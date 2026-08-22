@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
@@ -105,6 +106,52 @@ func TestCreatePostWritesRevisionAndIsIdempotentByUserKey(t *testing.T) {
 	NewHandler(db).ServeHTTP(res, req)
 	if res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"publication_status":"published"`) {
 		t.Fatalf("create post response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMediaUploadTokenRequiresBearerToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/media/upload-token", strings.NewReader(`{"file_name":"a.png","mime_type":"image/png","size":10}`))
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
+		t.Fatalf("media auth response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type testMediaStorage struct{}
+
+func (testMediaStorage) SignUpload(_ context.Context, assetID, _ string, _ string, _ time.Time) (string, error) {
+	return "https://upload.example/" + assetID, nil
+}
+
+func (testMediaStorage) VerifyUploaded(context.Context, mediaAsset) error { return nil }
+
+func TestMediaUploadTokenCreatesPendingAssetWithSignedURL(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "User", 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_assets (id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $10)`)).WithArgs(sqlmock.AnyArg(), "u1", sqlmock.AnyArg(), "a.png", "image/png", 100, 80, int64(10), "", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/media/upload-token", strings.NewReader(`{"file_name":"a.png","mime_type":"image/png","width":100,"height":80,"size":10}`))
+	req.Header.Set("Authorization", "Bearer access-token")
+	res := httptest.NewRecorder()
+	NewHandlerWithMedia(db, nil, testMediaStorage{}).ServeHTTP(res, req)
+	if res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"status":"pending"`) || !strings.Contains(res.Body.String(), `"upload_url":"https://upload.example/`) {
+		t.Fatalf("media upload response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

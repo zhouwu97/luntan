@@ -14,8 +14,9 @@ import (
 )
 
 type Server struct {
-	db          *sql.DB
-	authService *auth.Service
+	db           *sql.DB
+	authService  *auth.Service
+	mediaStorage mediaStorage
 }
 
 func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
@@ -23,7 +24,17 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 	if len(authServices) > 0 && authServices[0] != nil {
 		authService = authServices[0]
 	}
-	return &Server{db: db, authService: authService}
+	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv()}
+}
+
+func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaStorage) http.Handler {
+	if authService == nil {
+		authService = auth.NewService(db)
+	}
+	if storage == nil {
+		storage = unavailableMediaStorage{}
+	}
+	return &Server{db: db, authService: authService, mediaStorage: storage}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +64,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.deletePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 		return
-	case strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/me":
+	case r.Method == http.MethodPost && path == "/api/v1/media/upload-token":
+		s.createMediaUploadToken(w, r)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/media/") && strings.HasSuffix(path, "/complete"):
+		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/media/"), "/complete")
+		s.completeMedia(w, r, mediaID)
+		return
+	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return
 	case r.Method != http.MethodGet:
@@ -219,6 +237,14 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "IDEMPOTENCY_KEY_REQUIRED", Message: "缺少 Idempotency-Key"}
 	case errors.Is(err, ErrInvalidPost):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_POST", Message: "帖子内容不合法"}
+	case errors.Is(err, ErrInvalidMedia):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MEDIA", Message: "媒体参数不合法"}
+	case errors.Is(err, ErrMediaNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "MEDIA_NOT_FOUND", Message: "媒体不存在"}
+	case errors.Is(err, ErrMediaNotOwned):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "MEDIA_NOT_OWNED", Message: "没有操作该媒体的权限"}
+	case errors.Is(err, ErrStorageUnavailable):
+		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "STORAGE_UNAVAILABLE", Message: "媒体存储暂时不可用"}
 	case errors.Is(err, sql.ErrConnDone):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"}
 	}

@@ -22,10 +22,11 @@ var (
 )
 
 type postWriteInput struct {
-	CommunityID string `json:"community_id"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Content     string `json:"content"`
+	CommunityID string   `json:"community_id"`
+	Type        string   `json:"type"`
+	Title       string   `json:"title"`
+	Content     string   `json:"content"`
+	MediaIDs    []string `json:"media_ids"`
 }
 
 type postMutationResponse struct {
@@ -40,6 +41,7 @@ type postMutationResponse struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	PublishedAt       *time.Time `json:"published_at,omitempty"`
+	MediaIDs          []string   `json:"media_ids,omitempty"`
 }
 
 type postRecord struct {
@@ -109,6 +111,10 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	if err := attachMedia(r.Context(), tx, postID, user.ID, input.MediaIDs, now); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO post_idempotency_keys (user_id, idempotency_key, post_id, created_at) VALUES ($1, $2, $3, $4)`, user.ID, idempotencyKey, postID, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -118,6 +124,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := postMutationResponse{ID: postID, AuthorID: user.ID, CommunityID: input.CommunityID, Type: input.Type, Title: input.Title, Content: input.Content, PublicationStatus: "published", ModerationStatus: "normal", CreatedAt: now, UpdatedAt: now, PublishedAt: &now}
+	response.MediaIDs = append([]string(nil), input.MediaIDs...)
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 
@@ -172,6 +179,10 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID strin
 		writeInternalError(w, r, err)
 		return
 	}
+	if err := replaceMedia(r.Context(), tx, postID, user.ID, input.MediaIDs, now); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -180,6 +191,7 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID strin
 		current.PublishedAt = &publishedAt.Time
 	}
 	current.CommunityID, current.Type, current.Title, current.Content, current.UpdatedAt = input.CommunityID, input.Type, input.Title, input.Content, now
+	current.MediaIDs = append([]string(nil), input.MediaIDs...)
 	httpserver.WriteJSON(w, http.StatusOK, current.postMutationResponse)
 }
 
@@ -270,6 +282,41 @@ func newPostID() string {
 		return "post_fallback"
 	}
 	return "post_" + hex.EncodeToString(raw[:])
+}
+
+func attachMedia(ctx context.Context, tx *sql.Tx, postID, ownerID string, mediaIDs []string, now time.Time) error {
+	if len(mediaIDs) == 0 {
+		return nil
+	}
+	if len(mediaIDs) > 9 {
+		return ErrInvalidPost
+	}
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for index, mediaID := range mediaIDs {
+		if _, exists := seen[mediaID]; exists || strings.TrimSpace(mediaID) == "" {
+			return ErrInvalidPost
+		}
+		seen[mediaID] = struct{}{}
+		var id string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM media_assets WHERE id = $1 AND owner_id = $2 AND status = 'ready' AND deleted_at IS NULL`, mediaID, ownerID).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidPost
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO post_media (post_id, media_id, sort_order, created_at) VALUES ($1, $2, $3, $4)`, postID, mediaID, index, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func replaceMedia(ctx context.Context, tx *sql.Tx, postID, ownerID string, mediaIDs []string, now time.Time) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM post_media WHERE post_id = $1`, postID); err != nil {
+		return err
+	}
+	return attachMedia(ctx, tx, postID, ownerID, mediaIDs, now)
 }
 
 func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {

@@ -128,6 +128,14 @@ class ApiClient {
     return _request(method: 'PATCH', path: path, body: body, headers: headers);
   }
 
+  Future<Map<String, dynamic>> putJson(
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+  }) async {
+    return _request(method: 'PUT', path: path, body: body, headers: headers);
+  }
+
   Future<void> deleteJson(String path, {Map<String, String>? headers}) async {
     await _request(method: 'DELETE', path: path, headers: headers);
   }

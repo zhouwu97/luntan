@@ -1,6 +1,7 @@
 import 'api/api_client.dart';
 import 'api/api_repositories.dart';
 import 'api/auth_repository.dart';
+import 'api/interaction_repository.dart';
 import 'api/publish_repository.dart';
 import 'mock_forum_data.dart';
 import 'repositories/mock_repositories.dart';
@@ -13,6 +14,7 @@ class ForumRepositories {
     required this.post,
     this.apiClient,
     this.auth,
+    this.interactions,
     this.publish,
   });
 
@@ -21,6 +23,7 @@ class ForumRepositories {
   final PostRepository post;
   final ApiClient? apiClient;
   final AuthRepository? auth;
+  final InteractionRepository? interactions;
   final PublishRepository? publish;
 
   factory ForumRepositories.mock({ForumStore? store}) {
@@ -46,6 +49,7 @@ class ForumRepositories {
       post: ApiPostRepository(authenticatedClient),
       apiClient: authenticatedClient,
       auth: AuthRepository(client: authenticatedClient, tokenStore: tokenStore),
+      interactions: ApiInteractionRepository(authenticatedClient),
       publish: ApiPublishRepository(authenticatedClient),
     );
   }

@@ -72,13 +72,12 @@ class ApiCommentRepository implements CommentRepository {
     String? parentId,
     String? replyToUserId,
   }) async {
+    final body = <String, dynamic>{'content': content};
+    if (parentId != null) body['parent_id'] = parentId;
+    if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
     final payload = await _client.postJson(
       '/api/v1/posts/$postId/comments',
-      body: {
-        'content': content,
-        if (parentId != null) 'parent_id': parentId,
-        if (replyToUserId != null) 'reply_to_user_id': replyToUserId,
-      },
+      body: body,
     );
     return _commentFromJson(payload);
   }
@@ -89,12 +88,11 @@ class ApiCommentRepository implements CommentRepository {
     required String content,
     String? replyToUserId,
   }) async {
+    final body = <String, dynamic>{'content': content};
+    if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
     final payload = await _client.postJson(
       '/api/v1/comments/$commentId/replies',
-      body: {
-        'content': content,
-        if (replyToUserId != null) 'reply_to_user_id': replyToUserId,
-      },
+      body: body,
     );
     return _commentFromJson(payload);
   }

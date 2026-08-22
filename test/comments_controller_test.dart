@@ -60,12 +60,13 @@ class _FakeCommentRepository implements CommentRepository {
       throw StateError('network');
     }
     page++;
-    if (page == 1)
+    if (page == 1) {
       return CommentPage(
         items: [_comment('c1', 'first')],
         nextCursor: 'c1',
         hasMore: true,
       );
+    }
     return CommentPage(items: [_comment('c2', 'second')], hasMore: false);
   }
 

@@ -64,6 +64,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.deletePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/comments"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/comments")
+		s.createComment(w, r, postID, "")
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/replies"):
+		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/replies")
+		s.createReply(w, r, commentID)
+		return
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/comments/"):
+		s.updateComment(w, r, strings.TrimPrefix(path, "/api/v1/comments/"))
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/comments/"):
+		s.deleteComment(w, r, strings.TrimPrefix(path, "/api/v1/comments/"))
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/media/upload-token":
 		s.createMediaUploadToken(w, r)
 		return
@@ -71,7 +85,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/media/"), "/complete")
 		s.completeMedia(w, r, mediaID)
 		return
-	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || path == "/api/v1/me":
+	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return
 	case r.Method != http.MethodGet:
@@ -87,6 +101,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.getCommunity(w, r, strings.TrimPrefix(path, "/api/v1/communities/"))
 	case path == "/api/v1/feed/latest":
 		s.latestFeed(w, r)
+	case strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/comments"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/comments")
+		s.listComments(w, r, postID)
 	case strings.HasPrefix(path, "/api/v1/posts/"):
 		s.getPost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 	default:
@@ -245,6 +262,12 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "MEDIA_NOT_OWNED", Message: "没有操作该媒体的权限"}
 	case errors.Is(err, ErrStorageUnavailable):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "STORAGE_UNAVAILABLE", Message: "媒体存储暂时不可用"}
+	case errors.Is(err, ErrCommentNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "COMMENT_NOT_FOUND", Message: "评论不存在"}
+	case errors.Is(err, ErrCommentParentNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "COMMENT_PARENT_NOT_FOUND", Message: "回复目标不存在"}
+	case errors.Is(err, ErrInvalidComment):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_COMMENT", Message: "评论内容不合法"}
 	case errors.Is(err, sql.ErrConnDone):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"}
 	}

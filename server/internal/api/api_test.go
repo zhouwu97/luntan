@@ -158,6 +158,44 @@ func TestMediaUploadTokenCreatesPendingAssetWithSignedURL(t *testing.T) {
 	}
 }
 
+func TestCreateCommentRequiresBearerToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/p1/comments", strings.NewReader(`{"content":"评论"}`))
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
+		t.Fatalf("comment auth response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListCommentsUsesStableCursor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
+	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).WithArgs("p1", 2).WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "author_id", "username", "nickname", "root_id", "parent_id", "reply_to_user_id", "content", "like_count", "reply_count", "publication_status", "moderation_status", "created_at", "updated_at"}).AddRow("cm2", "p1", "u1", "user", "User", "cm2", "", "", "第二条", 0, 0, "published", "normal", created, created).AddRow("cm1", "p1", "u1", "user", "User", "cm1", "", "", "第一条", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/p1/comments?limit=1", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"has_more":true`) || !strings.Contains(res.Body.String(), `"next_cursor":"`) {
+		t.Fatalf("comments response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListCommunities(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

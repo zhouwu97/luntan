@@ -1,0 +1,155 @@
+import '../../domain/models.dart';
+import 'api_client.dart';
+
+class CommentPage {
+  const CommentPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<Comment> items;
+  final String? nextCursor;
+  final bool hasMore;
+}
+
+abstract interface class CommentRepository {
+  Future<CommentPage> listComments({
+    required String postId,
+    String? cursor,
+    int limit,
+  });
+
+  Future<Comment> createComment({
+    required String postId,
+    required String content,
+    String? parentId,
+    String? replyToUserId,
+  });
+
+  Future<Comment> createReply({
+    required String commentId,
+    required String content,
+    String? replyToUserId,
+  });
+
+  Future<void> deleteComment(String commentId);
+}
+
+class ApiCommentRepository implements CommentRepository {
+  ApiCommentRepository(this._client);
+
+  final ApiClient _client;
+
+  @override
+  Future<CommentPage> listComments({
+    required String postId,
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/posts/$postId/comments',
+      queryParameters: {'limit': '$limit', 'cursor': ?cursor},
+    );
+    final rawItems = payload['items'];
+    final items = rawItems is List
+        ? rawItems
+              .whereType<Map>()
+              .map((item) => _commentFromJson(Map<String, dynamic>.from(item)))
+              .toList()
+        : <Comment>[];
+    return CommentPage(
+      items: items,
+      nextCursor: payload['next_cursor'] as String?,
+      hasMore: payload['has_more'] == true,
+    );
+  }
+
+  @override
+  Future<Comment> createComment({
+    required String postId,
+    required String content,
+    String? parentId,
+    String? replyToUserId,
+  }) async {
+    final payload = await _client.postJson(
+      '/api/v1/posts/$postId/comments',
+      body: {
+        'content': content,
+        if (parentId != null) 'parent_id': parentId,
+        if (replyToUserId != null) 'reply_to_user_id': replyToUserId,
+      },
+    );
+    return _commentFromJson(payload);
+  }
+
+  @override
+  Future<Comment> createReply({
+    required String commentId,
+    required String content,
+    String? replyToUserId,
+  }) async {
+    final payload = await _client.postJson(
+      '/api/v1/comments/$commentId/replies',
+      body: {
+        'content': content,
+        if (replyToUserId != null) 'reply_to_user_id': replyToUserId,
+      },
+    );
+    return _commentFromJson(payload);
+  }
+
+  @override
+  Future<void> deleteComment(String commentId) async {
+    await _client.deleteJson('/api/v1/comments/$commentId');
+  }
+}
+
+Comment _commentFromJson(Map<String, dynamic> json) {
+  final authorJson = json['author'] is Map
+      ? Map<String, dynamic>.from(json['author'] as Map)
+      : <String, dynamic>{};
+  final now = DateTime.now().toUtc();
+  final createdAt = _date(json['created_at'], now);
+  final updatedAt = _date(json['updated_at'], createdAt);
+  return Comment(
+    id: _string(json['id']),
+    postId: _string(json['post_id']),
+    authorId: _string(authorJson['id']),
+    rootId: _nullableString(json['root_id']),
+    parentId: _nullableString(json['parent_id']),
+    replyToUserId: _nullableString(json['reply_to_user_id']),
+    content: _string(json['content']),
+    likeCount: _int(json['like_count']),
+    replyCount: _int(json['reply_count']),
+    publicationStatus: _enumByName(
+      CommentPublicationStatus.values,
+      json['publication_status'],
+      CommentPublicationStatus.published,
+    ),
+    moderationStatus: _enumByName(
+      ModerationStatus.values,
+      json['moderation_status'],
+      ModerationStatus.normal,
+    ),
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+  );
+}
+
+T _enumByName<T extends Enum>(List<T> values, dynamic value, T fallback) {
+  if (value is String) {
+    for (final item in values) {
+      if (item.name == value) return item;
+    }
+  }
+  return fallback;
+}
+
+String _string(dynamic value) => value is String ? value : '';
+String? _nullableString(dynamic value) =>
+    value is String && value.isNotEmpty ? value : null;
+int _int(dynamic value) =>
+    value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+DateTime _date(dynamic value, DateTime fallback) =>
+    value is String ? DateTime.tryParse(value) ?? fallback : fallback;

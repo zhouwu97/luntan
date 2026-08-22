@@ -37,6 +37,7 @@ class Post {
     required this.level,
     required this.time,
     required this.comments,
+    this.likeCount = 0,
     required this.views,
     required this.section,
     required this.tag,
@@ -55,6 +56,7 @@ class Post {
   final int level;
   final String time;
   int comments;
+  int likeCount;
   final String views;
   final ForumSection section;
   final String tag;
@@ -142,7 +144,7 @@ class ForumStore extends ChangeNotifier {
 
   void toggleLike(Post post) {
     post.isLiked = !post.isLiked;
-    post.comments += post.isLiked ? 1 : -1;
+    post.likeCount += post.isLiked ? 1 : -1;
     notifyListeners();
   }
 

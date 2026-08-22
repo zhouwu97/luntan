@@ -14,15 +14,22 @@ void main() {
     expect(store.visiblePosts.every((post) => post.section == ForumSection.community && post.isFeatured), isTrue);
   });
 
-  test('点赞、收藏和发布会更新本地状态', () {
+  test('点赞只更新点赞状态，收藏和发布仍更新本地状态', () {
     final store = ForumStore.seeded();
     final post = store.posts.first;
     final originalComments = post.comments;
+    final originalLikes = post.likeCount;
     store.toggleLike(post);
     store.toggleBookmark(post);
-    expect(post.comments, originalComments + 1);
+    expect(post.comments, originalComments);
+    expect(post.likeCount, originalLikes + 1);
     expect(post.isLiked, isTrue);
     expect(post.isBookmarked, isTrue);
+
+    store.toggleLike(post);
+    expect(post.comments, originalComments);
+    expect(post.likeCount, originalLikes);
+    expect(post.isLiked, isFalse);
 
     store.addPost(const PostDraft(title: '测试帖子', body: '测试正文', section: ForumSection.daily));
     expect(store.posts.first.title, '测试帖子');

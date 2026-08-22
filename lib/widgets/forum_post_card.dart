@@ -6,10 +6,11 @@ import 'forum_author_row.dart';
 import 'post_media_preview.dart';
 
 class ForumPostCard extends StatelessWidget {
-  const ForumPostCard({super.key, required this.post, required this.onOpen, required this.onLike, required this.onBookmark, required this.onMenu});
+  const ForumPostCard({super.key, required this.post, required this.onOpen, this.onOpenComments, required this.onLike, required this.onBookmark, required this.onMenu});
 
   final Post post;
   final VoidCallback onOpen;
+  final VoidCallback? onOpenComments;
   final VoidCallback onLike;
   final VoidCallback onBookmark;
   final VoidCallback onMenu;
@@ -31,16 +32,10 @@ class ForumPostCard extends StatelessWidget {
             children: [
               ForumAuthorRow(post: post, onMenu: onMenu),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 7,
-                runSpacing: 6,
-                children: [
-                  _Tag(text: post.tag, color: _sectionColor(post.section)),
-                  if (post.extraTag != null) _Tag(text: post.extraTag!, color: post.extraTag == '精华' ? AppTheme.orange : AppTheme.primary),
-                  if (post.isPinned) const _Tag(text: '置顶', color: AppTheme.pink),
-                ],
-              ),
-              const SizedBox(height: 9),
+              if (post.isPinned || post.isFeatured || post.extraTag == '精华') ...[
+                _Tag(text: post.isPinned ? '置顶' : '精华', color: post.isPinned ? AppTheme.pink : AppTheme.orange),
+                const SizedBox(height: 7),
+              ],
               Text(post.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, height: 1.32, color: AppTheme.textPrimary, fontWeight: FontWeight.w800)),
               if (post.body.isNotEmpty) ...[
                 const SizedBox(height: 6),
@@ -50,25 +45,18 @@ class ForumPostCard extends StatelessWidget {
               const SizedBox(height: 11),
               Row(
                 children: [
-                  _Stat(icon: Icons.chat_bubble_outline_rounded, text: '${post.comments}'),
-                  const SizedBox(width: 16),
+                  _ActionStat(icon: Icons.chat_bubble_outline_rounded, text: '${post.comments}', onTap: onOpenComments ?? onOpen),
+                  const SizedBox(width: 14),
+                  _ActionStat(icon: Icons.favorite_border_rounded, text: '${post.likeCount}', onTap: onLike, active: post.isLiked),
+                  const SizedBox(width: 14),
                   _Stat(icon: Icons.visibility_outlined, text: post.views),
                   const Spacer(),
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    onPressed: onLike,
-                    icon: Icon(post.isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded, size: 20, color: post.isLiked ? AppTheme.pink : AppTheme.textSecondary),
-                    tooltip: '点赞',
-                  ),
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
                     onPressed: onBookmark,
-                    icon: Icon(post.isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded, size: 20, color: post.isBookmarked ? AppTheme.primary : AppTheme.textSecondary),
-                    tooltip: '收藏',
+                    icon: Icon(post.isBookmarked ? Icons.star_rounded : Icons.star_border_rounded, size: 20, color: post.isBookmarked ? AppTheme.orange : AppTheme.textSecondary),
+                    tooltip: '收藏帖子',
                   ),
-                  const SizedBox(width: 4),
-                  const Text('进入帖子', style: TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w700)),
-                  const Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.primary),
                 ],
               ),
             ],
@@ -78,11 +66,6 @@ class ForumPostCard extends StatelessWidget {
     );
   }
 
-  Color _sectionColor(ForumSection section) => switch (section) {
-        ForumSection.unboxing => AppTheme.primary,
-        ForumSection.community => AppTheme.mint,
-        ForumSection.daily => AppTheme.purple,
-      };
 }
 
 class _Tag extends StatelessWidget {
@@ -111,4 +94,23 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 16, color: AppTheme.textSecondary), const SizedBox(width: 4), Text(text, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12))]);
   }
+}
+
+class _ActionStat extends StatelessWidget {
+  const _ActionStat({required this.icon, required this.text, required this.onTap, this.active = false});
+
+  final IconData icon;
+  final String text;
+  final VoidCallback onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(8),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 16, color: active ? AppTheme.pink : AppTheme.textSecondary), const SizedBox(width: 4), Text(text, style: TextStyle(color: active ? AppTheme.pink : AppTheme.textSecondary, fontSize: 12))]),
+    ),
+  );
 }

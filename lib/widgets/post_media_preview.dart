@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
+import '../theme/app_theme.dart';
 
+/// 帖子媒体预览。
+///
+/// 列表只使用稳定尺寸的缩略图，详情页通过 [MediaGalleryScreen] 查看原图，
+/// 避免原图解码把长列表撑开或造成明显跳动。
 class PostMediaPreview extends StatelessWidget {
   const PostMediaPreview({super.key, required this.images, this.onTap});
 
@@ -13,12 +18,9 @@ class PostMediaPreview extends StatelessWidget {
     if (images.isEmpty) return const SizedBox.shrink();
     final shown = images.length > 4 ? images.take(4).toList() : images;
     final more = images.length > 4 ? images.length - 4 : 0;
-    return GestureDetector(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: _layout(shown, more),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 11),
+      child: GestureDetector(onTap: onTap, child: _layout(shown, more)),
     );
   }
 
@@ -28,31 +30,23 @@ class PostMediaPreview extends StatelessWidget {
         return Align(
           alignment: Alignment.centerLeft,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 300, maxHeight: 220),
-            child: AspectRatio(aspectRatio: 1.58, child: _tile(shown[0])),
+            constraints: const BoxConstraints(maxWidth: 320, maxHeight: 245),
+            child: AspectRatio(aspectRatio: _ratio(shown.first), child: _tile(shown.first)),
           ),
         );
       case 2:
-        return SizedBox(height: 122, width: 332, child: Row(children: [Expanded(child: _tile(shown[0])), const SizedBox(width: 8), Expanded(child: _tile(shown[1]))]));
+        return SizedBox(height: 156, child: Row(children: [Expanded(child: _tile(shown[0])), const SizedBox(width: 5), Expanded(child: _tile(shown[1]))]));
       case 3:
         return SizedBox(
-          height: 164,
-          width: 332,
-          child: Row(
-            children: [
-              Expanded(flex: 2, child: _tile(shown[0])),
-              const SizedBox(width: 8),
-              Expanded(child: Column(children: [Expanded(child: _tile(shown[1])), const SizedBox(height: 8), Expanded(child: _tile(shown[2]))])),
-            ],
-          ),
+          height: 184,
+          child: Row(children: [Expanded(flex: 16, child: _tile(shown[0])), const SizedBox(width: 5), Expanded(flex: 10, child: Column(children: [Expanded(child: _tile(shown[1])), const SizedBox(height: 5), Expanded(child: _tile(shown[2]))]))]),
         );
       default:
         return SizedBox(
-          height: 164,
-          width: 332,
+          height: 220,
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 8, mainAxisSpacing: 8),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 5, mainAxisSpacing: 5),
             itemCount: shown.length,
             itemBuilder: (_, index) => _tile(shown[index], overlay: index == shown.length - 1 && more > 0 ? '+$more' : null),
           ),
@@ -60,59 +54,108 @@ class PostMediaPreview extends StatelessWidget {
     }
   }
 
+  double _ratio(PostMedia media) {
+    final width = media.width?.toDouble() ?? 4;
+    final height = media.height?.toDouble() ?? 3;
+    return (width / height).clamp(.72, 1.78);
+  }
+
   Widget _tile(PostMedia media, {String? overlay}) {
-    return Container(
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: media.colors.map(Color.new).toList(),
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Center(child: Text(media.emoji, style: const TextStyle(fontSize: 32))),
-            ),
-            Positioned(left: 10, bottom: 8, child: Text(media.label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700, shadows: [Shadow(color: Color(0x66000000), blurRadius: 4)]))),
-            if (overlay != null)
-              DecoratedBox(
-                decoration: const BoxDecoration(color: Color(0x990E2037)),
-                child: Center(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800))),
-              ),
-          ],
-        ),
-      );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(13),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (media.url != null)
+            Image.network(
+              media.url!,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.low,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) => frame == null && !wasSynchronouslyLoaded ? const ColoredBox(color: AppTheme.surfaceBlue, child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))) : child,
+              errorBuilder: (context, error, stackTrace) => _fallback(media),
+            )
+          else
+            _fallback(media),
+          if (overlay != null)
+            const DecoratedBox(decoration: BoxDecoration(color: Color(0x990E2037)), child: Center()),
+          if (overlay != null) Center(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800))),
+        ],
+      ),
+    );
+  }
+
+  Widget _fallback(PostMedia media) {
+    return DecoratedBox(
+      decoration: BoxDecoration(gradient: LinearGradient(colors: media.colors.map(Color.new).toList(), begin: Alignment.topLeft, end: Alignment.bottomRight)),
+      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.image_outlined, color: Colors.white.withValues(alpha: .9), size: 30), const SizedBox(height: 5), Text(media.label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700))])),
+    );
   }
 }
 
-class MediaGalleryScreen extends StatelessWidget {
-  const MediaGalleryScreen({super.key, required this.images});
+class MediaGalleryScreen extends StatefulWidget {
+  const MediaGalleryScreen({super.key, required this.images, this.initialIndex = 0});
 
   final List<PostMedia> images;
+  final int initialIndex;
+
+  @override
+  State<MediaGalleryScreen> createState() => _MediaGalleryScreenState();
+}
+
+class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
+  late final PageController pageController;
+  late int index;
+
+  @override
+  void initState() {
+    super.initState();
+    index = widget.initialIndex.clamp(0, widget.images.length - 1);
+    pageController = PageController(initialPage: index);
+  }
+
+  @override
+  void dispose() {
+    pageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('图片 ${images.length} 张')),
-      body: GridView.builder(
-        padding: const EdgeInsets.all(16),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12),
-        itemCount: images.length,
-        itemBuilder: (_, index) {
-          final image = images[index];
-          return Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
-            child: DecoratedBox(
-              decoration: BoxDecoration(gradient: LinearGradient(colors: image.colors.map(Color.new).toList(), begin: Alignment.topLeft, end: Alignment.bottomRight)),
-              child: Center(child: Text(image.emoji, style: const TextStyle(fontSize: 48))),
+      backgroundColor: const Color(0xFF0C1724),
+      appBar: AppBar(backgroundColor: Colors.transparent, foregroundColor: Colors.white, title: Text('${index + 1} / ${widget.images.length}')),
+      body: PageView.builder(
+        controller: pageController,
+        itemCount: widget.images.length,
+        onPageChanged: (value) => setState(() => index = value),
+        itemBuilder: (context, itemIndex) {
+          final image = widget.images[itemIndex];
+          return InteractiveViewer(
+            minScale: 1,
+            maxScale: 3,
+            child: Center(
+              child: image.url == null ? _fallback(image) : Image.network(image.url!, fit: BoxFit.contain, errorBuilder: (context, error, stackTrace) => _fallback(image)),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _fallback(PostMedia media) {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: media.colors.map(Color.new).toList()),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Center(
+          child: Text(
+            media.label,
+            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+        ),
       ),
     );
   }

@@ -32,10 +32,14 @@ class ProfileScreen extends StatelessWidget {
               const SizedBox(height: 24),
               const Text('常用功能', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800)),
               const SizedBox(height: 12),
-              Row(children: [_ProfileTool(icon: Icons.star_rounded, label: '我的收藏', color: AppTheme.orange, onTap: () => _showList(context, '我的收藏')), _ProfileTool(icon: Icons.thumb_up_rounded, label: '我的点赞', color: AppTheme.pink, onTap: () => _showList(context, '我的点赞')), _ProfileTool(icon: Icons.history_rounded, label: '浏览历史', color: AppTheme.primary, onTap: () => _showHistory(context))]),
+              Row(children: [_ProfileTool(icon: Icons.star_rounded, label: '我的收藏', color: AppTheme.orange, onTap: () => _showList(context, '我的收藏')), _ProfileTool(icon: Icons.thumb_up_rounded, label: '我的点赞', color: AppTheme.pink, onTap: () => _showList(context, '我的点赞')), _ProfileTool(icon: Icons.history_rounded, label: '浏览历史', color: AppTheme.primary, onTap: () => _showHistory(context)), _ProfileTool(icon: Icons.mode_comment_outlined, label: '我的评论', color: AppTheme.mint, onTap: () => _showList(context, '我的评论'))]),
               const SizedBox(height: 24),
               _ExchangePreview(store: store, onOpenStore: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExchangeStoreScreen(store: store))), onRedeem: (product) => _redeem(context, product)),
               const SizedBox(height: 16),
+              const Text('最近发布', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 10),
+              _RecentPosts(store: store, onOpenPost: onOpenPost),
+              const SizedBox(height: 24),
               Text('浅蓝论坛 · 把真实的校园生活留在这里', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary.withValues(alpha: .7), fontSize: 12)),
             ],
           ),
@@ -49,17 +53,32 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showList(BuildContext context, String label) {
+    final posts = switch (label) {
+      '我的收藏' => store.bookmarkedPosts,
+      '我的点赞' => store.likedPosts,
+      _ => <Post>[],
+    };
+    final comments = label == '我的评论' ? store.commentsByAuthor('user-1') : <Comment>[];
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (_) => SafeArea(
         child: SizedBox(
-          height: 280,
+          height: 460,
           child: Column(
             children: [
               Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.textPrimary)),
               const SizedBox(height: 12),
-              Expanded(child: Center(child: Text('$label暂时为空，去首页逛逛吧', style: const TextStyle(color: AppTheme.textSecondary)))),
+              Expanded(
+                child: posts.isEmpty && comments.isEmpty
+                    ? Center(child: Text('$label暂时为空，去首页逛逛吧', style: const TextStyle(color: AppTheme.textSecondary)))
+                    : ListView(
+                        children: [
+                          ...posts.map((post) => ListTile(leading: const Icon(Icons.article_outlined, color: AppTheme.primary), title: Text(post.title, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text('${post.community?.name ?? post.section.label} · ${post.comments} 回复'), onTap: () { Navigator.pop(context); onOpenPost(post); })),
+                          ...comments.map((comment) { final post = store.posts.firstWhere((item) => item.id == comment.postId, orElse: () => store.posts.first); return ListTile(leading: const Icon(Icons.mode_comment_outlined, color: AppTheme.mint), title: Text(comment.content, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text('来自 ${post.title}', maxLines: 1, overflow: TextOverflow.ellipsis), onTap: () { Navigator.pop(context); onOpenPost(post); }); }),
+                        ],
+                      ),
+              ),
             ],
           ),
         ),
@@ -104,6 +123,22 @@ class ProfileScreen extends StatelessWidget {
   void _redeem(BuildContext context, StoreProduct product) {
     final success = store.redeem(product);
     onFeedback(success ? '已兑换${product.name}，请留意领取通知' : '积分不足，再攒一攒就可以兑换啦');
+  }
+}
+
+class _RecentPosts extends StatelessWidget {
+  const _RecentPosts({required this.store, required this.onOpenPost});
+
+  final ForumStore store;
+  final ValueChanged<Post> onOpenPost;
+
+  @override
+  Widget build(BuildContext context) {
+    final posts = store.posts.where((post) => post.authorId == 'user-1').take(3).toList();
+    return Container(
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppTheme.border)),
+      child: posts.isEmpty ? const Padding(padding: EdgeInsets.all(18), child: Text('还没有发布内容', style: TextStyle(color: AppTheme.textSecondary))) : Column(children: posts.map((post) => ListTile(title: Text(post.title, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text('${post.community?.name ?? post.section.label} · ${post.comments} 回复 · ${post.views} 浏览'), trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary), onTap: () => onOpenPost(post))).toList()),
+    );
   }
 }
 

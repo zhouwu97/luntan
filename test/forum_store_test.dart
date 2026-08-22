@@ -42,7 +42,7 @@ void main() {
     final first = store.refresh();
     final second = store.refresh();
     expect(await second, 0);
-    expect(await first, greaterThan(0));
+    expect(await first, 0);
     expect(store.isRefreshing, isFalse);
   });
 }

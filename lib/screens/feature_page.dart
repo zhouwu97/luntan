@@ -20,7 +20,7 @@ class FeaturePage extends StatelessWidget {
       final list = [...store.posts]..sort((a, b) => _views(b.views).compareTo(_views(a.views)));
       return list.take(6).toList();
     }
-    if (title == '二手集市') return store.posts.where((post) => post.tag == '二手集市').toList();
+    if (title == '玩法分享') return store.posts.where((post) => post.tag == '玩法分享').toList();
     if (title == '穿搭分享') return store.posts.where((post) => post.tag == '穿搭分享' || post.images.isNotEmpty).take(6).toList();
     return store.posts.where((post) => post.isFeatured).take(6).toList();
   }
@@ -55,7 +55,7 @@ class FeaturePage extends StatelessWidget {
         '热门帖子' => '社区里正在被大家讨论的内容，今天也来逛逛吧。',
         '穿搭分享' => '桌搭、宿舍布置和校园生活灵感，都可以在这里找到。',
         '活动' => '把校园里有趣的活动和新鲜事，集中整理给你。',
-        '二手集市' => '校内闲置流转，先聊清楚再交易，积分与现金入口互不混用。',
+        '玩法分享' => '分享游戏、桌游、社团活动和校园玩法，找到一起玩的同学。',
         _ => '社区精华内容，值得慢下来认真读一读。',
       };
 }

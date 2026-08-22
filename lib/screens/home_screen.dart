@@ -12,6 +12,7 @@ class HomeScreen extends StatefulWidget {
     required this.store,
     required this.feedController,
     required this.onOpenPost,
+    required this.onOpenComments,
     required this.onOpenProfile,
     required this.onOpenComposer,
     required this.onOpenMessages,
@@ -21,6 +22,7 @@ class HomeScreen extends StatefulWidget {
   final ForumStore store;
   final FeedController feedController;
   final ValueChanged<Post> onOpenPost;
+  final ValueChanged<Post> onOpenComments;
   final VoidCallback onOpenProfile;
   final VoidCallback onOpenComposer;
   final VoidCallback onOpenMessages;
@@ -50,8 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> refresh() async {
     await widget.feedController.refresh();
-    final count = _visiblePosts.length;
-    if (mounted && count > 0) widget.onFeedback('已更新 $count 条内容');
+    if (mounted) widget.onFeedback('刷新完成，暂无新内容');
   }
 
   List<Post> get _visiblePosts {
@@ -144,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: _FeedToolbar(
                         store: widget.store,
                         isRefreshing: feedState.isBusy,
-                        onReply: () => widget.onFeedback('回复入口已打开，进入帖子后即可参与讨论'),
+                        onReply: () => openFeature('我的回复'),
                         onPublish: widget.onOpenComposer,
                         onRefresh: refresh,
                       ),
@@ -186,6 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 return ForumPostCard(
                                   post: post,
                                   onOpen: () => widget.onOpenPost(post),
+                                  onOpenComments: () => widget.onOpenComments(post),
                                   onLike: () => widget.store.toggleLike(post),
                                   onBookmark: () =>
                                       widget.store.toggleBookmark(post),
@@ -214,9 +216,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: Icon(
                 post.isBookmarked
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-                color: AppTheme.primary,
+                    ? Icons.star_rounded
+                    : Icons.star_border_rounded,
+                color: post.isBookmarked ? AppTheme.orange : AppTheme.textSecondary,
               ),
               title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
               onTap: () {
@@ -414,60 +416,37 @@ class _FeatureEntries extends StatelessWidget {
     ('热', '热门帖子', AppTheme.orange),
     ('搭', '穿搭分享', AppTheme.pink),
     ('活', '活动', AppTheme.mint),
-    ('市', '二手集市', AppTheme.purple),
+    ('玩', '玩法分享', AppTheme.purple),
   ];
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 92,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-        scrollDirection: Axis.horizontal,
-        itemCount: entries.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 20),
-        itemBuilder: (_, index) {
-          final entry = entries[index];
-          return GestureDetector(
-            onTap: () => onTap(entry.$2),
-            child: SizedBox(
-              width: 54,
-              child: Column(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: entry.$3.withValues(alpha: .12),
-                      shape: BoxShape.circle,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
+        child: Row(
+          children: entries.map((entry) {
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => onTap(entry.$2),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(color: entry.$3.withValues(alpha: .12), shape: BoxShape.circle),
+                      child: Center(child: Text(entry.$1, style: TextStyle(color: entry.$3, fontWeight: FontWeight.w900, fontSize: 15))),
                     ),
-                    child: Center(
-                      child: Text(
-                        entry.$1,
-                        style: TextStyle(
-                          color: entry.$3,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    entry.$2,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+                    const SizedBox(height: 6),
+                    FittedBox(fit: BoxFit.scaleDown, child: Text(entry.$2, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10.5, fontWeight: FontWeight.w600))),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -670,11 +649,17 @@ class _EmptyFeed extends StatelessWidget {
   }
 }
 
+enum _SearchKind { all, posts, users, communities }
+
 class _ForumSearchDelegate extends SearchDelegate<void> {
   _ForumSearchDelegate({required this.store, required this.onOpenPost});
 
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
+  _SearchKind kind = _SearchKind.all;
+
+  @override
+  String? get searchFieldLabel => '搜索帖子 / 用户 / 板块';
 
   @override
   List<Widget>? buildActions(BuildContext context) => [
@@ -692,34 +677,79 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
   );
 
   @override
-  Widget buildResults(BuildContext context) => _results();
+  Widget buildResults(BuildContext context) => _results(context);
 
   @override
-  Widget buildSuggestions(BuildContext context) => _results();
+  Widget buildSuggestions(BuildContext context) => _results(context);
 
-  Widget _results() {
-    final results = store.search(query);
-    if (results.isEmpty) {
-      return const Center(
-        child: Text(
-          '没有找到相关内容',
-          style: TextStyle(color: AppTheme.textSecondary),
+  Widget _results(BuildContext context) {
+    final posts = kind == _SearchKind.users || kind == _SearchKind.communities ? const <Post>[] : store.search(query);
+    final users = kind == _SearchKind.posts || kind == _SearchKind.communities ? const <User>[] : store.searchUsers(query);
+    final communities = kind == _SearchKind.posts || kind == _SearchKind.users ? const <Community>[] : store.searchCommunities(query);
+    final empty = posts.isEmpty && users.isEmpty && communities.isEmpty;
+    return Column(
+      children: [
+        _SearchKinds(
+          selected: kind,
+          onChanged: (value) {
+            kind = value;
+            showSuggestions(context);
+          },
         ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(14),
-      itemCount: results.length,
-      itemBuilder: (context, index) => ForumPostCard(
-        post: results[index],
-        onOpen: () {
-          close(context, null);
-          onOpenPost(results[index]);
-        },
-        onLike: () => store.toggleLike(results[index]),
-        onBookmark: () => store.toggleBookmark(results[index]),
-        onMenu: () {},
-      ),
+        if (empty)
+          const Expanded(child: Center(child: Text('没有找到相关内容', style: TextStyle(color: AppTheme.textSecondary))))
+        else
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(14),
+              children: [
+                if (posts.isNotEmpty) ...[
+                  if (kind == _SearchKind.all) const _SearchSectionTitle(title: '帖子'),
+                  ...posts.map((post) => ForumPostCard(post: post, onOpen: () { close(context, null); onOpenPost(post); }, onOpenComments: () { close(context, null); onOpenPost(post); }, onLike: () => store.toggleLike(post), onBookmark: () => store.toggleBookmark(post), onMenu: () {})),
+                ],
+                if (users.isNotEmpty) ...[
+                  if (kind == _SearchKind.all) const _SearchSectionTitle(title: '用户'),
+                  ...users.map((user) => ListTile(leading: CircleAvatar(backgroundColor: AppTheme.surfaceBlue, child: Text(user.nickname.characters.first)), title: Text(user.nickname), subtitle: Text('Lv.${user.level} · ${user.signature ?? '活跃用户'}'))),
+                ],
+                if (communities.isNotEmpty) ...[
+                  if (kind == _SearchKind.all) const _SearchSectionTitle(title: '板块'),
+                  ...communities.map((community) => ListTile(leading: const CircleAvatar(backgroundColor: AppTheme.surfaceBlue, child: Icon(Icons.forum_outlined, color: AppTheme.primary)), title: Text(community.name), subtitle: Text(community.description), onTap: () { store.selectSection(ForumSection.values.firstWhere((section) => section.communityId == community.id)); close(context, null); })),
+                ],
+              ],
+            ),
+          ),
+      ],
     );
   }
+}
+
+class _SearchKinds extends StatelessWidget {
+  const _SearchKinds({required this.selected, required this.onChanged});
+
+  final _SearchKind selected;
+  final ValueChanged<_SearchKind> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 0), child: Row(children: [_SearchKindButton(label: '综合', kind: _SearchKind.all, selected: selected, onChanged: onChanged), _SearchKindButton(label: '帖子', kind: _SearchKind.posts, selected: selected, onChanged: onChanged), _SearchKindButton(label: '用户', kind: _SearchKind.users, selected: selected, onChanged: onChanged), _SearchKindButton(label: '板块', kind: _SearchKind.communities, selected: selected, onChanged: onChanged)]));
+}
+
+class _SearchKindButton extends StatelessWidget {
+  const _SearchKindButton({required this.label, required this.kind, required this.selected, required this.onChanged});
+
+  final String label;
+  final _SearchKind kind;
+  final _SearchKind selected;
+  final ValueChanged<_SearchKind> onChanged;
+
+  @override
+  Widget build(BuildContext context) => TextButton(onPressed: () => onChanged(kind), child: Text(label, style: TextStyle(color: selected == kind ? AppTheme.primary : AppTheme.textSecondary, fontWeight: selected == kind ? FontWeight.w800 : FontWeight.w500)));
+}
+
+class _SearchSectionTitle extends StatelessWidget {
+  const _SearchSectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 8, bottom: 8), child: Text(title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w800)));
 }

@@ -12,7 +12,7 @@ enum CommunityJoinPolicy { open, approval, inviteOnly }
 
 enum CommunityStatus { active, archived, closed }
 
-enum PostType { normal, image, poll, market, question, article, video, activity }
+enum PostType { normal, image, poll, gameShare, question, article, video, activity }
 
 enum PublicationStatus { draft, published, deleted }
 

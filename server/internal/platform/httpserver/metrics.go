@@ -14,6 +14,15 @@ type requestMetrics struct {
 	serverErrs atomic.Uint64
 	timeouts   atomic.Uint64
 	buckets    [8]atomic.Uint64
+	login      businessMetric
+	publish    businessMetric
+	comment    businessMetric
+	upload     businessMetric
+}
+
+type businessMetric struct {
+	attempts atomic.Uint64
+	success  atomic.Uint64
 }
 
 var metrics = &requestMetrics{started: time.Now()}
@@ -39,6 +48,38 @@ func (m *requestMetrics) observe(status int, latency time.Duration) {
 	m.buckets[len(m.buckets)-1].Add(1)
 }
 
+func (m *requestMetrics) observeBusiness(path string, status int) {
+	metric := (*businessMetric)(nil)
+	switch {
+	case path == "/api/v1/auth/login":
+		metric = &m.login
+	case path == "/api/v1/posts":
+		metric = &m.publish
+	case path == "/api/v1/media/upload-token":
+		metric = &m.upload
+	case pathContainsCommentRoute(path):
+		metric = &m.comment
+	}
+	if metric == nil {
+		return
+	}
+	metric.attempts.Add(1)
+	if status >= 200 && status < 300 {
+		metric.success.Add(1)
+	}
+}
+
+func pathContainsCommentRoute(path string) bool {
+	return len(path) > 9 && (hasSuffix(path, "/comments") || hasSuffix(path, "/replies"))
+}
+
+func hasSuffix(value, suffix string) bool {
+	if len(value) < len(suffix) {
+		return false
+	}
+	return value[len(value)-len(suffix):] == suffix
+}
+
 func (m *requestMetrics) write(w http.ResponseWriter) {
 	total := m.requests.Load()
 	elapsed := time.Since(m.started).Seconds()
@@ -54,6 +95,18 @@ func (m *requestMetrics) write(w http.ResponseWriter) {
 	fmt.Fprintln(w, "luntan_db_latency_ms 0")
 	fmt.Fprintln(w, "luntan_db_connections 0")
 	fmt.Fprintln(w, "luntan_worker_backlog 0")
+	fmt.Fprintf(w, "luntan_login_success_rate %.4f\n", successRate(&m.login))
+	fmt.Fprintf(w, "luntan_publish_success_rate %.4f\n", successRate(&m.publish))
+	fmt.Fprintf(w, "luntan_comment_success_rate %.4f\n", successRate(&m.comment))
+	fmt.Fprintf(w, "luntan_upload_success_rate %.4f\n", successRate(&m.upload))
+}
+
+func successRate(metric *businessMetric) float64 {
+	attempts := metric.attempts.Load()
+	if attempts == 0 {
+		return 0
+	}
+	return float64(metric.success.Load()) / float64(attempts)
 }
 
 func (m *requestMetrics) quantile(quantile float64) float64 {

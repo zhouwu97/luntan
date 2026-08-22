@@ -1,0 +1,46 @@
+name: deploy-staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - run: go test ./...
+        working-directory: server
+      - run: go vet ./...
+        working-directory: server
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: docker build --tag ghcr.io/${{ github.repository }}/luntan-api:${{ github.sha }} server
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+      - run: docker push ghcr.io/${{ github.repository }}/luntan-api:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run staging migration, smoke test and rollout
+        env:
+          STAGING_DEPLOY_COMMAND: ${{ secrets.STAGING_DEPLOY_COMMAND }}
+          IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ github.sha }}
+        run: |
+          test -n "$STAGING_DEPLOY_COMMAND"
+          export IMAGE_TAG
+          sh -c "$STAGING_DEPLOY_COMMAND"

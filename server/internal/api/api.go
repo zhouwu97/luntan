@@ -55,6 +55,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/me":
 		s.me(w, r)
 		return
+	case r.Method == http.MethodDelete && path == "/api/v1/me":
+		s.deleteAccount(w, r)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/posts":
 		s.createPost(w, r)
 		return
@@ -132,10 +135,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/block"):
 		s.toggleBlock(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/block"), false)
 		return
-	case r.Method == http.MethodPatch && path == "/api/v1/notifications/read-all":
+	case (r.Method == http.MethodPost || r.Method == http.MethodPatch) && path == "/api/v1/notifications/read-all":
 		s.markAllNotificationsRead(w, r)
 		return
-	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/notifications/"):
+	case (r.Method == http.MethodPost || r.Method == http.MethodPatch) && strings.HasPrefix(path, "/api/v1/notifications/"):
 		s.markNotificationRead(w, r, strings.TrimPrefix(path, "/api/v1/notifications/"))
 		return
 	case r.Method == http.MethodPost && path == "/api/v1/reports":
@@ -168,8 +171,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.getCommunity(w, r, strings.TrimPrefix(path, "/api/v1/communities/"))
 	case path == "/api/v1/feed/latest":
 		s.latestFeed(w, r)
+	case path == "/api/v1/home":
+		s.home(w, r)
 	case path == "/api/v1/notifications":
 		s.listNotifications(w, r)
+	case path == "/api/v1/moderation/cases":
+		s.listModerationCases(w, r)
 	case path == "/api/v1/search":
 		s.search(w, r)
 	case path == "/api/v1/ranking":

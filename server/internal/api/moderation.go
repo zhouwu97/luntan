@@ -30,7 +30,7 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	if !s.hasPermission(r, user.ID, "moderation.action") {
+	if !s.hasPermission(r, user.ID, caseID, "moderation.action") {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -67,6 +67,10 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 		writeInternalError(w, r, err)
 		return
 	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE reports SET status = 'resolved', resolved_at = now() WHERE target_type = $1 AND target_id = $2 AND status IN ('pending', 'reviewing')`, targetType, targetID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -74,16 +78,87 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"case_id": caseID, "action": input.Action, "status": "resolved"})
 }
 
-func (s *Server) hasPermission(r *http.Request, userID, permission string) bool {
+func (s *Server) hasPermission(r *http.Request, userID, caseID, permission string) bool {
+	var targetType, targetID string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT target_type, target_id FROM moderation_cases WHERE id = $1`, caseID).Scan(&targetType, &targetID); err != nil {
+		return false
+	}
+	communityID := ""
+	switch targetType {
+	case "post":
+		if err := s.db.QueryRowContext(r.Context(), `SELECT community_id FROM posts WHERE id = $1`, targetID).Scan(&communityID); err != nil {
+			return false
+		}
+	case "comment":
+		if err := s.db.QueryRowContext(r.Context(), `SELECT p.community_id FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = $1`, targetID).Scan(&communityID); err != nil {
+			return false
+		}
+	}
+	return s.hasScopedPermission(r, userID, permission, communityID)
+}
+
+func (s *Server) hasScopedPermission(r *http.Request, userID, permission, communityID string) bool {
 	var allowed bool
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT EXISTS (
 			SELECT 1 FROM user_roles ur
 			JOIN role_permissions rp ON rp.role_id = ur.role_id
 			JOIN permissions p ON p.id = rp.permission_id
-			WHERE ur.user_id = $1 AND p.name = $2 AND ur.community_id IS NULL
-		)`, userID, permission).Scan(&allowed)
+			WHERE ur.user_id = $1 AND p.name = $2
+			  AND (ur.community_id IS NULL OR ur.community_id = NULLIF($3, ''))
+		)`, userID, permission, communityID).Scan(&allowed)
 	return err == nil && allowed
+}
+
+func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.hasScopedPermission(r, user.ID, "report.review", "") {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
+		return
+	}
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT id, target_type, target_id, source, risk_level, status, created_at, resolved_at
+		FROM moderation_cases
+		WHERE ($1 = '' OR status = $1)
+		ORDER BY created_at ASC, id ASC
+		LIMIT $2`, status, limit)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0, limit)
+	for rows.Next() {
+		var id, targetType, targetID, source, riskLevel, caseStatus string
+		var createdAt time.Time
+		var resolvedAt sql.NullTime
+		if err := rows.Scan(&id, &targetType, &targetID, &source, &riskLevel, &caseStatus, &createdAt, &resolvedAt); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		item := map[string]any{"id": id, "target_type": targetType, "target_id": targetID, "source": source, "risk_level": riskLevel, "status": caseStatus, "created_at": createdAt}
+		if resolvedAt.Valid {
+			item["resolved_at"] = resolvedAt.Time
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targetType, targetID string, input moderationActionInput) error {

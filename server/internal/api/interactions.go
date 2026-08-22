@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
@@ -46,6 +47,17 @@ func (s *Server) togglePostLike(w http.ResponseWriter, r *http.Request, postID s
 		if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET like_count = GREATEST(like_count `+operator+`, 0), updated_at = now() WHERE id = $1`, postID); err != nil {
 			writeInternalError(w, r, err)
 			return
+		}
+		if active {
+			var authorID string
+			if err := tx.QueryRowContext(r.Context(), `SELECT author_id FROM posts WHERE id = $1`, postID).Scan(&authorID); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if err := enqueueNotificationTx(tx, authorID, user.ID, "like", "post", postID, time.Now().UTC()); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -170,9 +182,16 @@ func (s *Server) toggleUserFollow(w http.ResponseWriter, r *http.Request, target
 		writeAuthError(w, r, err)
 		return
 	}
-	if _, err := setUserFollow(r.Context(), tx, user.ID, targetUserID, active); err != nil {
+	changed, err := setUserFollow(r.Context(), tx, user.ID, targetUserID, active)
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	if changed && active {
+		if err := enqueueNotificationTx(tx, targetUserID, user.ID, "follow", "user", targetUserID, time.Now().UTC()); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)

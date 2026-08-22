@@ -78,9 +78,15 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO permissions (id, name) VALUES
     ('perm-post-delete-own', 'post.delete.own'),
     ('perm-post-hide-community', 'post.hide.community'),
+    ('perm-comment-delete-own', 'comment.delete.own'),
+    ('perm-comment-hide-community', 'comment.hide.community'),
+    ('perm-member-mute', 'member.mute'),
+    ('perm-member-ban', 'member.ban'),
     ('perm-moderation-action', 'moderation.action'),
     ('perm-audit-read', 'audit.read'),
-    ('perm-report-review', 'report.review')
+    ('perm-report-review', 'report.review'),
+    ('perm-community-edit', 'community.edit'),
+    ('perm-user-ban-global', 'user.ban.global')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)

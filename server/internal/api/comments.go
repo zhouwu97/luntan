@@ -226,6 +226,12 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeInternalError(w, r, err)
 		return
 	}
+	if parentID != "" && input.ReplyToUserID != "" {
+		if err := enqueueNotificationTx(tx, input.ReplyToUserID, user.ID, "reply", "comment", parentID, now); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return

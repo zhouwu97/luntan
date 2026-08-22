@@ -77,6 +77,14 @@ class AuthRepository {
     }
   }
 
+  Future<void> deleteAccount() async {
+    try {
+      await _client.deleteJson('/api/v1/me');
+    } finally {
+      await _tokenStore.clear();
+    }
+  }
+
   Future<AuthSession> _saveSession(Map<String, dynamic> payload) async {
     final accessToken = payload['access_token'];
     final refreshToken = payload['refresh_token'];

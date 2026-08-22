@@ -320,6 +320,14 @@ func (s *Server) createReport(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	if err := enqueueOutboxTx(tx, "moderation.case.created", "moderation_case", caseID, map[string]any{
+		"report_id":   reportID,
+		"target_type": input.TargetType,
+		"target_id":   input.TargetID,
+	}, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return

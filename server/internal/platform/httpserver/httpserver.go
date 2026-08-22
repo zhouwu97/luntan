@@ -88,6 +88,7 @@ func loggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 		status := recorder.statusCode()
 		latency := time.Since(started)
 		metrics.observe(status, latency)
+		metrics.observeBusiness(r.URL.Path, status)
 		logger.Info("http_request", "timestamp", time.Now().UTC().Format(time.RFC3339Nano), "request_id", requestID(r.Context()), "method", r.Method, "path", r.URL.Path, "status", status, "latency_ms", latency.Milliseconds(), "error_code", errorCodeForStatus(status))
 	})
 }

@@ -27,7 +27,7 @@ func TestMetricsEndpointExposesPrometheusShape(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	res := httptest.NewRecorder()
 	NewHandler(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "luntan_http_requests_total") || !strings.Contains(res.Body.String(), "quantile=\"0.95\"") {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "luntan_http_requests_total") || !strings.Contains(res.Body.String(), "quantile=\"0.95\"") || !strings.Contains(res.Body.String(), "luntan_login_success_rate") {
 		t.Fatalf("metrics response: status=%d body=%s", res.Code, res.Body.String())
 	}
 }
@@ -71,5 +71,29 @@ func TestPanicReturnsStandard500(t *testing.T) {
 	}
 	if !strings.Contains(res.Body.String(), `"code":"INTERNAL_ERROR"`) {
 		t.Fatalf("panic body = %s", res.Body.String())
+	}
+}
+
+func TestRateLimiterPreservesRouteBucketAcrossRequests(t *testing.T) {
+	t.Setenv("RATE_LIMIT_ENABLED", "true")
+	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	handler := NewHandlerWithAPI(nil, slog.New(slog.NewTextHandler(io.Discard, nil)), apiHandler)
+	for index := 0; index < 10; index++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"user","password":"password123"}`))
+		req.RemoteAddr = "198.51.100.10:1234"
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusServiceUnavailable {
+			t.Fatalf("request %d status = %d, want 503 before limit", index+1, res.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"user","password":"password123"}`))
+	req.RemoteAddr = "198.51.100.10:1234"
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusTooManyRequests || !strings.Contains(res.Body.String(), `"code":"RATE_LIMITED"`) {
+		t.Fatalf("limited response: status=%d body=%s", res.Code, res.Body.String())
 	}
 }

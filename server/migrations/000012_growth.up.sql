@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 
 CREATE OR REPLACE FUNCTION enforce_poll_vote_choice() RETURNS trigger AS $$
 BEGIN
+    -- 同一用户在单选投票上的并发写入必须串行化，避免两个事务同时通过 EXISTS 检查。
+    PERFORM pg_advisory_xact_lock(hashtext(NEW.poll_id || ':' || NEW.user_id));
     IF NOT (SELECT allow_multiple FROM polls WHERE id = NEW.poll_id)
        AND EXISTS (SELECT 1 FROM poll_votes WHERE poll_id = NEW.poll_id AND user_id = NEW.user_id) THEN
         RAISE EXCEPTION 'poll allows only one option per user';

@@ -97,6 +97,8 @@ func TestCreatePostWritesRevisionAndIsIdempotentByUserKey(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7)`)).WithArgs(sqlmock.AnyArg(), "u1", "c1", "normal", "标题", "正文", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_revisions (id, post_id, editor_id, community_id, type, title, content, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "u1", "c1", "normal", "标题", "正文", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_idempotency_keys (user_id, idempotency_key, post_id, created_at) VALUES ($1, $2, $3, $4)`)).WithArgs("u1", "post-key-1", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO outbox_events (id, event_type, aggregate_type, aggregate_id, payload, status, available_at, created_at)
+		VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', $6, $6)`)).WithArgs(sqlmock.AnyArg(), "post.created", "post", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(`{"community_id":"c1","type":"normal","title":"标题","content":"正文"}`))
@@ -226,6 +228,11 @@ func TestPostLikeIsIdempotentAndUpdatesCountOnlyAfterNewRelation(t *testing.T) {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_reactions (post_id, user_id, reaction_type) VALUES ($1, $2, $3) ON CONFLICT (post_id, user_id, reaction_type) DO NOTHING`)).WithArgs("p1", "u1", "like").WillReturnResult(sqlmock.NewResult(1, inserted))
 		if inserted == 1 {
 			mock.ExpectExec(regexp.QuoteMeta(`UPDATE posts SET like_count = GREATEST(like_count + 1, 0), updated_at = now() WHERE id = $1`)).WithArgs("p1").WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT author_id FROM posts WHERE id = $1`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"author_id"}).AddRow("u2"))
+			mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO notifications (id, user_id, type, actor_id, target_type, target_id, is_read, created_at)
+				VALUES ($1, $2, $3, $4, $5, $6, false, $7)`)).WithArgs(sqlmock.AnyArg(), "u2", "like", "u1", "post", "p1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO outbox_events (id, event_type, aggregate_type, aggregate_id, payload, status, available_at, created_at)
+				VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', $6, $6)`)).WithArgs(sqlmock.AnyArg(), "notification.created", "notification", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 		}
 		mock.ExpectCommit()
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/posts/p1/like", nil)
@@ -256,6 +263,7 @@ func TestPlatformWriteAndNotificationRoutesRequireAuthentication(t *testing.T) {
 		{http.MethodPost, "/api/v1/reports", `{"target_type":"post","target_id":"p1","reason_code":"spam"}`},
 		{http.MethodPut, "/api/v1/users/u2/block", ""},
 		{http.MethodPatch, "/api/v1/notifications/n1", ""},
+		{http.MethodGet, "/api/v1/moderation/cases", ""},
 	}
 	for _, item := range cases {
 		req := httptest.NewRequest(item.method, item.path, strings.NewReader(item.body))
@@ -264,6 +272,75 @@ func TestPlatformWriteAndNotificationRoutesRequireAuthentication(t *testing.T) {
 		if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
 			t.Fatalf("%s %s response: status=%d body=%s", item.method, item.path, res.Code, res.Body.String())
 		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNotificationReadAllPOSTRouteRequiresAuthentication(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/read-all", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
+		t.Fatalf("notification read-all response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAccountDeletionRouteRequiresAuthentication(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/me", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
+		t.Fatalf("account deletion response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHomeRouteRequiresDatabase(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/home", nil)
+	res := httptest.NewRecorder()
+	NewHandler(nil).ServeHTTP(res, req)
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("home status = %d, want 503", res.Code)
+	}
+}
+
+func TestHomeReturnsDynamicSections(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, slug, name, description, member_count, follower_count, post_count
+		FROM communities
+		WHERE status = 'active' AND deleted_at IS NULL
+		ORDER BY sort_order ASC, post_count DESC, id ASC
+		LIMIT 8`)).WillReturnRows(sqlmock.NewRows([]string{"id", "slug", "name", "description", "member_count", "follower_count", "post_count"}).AddRow("c1", "campus", "校园", "交流", 10, 20, 30))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT p.id, p.title, LEFT(p.content, 200), p.community_id, c.name,
+		       p.like_count, p.comment_count, p.published_at
+		FROM posts p`)).WillReturnRows(sqlmock.NewRows([]string{"id", "title", "content", "community_id", "name", "like_count", "comment_count", "published_at"}).AddRow("p1", "标题", "正文", "c1", "校园", 3, 2, time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/home", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"communities"`) || !strings.Contains(res.Body.String(), `"featured"`) || !strings.Contains(res.Body.String(), `"campus"`) {
+		t.Fatalf("home response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

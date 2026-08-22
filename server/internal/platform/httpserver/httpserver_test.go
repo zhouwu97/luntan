@@ -23,6 +23,15 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointExposesPrometheusShape(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	res := httptest.NewRecorder()
+	NewHandler(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "luntan_http_requests_total") || !strings.Contains(res.Body.String(), "quantile=\"0.95\"") {
+		t.Fatalf("metrics response: status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestUnknownRouteReturnsStandardErrorAndRequestID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	res := httptest.NewRecorder()

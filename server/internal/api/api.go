@@ -80,6 +80,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/comments")
 		s.createComment(w, r, postID, "")
 		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/poll"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/poll")
+		s.createPoll(w, r, postID)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/market"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/market")
+		s.createMarketItem(w, r, postID)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/polls/") && strings.HasSuffix(path, "/vote"):
+		pollID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/polls/"), "/vote")
+		s.votePoll(w, r, pollID)
+		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/replies"):
 		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/replies")
 		s.createReply(w, r, commentID)
@@ -114,6 +126,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/communities/") && strings.HasSuffix(path, "/membership"):
 		s.toggleCommunityMembership(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/communities/"), "/membership"), false)
 		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/block"):
+		s.toggleBlock(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/block"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/block"):
+		s.toggleBlock(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/block"), false)
+		return
+	case r.Method == http.MethodPatch && path == "/api/v1/notifications/read-all":
+		s.markAllNotificationsRead(w, r)
+		return
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/notifications/"):
+		s.markNotificationRead(w, r, strings.TrimPrefix(path, "/api/v1/notifications/"))
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/reports":
+		s.createReport(w, r)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/moderation/cases/") && strings.HasSuffix(path, "/actions"):
+		caseID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/moderation/cases/"), "/actions")
+		s.createModerationAction(w, r, caseID)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/media/upload-token":
 		s.createMediaUploadToken(w, r)
 		return
@@ -121,7 +152,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/media/"), "/complete")
 		s.completeMedia(w, r, mediaID)
 		return
-	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || strings.HasPrefix(path, "/api/v1/users/") || path == "/api/v1/me":
+	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || strings.HasPrefix(path, "/api/v1/users/") || strings.HasPrefix(path, "/api/v1/notifications/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return
 	case r.Method != http.MethodGet:
@@ -137,6 +168,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.getCommunity(w, r, strings.TrimPrefix(path, "/api/v1/communities/"))
 	case path == "/api/v1/feed/latest":
 		s.latestFeed(w, r)
+	case path == "/api/v1/notifications":
+		s.listNotifications(w, r)
+	case path == "/api/v1/search":
+		s.search(w, r)
+	case path == "/api/v1/ranking":
+		s.ranking(w, r)
+	case path == "/api/v1/me/points":
+		s.points(w, r)
+	case strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/poll"):
+		s.getPoll(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/poll"))
 	case strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/comments"):
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/comments")
 		s.listComments(w, r, postID)
@@ -308,6 +349,20 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "TARGET_NOT_FOUND", Message: "目标不存在或不可用"}
 	case errors.Is(err, ErrSelfFollow):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "SELF_FOLLOW_NOT_ALLOWED", Message: "不能关注自己"}
+	case errors.Is(err, ErrBlockTargetNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "BLOCK_TARGET_NOT_FOUND", Message: "用户不存在或不可用"}
+	case errors.Is(err, ErrBlocked):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "BLOCKED", Message: "该互动已被阻止"}
+	case errors.Is(err, ErrInvalidReport):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_REPORT", Message: "举报参数不合法"}
+	case errors.Is(err, ErrReportTargetNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "REPORT_TARGET_NOT_FOUND", Message: "举报目标不存在"}
+	case errors.Is(err, ErrPermissionDenied):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "PERMISSION_DENIED", Message: "没有执行该操作的权限"}
+	case errors.Is(err, ErrInvalidModerationAction):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MODERATION_ACTION", Message: "审核动作不合法"}
+	case errors.Is(err, ErrModerationCaseNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "MODERATION_CASE_NOT_FOUND", Message: "审核案件不存在"}
 	case errors.Is(err, sql.ErrConnDone):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"}
 	}

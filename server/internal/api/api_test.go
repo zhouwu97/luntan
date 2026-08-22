@@ -241,6 +241,52 @@ func TestPostLikeIsIdempotentAndUpdatesCountOnlyAfterNewRelation(t *testing.T) {
 	}
 }
 
+func TestPlatformWriteAndNotificationRoutesRequireAuthentication(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/v1/notifications", ""},
+		{http.MethodPost, "/api/v1/reports", `{"target_type":"post","target_id":"p1","reason_code":"spam"}`},
+		{http.MethodPut, "/api/v1/users/u2/block", ""},
+		{http.MethodPatch, "/api/v1/notifications/n1", ""},
+	}
+	for _, item := range cases {
+		req := httptest.NewRequest(item.method, item.path, strings.NewReader(item.body))
+		res := httptest.NewRecorder()
+		NewHandler(db).ServeHTTP(res, req)
+		if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
+			t.Fatalf("%s %s response: status=%d body=%s", item.method, item.path, res.Code, res.Body.String())
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchRejectsEmptyQueryBeforeDatabaseAccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), `"code":"INVALID_QUERY"`) {
+		t.Fatalf("search response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListCommunities(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

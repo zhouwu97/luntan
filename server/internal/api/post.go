@@ -242,7 +242,7 @@ func validPostInput(input postWriteInput) bool {
 		return false
 	}
 	switch input.Type {
-	case "normal", "guide", "question", "game_share":
+	case "normal", "guide", "question", "game_share", "market":
 		return true
 	default:
 		return false

@@ -151,6 +151,15 @@ func (s *Server) toggleUserFollow(w http.ResponseWriter, r *http.Request, target
 		writeAuthError(w, r, ErrSelfFollow)
 		return
 	}
+	blocked, err := usersBlockEachOther(r.Context(), s.db, user.ID, targetUserID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if blocked {
+		writeAuthError(w, r, ErrBlocked)
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)

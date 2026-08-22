@@ -37,6 +37,9 @@ func NewHandlerWithAPI(db *sql.DB, logger *slog.Logger, apiHandler http.Handler)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/health":
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		case r.Method == http.MethodGet && r.URL.Path == "/metrics":
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+			metrics.write(w)
 		case r.Method == http.MethodGet && r.URL.Path == "/ready":
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
@@ -51,7 +54,11 @@ func NewHandlerWithAPI(db *sql.DB, logger *slog.Logger, apiHandler http.Handler)
 			WriteAppError(w, r, AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
 		}
 	})
-	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(router), logger))
+	var root http.Handler = router
+	if rateLimitEnabled() {
+		root = newRateLimiter().middleware(root)
+	}
+	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger))
 }
 
 func pingDatabase(ctx context.Context, db *sql.DB) error {
@@ -79,7 +86,9 @@ func loggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 		recorder := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(recorder, r)
 		status := recorder.statusCode()
-		logger.Info("http_request", "timestamp", time.Now().UTC().Format(time.RFC3339Nano), "request_id", requestID(r.Context()), "method", r.Method, "path", r.URL.Path, "status", status, "latency_ms", time.Since(started).Milliseconds(), "error_code", errorCodeForStatus(status))
+		latency := time.Since(started)
+		metrics.observe(status, latency)
+		logger.Info("http_request", "timestamp", time.Now().UTC().Format(time.RFC3339Nano), "request_id", requestID(r.Context()), "method", r.Method, "path", r.URL.Path, "status", status, "latency_ms", latency.Milliseconds(), "error_code", errorCodeForStatus(status))
 	})
 }
 

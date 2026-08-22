@@ -170,7 +170,7 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
-      elevation: 12,
+      elevation: 8,
       child: SafeArea(
         top: false,
         child: SizedBox(
@@ -196,10 +196,12 @@ class _BottomBar extends StatelessWidget {
                       child: Ink(
                         width: 54,
                         height: 54,
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           gradient: AppTheme.primaryGradient,
-                          shape: BoxShape.circle,
-                          boxShadow: [
+                          borderRadius: BorderRadius.all(
+                            Radius.circular(AppTheme.publishRadius),
+                          ),
+                          boxShadow: const [
                             BoxShadow(
                               color: Color(0x355A9EFF),
                               blurRadius: 16,

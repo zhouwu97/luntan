@@ -27,28 +27,71 @@ class PostMediaPreview extends StatelessWidget {
   Widget _layout(List<PostMedia> shown, int more) {
     switch (shown.length) {
       case 1:
-        return Align(
-          alignment: Alignment.centerLeft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 320, maxHeight: 245),
-            child: AspectRatio(aspectRatio: _ratio(shown.first), child: _tile(shown.first)),
-          ),
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final height = (constraints.maxWidth / _ratio(shown.first))
+                .clamp(132.0, 240.0)
+                .toDouble();
+            return SizedBox(
+              width: constraints.maxWidth,
+              height: height,
+              child: _tile(shown.first),
+            );
+          },
         );
       case 2:
-        return SizedBox(height: 156, child: Row(children: [Expanded(child: _tile(shown[0])), const SizedBox(width: 5), Expanded(child: _tile(shown[1]))]));
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final height = ((constraints.maxWidth - 5) / 2)
+                .clamp(132.0, 190.0)
+                .toDouble();
+            return SizedBox(
+              height: height,
+              child: Row(
+                children: [
+                  Expanded(child: _tile(shown[0])),
+                  const SizedBox(width: 5),
+                  Expanded(child: _tile(shown[1])),
+                ],
+              ),
+            );
+          },
+        );
       case 3:
         return SizedBox(
-          height: 184,
-          child: Row(children: [Expanded(flex: 16, child: _tile(shown[0])), const SizedBox(width: 5), Expanded(flex: 10, child: Column(children: [Expanded(child: _tile(shown[1])), const SizedBox(height: 5), Expanded(child: _tile(shown[2]))]))]),
+          height: 194,
+          child: Row(
+            children: [
+              Expanded(flex: 16, child: _tile(shown[0])),
+              const SizedBox(width: 5),
+              Expanded(
+                flex: 10,
+                child: Column(
+                  children: [
+                    Expanded(child: _tile(shown[1])),
+                    const SizedBox(height: 5),
+                    Expanded(child: _tile(shown[2])),
+                  ],
+                ),
+              ),
+            ],
+          ),
         );
       default:
-        return SizedBox(
-          height: 220,
+        return AspectRatio(
+          aspectRatio: 1,
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 5, mainAxisSpacing: 5),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 5,
+              mainAxisSpacing: 5,
+            ),
             itemCount: shown.length,
-            itemBuilder: (_, index) => _tile(shown[index], overlay: index == shown.length - 1 && more > 0 ? '+$more' : null),
+            itemBuilder: (_, index) => _tile(
+              shown[index],
+              overlay: index == shown.length - 1 && more > 0 ? '+$more' : null,
+            ),
           ),
         );
     }
@@ -62,7 +105,7 @@ class PostMediaPreview extends StatelessWidget {
 
   Widget _tile(PostMedia media, {String? overlay}) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(13),
+      borderRadius: BorderRadius.circular(10),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -71,14 +114,39 @@ class PostMediaPreview extends StatelessWidget {
               media.url!,
               fit: BoxFit.cover,
               filterQuality: FilterQuality.low,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) => frame == null && !wasSynchronouslyLoaded ? const ColoredBox(color: AppTheme.surfaceBlue, child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))) : child,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) =>
+                  frame == null && !wasSynchronouslyLoaded
+                  ? const ColoredBox(
+                      color: AppTheme.surfaceBlue,
+                      child: Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    )
+                  : child,
               errorBuilder: (context, error, stackTrace) => _fallback(media),
             )
           else
             _fallback(media),
           if (overlay != null)
-            const DecoratedBox(decoration: BoxDecoration(color: Color(0x990E2037)), child: Center()),
-          if (overlay != null) Center(child: Text(overlay, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800))),
+            const DecoratedBox(
+              decoration: BoxDecoration(color: Color(0x990E2037)),
+              child: Center(),
+            ),
+          if (overlay != null)
+            Center(
+              child: Text(
+                overlay,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -86,14 +154,44 @@ class PostMediaPreview extends StatelessWidget {
 
   Widget _fallback(PostMedia media) {
     return DecoratedBox(
-      decoration: BoxDecoration(gradient: LinearGradient(colors: media.colors.map(Color.new).toList(), begin: Alignment.topLeft, end: Alignment.bottomRight)),
-      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.image_outlined, color: Colors.white.withValues(alpha: .9), size: 30), const SizedBox(height: 5), Text(media.label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700))])),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: media.colors.map(Color.new).toList(),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.image_outlined,
+              color: Colors.white.withValues(alpha: .9),
+              size: 30,
+            ),
+            const SizedBox(height: 5),
+            Text(
+              media.label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
 class MediaGalleryScreen extends StatefulWidget {
-  const MediaGalleryScreen({super.key, required this.images, this.initialIndex = 0});
+  const MediaGalleryScreen({
+    super.key,
+    required this.images,
+    this.initialIndex = 0,
+  });
 
   final List<PostMedia> images;
   final int initialIndex;
@@ -123,7 +221,11 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0C1724),
-      appBar: AppBar(backgroundColor: Colors.transparent, foregroundColor: Colors.white, title: Text('${index + 1} / ${widget.images.length}')),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        title: Text('${index + 1} / ${widget.images.length}'),
+      ),
       body: PageView.builder(
         controller: pageController,
         itemCount: widget.images.length,
@@ -134,7 +236,14 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
             minScale: 1,
             maxScale: 3,
             child: Center(
-              child: image.url == null ? _fallback(image) : Image.network(image.url!, fit: BoxFit.contain, errorBuilder: (context, error, stackTrace) => _fallback(image)),
+              child: image.url == null
+                  ? _fallback(image)
+                  : Image.network(
+                      image.url!,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) =>
+                          _fallback(image),
+                    ),
             ),
           );
         },
@@ -147,13 +256,19 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
       padding: const EdgeInsets.all(32),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: LinearGradient(colors: media.colors.map(Color.new).toList()),
+          gradient: LinearGradient(
+            colors: media.colors.map(Color.new).toList(),
+          ),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Center(
           child: Text(
             media.label,
-            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
       ),

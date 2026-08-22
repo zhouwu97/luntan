@@ -14,7 +14,7 @@ func TestMigrationFilesAreOrderedAndPaired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 7 || files[0].Version != "000001" || files[1].Version != "000002" || files[2].Version != "000003" || files[3].Version != "000004" || files[4].Version != "000005" || files[5].Version != "000006" || files[6].Version != "000007" {
+	if len(files) != 8 || files[0].Version != "000001" || files[1].Version != "000002" || files[2].Version != "000003" || files[3].Version != "000004" || files[4].Version != "000005" || files[5].Version != "000006" || files[6].Version != "000007" || files[7].Version != "000008" {
 		t.Fatalf("unexpected migration order: %#v", files)
 	}
 	for _, file := range files {
@@ -53,7 +53,7 @@ func TestMigrationsAgainstPostgres(t *testing.T) {
 	if err := Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"users", "user_profiles", "community_categories", "communities", "posts", "user_auth_methods", "sessions", "refresh_tokens", "post_revisions", "post_idempotency_keys", "media_assets", "post_media", "comments"} {
+	for _, table := range []string{"users", "user_profiles", "community_categories", "communities", "posts", "user_auth_methods", "sessions", "refresh_tokens", "post_revisions", "post_idempotency_keys", "media_assets", "post_media", "comments", "post_reactions", "comment_reactions", "bookmarks", "user_follows", "community_follows", "community_members"} {
 		var exists bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
 			t.Fatal(err)

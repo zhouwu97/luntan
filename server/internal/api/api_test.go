@@ -196,6 +196,51 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	}
 }
 
+func TestTogglePostLikeRequiresBearerToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/posts/p1/like", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized || !strings.Contains(res.Body.String(), `"code":"INVALID_TOKEN"`) {
+		t.Fatalf("like auth response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostLikeIsIdempotentAndUpdatesCountOnlyAfterNewRelation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for index, inserted := range []int64{1, 0} {
+		mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "User", 1))
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
+		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_reactions (post_id, user_id, reaction_type) VALUES ($1, $2, $3) ON CONFLICT (post_id, user_id, reaction_type) DO NOTHING`)).WithArgs("p1", "u1", "like").WillReturnResult(sqlmock.NewResult(1, inserted))
+		if inserted == 1 {
+			mock.ExpectExec(regexp.QuoteMeta(`UPDATE posts SET like_count = GREATEST(like_count + 1, 0), updated_at = now() WHERE id = $1`)).WithArgs("p1").WillReturnResult(sqlmock.NewResult(1, 1))
+		}
+		mock.ExpectCommit()
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/posts/p1/like", nil)
+		req.Header.Set("Authorization", "Bearer access-token")
+		res := httptest.NewRecorder()
+		NewHandler(db).ServeHTTP(res, req)
+		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"active":true`) {
+			t.Fatalf("like attempt %d: status=%d body=%s", index, res.Code, res.Body.String())
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListCommunities(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

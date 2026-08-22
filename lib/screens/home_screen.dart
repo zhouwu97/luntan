@@ -52,7 +52,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> refresh() async {
     await widget.feedController.refresh();
-    if (mounted) widget.onFeedback('刷新完成，暂无新内容');
+    if (!mounted) return;
+    final state = widget.feedController.state;
+    widget.onFeedback(
+      state.status == FeedStatus.error && state.items.isEmpty
+          ? '刷新失败，请重试'
+          : '已经是最新内容',
+    );
   }
 
   List<Post> get _visiblePosts {
@@ -105,100 +111,110 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, _) {
         final posts = _visiblePosts;
         final feedState = widget.feedController.state;
-        final isLoading =
+        final showInitialSkeleton =
             feedState.status == FeedStatus.initial ||
-            feedState.status == FeedStatus.loading;
+            (feedState.status == FeedStatus.loading && feedState.items.isEmpty);
         return Scaffold(
           body: SafeArea(
             bottom: false,
-            child: RefreshIndicator(
-              color: AppTheme.primary,
-              onRefresh: refresh,
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  if (notification.metrics.extentAfter < 360) {
-                    widget.feedController.loadMore();
-                  }
-                  return false;
-                },
-                child: CustomScrollView(
-                  controller: scrollController,
-                  physics: const AlwaysScrollableScrollPhysics(
-                    parent: BouncingScrollPhysics(),
-                  ),
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: _Header(
-                        onProfile: widget.onOpenProfile,
-                        onSearch: openSearch,
-                        onMessages: widget.onOpenMessages,
-                        unread: widget.store.unreadMessages,
+            child: Stack(
+              children: [
+                RefreshIndicator(
+                  color: AppTheme.primary,
+                  onRefresh: refresh,
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification.metrics.extentAfter < 360) {
+                        widget.feedController.loadMore();
+                      }
+                      return false;
+                    },
+                    child: CustomScrollView(
+                      controller: scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
                       ),
-                    ),
-                    SliverToBoxAdapter(
-                      child: _SectionTabs(store: widget.store),
-                    ),
-                    SliverToBoxAdapter(
-                      child: _FeatureEntries(onTap: openFeature),
-                    ),
-                    SliverToBoxAdapter(
-                      child: _FeedToolbar(
-                        store: widget.store,
-                        isRefreshing: feedState.isBusy,
-                        onReply: () => openFeature('我的回复'),
-                        onPublish: widget.onOpenComposer,
-                        onRefresh: refresh,
-                      ),
-                    ),
-                    if (isLoading || feedState.status == FeedStatus.loadingMore)
-                      const SliverToBoxAdapter(
-                        child: LinearProgressIndicator(
-                          minHeight: 2,
-                          color: AppTheme.primary,
-                          backgroundColor: AppTheme.surfaceBlue,
+                      slivers: [
+                        SliverToBoxAdapter(
+                          child: _Header(
+                            onProfile: widget.onOpenProfile,
+                            onSearch: openSearch,
+                            onMessages: widget.onOpenMessages,
+                            unread: widget.store.unreadMessages,
+                          ),
                         ),
-                      )
-                    else
-                      const SliverToBoxAdapter(child: SizedBox(height: 2)),
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 26),
-                      sliver:
-                          feedState.status == FeedStatus.error &&
-                              feedState.items.isEmpty
-                          ? SliverToBoxAdapter(
-                              child: _FeedError(
-                                onRetry: widget.feedController.initialLoad,
-                              ),
-                            )
-                          : isLoading
-                          ? const SliverToBoxAdapter(
-                              child: SizedBox(height: 180),
-                            )
-                          : posts.isEmpty
-                          ? SliverToBoxAdapter(
-                              child: _EmptyFeed(
-                                sort: widget.store.selectedSort,
-                              ),
-                            )
-                          : SliverList.builder(
-                              itemCount: posts.length,
-                              itemBuilder: (context, index) {
-                                final post = posts[index];
-                                return ForumPostCard(
-                                  post: post,
-                                  onOpen: () => widget.onOpenPost(post),
-                                  onOpenComments: () => widget.onOpenComments(post),
-                                  onLike: () => widget.store.toggleLike(post),
-                                  onBookmark: () =>
-                                      widget.store.toggleBookmark(post),
-                                  onMenu: () => _showPostMenu(post),
-                                );
-                              },
+                        SliverToBoxAdapter(
+                          child: _SectionTabs(store: widget.store),
+                        ),
+                        SliverToBoxAdapter(
+                          child: _FeatureEntries(onTap: openFeature),
+                        ),
+                        SliverToBoxAdapter(
+                          child: _FeedToolbar(
+                            store: widget.store,
+                            onReply: () => openFeature('我的回复'),
+                            onPublish: widget.onOpenComposer,
+                          ),
+                        ),
+                        if (feedState.isBusy)
+                          const SliverToBoxAdapter(
+                            child: LinearProgressIndicator(
+                              minHeight: 2,
+                              color: AppTheme.primary,
+                              backgroundColor: AppTheme.surfaceBlue,
                             ),
+                          )
+                        else
+                          const SliverToBoxAdapter(child: SizedBox(height: 2)),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 88),
+                          sliver:
+                              feedState.status == FeedStatus.error &&
+                                  feedState.items.isEmpty
+                              ? SliverToBoxAdapter(
+                                  child: _FeedError(
+                                    onRetry: widget.feedController.initialLoad,
+                                  ),
+                                )
+                              : showInitialSkeleton
+                              ? const SliverToBoxAdapter(child: _FeedSkeleton())
+                              : posts.isEmpty
+                              ? SliverToBoxAdapter(
+                                  child: _EmptyFeed(
+                                    sort: widget.store.selectedSort,
+                                  ),
+                                )
+                              : SliverList.builder(
+                                  itemCount: posts.length,
+                                  itemBuilder: (context, index) {
+                                    final post = posts[index];
+                                    return ForumPostCard(
+                                      post: post,
+                                      onOpen: () => widget.onOpenPost(post),
+                                      onOpenComments: () =>
+                                          widget.onOpenComments(post),
+                                      onLike: () =>
+                                          widget.store.toggleLike(post),
+                                      onBookmark: () =>
+                                          widget.store.toggleBookmark(post),
+                                      onMenu: () => _showPostMenu(post),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: _FloatingRefresh(
+                    active: feedState.isBusy,
+                    onTap: refresh,
+                  ),
+                ),
+              ],
             ),
           ),
         );
@@ -218,7 +234,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 post.isBookmarked
                     ? Icons.star_rounded
                     : Icons.star_border_rounded,
-                color: post.isBookmarked ? AppTheme.orange : AppTheme.textSecondary,
+                color: post.isBookmarked
+                    ? AppTheme.orange
+                    : AppTheme.textSecondary,
               ),
               title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
               onTap: () {
@@ -367,40 +385,42 @@ class _SectionTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 52,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        scrollDirection: Axis.horizontal,
-        itemCount: ForumSection.values.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 10),
-        itemBuilder: (_, index) {
-          final section = ForumSection.values[index];
-          final active = store.selectedSection == section;
-          return GestureDetector(
-            onTap: () => store.selectSection(section),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: active ? AppTheme.textPrimary : Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: active ? AppTheme.textPrimary : AppTheme.border,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+      child: Container(
+        height: 46,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceBlue,
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Row(
+          children: ForumSection.values.map((section) {
+            final active = store.selectedSection == section;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => store.selectSection(section),
+                child: AnimatedContainer(
+                  duration: AppTheme.tabMotion,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: active ? AppTheme.textPrimary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    section.label,
+                    style: TextStyle(
+                      color: active ? Colors.white : AppTheme.textSecondary,
+                      fontSize: 13,
+                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
-              child: Text(
-                section.label,
-                style: TextStyle(
-                  color: active ? Colors.white : AppTheme.textSecondary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          );
-        },
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -412,11 +432,11 @@ class _FeatureEntries extends StatelessWidget {
   final ValueChanged<String> onTap;
 
   static const entries = [
-    ('榜', '排行榜', AppTheme.primary),
-    ('热', '热门帖子', AppTheme.orange),
-    ('搭', '穿搭分享', AppTheme.pink),
-    ('活', '活动', AppTheme.mint),
-    ('玩', '玩法分享', AppTheme.purple),
+    (Icons.emoji_events_outlined, '排行榜', AppTheme.primary),
+    (Icons.local_fire_department_outlined, '热门帖子', AppTheme.orange),
+    (Icons.checkroom_outlined, '穿搭分享', AppTheme.pink),
+    (Icons.calendar_month_outlined, '活动', AppTheme.mint),
+    (Icons.shopping_bag_outlined, '二手集市', AppTheme.purple),
   ];
 
   @override
@@ -434,13 +454,28 @@ class _FeatureEntries extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(color: entry.$3.withValues(alpha: .12), shape: BoxShape.circle),
-                      child: Center(child: Text(entry.$1, style: TextStyle(color: entry.$3, fontWeight: FontWeight.w900, fontSize: 15))),
+                      width: 43,
+                      height: 43,
+                      decoration: BoxDecoration(
+                        color: entry.$3.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.iconContainerRadius,
+                        ),
+                      ),
+                      child: Icon(entry.$1, color: entry.$3, size: 22),
                     ),
                     const SizedBox(height: 6),
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(entry.$2, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10.5, fontWeight: FontWeight.w600))),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        entry.$2,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -455,17 +490,13 @@ class _FeatureEntries extends StatelessWidget {
 class _FeedToolbar extends StatelessWidget {
   const _FeedToolbar({
     required this.store,
-    required this.isRefreshing,
     required this.onReply,
     required this.onPublish,
-    required this.onRefresh,
   });
 
   final ForumStore store;
-  final bool isRefreshing;
   final VoidCallback onReply;
   final VoidCallback onPublish;
-  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -473,19 +504,24 @@ class _FeedToolbar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         children: [
-          ...FeedSort.values.map(
-            (sort) => Padding(
-              padding: const EdgeInsets.only(right: 18),
-              child: GestureDetector(
-                onTap: () => store.selectSort(sort),
-                child: _SortItem(
-                  label: sort.label,
-                  active: store.selectedSort == sort,
-                ),
-              ),
+          Expanded(
+            child: Row(
+              children: FeedSort.values
+                  .map(
+                    (sort) => Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: GestureDetector(
+                        onTap: () => store.selectSort(sort),
+                        child: _SortItem(
+                          label: sort.label,
+                          active: store.selectedSort == sort,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
             ),
           ),
-          const Spacer(),
           _ToolbarButton(
             label: '回复',
             icon: Icons.chat_bubble_outline_rounded,
@@ -496,20 +532,6 @@ class _FeedToolbar extends StatelessWidget {
             label: '发布',
             icon: Icons.edit_outlined,
             onTap: onPublish,
-          ),
-          const SizedBox(width: 2),
-          IconButton(
-            onPressed: isRefreshing ? null : onRefresh,
-            tooltip: '刷新',
-            icon: AnimatedRotation(
-              turns: isRefreshing ? .8 : 0,
-              duration: const Duration(milliseconds: 450),
-              child: const Icon(
-                Icons.refresh_rounded,
-                color: AppTheme.primary,
-                size: 22,
-              ),
-            ),
           ),
         ],
       ),
@@ -613,6 +635,158 @@ class _ToolbarButton extends StatelessWidget {
   }
 }
 
+class _FloatingRefresh extends StatefulWidget {
+  const _FloatingRefresh({required this.active, required this.onTap});
+
+  final bool active;
+  final Future<void> Function() onTap;
+
+  @override
+  State<_FloatingRefresh> createState() => _FloatingRefreshState();
+}
+
+class _FloatingRefreshState extends State<_FloatingRefresh>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (widget.active) controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _FloatingRefresh oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !controller.isAnimating) {
+      controller.repeat();
+    } else if (!widget.active && controller.isAnimating) {
+      controller.stop();
+      controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '刷新',
+      child: Material(
+        color: Colors.white,
+        elevation: 5,
+        shadowColor: const Color(0x2A284A6E),
+        borderRadius: BorderRadius.circular(15),
+        child: InkWell(
+          onTap: widget.active ? null : widget.onTap,
+          borderRadius: BorderRadius.circular(15),
+          child: Ink(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: RotationTransition(
+              turns: controller,
+              child: const Icon(
+                Icons.refresh_rounded,
+                color: AppTheme.primary,
+                size: 22,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FeedSkeleton extends StatelessWidget {
+  const _FeedSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: List.generate(
+        2,
+        (index) => Container(
+          height: index == 0 ? 250 : 176,
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const _SkeletonBlock(width: 34, height: 34, radius: 17),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        _SkeletonBlock(width: 92, height: 10),
+                        SizedBox(height: 7),
+                        _SkeletonBlock(width: 132, height: 8),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const _SkeletonBlock(width: double.infinity, height: 14),
+              const SizedBox(height: 9),
+              const _SkeletonBlock(width: 210, height: 11),
+              if (index == 0) ...[
+                const SizedBox(height: 15),
+                const Expanded(child: _SkeletonBlock(width: double.infinity)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkeletonBlock extends StatelessWidget {
+  const _SkeletonBlock({
+    this.width = double.infinity,
+    this.height = 12,
+    this.radius = 6,
+  });
+
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        borderRadius: BorderRadius.circular(radius),
+      ),
+    );
+  }
+}
+
 class _EmptyFeed extends StatelessWidget {
   const _EmptyFeed({required this.sort});
 
@@ -683,9 +857,15 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
   Widget buildSuggestions(BuildContext context) => _results(context);
 
   Widget _results(BuildContext context) {
-    final posts = kind == _SearchKind.users || kind == _SearchKind.communities ? const <Post>[] : store.search(query);
-    final users = kind == _SearchKind.posts || kind == _SearchKind.communities ? const <User>[] : store.searchUsers(query);
-    final communities = kind == _SearchKind.posts || kind == _SearchKind.users ? const <Community>[] : store.searchCommunities(query);
+    final posts = kind == _SearchKind.users || kind == _SearchKind.communities
+        ? const <Post>[]
+        : store.search(query);
+    final users = kind == _SearchKind.posts || kind == _SearchKind.communities
+        ? const <User>[]
+        : store.searchUsers(query);
+    final communities = kind == _SearchKind.posts || kind == _SearchKind.users
+        ? const <Community>[]
+        : store.searchCommunities(query);
     final empty = posts.isEmpty && users.isEmpty && communities.isEmpty;
     return Column(
       children: [
@@ -697,23 +877,79 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
           },
         ),
         if (empty)
-          const Expanded(child: Center(child: Text('没有找到相关内容', style: TextStyle(color: AppTheme.textSecondary))))
+          const Expanded(
+            child: Center(
+              child: Text(
+                '没有找到相关内容',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+            ),
+          )
         else
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(14),
               children: [
                 if (posts.isNotEmpty) ...[
-                  if (kind == _SearchKind.all) const _SearchSectionTitle(title: '帖子'),
-                  ...posts.map((post) => ForumPostCard(post: post, onOpen: () { close(context, null); onOpenPost(post); }, onOpenComments: () { close(context, null); onOpenPost(post); }, onLike: () => store.toggleLike(post), onBookmark: () => store.toggleBookmark(post), onMenu: () {})),
+                  if (kind == _SearchKind.all)
+                    const _SearchSectionTitle(title: '帖子'),
+                  ...posts.map(
+                    (post) => ForumPostCard(
+                      post: post,
+                      onOpen: () {
+                        close(context, null);
+                        onOpenPost(post);
+                      },
+                      onOpenComments: () {
+                        close(context, null);
+                        onOpenPost(post);
+                      },
+                      onLike: () => store.toggleLike(post),
+                      onBookmark: () => store.toggleBookmark(post),
+                      onMenu: () {},
+                    ),
+                  ),
                 ],
                 if (users.isNotEmpty) ...[
-                  if (kind == _SearchKind.all) const _SearchSectionTitle(title: '用户'),
-                  ...users.map((user) => ListTile(leading: CircleAvatar(backgroundColor: AppTheme.surfaceBlue, child: Text(user.nickname.characters.first)), title: Text(user.nickname), subtitle: Text('Lv.${user.level} · ${user.signature ?? '活跃用户'}'))),
+                  if (kind == _SearchKind.all)
+                    const _SearchSectionTitle(title: '用户'),
+                  ...users.map(
+                    (user) => ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: AppTheme.surfaceBlue,
+                        child: Text(user.nickname.characters.first),
+                      ),
+                      title: Text(user.nickname),
+                      subtitle: Text(
+                        'Lv.${user.level} · ${user.signature ?? '活跃用户'}',
+                      ),
+                    ),
+                  ),
                 ],
                 if (communities.isNotEmpty) ...[
-                  if (kind == _SearchKind.all) const _SearchSectionTitle(title: '板块'),
-                  ...communities.map((community) => ListTile(leading: const CircleAvatar(backgroundColor: AppTheme.surfaceBlue, child: Icon(Icons.forum_outlined, color: AppTheme.primary)), title: Text(community.name), subtitle: Text(community.description), onTap: () { store.selectSection(ForumSection.values.firstWhere((section) => section.communityId == community.id)); close(context, null); })),
+                  if (kind == _SearchKind.all)
+                    const _SearchSectionTitle(title: '板块'),
+                  ...communities.map(
+                    (community) => ListTile(
+                      leading: const CircleAvatar(
+                        backgroundColor: AppTheme.surfaceBlue,
+                        child: Icon(
+                          Icons.forum_outlined,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                      title: Text(community.name),
+                      subtitle: Text(community.description),
+                      onTap: () {
+                        store.selectSection(
+                          ForumSection.values.firstWhere(
+                            (section) => section.communityId == community.id,
+                          ),
+                        );
+                        close(context, null);
+                      },
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -730,11 +966,46 @@ class _SearchKinds extends StatelessWidget {
   final ValueChanged<_SearchKind> onChanged;
 
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 0), child: Row(children: [_SearchKindButton(label: '综合', kind: _SearchKind.all, selected: selected, onChanged: onChanged), _SearchKindButton(label: '帖子', kind: _SearchKind.posts, selected: selected, onChanged: onChanged), _SearchKindButton(label: '用户', kind: _SearchKind.users, selected: selected, onChanged: onChanged), _SearchKindButton(label: '板块', kind: _SearchKind.communities, selected: selected, onChanged: onChanged)]));
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+    child: Row(
+      children: [
+        _SearchKindButton(
+          label: '综合',
+          kind: _SearchKind.all,
+          selected: selected,
+          onChanged: onChanged,
+        ),
+        _SearchKindButton(
+          label: '帖子',
+          kind: _SearchKind.posts,
+          selected: selected,
+          onChanged: onChanged,
+        ),
+        _SearchKindButton(
+          label: '用户',
+          kind: _SearchKind.users,
+          selected: selected,
+          onChanged: onChanged,
+        ),
+        _SearchKindButton(
+          label: '板块',
+          kind: _SearchKind.communities,
+          selected: selected,
+          onChanged: onChanged,
+        ),
+      ],
+    ),
+  );
 }
 
 class _SearchKindButton extends StatelessWidget {
-  const _SearchKindButton({required this.label, required this.kind, required this.selected, required this.onChanged});
+  const _SearchKindButton({
+    required this.label,
+    required this.kind,
+    required this.selected,
+    required this.onChanged,
+  });
 
   final String label;
   final _SearchKind kind;
@@ -742,7 +1013,16 @@ class _SearchKindButton extends StatelessWidget {
   final ValueChanged<_SearchKind> onChanged;
 
   @override
-  Widget build(BuildContext context) => TextButton(onPressed: () => onChanged(kind), child: Text(label, style: TextStyle(color: selected == kind ? AppTheme.primary : AppTheme.textSecondary, fontWeight: selected == kind ? FontWeight.w800 : FontWeight.w500)));
+  Widget build(BuildContext context) => TextButton(
+    onPressed: () => onChanged(kind),
+    child: Text(
+      label,
+      style: TextStyle(
+        color: selected == kind ? AppTheme.primary : AppTheme.textSecondary,
+        fontWeight: selected == kind ? FontWeight.w800 : FontWeight.w500,
+      ),
+    ),
+  );
 }
 
 class _SearchSectionTitle extends StatelessWidget {
@@ -751,5 +1031,15 @@ class _SearchSectionTitle extends StatelessWidget {
   final String title;
 
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 8, bottom: 8), child: Text(title, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w800)));
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 8),
+    child: Text(
+      title,
+      style: const TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: 15,
+        fontWeight: FontWeight.w800,
+      ),
+    ),
+  );
 }

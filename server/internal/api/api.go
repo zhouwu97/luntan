@@ -61,6 +61,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.updatePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/like"):
+		s.togglePostLike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/like"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/like"):
+		s.togglePostLike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/like"), false)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/bookmark"):
+		s.toggleBookmark(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/bookmark"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/bookmark"):
+		s.toggleBookmark(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/bookmark"), false)
+		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.deletePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 		return
@@ -75,8 +87,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/comments/"):
 		s.updateComment(w, r, strings.TrimPrefix(path, "/api/v1/comments/"))
 		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/like"):
+		s.toggleCommentLike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/like"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/like"):
+		s.toggleCommentLike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/like"), false)
+		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/comments/"):
 		s.deleteComment(w, r, strings.TrimPrefix(path, "/api/v1/comments/"))
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/follow"):
+		s.toggleUserFollow(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/follow"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/follow"):
+		s.toggleUserFollow(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/follow"), false)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/communities/") && strings.HasSuffix(path, "/follow"):
+		s.toggleCommunityFollow(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/communities/"), "/follow"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/communities/") && strings.HasSuffix(path, "/follow"):
+		s.toggleCommunityFollow(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/communities/"), "/follow"), false)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/communities/") && strings.HasSuffix(path, "/membership"):
+		s.toggleCommunityMembership(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/communities/"), "/membership"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/communities/") && strings.HasSuffix(path, "/membership"):
+		s.toggleCommunityMembership(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/communities/"), "/membership"), false)
 		return
 	case r.Method == http.MethodPost && path == "/api/v1/media/upload-token":
 		s.createMediaUploadToken(w, r)
@@ -85,7 +121,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/media/"), "/complete")
 		s.completeMedia(w, r, mediaID)
 		return
-	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || path == "/api/v1/me":
+	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || strings.HasPrefix(path, "/api/v1/users/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return
 	case r.Method != http.MethodGet:
@@ -268,6 +304,10 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "COMMENT_PARENT_NOT_FOUND", Message: "回复目标不存在"}
 	case errors.Is(err, ErrInvalidComment):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_COMMENT", Message: "评论内容不合法"}
+	case errors.Is(err, ErrInteractionTargetNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "TARGET_NOT_FOUND", Message: "目标不存在或不可用"}
+	case errors.Is(err, ErrSelfFollow):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "SELF_FOLLOW_NOT_ALLOWED", Message: "不能关注自己"}
 	case errors.Is(err, sql.ErrConnDone):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"}
 	}

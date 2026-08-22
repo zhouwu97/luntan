@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'controllers/feed_controller.dart';
+import 'controllers/post_detail_controller.dart';
 import 'data/mock_forum_data.dart';
+import 'data/repositories/mock_repositories.dart';
 import 'screens/home_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
@@ -17,17 +20,22 @@ class LuntanApp extends StatefulWidget {
 
 class _LuntanAppState extends State<LuntanApp> {
   late final ForumStore store;
+  late final FeedController feedController;
   int currentTab = 0;
 
   @override
   void initState() {
     super.initState();
     store = ForumStore.seeded();
+    feedController = FeedController(
+      repository: MockFeedRepository(store: store),
+    );
   }
 
   @override
   void dispose() {
     store.dispose();
+    feedController.dispose();
     super.dispose();
   }
 
@@ -66,11 +74,18 @@ class _LuntanAppState extends State<LuntanApp> {
 
   void openPost(Post post) {
     store.recordHistory(post);
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PostDetailScreen(store: store, post: post),
-      ),
+    final detailController = PostDetailController(
+      repository: MockPostRepository(store: store),
+      postId: post.id,
     );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                PostDetailScreen(store: store, controller: detailController),
+          ),
+        )
+        .then((_) => detailController.dispose());
   }
 
   void _showQuickFeedback(String message) {
@@ -100,6 +115,7 @@ class _LuntanAppState extends State<LuntanApp> {
           children: [
             HomeScreen(
               store: store,
+              feedController: feedController,
               onOpenPost: openPost,
               onOpenProfile: () => setState(() => currentTab = 2),
               onOpenComposer: showComposer,
@@ -129,7 +145,12 @@ class _LuntanAppState extends State<LuntanApp> {
 }
 
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.currentTab, required this.onHome, required this.onProfile, required this.onCreate});
+  const _BottomBar({
+    required this.currentTab,
+    required this.onHome,
+    required this.onProfile,
+    required this.onCreate,
+  });
 
   final int currentTab;
   final VoidCallback onHome;
@@ -147,7 +168,14 @@ class _BottomBar extends StatelessWidget {
           height: 72,
           child: Row(
             children: [
-              Expanded(child: _BottomItem(icon: Icons.home_rounded, label: '首页', active: currentTab == 0, onTap: onHome)),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.home_rounded,
+                  label: '首页',
+                  active: currentTab == 0,
+                  onTap: onHome,
+                ),
+              ),
               Expanded(
                 child: Center(
                   child: Semantics(
@@ -162,15 +190,32 @@ class _BottomBar extends StatelessWidget {
                         decoration: const BoxDecoration(
                           gradient: AppTheme.primaryGradient,
                           shape: BoxShape.circle,
-                          boxShadow: [BoxShadow(color: Color(0x355A9EFF), blurRadius: 16, offset: Offset(0, 7))],
+                          boxShadow: [
+                            BoxShadow(
+                              color: Color(0x355A9EFF),
+                              blurRadius: 16,
+                              offset: Offset(0, 7),
+                            ),
+                          ],
                         ),
-                        child: const Icon(Icons.add_rounded, color: Colors.white, size: 30),
+                        child: const Icon(
+                          Icons.add_rounded,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-              Expanded(child: _BottomItem(icon: Icons.person_rounded, label: '我的', active: currentTab == 2, onTap: onProfile)),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.person_rounded,
+                  label: '我的',
+                  active: currentTab == 2,
+                  onTap: onProfile,
+                ),
+              ),
             ],
           ),
         ),
@@ -180,7 +225,12 @@ class _BottomBar extends StatelessWidget {
 }
 
 class _BottomItem extends StatelessWidget {
-  const _BottomItem({required this.icon, required this.label, required this.active, required this.onTap});
+  const _BottomItem({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;
@@ -197,7 +247,14 @@ class _BottomItem extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 24),
           const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: active ? FontWeight.w700 : FontWeight.w500)),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );

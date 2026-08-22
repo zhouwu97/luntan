@@ -1,11 +1,276 @@
 package api
 
 import (
+	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
+
+var (
+	ErrCommunityNotFound      = errors.New("community not found")
+	ErrPostNotFound           = errors.New("post not found")
+	ErrForbidden              = errors.New("forbidden")
+	ErrIdempotencyKeyRequired = errors.New("idempotency key required")
+	ErrInvalidPost            = errors.New("invalid post")
+)
+
+type postWriteInput struct {
+	CommunityID string `json:"community_id"`
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Content     string `json:"content"`
+}
+
+type postMutationResponse struct {
+	ID                string     `json:"id"`
+	AuthorID          string     `json:"author_id"`
+	CommunityID       string     `json:"community_id"`
+	Type              string     `json:"type"`
+	Title             string     `json:"title"`
+	Content           string     `json:"content"`
+	PublicationStatus string     `json:"publication_status"`
+	ModerationStatus  string     `json:"moderation_status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	PublishedAt       *time.Time `json:"published_at,omitempty"`
+}
+
+type postRecord struct {
+	postMutationResponse
+	DeletedAt sql.NullTime
+}
+
+type queryRowContext interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" || len(idempotencyKey) > 128 {
+		writeAuthError(w, r, ErrIdempotencyKeyRequired)
+		return
+	}
+	var input postWriteInput
+	if err := decodeJSON(r, &input); err != nil || !validPostInput(input) {
+		writeAuthError(w, r, ErrInvalidPost)
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	var existingPostID string
+	err = tx.QueryRowContext(r.Context(), `SELECT post_id FROM post_idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&existingPostID)
+	if err == nil {
+		response, loadErr := loadPostMutation(r.Context(), tx, existingPostID)
+		if loadErr != nil {
+			writeInternalError(w, r, loadErr)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		httpserver.WriteJSON(w, http.StatusOK, response)
+		return
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := ensureCommunity(r.Context(), tx, input.CommunityID); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
+	now := time.Now().UTC()
+	postID := newPostID()
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7)`, postID, user.ID, input.CommunityID, input.Type, input.Title, input.Content, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := insertPostRevision(r.Context(), tx, postID, user.ID, input, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO post_idempotency_keys (user_id, idempotency_key, post_id, created_at) VALUES ($1, $2, $3, $4)`, user.ID, idempotencyKey, postID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	response := postMutationResponse{ID: postID, AuthorID: user.ID, CommunityID: input.CommunityID, Type: input.Type, Title: input.Title, Content: input.Content, PublicationStatus: "published", ModerationStatus: "normal", CreatedAt: now, UpdatedAt: now, PublishedAt: &now}
+	httpserver.WriteJSON(w, http.StatusCreated, response)
+}
+
+func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(postID) == "" {
+		writeAuthError(w, r, ErrPostNotFound)
+		return
+	}
+	var input postWriteInput
+	if err := decodeJSON(r, &input); err != nil || !validPostInput(input) {
+		writeAuthError(w, r, ErrInvalidPost)
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	var current postRecord
+	var publishedAt sql.NullTime
+	err = tx.QueryRowContext(r.Context(), `SELECT id, author_id, community_id, type, title, content, publication_status, moderation_status, created_at, updated_at, published_at, deleted_at FROM posts WHERE id = $1 FOR UPDATE`, postID).Scan(&current.ID, &current.AuthorID, &current.CommunityID, &current.Type, &current.Title, &current.Content, &current.PublicationStatus, &current.ModerationStatus, &current.CreatedAt, &current.UpdatedAt, &publishedAt, &current.DeletedAt)
+	if errors.Is(err, sql.ErrNoRows) || current.DeletedAt.Valid {
+		writeAuthError(w, r, ErrPostNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if current.AuthorID != user.ID {
+		writeAuthError(w, r, ErrForbidden)
+		return
+	}
+	if err := ensureCommunity(r.Context(), tx, input.CommunityID); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET community_id = $1, type = $2, title = $3, content = $4, updated_at = $5 WHERE id = $6`, input.CommunityID, input.Type, input.Title, input.Content, now, postID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := insertPostRevision(r.Context(), tx, postID, user.ID, input, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if publishedAt.Valid {
+		current.PublishedAt = &publishedAt.Time
+	}
+	current.CommunityID, current.Type, current.Title, current.Content, current.UpdatedAt = input.CommunityID, input.Type, input.Title, input.Content, now
+	httpserver.WriteJSON(w, http.StatusOK, current.postMutationResponse)
+}
+
+func (s *Server) deletePost(w http.ResponseWriter, r *http.Request, postID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	var authorID string
+	err = tx.QueryRowContext(r.Context(), `SELECT author_id FROM posts WHERE id = $1 FOR UPDATE`, postID).Scan(&authorID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrPostNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if authorID != user.ID {
+		writeAuthError(w, r, ErrForbidden)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET deleted_at = COALESCE(deleted_at, now()), publication_status = 'deleted', updated_at = now() WHERE id = $1`, postID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func validPostInput(input postWriteInput) bool {
+	if strings.TrimSpace(input.CommunityID) == "" || strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Content) == "" {
+		return false
+	}
+	if len([]rune(input.Title)) > 200 || len([]rune(input.Content)) > 200000 {
+		return false
+	}
+	switch input.Type {
+	case "normal", "guide", "question", "game_share":
+		return true
+	default:
+		return false
+	}
+}
+
+func ensureCommunity(ctx context.Context, queryer queryRowContext, communityID string) error {
+	var id string
+	err := queryer.QueryRowContext(ctx, `SELECT id FROM communities WHERE id = $1 AND status = 'active' AND deleted_at IS NULL`, communityID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCommunityNotFound
+	}
+	return err
+}
+
+func insertPostRevision(ctx context.Context, tx *sql.Tx, postID, editorID string, input postWriteInput, now time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO post_revisions (id, post_id, editor_id, community_id, type, title, content, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, newPostID(), postID, editorID, input.CommunityID, input.Type, input.Title, input.Content, now)
+	return err
+}
+
+func loadPostMutation(ctx context.Context, queryer queryRowContext, postID string) (postMutationResponse, error) {
+	var response postMutationResponse
+	var publishedAt sql.NullTime
+	err := queryer.QueryRowContext(ctx, `SELECT id, author_id, community_id, type, title, content, publication_status, moderation_status, created_at, updated_at, published_at FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&response.ID, &response.AuthorID, &response.CommunityID, &response.Type, &response.Title, &response.Content, &response.PublicationStatus, &response.ModerationStatus, &response.CreatedAt, &response.UpdatedAt, &publishedAt)
+	if err != nil {
+		return postMutationResponse{}, err
+	}
+	if publishedAt.Valid {
+		response.PublishedAt = &publishedAt.Time
+	}
+	return response, nil
+}
+
+func newPostID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "post_fallback"
+	}
+	return "post_" + hex.EncodeToString(raw[:])
+}
 
 func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 	if !s.requireDatabase(w, r) {

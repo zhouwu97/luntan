@@ -195,7 +195,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 		JOIN users u ON u.id = rt.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND u.deleted_at IS NULL
-		FOR UPDATE`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &expiresAt)
+		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidToken
 	}

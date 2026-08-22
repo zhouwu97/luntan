@@ -23,14 +23,14 @@ class ForumAuthorRow extends StatelessWidget {
         CircleAvatar(
           radius: 20,
           backgroundColor: AppTheme.surfaceBlue,
-          child: Text(post.author.characters.first, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
+          child: Text((post.author?.nickname ?? '匿').characters.first, style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w800)),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(children: [Flexible(child: Text(post.author, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800))), const SizedBox(width: 6), _LevelBadge(level: post.level, color: levelColor)]),
+              Row(children: [Flexible(child: Text(post.author?.nickname ?? '匿名用户', overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w800))), const SizedBox(width: 6), _LevelBadge(level: post.level, color: levelColor)]),
               const SizedBox(height: 3),
               Text('${post.section.label} · ${post.time}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
             ],

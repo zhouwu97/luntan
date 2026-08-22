@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'controllers/feed_controller.dart';
 import 'controllers/post_detail_controller.dart';
 import 'data/mock_forum_data.dart';
-import 'data/repositories/mock_repositories.dart';
+import 'data/repository_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
@@ -20,6 +20,7 @@ class LuntanApp extends StatefulWidget {
 
 class _LuntanAppState extends State<LuntanApp> {
   late final ForumStore store;
+  late final ForumRepositories repositories;
   late final FeedController feedController;
   int currentTab = 0;
 
@@ -27,15 +28,15 @@ class _LuntanAppState extends State<LuntanApp> {
   void initState() {
     super.initState();
     store = ForumStore.seeded();
-    feedController = FeedController(
-      repository: MockFeedRepository(store: store),
-    );
+    repositories = ForumRepositories.fromEnvironment(store: store);
+    feedController = FeedController(repository: repositories.feed);
   }
 
   @override
   void dispose() {
     store.dispose();
     feedController.dispose();
+    repositories.close();
     super.dispose();
   }
 
@@ -51,20 +52,24 @@ class _LuntanAppState extends State<LuntanApp> {
         },
         onCreatePoll: () {
           Navigator.of(sheetContext).pop();
-          _showQuickFeedback('投票发布入口已打开，选择项功能已准备好');
+          _showPostEditor(isPoll: true);
         },
-        onCreateMarket: () {
+        onCreateGameShare: () {
           Navigator.of(sheetContext).pop();
-          _showPostEditor(isMarket: true);
+          _showPostEditor(isGameShare: true);
         },
       ),
     );
   }
 
-  Future<void> _showPostEditor({bool isMarket = false}) async {
+  Future<void> _showPostEditor({
+    bool isGameShare = false,
+    bool isPoll = false,
+  }) async {
     final result = await showDialog<PostDraft>(
       context: context,
-      builder: (_) => PostEditorDialog(isMarket: isMarket),
+      builder: (_) =>
+          PostEditorDialog(isGameShare: isGameShare, isPoll: isPoll),
     );
     if (!mounted || result == null) return;
     store.addPost(result);
@@ -72,17 +77,20 @@ class _LuntanAppState extends State<LuntanApp> {
     _showQuickFeedback('帖子已发布，已加入当前板块');
   }
 
-  void openPost(Post post) {
+  void openPost(Post post, {bool focusComments = false}) {
     store.recordHistory(post);
     final detailController = PostDetailController(
-      repository: MockPostRepository(store: store),
+      repository: repositories.post,
       postId: post.id,
     );
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                PostDetailScreen(store: store, controller: detailController),
+            builder: (_) => PostDetailScreen(
+              store: store,
+              controller: detailController,
+              focusComments: focusComments,
+            ),
           ),
         )
         .then((_) => detailController.dispose());
@@ -117,6 +125,7 @@ class _LuntanAppState extends State<LuntanApp> {
               store: store,
               feedController: feedController,
               onOpenPost: openPost,
+              onOpenComments: (post) => openPost(post, focusComments: true),
               onOpenProfile: () => setState(() => currentTab = 2),
               onOpenComposer: showComposer,
               onOpenMessages: showMessages,

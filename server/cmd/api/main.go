@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/api"
 	"github.com/zhouwu97/luntan/server/internal/platform/config"
 	"github.com/zhouwu97/luntan/server/internal/platform/database"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
@@ -37,7 +38,7 @@ func main() {
 		}
 	}
 
-	server := &http.Server{Addr: fmt.Sprintf(":%s", cfg.HTTPPort), Handler: httpserver.NewHandler(db, logger), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: fmt.Sprintf(":%s", cfg.HTTPPort), Handler: httpserver.NewHandlerWithAPI(db, logger, api.NewHandler(db)), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		logger.Info("http_server_started", "app_env", cfg.AppEnv, "port", cfg.HTTPPort)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

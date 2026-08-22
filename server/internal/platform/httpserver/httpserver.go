@@ -26,23 +26,29 @@ type AppError struct {
 func (e AppError) Error() string { return e.Code }
 
 func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
+	return NewHandlerWithAPI(db, logger, nil)
+}
+
+func NewHandlerWithAPI(db *sql.DB, logger *slog.Logger, apiHandler http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/health":
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		case r.Method == http.MethodGet && r.URL.Path == "/ready":
 			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 			defer cancel()
 			if err := pingDatabase(ctx, db); err != nil {
-				writeAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"})
+				WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"})
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+		case apiHandler != nil && len(r.URL.Path) >= len("/api/") && r.URL.Path[:len("/api/")] == "/api/":
+			apiHandler.ServeHTTP(w, r)
 		default:
-			writeAppError(w, r, AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
+			WriteAppError(w, r, AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
 		}
 	})
 	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(router), logger))
@@ -94,22 +100,22 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if recover() != nil {
-				writeAppError(w, r, AppError{Status: http.StatusInternalServerError, Code: "INTERNAL_ERROR", Message: "服务暂时不可用"})
+				WriteAppError(w, r, AppError{Status: http.StatusInternalServerError, Code: "INTERNAL_ERROR", Message: "服务暂时不可用"})
 			}
 		}()
 		next.ServeHTTP(w, r)
 	})
 }
 
-func writeAppError(w http.ResponseWriter, r *http.Request, appErr AppError) {
+func WriteAppError(w http.ResponseWriter, r *http.Request, appErr AppError) {
 	requestID := requestID(r.Context())
 	if requestID == "" {
 		requestID = newRequestID()
 	}
-	writeJSON(w, appErr.Status, map[string]any{"code": appErr.Code, "message": appErr.Message, "request_id": requestID, "details": appErr.Details})
+	WriteJSON(w, appErr.Status, map[string]any{"code": appErr.Code, "message": appErr.Message, "request_id": requestID, "details": appErr.Details})
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
+func WriteJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)

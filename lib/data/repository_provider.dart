@@ -1,5 +1,7 @@
 import 'api/api_client.dart';
 import 'api/api_repositories.dart';
+import 'api/auth_repository.dart';
+import 'api/publish_repository.dart';
 import 'mock_forum_data.dart';
 import 'repositories/mock_repositories.dart';
 import '../domain/repositories.dart';
@@ -10,12 +12,16 @@ class ForumRepositories {
     required this.feed,
     required this.post,
     this.apiClient,
+    this.auth,
+    this.publish,
   });
 
   final CommunityRepository community;
   final FeedRepository feed;
   final PostRepository post;
   final ApiClient? apiClient;
+  final AuthRepository? auth;
+  final PublishRepository? publish;
 
   factory ForumRepositories.mock({ForumStore? store}) {
     final actualStore = store ?? ForumStore.seeded();
@@ -29,12 +35,18 @@ class ForumRepositories {
   factory ForumRepositories.fromEnvironment({ForumStore? store}) {
     const baseUrl = String.fromEnvironment('API_BASE_URL');
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
-    final client = ApiClient(baseUri: Uri.parse(baseUrl));
+    final tokenStore = MemoryTokenStore();
+    final authenticatedClient = ApiClient(
+      baseUri: Uri.parse(baseUrl),
+      tokenStore: tokenStore,
+    );
     return ForumRepositories(
-      community: ApiCommunityRepository(client),
-      feed: ApiFeedRepository(client),
-      post: ApiPostRepository(client),
-      apiClient: client,
+      community: ApiCommunityRepository(authenticatedClient),
+      feed: ApiFeedRepository(authenticatedClient),
+      post: ApiPostRepository(authenticatedClient),
+      apiClient: authenticatedClient,
+      auth: AuthRepository(client: authenticatedClient, tokenStore: tokenStore),
+      publish: ApiPublishRepository(authenticatedClient),
     );
   }
 

@@ -132,6 +132,21 @@ class ApiClient {
     await _request(method: 'DELETE', path: path, headers: headers);
   }
 
+  Future<void> uploadBytes(
+    Uri uploadUri,
+    List<int> bytes, {
+    required String contentType,
+  }) async {
+    final response = await _send(
+      method: 'PUT',
+      path: uploadUri.toString(),
+      rawBody: bytes,
+      headers: {'Content-Type': contentType},
+      includeAuthToken: false,
+    );
+    _decodeResponse(response);
+  }
+
   void close() => _client.close();
 
   Future<Map<String, dynamic>> _request({
@@ -172,8 +187,10 @@ class ApiClient {
     required String method,
     required String path,
     Object? body,
+    List<int>? rawBody,
     Map<String, String>? queryParameters,
     Map<String, String>? headers,
+    bool includeAuthToken = true,
   }) async {
     final uri = _baseUri
         .resolve(path)
@@ -183,11 +200,13 @@ class ApiClient {
       if (body != null) 'Content-Type': 'application/json',
       ...?headers,
     };
-    final accessToken = await _tokenStore?.readAccessToken();
-    if (accessToken != null && accessToken.isNotEmpty) {
-      requestHeaders['Authorization'] = 'Bearer $accessToken';
+    if (includeAuthToken) {
+      final accessToken = await _tokenStore?.readAccessToken();
+      if (accessToken != null && accessToken.isNotEmpty) {
+        requestHeaders['Authorization'] = 'Bearer $accessToken';
+      }
     }
-    final encodedBody = body == null ? null : jsonEncode(body);
+    final encodedBody = rawBody ?? (body == null ? null : jsonEncode(body));
     try {
       return await switch (method) {
         'GET' => _client.get(uri, headers: requestHeaders).timeout(timeout),
@@ -198,6 +217,10 @@ class ApiClient {
         'PATCH' =>
           _client
               .patch(uri, headers: requestHeaders, body: encodedBody)
+              .timeout(timeout),
+        'PUT' =>
+          _client
+              .put(uri, headers: requestHeaders, body: encodedBody)
               .timeout(timeout),
         'DELETE' =>
           _client.delete(uri, headers: requestHeaders).timeout(timeout),

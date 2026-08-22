@@ -13,13 +13,55 @@ import (
 )
 
 func TestAPIWithoutDatabaseReturns503(t *testing.T) {
-	for _, path := range []string{"/api/v1/community-categories", "/api/v1/communities", "/api/v1/feed/latest", "/api/v1/posts/p1"} {
+	for _, path := range []string{"/api/v1/community-categories", "/api/v1/communities", "/api/v1/feed/latest", "/api/v1/posts/p1", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/me"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if strings.Contains(path, "/auth/") {
+			req = httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"username":"user","password":"password123"}`))
+		}
 		res := httptest.NewRecorder()
 		NewHandler(nil).ServeHTTP(res, req)
 		if res.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s status = %d, want 503", path, res.Code)
 		}
+	}
+}
+
+func TestAuthMethodAndBearerValidation(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	methodReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/register", nil)
+	methodRes := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(methodRes, methodReq)
+	if methodRes.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("auth method status = %d, want 405", methodRes.Code)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	meRes := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(meRes, meReq)
+	if meRes.Code != http.StatusUnauthorized || !strings.Contains(meRes.Body.String(), `"code":"INVALID_TOKEN"`) {
+		t.Fatalf("missing bearer response: status=%d body=%s", meRes.Code, meRes.Body.String())
+	}
+}
+
+func TestRegisterRejectsWeakPasswordBeforeDatabaseAccess(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(`{"username":"new_user","password":"short"}`))
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), `"code":"INVALID_INPUT"`) {
+		t.Fatalf("weak password response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

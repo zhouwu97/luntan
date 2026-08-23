@@ -31,6 +31,12 @@ class AuthRepository {
   final ApiClient _client;
   final TokenStore _tokenStore;
 
+  Future<bool> hasStoredSession() async {
+    final accessToken = await _tokenStore.readAccessToken();
+    final refreshToken = await _tokenStore.readRefreshToken();
+    return (accessToken?.isNotEmpty ?? false) || (refreshToken?.isNotEmpty ?? false);
+  }
+
   Future<AuthSession> register({
     required String username,
     required String password,

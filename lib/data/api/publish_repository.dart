@@ -27,6 +27,16 @@ abstract interface class PublishRepository {
   });
 }
 
+abstract interface class PollPublishRepository {
+  Future<Map<String, dynamic>> createPoll({
+    required String postId,
+    required String question,
+    required List<String> options,
+    bool allowMultiple,
+    DateTime? endsAt,
+  });
+}
+
 class PublishException implements Exception {
   const PublishException(this.message);
 
@@ -50,7 +60,7 @@ class MediaUploadTicket {
   final DateTime expiresAt;
 }
 
-class ApiPublishRepository implements PublishRepository {
+class ApiPublishRepository implements PublishRepository, PollPublishRepository {
   ApiPublishRepository(this._client);
 
   final ApiClient _client;
@@ -76,6 +86,23 @@ class ApiPublishRepository implements PublishRepository {
       },
     );
   }
+
+  @override
+  Future<Map<String, dynamic>> createPoll({
+    required String postId,
+    required String question,
+    required List<String> options,
+    bool allowMultiple = false,
+    DateTime? endsAt,
+  }) => _client.postJson(
+    '/api/v1/posts/$postId/poll',
+    body: {
+      'question': question,
+      'options': options,
+      'allow_multiple': allowMultiple,
+      if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
+    },
+  );
 
   @override
   Future<MediaUploadTicket> requestMediaUpload({

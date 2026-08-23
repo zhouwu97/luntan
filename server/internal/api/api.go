@@ -55,11 +55,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/me":
 		s.me(w, r)
 		return
+	case r.Method == http.MethodGet && path == "/api/v1/me/profile":
+		s.profile(w, r)
+		return
+	case r.Method == http.MethodGet && isProfileListPath(path):
+		s.profileList(w, r, strings.TrimPrefix(path, "/api/v1/me/"))
+		return
+	case r.Method == http.MethodDelete && path == "/api/v1/me/history":
+		s.clearHistory(w, r)
+		return
 	case r.Method == http.MethodDelete && path == "/api/v1/me":
 		s.deleteAccount(w, r)
 		return
 	case r.Method == http.MethodPost && path == "/api/v1/posts":
 		s.createPost(w, r)
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/store/orders":
+		s.createStoreOrder(w, r)
 		return
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.updatePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
@@ -82,6 +94,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/comments"):
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/comments")
 		s.createComment(w, r, postID, "")
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/history"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/history")
+		s.recordHistory(w, r, postID)
 		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/poll"):
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/poll")
@@ -138,6 +154,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case (r.Method == http.MethodPost || r.Method == http.MethodPatch) && path == "/api/v1/notifications/read-all":
 		s.markAllNotificationsRead(w, r)
 		return
+	case r.Method == http.MethodGet && path == "/api/v1/notifications/unread-count":
+		s.unreadNotificationCount(w, r)
+		return
 	case (r.Method == http.MethodPost || r.Method == http.MethodPatch) && strings.HasPrefix(path, "/api/v1/notifications/"):
 		s.markNotificationRead(w, r, strings.TrimPrefix(path, "/api/v1/notifications/"))
 		return
@@ -183,6 +202,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.ranking(w, r)
 	case path == "/api/v1/me/points":
 		s.points(w, r)
+	case path == "/api/v1/me/store-orders":
+		s.storeOrders(w, r)
+	case path == "/api/v1/store/products":
+		s.storeProducts(w, r)
 	case strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/poll"):
 		s.getPoll(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/poll"))
 	case strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/comments"):
@@ -192,6 +215,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.getPost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 	default:
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
+	}
+}
+
+func isProfileListPath(path string) bool {
+	switch path {
+	case "/api/v1/me/posts", "/api/v1/me/comments", "/api/v1/me/likes", "/api/v1/me/bookmarks", "/api/v1/me/history":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -338,6 +370,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "IDEMPOTENCY_KEY_REQUIRED", Message: "缺少 Idempotency-Key"}
 	case errors.Is(err, ErrInvalidPost):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_POST", Message: "帖子内容不合法"}
+	case errors.Is(err, ErrInsufficientPoints):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "INSUFFICIENT_POINTS", Message: "积分不足"}
 	case errors.Is(err, ErrInvalidMedia):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MEDIA", Message: "媒体参数不合法"}
 	case errors.Is(err, ErrMediaNotFound):

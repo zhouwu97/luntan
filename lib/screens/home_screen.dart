@@ -1,10 +1,17 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controllers/feed_controller.dart';
+import '../controllers/interaction_controller.dart';
+import '../data/api/platform_repository.dart';
 import '../data/mock_forum_data.dart';
+import '../domain/repositories.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 import 'feature_page.dart';
+import 'search_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -17,6 +24,15 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenComposer,
     required this.onOpenMessages,
     required this.onFeedback,
+    required this.onToggleLike,
+    required this.onToggleBookmark,
+    required this.onRequireAuth,
+    required this.onOpenPostId,
+    required this.onSectionChanged,
+    this.platform,
+    this.unread,
+    required this.interactionController,
+    this.feedRepository,
   });
 
   final ForumStore store;
@@ -27,6 +43,15 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback onOpenComposer;
   final VoidCallback onOpenMessages;
   final ValueChanged<String> onFeedback;
+  final ValueChanged<Post> onToggleLike;
+  final ValueChanged<Post> onToggleBookmark;
+  final VoidCallback onRequireAuth;
+  final ValueChanged<String> onOpenPostId;
+  final ValueChanged<ForumSection> onSectionChanged;
+  final PlatformRepository? platform;
+  final int? unread;
+  final InteractionController interactionController;
+  final FeedRepository? feedRepository;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -83,13 +108,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void openSearch() {
-    showSearch<void>(
-      context: context,
-      delegate: _ForumSearchDelegate(
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => SearchScreen(
         store: widget.store,
+        platform: widget.platform,
         onOpenPost: widget.onOpenPost,
+        onOpenPostId: widget.onOpenPostId,
+        interactionController: widget.interactionController,
       ),
-    );
+    ));
   }
 
   void openFeature(String title) {
@@ -99,6 +126,9 @@ class _HomeScreenState extends State<HomeScreen> {
           title: title,
           store: widget.store,
           onOpenPost: widget.onOpenPost,
+          onLike: widget.onToggleLike,
+          onBookmark: widget.onToggleBookmark,
+          feedRepository: widget.feedRepository,
         ),
       ),
     );
@@ -107,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([widget.store, widget.feedController]),
+      animation: Listenable.merge([widget.store, widget.feedController, widget.interactionController]),
       builder: (context, _) {
         final posts = _visiblePosts;
         final feedState = widget.feedController.state;
@@ -140,11 +170,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             onProfile: widget.onOpenProfile,
                             onSearch: openSearch,
                             onMessages: widget.onOpenMessages,
-                            unread: widget.store.unreadMessages,
+                            unread: widget.unread ?? widget.store.unreadMessages,
                           ),
                         ),
                         SliverToBoxAdapter(
-                          child: _SectionTabs(store: widget.store),
+                          child: _SectionTabs(store: widget.store, onChanged: widget.onSectionChanged),
                         ),
                         SliverToBoxAdapter(
                           child: _FeatureEntries(onTap: openFeature),
@@ -154,6 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             store: widget.store,
                             onReply: () => openFeature('我的回复'),
                             onPublish: widget.onOpenComposer,
+                            onSortChanged: (sort) => widget.feedController.setQuery(sort: sort.name, communityId: widget.store.selectedSection.communityId),
                           ),
                         ),
                         if (feedState.isBusy)
@@ -193,10 +224,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       onOpen: () => widget.onOpenPost(post),
                                       onOpenComments: () =>
                                           widget.onOpenComments(post),
-                                      onLike: () =>
-                                          widget.store.toggleLike(post),
-                                      onBookmark: () =>
-                                          widget.store.toggleBookmark(post),
+                                      onLike: () => widget.onToggleLike(post),
+                                      onBookmark: () => widget.onToggleBookmark(post),
                                       onMenu: () => _showPostMenu(post),
                                     );
                                   },
@@ -240,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
               onTap: () {
-                widget.store.toggleBookmark(post);
+                widget.onToggleBookmark(post);
                 Navigator.pop(sheetContext);
               },
             ),
@@ -249,15 +278,25 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('分享帖子'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                widget.onFeedback('分享链接已复制');
+                Clipboard.setData(ClipboardData(text: '/posts/${post.id}'));
+                widget.onFeedback('帖子链接已复制');
               },
             ),
             ListTile(
               leading: const Icon(Icons.flag_outlined, color: AppTheme.orange),
               title: const Text('举报或屏蔽'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(sheetContext);
-                widget.onFeedback('感谢反馈，我们会尽快处理');
+                try {
+                  if (widget.platform != null) {
+                    await widget.platform!.report(targetType: 'post', targetId: post.id, reasonCode: 'other');
+                    widget.onFeedback('举报已提交，我们会尽快处理');
+                  } else {
+                    widget.onFeedback('感谢反馈，我们会尽快处理');
+                  }
+                } catch (error) {
+                  widget.onFeedback('举报失败，请稍后重试');
+                }
               },
             ),
           ],
@@ -379,9 +418,10 @@ class _Header extends StatelessWidget {
 }
 
 class _SectionTabs extends StatelessWidget {
-  const _SectionTabs({required this.store});
+  const _SectionTabs({required this.store, required this.onChanged});
 
   final ForumStore store;
+  final ValueChanged<ForumSection> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -400,7 +440,10 @@ class _SectionTabs extends StatelessWidget {
             final active = store.selectedSection == section;
             return Expanded(
               child: GestureDetector(
-                onTap: () => store.selectSection(section),
+                onTap: () {
+                  store.selectSection(section);
+                  onChanged(section);
+                },
                 child: AnimatedContainer(
                   duration: AppTheme.tabMotion,
                   alignment: Alignment.center,
@@ -492,11 +535,13 @@ class _FeedToolbar extends StatelessWidget {
     required this.store,
     required this.onReply,
     required this.onPublish,
+    required this.onSortChanged,
   });
 
   final ForumStore store;
   final VoidCallback onReply;
   final VoidCallback onPublish;
+  final ValueChanged<FeedSort> onSortChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -511,7 +556,10 @@ class _FeedToolbar extends StatelessWidget {
                     (sort) => Padding(
                       padding: const EdgeInsets.only(right: 16),
                       child: GestureDetector(
-                        onTap: () => store.selectSort(sort),
+                        onTap: () {
+                          store.selectSort(sort);
+                          onSortChanged(sort);
+                        },
                         child: _SortItem(
                           label: sort.label,
                           active: store.selectedSort == sort,
@@ -826,10 +874,11 @@ class _EmptyFeed extends StatelessWidget {
 enum _SearchKind { all, posts, users, communities }
 
 class _ForumSearchDelegate extends SearchDelegate<void> {
-  _ForumSearchDelegate({required this.store, required this.onOpenPost});
+  _ForumSearchDelegate({required this.store, required this.onOpenPost, required this.onOpenPostId});
 
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
+  final ValueChanged<String> onOpenPostId;
   _SearchKind kind = _SearchKind.all;
 
   @override

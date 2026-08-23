@@ -85,6 +85,12 @@ class PlatformRepository {
     await _client.postJson('/api/v1/notifications/read-all');
   }
 
+  Future<int> unreadNotificationCount() async {
+    final payload = await _client.getJson('/api/v1/notifications/unread-count');
+    final value = payload['unread_count'];
+    return value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+  }
+
   Future<Map<String, dynamic>> search(
     String query, {
     String type = 'all',

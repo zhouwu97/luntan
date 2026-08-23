@@ -357,5 +357,11 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 	if publishedAt.Valid {
 		row.PublishedAt = &publishedAt.Time
 	}
+	if includePostDetails(r) {
+		if err := s.enrichPostResponse(r.Context(), r, &row, true); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	httpserver.WriteJSON(w, http.StatusOK, row)
 }

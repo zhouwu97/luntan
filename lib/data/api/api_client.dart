@@ -33,6 +33,21 @@ class ApiException implements Exception {
       'ApiException(type: $type, statusCode: $statusCode, message: $message)';
 }
 
+String userFacingApiMessage(Object error, {String fallback = '操作失败，请稍后重试'}) {
+  if (error is! ApiException) return fallback;
+  return switch (error.type) {
+    ApiErrorType.unauthorized => '登录状态已失效，请重新登录',
+    ApiErrorType.forbidden => '你暂时没有权限执行此操作',
+    ApiErrorType.notFound => '内容不存在或已被删除',
+    ApiErrorType.rateLimited => '操作太频繁，请稍后再试',
+    ApiErrorType.timeout => '网络有点慢，请重试',
+    ApiErrorType.networkUnavailable => '网络不可用，请检查网络后重试',
+    ApiErrorType.serverError => '服务暂时不可用，请稍后重试',
+    ApiErrorType.conflict => error.message.isEmpty ? '操作冲突，请刷新后重试' : error.message,
+    ApiErrorType.unknown => error.message.isEmpty ? fallback : error.message,
+  };
+}
+
 class AuthTokens {
   const AuthTokens({
     required this.accessToken,

@@ -41,6 +41,47 @@ class PublishController extends ChangeNotifier {
     return future;
   }
 
+  Future<String> uploadMedia({
+    required String fileName,
+    required String mimeType,
+    required List<int> bytes,
+    required String sha256,
+    int width = 0,
+    int height = 0,
+  }) async {
+    final ticket = await _repository.requestMediaUpload(
+      fileName: fileName,
+      mimeType: mimeType,
+      size: bytes.length,
+      sha256: sha256,
+      width: width,
+      height: height,
+    );
+    if (DateTime.now().isAfter(ticket.expiresAt)) {
+      throw const PublishException('媒体上传凭证已过期，请重新选择图片');
+    }
+    await _repository.uploadMedia(
+      ticket: ticket,
+      bytes: bytes,
+      size: bytes.length,
+      sha256: sha256,
+    );
+    return ticket.mediaId;
+  }
+
+  Future<Map<String, dynamic>>? createPoll({
+    required String postId,
+    required String question,
+    required List<String> options,
+    bool allowMultiple = false,
+    DateTime? endsAt,
+  }) {
+    final repository = _repository;
+    if (repository is! PollPublishRepository) return null;
+    final pollRepository = repository as PollPublishRepository;
+    return pollRepository.createPoll(postId: postId, question: question, options: options, allowMultiple: allowMultiple, endsAt: endsAt);
+  }
+
   Future<Map<String, dynamic>> _runPublish({
     required String communityId,
     required String type,

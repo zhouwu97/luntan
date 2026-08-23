@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'app.dart';
+import 'data/repository_provider.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const LuntanApp());
+  final repositories = await ForumRepositories.create();
+  runApp(LuntanApp(repositories: repositories));
 }

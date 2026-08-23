@@ -36,7 +36,15 @@ abstract interface class CommentRepository {
   Future<void> deleteComment(String commentId);
 }
 
-class ApiCommentRepository implements CommentRepository {
+/// 可选的评论编辑能力。单独拆出接口以兼容已有的测试仓储和离线仓储。
+abstract interface class CommentMutationRepository {
+  Future<Comment> updateComment({
+    required String commentId,
+    required String content,
+  });
+}
+
+class ApiCommentRepository implements CommentRepository, CommentMutationRepository {
   ApiCommentRepository(this._client);
 
   final ApiClient _client;
@@ -101,6 +109,18 @@ class ApiCommentRepository implements CommentRepository {
   Future<void> deleteComment(String commentId) async {
     await _client.deleteJson('/api/v1/comments/$commentId');
   }
+
+  @override
+  Future<Comment> updateComment({
+    required String commentId,
+    required String content,
+  }) async {
+    final payload = await _client.patchJson(
+      '/api/v1/comments/$commentId',
+      body: {'content': content},
+    );
+    return _commentFromJson(payload);
+  }
 }
 
 Comment _commentFromJson(Map<String, dynamic> json) {
@@ -114,6 +134,14 @@ Comment _commentFromJson(Map<String, dynamic> json) {
     id: _string(json['id']),
     postId: _string(json['post_id']),
     authorId: _string(authorJson['id']),
+    author: authorJson.isEmpty ? null : User(
+      id: _string(authorJson['id']),
+      username: _string(authorJson['username']),
+      nickname: _string(authorJson['nickname']),
+      level: _int(authorJson['level']),
+      createdAt: now,
+      updatedAt: now,
+    ),
     rootId: _nullableString(json['root_id']),
     parentId: _nullableString(json['parent_id']),
     replyToUserId: _nullableString(json['reply_to_user_id']),

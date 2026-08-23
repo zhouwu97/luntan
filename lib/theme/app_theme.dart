@@ -15,6 +15,15 @@ class AppTheme {
 
   // 论坛 UI 的统一量尺，页面和基础组件只从这里取值，避免局部漂移。
   static const pagePadding = 14.0;
+  static const spacing4 = 4.0;
+  static const spacing8 = 8.0;
+  static const spacing12 = 12.0;
+  static const spacing16 = 16.0;
+  static const spacing20 = 20.0;
+  static const spacing24 = 24.0;
+  static const avatarSmall = 32.0;
+  static const avatarMedium = 40.0;
+  static const minTapTarget = 44.0;
   static const compactRadius = 9.0;
   static const searchRadius = 14.0;
   static const cardRadius = 16.0;

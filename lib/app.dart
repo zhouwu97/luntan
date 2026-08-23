@@ -52,15 +52,24 @@ class _LuntanAppState extends State<LuntanApp> {
     // API 模式只创建空的 UI 状态容器；业务数据全部来自 Repository。
     const baseUrl = String.fromEnvironment('API_BASE_URL');
     store = baseUrl.trim().isEmpty ? ForumStore.seeded() : ForumStore.uiOnly();
-    repositories = widget.repositories ?? ForumRepositories.fromEnvironment(store: store, tokenStore: widget.tokenStore);
+    repositories =
+        widget.repositories ??
+        ForumRepositories.fromEnvironment(
+          store: store,
+          tokenStore: widget.tokenStore,
+        );
     feedController = FeedController(repository: repositories.feed);
-    interactionController = InteractionController(repository: repositories.interactions!);
+    interactionController = InteractionController(
+      repository: repositories.interactions!,
+    );
     publishController = PublishController(repository: repositories.publish!);
     final auth = repositories.auth;
     if (auth != null) {
       authController = AuthController(repository: auth);
       authInitialization = authController!.initialize().then((_) async {
-        if (authController?.status == AuthStatus.authenticated) await _refreshUnreadCount();
+        if (authController?.status == AuthStatus.authenticated) {
+          await _refreshUnreadCount();
+        }
       });
     }
   }
@@ -79,11 +88,20 @@ class _LuntanAppState extends State<LuntanApp> {
   void _openLogin() {
     final auth = authController;
     if (auth == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AuthScreen(controller: auth, onBrowse: () => Navigator.of(context).pop())));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AuthScreen(
+          controller: auth,
+          onBrowse: () => Navigator.of(context).pop(),
+        ),
+      ),
+    );
   }
 
   bool _requireAuth() {
-    if (!apiMode || authController?.status == AuthStatus.authenticated) return true;
+    if (!apiMode || authController?.status == AuthStatus.authenticated) {
+      return true;
+    }
     _openLogin();
     return false;
   }
@@ -111,7 +129,10 @@ class _LuntanAppState extends State<LuntanApp> {
     );
   }
 
-  Future<void> _showPostEditor({bool isGameShare = false, bool isPoll = false}) async {
+  Future<void> _showPostEditor({
+    bool isGameShare = false,
+    bool isPoll = false,
+  }) async {
     final result = await showDialog<PostDraft>(
       context: context,
       builder: (_) => PostEditorDialog(
@@ -123,7 +144,11 @@ class _LuntanAppState extends State<LuntanApp> {
     );
     if (!mounted || result == null) return;
     try {
-      final type = result.isGameShare ? 'game_share' : result.isPoll ? 'poll' : 'normal';
+      final type = result.isGameShare
+          ? 'game_share'
+          : result.isPoll
+          ? 'poll'
+          : 'normal';
       final response = await publishController.publish(
         communityId: result.section.communityId,
         type: type,
@@ -140,12 +165,19 @@ class _LuntanAppState extends State<LuntanApp> {
           endsAt: result.pollEndsAt,
         );
       }
-      await feedController.setQuery(communityId: result.section.communityId, sort: 'latest');
+      await feedController.setQuery(
+        communityId: result.section.communityId,
+        sort: 'latest',
+      );
       if (!mounted) return;
       setState(() => currentTab = 0);
       _showQuickFeedback('帖子已发布');
     } catch (error) {
-      if (mounted) _showQuickFeedback(userFacingApiMessage(error, fallback: '发布失败，草稿内容可重新填写后重试'));
+      if (mounted) {
+        _showQuickFeedback(
+          userFacingApiMessage(error, fallback: '发布失败，草稿内容可重新填写后重试'),
+        );
+      }
     }
   }
 
@@ -155,35 +187,57 @@ class _LuntanAppState extends State<LuntanApp> {
       // 浏览历史是服务端事实；失败不阻塞打开帖子，详情页仍可正常阅读。
       repositories.profile!.recordHistory(post.id).catchError((_) {});
     }
-    final detailController = PostDetailController(repository: repositories.post, postId: post.id);
-    final commentsController = CommentsController(repository: repositories.comments!, postId: post.id);
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PostDetailScreen(
-      controller: detailController,
-      commentsController: commentsController,
-      interactionController: interactionController,
-      currentUserId: currentUser?.id ?? 'user-1',
-      focusComments: focusComments,
-      onToggleLike: togglePostLike,
-      onToggleBookmark: toggleBookmark,
-      onFeedback: _showQuickFeedback,
-      onDeletePost: deletePost,
-      onEditPost: editPost,
-      onReport: report,
-      pollRepository: repositories.poll,
-    ))).then((_) {
-      // 详情页返回时用其最终帖子状态做增量同步，避免无条件整页刷新。
-      // 编辑/删除等结构化变更已由各自回调刷新 Feed。
-      final detailPost = detailController.state.detail?.post;
-      detailController.dispose();
-      commentsController.dispose();
-      if (apiMode && detailPost != null) {
-        feedController.applyDetailResult(detailPost);
-      }
-    });
+    final detailController = PostDetailController(
+      repository: repositories.post,
+      postId: post.id,
+    );
+    final commentsController = CommentsController(
+      repository: repositories.comments!,
+      postId: post.id,
+    );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => PostDetailScreen(
+              controller: detailController,
+              commentsController: commentsController,
+              interactionController: interactionController,
+              currentUserId: currentUser?.id ?? 'user-1',
+              focusComments: focusComments,
+              onToggleLike: togglePostLike,
+              onToggleBookmark: toggleBookmark,
+              onFeedback: _showQuickFeedback,
+              onDeletePost: deletePost,
+              onEditPost: editPost,
+              onReport: report,
+              pollRepository: repositories.poll,
+            ),
+          ),
+        )
+        .then((_) {
+          // 详情页返回时用其最终帖子状态做增量同步，避免无条件整页刷新。
+          // 编辑/删除等结构化变更已由各自回调刷新 Feed。
+          final detailPost = detailController.state.detail?.post;
+          detailController.dispose();
+          commentsController.dispose();
+          if (apiMode && detailPost != null) {
+            feedController.applyDetailResult(detailPost);
+          }
+        });
   }
 
   void openPostId(String postId) {
-    openPost(Post(id: postId, authorId: '', communityId: '', title: '', content: '', createdAt: DateTime.now(), updatedAt: DateTime.now()));
+    openPost(
+      Post(
+        id: postId,
+        authorId: '',
+        communityId: '',
+        title: '',
+        content: '',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ),
+    );
   }
 
   Future<void> togglePostLike(Post post) async {
@@ -206,7 +260,12 @@ class _LuntanAppState extends State<LuntanApp> {
 
   Future<void> editPost(Post post, String title, String content) async {
     final repository = repositories.post;
-    if (repository is! PostMutationRepository) throw const ApiException(type: ApiErrorType.unknown, message: '当前模式暂不支持编辑帖子');
+    if (repository is! PostMutationRepository) {
+      throw const ApiException(
+        type: ApiErrorType.unknown,
+        message: '当前模式暂不支持编辑帖子',
+      );
+    }
     final mutationRepository = repository as PostMutationRepository;
     await mutationRepository.updatePost(
       postId: post.id,
@@ -221,7 +280,12 @@ class _LuntanAppState extends State<LuntanApp> {
 
   Future<void> deletePost(Post post) async {
     final repository = repositories.post;
-    if (repository is! PostMutationRepository) throw const ApiException(type: ApiErrorType.unknown, message: '当前模式暂不支持删除帖子');
+    if (repository is! PostMutationRepository) {
+      throw const ApiException(
+        type: ApiErrorType.unknown,
+        message: '当前模式暂不支持删除帖子',
+      );
+    }
     final mutationRepository = repository as PostMutationRepository;
     await mutationRepository.deletePost(post.id);
     await feedController.refresh();
@@ -230,7 +294,11 @@ class _LuntanAppState extends State<LuntanApp> {
   Future<void> report(String targetType, String targetId) async {
     final platform = repositories.platform;
     if (platform == null) return;
-    await platform.report(targetType: targetType, targetId: targetId, reasonCode: 'other');
+    await platform.report(
+      targetType: targetType,
+      targetId: targetId,
+      reasonCode: 'other',
+    );
   }
 
   String _wirePostType(PostType type) => switch (type) {
@@ -243,17 +311,32 @@ class _LuntanAppState extends State<LuntanApp> {
 
   void _showQuickFeedback(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)..hideCurrentSnackBar()..showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   void showMessages() {
     if (!_requireAuth()) return;
     if (apiMode && repositories.platform != null) {
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => NotificationsScreen(repository: repositories.platform!, onOpenPostId: openPostId))).then((_) => _refreshUnreadCount());
+      Navigator.of(context)
+          .push(
+            MaterialPageRoute<void>(
+              builder: (_) => NotificationsScreen(
+                repository: repositories.platform!,
+                onOpenPostId: openPostId,
+              ),
+            ),
+          )
+          .then((_) => _refreshUnreadCount());
       return;
     }
     store.markMessagesRead();
-    showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (_) => const MessagesSheet());
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => const MessagesSheet(),
+    );
   }
 
   Future<void> _refreshUnreadCount() async {
@@ -282,8 +365,13 @@ class _LuntanAppState extends State<LuntanApp> {
       animation: auth,
       builder: (context, _) {
         if (auth.status == AuthStatus.unknown) return const _SplashScreen();
-        if (auth.status == AuthStatus.authenticated || browseWithoutAuth) return _mainShell();
-        return AuthScreen(controller: auth, onBrowse: () => setState(() => browseWithoutAuth = true));
+        if (auth.status == AuthStatus.authenticated || browseWithoutAuth) {
+          return _mainShell();
+        }
+        return AuthScreen(
+          controller: auth,
+          onBrowse: () => setState(() => browseWithoutAuth = true),
+        );
       },
     );
   }
@@ -306,11 +394,13 @@ class _LuntanAppState extends State<LuntanApp> {
             onToggleLike: (post) => togglePostLike(post),
             onToggleBookmark: (post) => toggleBookmark(post),
             onRequireAuth: _openLogin,
-            onSectionChanged: (section) => feedController.setQuery(communityId: section.communityId, sort: store.selectedSort.name),
             platform: repositories.platform,
             unread: apiMode ? unreadCount : null,
             interactionController: interactionController,
             feedRepository: repositories.isApiMode ? repositories.feed : null,
+            communityRepository: repositories.isApiMode
+                ? repositories.community
+                : null,
           ),
           const SizedBox.shrink(),
           ProfileScreen(
@@ -329,22 +419,48 @@ class _LuntanAppState extends State<LuntanApp> {
           ),
         ],
       ),
-      bottomNavigationBar: _BottomBar(currentTab: currentTab, onHome: () => setState(() => currentTab = 0), onProfile: () => setState(() => currentTab = 2), onCreate: showComposer),
+      bottomNavigationBar: _BottomBar(
+        currentTab: currentTab,
+        onHome: () => setState(() => currentTab = 0),
+        onProfile: () => setState(() => currentTab = 2),
+        onCreate: showComposer,
+      ),
     );
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(debugShowCheckedModeBanner: false, title: '浅蓝论坛', theme: AppTheme.light, home: _authOrMain());
+  Widget build(BuildContext context) => MaterialApp(
+    debugShowCheckedModeBanner: false,
+    title: '浅蓝论坛',
+    theme: AppTheme.light,
+    home: _authOrMain(),
+  );
 }
 
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
   @override
-  Widget build(BuildContext context) => const Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 14), Text('正在检查登录状态', style: TextStyle(color: AppTheme.textSecondary))])));
+  Widget build(BuildContext context) => const Scaffold(
+    body: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 14),
+          Text('正在检查登录状态', style: TextStyle(color: AppTheme.textSecondary)),
+        ],
+      ),
+    ),
+  );
 }
 
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.currentTab, required this.onHome, required this.onProfile, required this.onCreate});
+  const _BottomBar({
+    required this.currentTab,
+    required this.onHome,
+    required this.onProfile,
+    required this.onCreate,
+  });
   final int currentTab;
   final VoidCallback onHome;
   final VoidCallback onProfile;
@@ -360,7 +476,14 @@ class _BottomBar extends StatelessWidget {
           height: 72,
           child: Row(
             children: [
-              Expanded(child: _BottomItem(icon: Icons.home_rounded, label: '首页', active: currentTab == 0, onTap: onHome)),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.home_rounded,
+                  label: '首页',
+                  active: currentTab == 0,
+                  onTap: onHome,
+                ),
+              ),
               Expanded(
                 child: Center(
                   child: Semantics(
@@ -374,16 +497,35 @@ class _BottomBar extends StatelessWidget {
                         height: 54,
                         decoration: BoxDecoration(
                           gradient: AppTheme.primaryGradient,
-                          borderRadius: BorderRadius.circular(AppTheme.publishRadius),
-                          boxShadow: const [BoxShadow(color: Color(0x355A9EFF), blurRadius: 16, offset: Offset(0, 7))],
+                          borderRadius: BorderRadius.circular(
+                            AppTheme.publishRadius,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x355A9EFF),
+                              blurRadius: 16,
+                              offset: Offset(0, 7),
+                            ),
+                          ],
                         ),
-                        child: const Icon(Icons.add_rounded, color: Colors.white, size: 30),
+                        child: const Icon(
+                          Icons.add_rounded,
+                          color: Colors.white,
+                          size: 30,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-              Expanded(child: _BottomItem(icon: Icons.person_rounded, label: '我的', active: currentTab == 2, onTap: onProfile)),
+              Expanded(
+                child: _BottomItem(
+                  icon: Icons.person_rounded,
+                  label: '我的',
+                  active: currentTab == 2,
+                  onTap: onProfile,
+                ),
+              ),
             ],
           ),
         ),
@@ -393,11 +535,36 @@ class _BottomBar extends StatelessWidget {
 }
 
 class _BottomItem extends StatelessWidget {
-  const _BottomItem({required this.icon, required this.label, required this.active, required this.onTap});
+  const _BottomItem({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final bool active;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) { final color = active ? AppTheme.primary : AppTheme.textSecondary; return InkWell(onTap: onTap, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(icon, color: color, size: 24), const SizedBox(height: 4), Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: active ? FontWeight.w700 : FontWeight.w500))])); }
+  Widget build(BuildContext context) {
+    final color = active ? AppTheme.primary : AppTheme.textSecondary;
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

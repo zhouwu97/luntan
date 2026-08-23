@@ -458,33 +458,12 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => SizedBox(
-        height: 500,
-        child: FutureBuilder<ProfileListPage>(
-          future: widget.repository.list(kind),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-            if (snapshot.hasError) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Text('列表加载失败'), TextButton(onPressed: () => Navigator.pop(sheetContext), child: const Text('关闭'))]));
-            final items = snapshot.data?.items ?? const <Map<String, dynamic>>[];
-            if (items.isEmpty) return Center(child: Text('$label暂时为空，去首页逛逛吧', style: const TextStyle(color: AppTheme.textSecondary)));
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 22),
-              itemCount: items.length + 1,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                if (index == 0) return Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)));
-                final post = _postFromJson(items[index - 1]);
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.article_outlined, color: AppTheme.primary),
-                  title: Text(post.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-                  subtitle: Text('${items[index - 1]['community_name'] ?? ''} · ${post.commentCount} 回复'),
-                  onTap: () { Navigator.pop(sheetContext); widget.onOpenPost(post); },
-                );
-              },
-            );
-          },
-        ),
+      isScrollControlled: true,
+      builder: (_) => _ProfileListSheet(
+        label: label,
+        kind: kind,
+        repository: widget.repository,
+        onOpenPost: widget.onOpenPost,
       ),
     );
   }
@@ -496,18 +475,228 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       ListTile(leading: const Icon(Icons.info_outline_rounded), title: const Text('关于浅蓝论坛'), onTap: () { Navigator.pop(sheetContext); widget.onFeedback('当前版本 v1.0.0'); }),
     ])));
   }
+}
 
-  Post _postFromJson(Map<String, dynamic> value) {
-    final now = DateTime.tryParse('${value['created_at']}') ?? DateTime.now();
-    return Post(
-      id: '${value['id'] ?? ''}', authorId: '', communityId: '${value['community_id'] ?? ''}',
-      title: '${value['title'] ?? ''}', content: '${value['content_preview'] ?? ''}',
-      commentCount: _int(value['comment_count']), likeCount: _int(value['like_count']), bookmarkCount: _int(value['bookmark_count']),
-      createdAt: now, updatedAt: now,
+Post _profilePostFromJson(Map<String, dynamic> value) {
+  final now = DateTime.tryParse('${value['created_at']}') ?? DateTime.now();
+  return Post(
+    id: '${value['id'] ?? ''}',
+    authorId: '',
+    communityId: '${value['community_id'] ?? ''}',
+    title: '${value['title'] ?? ''}',
+    content: '${value['content_preview'] ?? ''}',
+    commentCount: _profileInt(value['comment_count']),
+    likeCount: _profileInt(value['like_count']),
+    bookmarkCount: _profileInt(value['bookmark_count']),
+    createdAt: now,
+    updatedAt: now,
+  );
+}
+
+int _profileInt(dynamic value) =>
+    value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+/// 个人中心列表 sheet：游标分页 + 浏览历史清空。
+class _ProfileListSheet extends StatefulWidget {
+  const _ProfileListSheet({
+    required this.label,
+    required this.kind,
+    required this.repository,
+    required this.onOpenPost,
+  });
+
+  final String label;
+  final String kind;
+  final ProfileRepository repository;
+  final ValueChanged<Post> onOpenPost;
+
+  @override
+  State<_ProfileListSheet> createState() => _ProfileListSheetState();
+}
+
+class _ProfileListSheetState extends State<_ProfileListSheet> {
+  final List<Post> posts = [];
+  final List<String> communityNames = [];
+  final ScrollController scrollController = ScrollController();
+  String? nextCursor;
+  bool hasMore = true;
+  bool loading = false;
+  bool loadingMore = false;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    scrollController.addListener(_maybeLoadMore);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    scrollController
+      ..removeListener(_maybeLoadMore)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _maybeLoadMore() {
+    if (scrollController.position.extentAfter < 220) _loadMore();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      loading = true;
+      errorMessage = null;
+    });
+    try {
+      final page = await widget.repository.list(widget.kind);
+      if (!mounted) return;
+      setState(() {
+        posts
+          ..clear()
+          ..addAll(page.items.map(_profilePostFromJson));
+        communityNames
+          ..clear()
+          ..addAll(page.items.map((item) => '${item['community_name'] ?? ''}'));
+        nextCursor = page.nextCursor;
+        hasMore = page.hasMore;
+      });
+    } catch (_) {
+      if (mounted) setState(() => errorMessage = '列表加载失败，请重试');
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (loading || loadingMore || !hasMore || nextCursor == null) return;
+    setState(() => loadingMore = true);
+    try {
+      final page = await widget.repository.list(
+        widget.kind,
+        cursor: nextCursor,
+      );
+      if (!mounted) return;
+      setState(() {
+        posts.addAll(page.items.map(_profilePostFromJson));
+        communityNames.addAll(
+          page.items.map((item) => '${item['community_name'] ?? ''}'),
+        );
+        nextCursor = page.nextCursor;
+        hasMore = page.hasMore;
+      });
+    } catch (_) {
+      // 允许滚动到底部后再次触发。
+    } finally {
+      if (mounted) setState(() => loadingMore = false);
+    }
+  }
+
+  Future<void> _clearHistory() async {
+    await widget.repository.clearHistory();
+    _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isHistory = widget.kind == 'history';
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.72,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 12, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (isHistory && posts.isNotEmpty)
+                    TextButton(onPressed: _clearHistory, child: const Text('清空')),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: AppTheme.border),
+            Expanded(child: _body()),
+          ],
+        ),
+      ),
     );
   }
 
-  int _int(dynamic value) => value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+  bool get _isHistory => widget.kind == 'history';
+
+  Widget _body() {
+    if (loading && posts.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (errorMessage != null && posts.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              errorMessage!,
+              style: const TextStyle(color: AppTheme.textSecondary),
+            ),
+            TextButton(onPressed: _load, child: const Text('重试')),
+          ],
+        ),
+      );
+    }
+    if (posts.isEmpty) {
+      return Center(
+        child: Text(
+          '${widget.label}暂时为空，去首页逛逛吧',
+          style: const TextStyle(color: AppTheme.textSecondary),
+        ),
+      );
+    }
+    return ListView.separated(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 22),
+      itemCount: posts.length + 1,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        if (index == posts.length) {
+          return loadingMore
+              ? const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : const SizedBox(height: 6);
+        }
+        final post = posts[index];
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            _isHistory ? Icons.history_rounded : Icons.article_outlined,
+            color: AppTheme.primary,
+          ),
+          title: Text(post.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${communityNames[index]} · ${post.commentCount} 回复',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () {
+            Navigator.pop(context);
+            widget.onOpenPost(post);
+          },
+        );
+      },
+    );
+  }
 }
 
 class _ApiStat extends StatelessWidget {

@@ -10,6 +10,8 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
 
+var ErrInsufficientPoints = errors.New("insufficient points")
+
 type pollInput struct {
 	Question      string     `json:"question"`
 	Options       []string   `json:"options"`
@@ -310,6 +312,122 @@ func (s *Server) points(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{"id": id, "source": source, "delta": delta, "balance_after": balanceAfter, "reason": reason, "created_at": createdAt})
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance, "transactions": items})
+}
+
+func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	rows, err := s.db.QueryContext(r.Context(), `SELECT id, name, description, emoji, points, color FROM store_products WHERE active = true ORDER BY points ASC, id ASC`)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, name, description, emoji string
+		var points int64
+		var color int
+		if err := rows.Scan(&id, &name, &description, &emoji, &points, &color); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		items = append(items, map[string]any{"id": id, "name": name, "description": description, "emoji": emoji, "points": points, "color": color})
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.db.QueryContext(r.Context(), `SELECT o.id, o.product_id, p.name, o.points, o.status, o.created_at FROM store_orders o JOIN store_products p ON p.id = o.product_id WHERE o.user_id = $1 ORDER BY o.created_at DESC, o.id DESC LIMIT 50`, user.ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, productID, name, status string
+		var points int64
+		var createdAt time.Time
+		if err := rows.Scan(&id, &productID, &name, &points, &status, &createdAt); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		items = append(items, map[string]any{"id": id, "product_id": productID, "product_name": name, "points": points, "status": status, "created_at": createdAt})
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		ProductID string `json:"product_id"`
+	}
+	if err := decodeJSON(r, &input); err != nil || strings.TrimSpace(input.ProductID) == "" {
+		writeAuthError(w, r, ErrInvalidPost)
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	var productName string
+	var points int64
+	if err := tx.QueryRowContext(r.Context(), `SELECT name, points FROM store_products WHERE id = $1 AND active = true FOR UPDATE`, input.ProductID).Scan(&productName, &points); err == sql.ErrNoRows {
+		writeAuthError(w, r, ErrInvalidPost)
+		return
+	} else if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var balance int64
+	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, user.ID).Scan(&balance); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if balance < points {
+		writeAuthError(w, r, ErrInsufficientPoints)
+		return
+	}
+	newBalance := balance - points
+	if _, err := tx.ExecContext(r.Context(), `UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`, newBalance, user.ID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	orderID := newPostID()
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status) VALUES ($1, $2, $3, $4, 'pending')`, orderID, user.ID, input.ProductID, points); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason) VALUES ($1, $2, 'store', $3, $4, $5)`, newPostID(), user.ID, -points, newBalance, productName); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"id": orderID, "product_id": input.ProductID, "points": points, "balance": newBalance, "status": "pending"})
 }
 
 func windowOrDefault(value, fallback string) string {

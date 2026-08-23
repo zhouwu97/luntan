@@ -187,8 +187,8 @@ class Post {
   final PostType type;
   final PublicationStatus publicationStatus;
   final ModerationStatus moderationStatus;
-  final String title;
-  final String content;
+  String title;
+  String content;
   int commentCount;
   int likeCount;
   int bookmarkCount;
@@ -224,6 +224,7 @@ class Comment {
     required this.id,
     required this.postId,
     required this.authorId,
+    this.author,
     this.rootId,
     this.parentId,
     this.replyToUserId,
@@ -239,6 +240,7 @@ class Comment {
   final String id;
   final String postId;
   final String authorId;
+  final User? author;
   final String? rootId;
   final String? parentId;
   final String? replyToUserId;

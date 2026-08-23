@@ -17,6 +17,7 @@ class CommentsController extends ChangeNotifier {
   bool isLoading = false;
   bool isLoadingMore = false;
   String? errorMessage;
+  Future<Comment>? _addInFlight;
 
   Future<void> load() async {
     if (isLoading) return;
@@ -64,13 +65,21 @@ class CommentsController extends ChangeNotifier {
   }
 
   Future<Comment> addComment(String content) async {
-    final comment = await _repository.createComment(
+    final running = _addInFlight;
+    if (running != null) return running;
+    late final Future<Comment> future;
+    future = _repository.createComment(
       postId: postId,
       content: content,
-    );
-    items.add(comment);
-    notifyListeners();
-    return comment;
+    ).then((comment) {
+      items.add(comment);
+      notifyListeners();
+      return comment;
+    }).whenComplete(() {
+      if (identical(_addInFlight, future)) _addInFlight = null;
+    });
+    _addInFlight = future;
+    return future;
   }
 
   Future<Comment> replyTo(
@@ -92,5 +101,19 @@ class CommentsController extends ChangeNotifier {
     await _repository.deleteComment(comment.id);
     items.removeWhere((item) => item.id == comment.id);
     notifyListeners();
+  }
+
+  Future<Comment?> edit(Comment comment, String content) async {
+    final repository = _repository;
+    if (repository is! CommentMutationRepository) return null;
+    final mutationRepository = repository as CommentMutationRepository;
+    final updated = await mutationRepository.updateComment(
+      commentId: comment.id,
+      content: content,
+    );
+    final index = items.indexWhere((item) => item.id == comment.id);
+    if (index >= 0) items[index] = updated;
+    notifyListeners();
+    return updated;
   }
 }

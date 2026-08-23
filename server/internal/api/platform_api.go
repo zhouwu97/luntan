@@ -151,6 +151,22 @@ func (s *Server) markAllNotificationsRead(w http.ResponseWriter, r *http.Request
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"is_read": true})
 }
 
+func (s *Server) unreadNotificationCount(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	_, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	var count int64
+	if err := s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM notifications WHERE user_id = $1 AND is_read = false`).Scan(&count); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"unread_count": count})
+}
+
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return

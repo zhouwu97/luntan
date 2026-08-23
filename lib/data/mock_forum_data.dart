@@ -45,7 +45,7 @@ extension FeedSortLabel on FeedSort {
 }
 
 class PostDraft {
-  const PostDraft({required this.title, required this.body, required this.section, this.isGameShare = false, this.isPoll = false, this.media = const []});
+  const PostDraft({required this.title, required this.body, required this.section, this.isGameShare = false, this.isPoll = false, this.media = const [], this.mediaIds = const [], this.pollOptions = const [], this.allowMultiple = false, this.pollEndsAt});
 
   final String title;
   final String body;
@@ -53,6 +53,10 @@ class PostDraft {
   final bool isGameShare;
   final bool isPoll;
   final List<MediaAsset> media;
+  final List<String> mediaIds;
+  final List<String> pollOptions;
+  final bool allowMultiple;
+  final DateTime? pollEndsAt;
 }
 
 class StoreProduct {
@@ -66,9 +70,13 @@ class StoreProduct {
 }
 
 class ForumStore extends ChangeNotifier {
-  ForumStore._(this.posts, this.communities) : commentsByPost = _seedComments();
+  ForumStore._(this.posts, this.communities, {Map<String, List<Comment>>? comments}) : commentsByPost = comments ?? _seedComments();
 
   factory ForumStore.seeded() => ForumStore._(_seedPosts(), _seedCommunities());
+
+  /// API 模式只需要板块和本地 UI 筛选状态，不应预加载一套会与服务端
+  /// 冲突的演示帖子、评论或用户资料。
+  factory ForumStore.uiOnly() => ForumStore._(<Post>[], _seedCommunities(), comments: <String, List<Comment>>{});
 
   final List<Post> posts;
   final List<Community> communities;
@@ -138,6 +146,8 @@ class ForumStore extends ChangeNotifier {
     selectedSection = section;
     notifyListeners();
   }
+
+  void touch() => notifyListeners();
 
   void selectSort(FeedSort sort) {
     selectedSort = sort;

@@ -1,8 +1,13 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
 import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../controllers/publish_controller.dart';
+import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
+import '../domain/models.dart';
 import '../theme/app_theme.dart';
 import 'post_media_preview.dart';
 
@@ -58,10 +63,12 @@ class _PublishOption extends StatelessWidget {
 }
 
 class PostEditorDialog extends StatefulWidget {
-  const PostEditorDialog({super.key, required this.isGameShare, this.isPoll = false});
+  const PostEditorDialog({super.key, required this.isGameShare, this.isPoll = false, this.publishController, this.enableSampleMedia = true});
 
   final bool isGameShare;
   final bool isPoll;
+  final PublishController? publishController;
+  final bool enableSampleMedia;
 
   @override
   State<PostEditorDialog> createState() => _PostEditorDialogState();
@@ -70,8 +77,10 @@ class PostEditorDialog extends StatefulWidget {
 class _PostEditorDialogState extends State<PostEditorDialog> {
   final titleController = TextEditingController();
   final bodyController = TextEditingController();
+  final pollOptionControllers = [TextEditingController(), TextEditingController()];
   ForumSection section = ForumSection.unboxing;
   List<MediaAsset> selectedMedia = const [];
+  final List<XFile> selectedFiles = <XFile>[];
   String? errorText;
   bool submitting = false;
 
@@ -81,6 +90,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   void dispose() {
     titleController.dispose();
     bodyController.dispose();
+    for (final controller in pollOptionControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -90,8 +102,77 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
     if (body.isEmpty) return setState(() => errorText = '正文不能为空');
+    final pollOptions = pollOptionControllers.map((controller) => controller.text.trim()).where((value) => value.isNotEmpty).toList();
+    if (widget.isPoll && pollOptions.length < 2) return setState(() => errorText = '投票至少需要两个选项');
     setState(() => submitting = true);
-    Navigator.of(context).pop(PostDraft(title: title, body: body, section: section, isGameShare: widget.isGameShare, isPoll: widget.isPoll, media: selectedMedia));
+    _finishSubmit(title: title, body: body, pollOptions: pollOptions);
+  }
+
+  Future<void> _finishSubmit({required String title, required String body, required List<String> pollOptions}) async {
+    try {
+      final mediaIds = <String>[];
+      final publisher = widget.publishController;
+      if (publisher != null) {
+        for (final file in selectedFiles) {
+          final bytes = await file.readAsBytes();
+          if (bytes.length > 10 * 1024 * 1024) {
+            throw const PublishException('单张图片不能超过 10 MB');
+          }
+          final mimeType = _mimeType(file.name);
+          final extension = file.name.toLowerCase();
+          if (!(extension.endsWith('.jpg') || extension.endsWith('.jpeg') || extension.endsWith('.png') || extension.endsWith('.webp'))) {
+            throw const PublishException('仅支持 JPG、PNG、WEBP 图片');
+          }
+          final digest = sha256.convert(bytes).toString();
+          final mediaId = await publisher.uploadMedia(
+            fileName: file.name,
+            mimeType: mimeType,
+            bytes: bytes,
+            sha256: digest,
+          );
+          mediaIds.add(mediaId);
+        }
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(PostDraft(
+        title: title,
+        body: body,
+        section: section,
+        isGameShare: widget.isGameShare,
+        isPoll: widget.isPoll,
+        media: selectedMedia,
+        mediaIds: mediaIds,
+        pollOptions: pollOptions,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        submitting = false;
+        errorText = error is PublishException ? error.message : '图片上传失败，请重试';
+      });
+    }
+  }
+
+  Future<void> _pickImages() async {
+    if (submitting || selectedFiles.length >= 9) return;
+    final files = await ImagePicker().pickMultiImage(imageQuality: 92);
+    if (!mounted || files.isEmpty) return;
+    setState(() {
+      selectedFiles.addAll(files.take(9 - selectedFiles.length));
+      selectedMedia = [
+        ...selectedMedia,
+        ...files.take(9 - selectedMedia.length).map(
+          (file) => MediaAsset(id: 'local-${file.name}-${file.hashCode}', type: MediaType.image, label: file.name),
+        ),
+      ];
+    });
+  }
+
+  String _mimeType(String fileName) {
+    final lower = fileName.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
   }
 
   @override
@@ -114,11 +195,17 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
               TextField(controller: titleController, enabled: !submitting, maxLength: 40, decoration: const InputDecoration(labelText: '标题', hintText: '给帖子起一个清楚的标题')),
               const SizedBox(height: 12),
               TextField(controller: bodyController, enabled: !submitting, maxLength: 2000, minLines: 8, maxLines: 12, decoration: const InputDecoration(labelText: '正文', hintText: '分享你的真实体验、问题或发现…')),
+              if (widget.isPoll) ...[
+                const SizedBox(height: 12),
+                const Text('投票选项', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                ...pollOptionControllers.asMap().entries.map((entry) => Padding(padding: const EdgeInsets.only(bottom: 8), child: TextField(controller: entry.value, enabled: !submitting, decoration: InputDecoration(labelText: '选项 ${entry.key + 1}', prefixIcon: const Icon(Icons.radio_button_unchecked_rounded))))),
+              ],
               const SizedBox(height: 12),
               const Text('图片', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Row(children: [
-                OutlinedButton.icon(onPressed: submitting ? null : () => setState(() => selectedMedia = [...selectedMedia, ...sampleMedia.take(1)]), icon: const Icon(Icons.add_photo_alternate_outlined), label: const Text('添加示例图')),
+                OutlinedButton.icon(onPressed: submitting ? null : (widget.publishController == null && widget.enableSampleMedia ? () => setState(() => selectedMedia = [...selectedMedia, ...sampleMedia.take(1)]) : _pickImages), icon: const Icon(Icons.add_photo_alternate_outlined), label: Text(widget.publishController == null && widget.enableSampleMedia ? '添加示例图' : '选择图片')),
                 const SizedBox(width: 8),
                 Text('${selectedMedia.length} / 9', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
               ]),
@@ -126,7 +213,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                 const SizedBox(height: 10),
                 SizedBox(height: 86, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: selectedMedia.length, separatorBuilder: (_, _) => const SizedBox(width: 8), itemBuilder: (_, index) => Stack(children: [
                   SizedBox(width: 86, height: 86, child: PostMediaPreview(images: [selectedMedia[index]])),
-                  Positioned(right: 0, top: 0, child: IconButton(onPressed: submitting ? null : () => setState(() { final copy = [...selectedMedia]..removeAt(index); selectedMedia = copy; }), icon: const Icon(Icons.cancel, color: Colors.white, size: 20))),
+                  Positioned(right: 0, top: 0, child: IconButton(onPressed: submitting ? null : () => setState(() { final mediaCopy = [...selectedMedia]..removeAt(index); selectedMedia = mediaCopy; selectedFiles.removeAt(index); }), icon: const Icon(Icons.cancel, color: Colors.white, size: 20))),
                 ]))),
               ],
               if (errorText != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(errorText!, style: const TextStyle(color: AppTheme.pink, fontSize: 12))),

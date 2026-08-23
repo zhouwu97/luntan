@@ -41,18 +41,31 @@ class ApiCommunityRepository implements CommunityRepository {
   }
 }
 
-class ApiFeedRepository implements FeedRepository {
+class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
   ApiFeedRepository(this._client);
 
   final ApiClient _client;
 
   @override
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) async {
+    return getFeed(cursor: cursor, limit: limit);
+  }
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+  }) async {
     final payload = await _client.getJson(
       '/api/v1/feed/latest',
       queryParameters: {
         'limit': '$limit',
         'cursor': ?cursor,
+        'community_id': ?communityId,
+        'sort': sort,
+        'include_details': '1',
       },
     );
     final rawItems = payload['items'];
@@ -67,7 +80,7 @@ class ApiFeedRepository implements FeedRepository {
   }
 }
 
-class ApiPostRepository implements PostRepository {
+class ApiPostRepository implements PostRepository, PostMutationRepository {
   ApiPostRepository(this._client);
 
   final ApiClient _client;
@@ -75,7 +88,7 @@ class ApiPostRepository implements PostRepository {
   @override
   Future<PostDetail?> getPost(String id) async {
     try {
-      final payload = await _client.getJson('/api/v1/posts/$id');
+      final payload = await _client.getJson('/api/v1/posts/$id', queryParameters: const {'include_details': '1'});
       return PostDetail(post: _postFromJson(payload));
     } on ApiException catch (error) {
       if (error.type == ApiErrorType.notFound) {
@@ -84,6 +97,28 @@ class ApiPostRepository implements PostRepository {
       rethrow;
     }
   }
+
+  @override
+  Future<Post> updatePost({
+    required String postId,
+    required String communityId,
+    required String type,
+    required String title,
+    required String content,
+    List<String> mediaIds = const [],
+  }) async {
+    final payload = await _client.patchJson('/api/v1/posts/$postId', body: {
+      'community_id': communityId,
+      'type': type,
+      'title': title,
+      'content': content,
+      'media_ids': mediaIds,
+    });
+    return _postFromJson(payload);
+  }
+
+  @override
+  Future<void> deletePost(String postId) => _client.deleteJson('/api/v1/posts/$postId');
 }
 
 Community _communityFromJson(Map<String, dynamic> json) {
@@ -127,7 +162,26 @@ Post _postFromJson(Map<String, dynamic> json) {
   final publishedAt = json['published_at'] == null
       ? null
       : _date(json['published_at'], createdAt);
-  final type = _enumByName(PostType.values, json['type'], PostType.normal);
+  final type = _postTypeFromWire(json['type']);
+  final viewerJson = json['viewer_state'] is Map
+      ? Map<String, dynamic>.from(json['viewer_state'] as Map)
+      : const <String, dynamic>{};
+  final media = json['media'] is List
+      ? (json['media'] as List)
+          .whereType<Map>()
+          .map((raw) {
+            final value = Map<String, dynamic>.from(raw);
+            return MediaAsset(
+              id: _string(value['id']),
+              type: value['type'] == 'video' ? MediaType.video : MediaType.image,
+              url: _nullableString(value['url']),
+              width: _nullableInt(value['width']),
+              height: _nullableInt(value['height']),
+              altText: _nullableString(value['alt_text']),
+            );
+          })
+          .toList()
+      : const <MediaAsset>[];
   return Post(
     id: _string(json['id']),
     authorId: _string(authorJson['id']),
@@ -136,6 +190,7 @@ Post _postFromJson(Map<String, dynamic> json) {
       id: _string(authorJson['id']),
       username: _string(authorJson['username']),
       nickname: _string(authorJson['nickname']),
+      level: _int(authorJson['level'], fallback: 1),
       createdAt: now,
       updatedAt: now,
     ),
@@ -167,8 +222,31 @@ Post _postFromJson(Map<String, dynamic> json) {
     createdAt: createdAt,
     updatedAt: _date(json['updated_at'], createdAt),
     publishedAt: publishedAt,
+    viewerState: ViewerPostState(
+      hasLiked: viewerJson['has_liked'] == true,
+      hasBookmarked: viewerJson['has_bookmarked'] == true,
+      isFollowingAuthor: viewerJson['is_following_author'] == true,
+      isFollowingCommunity: viewerJson['is_following_community'] == true,
+      isCommunityMember: viewerJson['is_community_member'] == true,
+      canEdit: viewerJson['can_edit'] == true,
+      canDelete: viewerJson['can_delete'] == true,
+      canReport: viewerJson['can_report'] != false,
+    ),
+    media: media,
   );
 }
+
+PostType _postTypeFromWire(dynamic value) => switch (value) {
+  'game_share' => PostType.gameShare,
+  'image' => PostType.image,
+  'poll' => PostType.poll,
+  'question' => PostType.question,
+  'article' => PostType.article,
+  'video' => PostType.video,
+  'activity' => PostType.activity,
+  'market' => PostType.market,
+  _ => PostType.normal,
+};
 
 T _enumByName<T extends Enum>(List<T> values, dynamic value, T fallback) {
   if (value is String) {
@@ -180,7 +258,9 @@ T _enumByName<T extends Enum>(List<T> values, dynamic value, T fallback) {
 }
 
 String _string(dynamic value) => value is String ? value : '';
-int _int(dynamic value) =>
-    value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+String? _nullableString(dynamic value) => value is String && value.isNotEmpty ? value : null;
+int? _nullableInt(dynamic value) => value is num ? value.toInt() : int.tryParse('$value');
+int _int(dynamic value, {int fallback = 0}) =>
+    value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
 DateTime _date(dynamic value, DateTime fallback) =>
     value is String ? DateTime.tryParse(value) ?? fallback : fallback;

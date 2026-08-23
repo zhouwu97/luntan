@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../domain/models.dart';
+import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 
 class FeaturePage extends StatelessWidget {
-  const FeaturePage({super.key, required this.title, required this.store, required this.onOpenPost});
+  const FeaturePage({super.key, required this.title, required this.store, required this.onOpenPost, this.onLike, this.onBookmark, this.feedRepository});
 
   final String title;
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
+  final ValueChanged<Post>? onLike;
+  final ValueChanged<Post>? onBookmark;
+  final FeedRepository? feedRepository;
 
   List<Post> _posts() {
     if (title == '排行榜') {
@@ -29,6 +34,19 @@ class FeaturePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (feedRepository != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: FutureBuilder<List<Post>>(
+          future: _remotePosts(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+            if (snapshot.hasError) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Text('内容加载失败', style: TextStyle(color: AppTheme.textSecondary)), TextButton(onPressed: () {}, child: const Text('返回重试'))]));
+            return _body(context, snapshot.data ?? const <Post>[]);
+          },
+        ),
+      );
+    }
     final posts = _posts();
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -44,11 +62,33 @@ class FeaturePage extends StatelessWidget {
           if (posts.isEmpty)
             const Padding(padding: EdgeInsets.symmetric(vertical: 80), child: Center(child: Text('这里还没有内容', style: TextStyle(color: AppTheme.textSecondary))))
           else
-            ...posts.map((post) => ForumPostCard(post: post, onOpen: () => onOpenPost(post), onLike: () => store.toggleLike(post), onBookmark: () => store.toggleBookmark(post), onMenu: () {})),
+            ...posts.map((post) => ForumPostCard(post: post, onOpen: () => onOpenPost(post), onLike: () => onLike?.call(post), onBookmark: () => onBookmark?.call(post), onMenu: () {})),
         ],
       ),
     );
   }
+
+  Future<List<Post>> _remotePosts() async {
+    final repository = feedRepository!;
+    final page = repository is QueryableFeedRepository
+        ? await (repository as QueryableFeedRepository).getFeed(sort: title == '排行榜' || title == '热门帖子' ? 'featured' : 'recommended', limit: 50)
+        : await repository.getLatestFeed(limit: 50);
+    final items = page.items;
+    if (title == '活动') return items.where((post) => post.type == PostType.activity).toList();
+    if (title == '二手集市') return items.where((post) => post.type == PostType.market).toList();
+    if (title == '玩法分享') return items.where((post) => post.type == PostType.gameShare || post.tags.contains('玩法分享')).toList();
+    if (title == '穿搭分享') return items.where((post) => post.media.isNotEmpty || post.tags.contains('穿搭分享')).toList();
+    return items.take(20).toList();
+  }
+
+  Widget _body(BuildContext context, List<Post> posts) => ListView(
+    padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+    children: [
+      Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(gradient: AppTheme.primaryGradient, borderRadius: BorderRadius.circular(22)), child: Row(children: [const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 30), const SizedBox(width: 12), Expanded(child: Text(_description(title), style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5, fontWeight: FontWeight.w700)))])),
+      const SizedBox(height: 16),
+      if (posts.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 80), child: Center(child: Text('这里还没有内容', style: TextStyle(color: AppTheme.textSecondary)))) else ...posts.map((post) => ForumPostCard(post: post, onOpen: () => onOpenPost(post), onLike: () => onLike?.call(post), onBookmark: () => onBookmark?.call(post), onMenu: () {})),
+    ],
+  );
 
   String _description(String title) => switch (title) {
         '排行榜' => '看看最近最受欢迎的帖子，给认真分享的人一点掌声。',

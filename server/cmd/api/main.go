@@ -38,7 +38,15 @@ func main() {
 		}
 	}
 
-	server := &http.Server{Addr: fmt.Sprintf(":%s", cfg.HTTPPort), Handler: httpserver.NewHandlerWithAPI(db, logger, api.NewHandler(db)), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{
+		Addr:              fmt.Sprintf(":%s", cfg.HTTPPort),
+		Handler:           httpserver.NewHandlerWithAPI(db, logger, api.NewHandler(db)),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 	go func() {
 		logger.Info("http_server_started", "app_env", cfg.AppEnv, "port", cfg.HTTPPort)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

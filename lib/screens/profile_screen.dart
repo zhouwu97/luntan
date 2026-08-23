@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../data/api/auth_repository.dart';
+import '../data/api/profile_repository.dart';
+import '../data/api/store_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 import 'exchange_store_screen.dart';
@@ -13,6 +16,12 @@ class ProfileScreen extends StatelessWidget {
     required this.onOpenComposer,
     required this.onOpenMessages,
     required this.onFeedback,
+    this.currentUser,
+    required this.currentUserId,
+    this.isApiMode = false,
+    this.profileRepository,
+    this.storeRepository,
+    this.onLogout,
   });
 
   final ForumStore store;
@@ -21,9 +30,25 @@ class ProfileScreen extends StatelessWidget {
   final VoidCallback onOpenComposer;
   final VoidCallback onOpenMessages;
   final ValueChanged<String> onFeedback;
+  final AuthUser? currentUser;
+  final String currentUserId;
+  final bool isApiMode;
+  final ProfileRepository? profileRepository;
+  final StoreRepository? storeRepository;
+  final Future<void> Function()? onLogout;
 
   @override
   Widget build(BuildContext context) {
+    if (isApiMode && profileRepository != null) {
+      return _ApiProfileScreen(
+        repository: profileRepository!,
+        onOpenPost: onOpenPost,
+        onOpenMessages: onOpenMessages,
+        onFeedback: onFeedback,
+        onLogout: onLogout,
+        storeRepository: storeRepository,
+      );
+    }
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) => Scaffold(
@@ -37,10 +62,11 @@ class ProfileScreen extends StatelessWidget {
                 onSettings: () => _showSettings(context),
               ),
               const SizedBox(height: 16),
-              _ProfileHero(),
+              _ProfileHero(user: currentUser, isApiMode: isApiMode),
               const SizedBox(height: 16),
               _StatsStrip(
                 store: store,
+                isApiMode: isApiMode,
                 onTap: (label) => _showList(context, label),
               ),
               const SizedBox(height: 22),
@@ -82,16 +108,18 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 22),
-              _ExchangePreview(
-                store: store,
-                onOpenStore: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ExchangeStoreScreen(store: store),
+              if (!isApiMode) ...[
+                _ExchangePreview(
+                  store: store,
+                  onOpenStore: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ExchangeStoreScreen(store: store),
+                    ),
                   ),
+                  onRedeem: (product) => _redeem(context, product),
                 ),
-                onRedeem: (product) => _redeem(context, product),
-              ),
-              const SizedBox(height: 18),
+                const SizedBox(height: 18),
+              ],
               const Text(
                 '最近发布',
                 style: TextStyle(
@@ -101,7 +129,7 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _RecentPosts(store: store, onOpenPost: onOpenPost),
+              _RecentPosts(store: store, currentUserId: currentUserId, onOpenPost: onOpenPost),
               const SizedBox(height: 24),
               Text(
                 '浅蓝论坛 · 把真实的校园生活留在这里',
@@ -138,6 +166,14 @@ class ProfileScreen extends StatelessWidget {
                 onFeedback('隐私设置已打开');
               },
             ),
+            if (onLogout != null) ListTile(
+              leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
+              title: const Text('退出登录'),
+              onTap: () async {
+                Navigator.pop(context);
+                await onLogout!();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.info_outline_rounded),
               title: const Text('关于浅蓝论坛'),
@@ -159,7 +195,7 @@ class ProfileScreen extends StatelessWidget {
       _ => <Post>[],
     };
     final comments = label == '我的评论'
-        ? store.commentsByAuthor('user-1')
+        ? store.commentsByAuthor(currentUserId)
         : <Comment>[];
     showModalBottomSheet<void>(
       context: context,
@@ -305,16 +341,195 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
+/// 正式模式的个人中心只依赖服务器返回的聚合数据和列表，不读取 ForumStore。
+class _ApiProfileScreen extends StatefulWidget {
+  const _ApiProfileScreen({
+    required this.repository,
+    required this.onOpenPost,
+    required this.onOpenMessages,
+    required this.onFeedback,
+    this.storeRepository,
+    this.onLogout,
+  });
+
+  final ProfileRepository repository;
+  final ValueChanged<Post> onOpenPost;
+  final VoidCallback onOpenMessages;
+  final ValueChanged<String> onFeedback;
+  final Future<void> Function()? onLogout;
+  final StoreRepository? storeRepository;
+
+  @override
+  State<_ApiProfileScreen> createState() => _ApiProfileScreenState();
+}
+
+class _ApiProfileScreenState extends State<_ApiProfileScreen> {
+  late Future<ProfileSummary> profileFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    profileFuture = widget.repository.getProfile();
+  }
+
+  void retry() => setState(() => profileFuture = widget.repository.getProfile());
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<ProfileSummary>(
+    future: profileFuture,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      }
+      if (snapshot.hasError || !snapshot.hasData) {
+        return Scaffold(
+          body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('个人资料加载失败', style: TextStyle(color: AppTheme.textSecondary)),
+            TextButton(onPressed: retry, child: const Text('重试')),
+          ])),
+        );
+      }
+      return _content(snapshot.data!);
+    },
+  );
+
+  Widget _content(ProfileSummary profile) => Scaffold(
+    body: SafeArea(
+      bottom: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+        children: [
+          _ProfileTopbar(onMessages: widget.onOpenMessages, onSettings: () => _showSettings(context)),
+          const SizedBox(height: 16),
+          Row(children: [
+            const CircleAvatar(radius: 32, backgroundColor: AppTheme.surfaceBlue, child: Icon(Icons.person_rounded, color: AppTheme.primary, size: 32)),
+            const SizedBox(width: 13),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(profile.nickname, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 4),
+              Text('@${profile.username} · Lv.${profile.level}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+              if (profile.signature.isNotEmpty) ...[const SizedBox(height: 4), Text(profile.signature, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12))],
+            ])),
+          ]),
+          if (widget.storeRepository != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExchangeStoreScreen(apiRepository: widget.storeRepository!))), icon: const Icon(Icons.card_giftcard_outlined), label: const Text('打开积分商店')),
+          ],
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 15),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.cardRadius), border: Border.all(color: AppTheme.border)),
+            child: Row(children: [
+              _ApiStat(value: profile.postCount, label: '我的发帖', onTap: () => _showList('我的发帖')),
+              _ApiStat(value: profile.commentCount, label: '我的回帖', onTap: () => _showList('我的回帖')),
+              _ApiStat(value: profile.followerCount, label: '粉丝', onTap: () {}),
+            ]),
+          ),
+          const SizedBox(height: 22),
+          const Text('常用功能', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 10),
+          Row(children: [
+            _ProfileTool(icon: Icons.star_rounded, label: '我的收藏', color: AppTheme.orange, onTap: () => _showList('我的收藏')),
+            _ProfileTool(icon: Icons.thumb_up_rounded, label: '我的点赞', color: AppTheme.pink, onTap: () => _showList('我的点赞')),
+            _ProfileTool(icon: Icons.history_rounded, label: '浏览历史', color: AppTheme.primary, onTap: () => _showList('浏览历史')),
+            _ProfileTool(icon: Icons.mode_comment_outlined, label: '我的评论', color: AppTheme.mint, onTap: () => _showList('我的评论')),
+          ]),
+          const SizedBox(height: 22),
+          const Text('最近发布', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(onPressed: () => _showList('我的发帖'), icon: const Icon(Icons.article_outlined), label: const Text('查看我的全部帖子')),
+          const SizedBox(height: 24),
+          Text('浅蓝论坛 · 把真实的校园生活留在这里', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary.withValues(alpha: .7), fontSize: 12)),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> _showList(String label) async {
+    final kind = switch (label) {
+      '我的发帖' => 'posts',
+      '我的回帖' || '我的评论' => 'comments',
+      '我的收藏' => 'bookmarks',
+      '我的点赞' => 'likes',
+      '浏览历史' => 'history',
+      _ => 'posts',
+    };
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SizedBox(
+        height: 500,
+        child: FutureBuilder<ProfileListPage>(
+          future: widget.repository.list(kind),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+            if (snapshot.hasError) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Text('列表加载失败'), TextButton(onPressed: () => Navigator.pop(sheetContext), child: const Text('关闭'))]));
+            final items = snapshot.data?.items ?? const <Map<String, dynamic>>[];
+            if (items.isEmpty) return Center(child: Text('$label暂时为空，去首页逛逛吧', style: const TextStyle(color: AppTheme.textSecondary)));
+            return ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 22),
+              itemCount: items.length + 1,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                if (index == 0) return Padding(padding: const EdgeInsets.only(bottom: 10), child: Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)));
+                final post = _postFromJson(items[index - 1]);
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.article_outlined, color: AppTheme.primary),
+                  title: Text(post.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('${items[index - 1]['community_name'] ?? ''} · ${post.commentCount} 回复'),
+                  onTap: () { Navigator.pop(sheetContext); widget.onOpenPost(post); },
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showSettings(BuildContext context) {
+    showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (sheetContext) => SafeArea(child: Wrap(children: [
+      const ListTile(leading: Icon(Icons.palette_outlined), title: Text('浅蓝主题'), trailing: Icon(Icons.check_rounded, color: AppTheme.primary)),
+      if (widget.onLogout != null) ListTile(leading: const Icon(Icons.logout_rounded, color: AppTheme.pink), title: const Text('退出登录'), onTap: () async { Navigator.pop(sheetContext); await widget.onLogout!(); }),
+      ListTile(leading: const Icon(Icons.info_outline_rounded), title: const Text('关于浅蓝论坛'), onTap: () { Navigator.pop(sheetContext); widget.onFeedback('当前版本 v1.0.0'); }),
+    ])));
+  }
+
+  Post _postFromJson(Map<String, dynamic> value) {
+    final now = DateTime.tryParse('${value['created_at']}') ?? DateTime.now();
+    return Post(
+      id: '${value['id'] ?? ''}', authorId: '', communityId: '${value['community_id'] ?? ''}',
+      title: '${value['title'] ?? ''}', content: '${value['content_preview'] ?? ''}',
+      commentCount: _int(value['comment_count']), likeCount: _int(value['like_count']), bookmarkCount: _int(value['bookmark_count']),
+      createdAt: now, updatedAt: now,
+    );
+  }
+
+  int _int(dynamic value) => value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+}
+
+class _ApiStat extends StatelessWidget {
+  const _ApiStat({required this.value, required this.label, required this.onTap});
+  final int value;
+  final String label;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Expanded(child: GestureDetector(onTap: onTap, child: Column(children: [Text('$value', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.w900)), const SizedBox(height: 4), Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11))])));
+}
+
 class _RecentPosts extends StatelessWidget {
-  const _RecentPosts({required this.store, required this.onOpenPost});
+  const _RecentPosts({required this.store, required this.currentUserId, required this.onOpenPost});
 
   final ForumStore store;
+  final String currentUserId;
   final ValueChanged<Post> onOpenPost;
 
   @override
   Widget build(BuildContext context) {
     final posts = store.posts
-        .where((post) => post.authorId == 'user-1')
+        .where((post) => post.authorId == currentUserId)
         .take(3)
         .toList();
     return Container(
@@ -388,8 +603,15 @@ class _ProfileTopbar extends StatelessWidget {
 }
 
 class _ProfileHero extends StatelessWidget {
+  const _ProfileHero({this.user, required this.isApiMode});
+
+  final AuthUser? user;
+  final bool isApiMode;
+
   @override
   Widget build(BuildContext context) {
+    final nickname = user?.nickname.isNotEmpty == true ? user!.nickname : '小理不理';
+    final level = user?.level ?? 8;
     return Row(
       children: [
         const CircleAvatar(
@@ -412,8 +634,8 @@ class _ProfileHero extends StatelessWidget {
               Row(
                 children: [
                   Flexible(
-                    child: const Text(
-                      '小理不理',
+                    child: Text(
+                      nickname,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
@@ -439,13 +661,13 @@ class _ProfileHero extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                '关注 15 · 粉丝 59',
+              Text(
+                isApiMode ? '@${user?.username ?? '未登录'}' : '关注 15 · 粉丝 59',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 4),
-              const Text(
-                '等级 Lv.8 · 活跃用户',
+              Text(
+                '等级 Lv.$level · 活跃用户',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
               ),
             ],
@@ -457,18 +679,21 @@ class _ProfileHero extends StatelessWidget {
 }
 
 class _StatsStrip extends StatelessWidget {
-  const _StatsStrip({required this.store, required this.onTap});
+  const _StatsStrip({required this.store, required this.onTap, required this.isApiMode});
 
   final ForumStore store;
   final ValueChanged<String> onTap;
+  final bool isApiMode;
 
   @override
   Widget build(BuildContext context) {
-    final stats = [
-      (store.publishedCount, '我的发帖'),
-      (store.replyCount, '我的回帖'),
-      (store.followedBoards, '关注的吧'),
-    ];
+    final stats = isApiMode
+        ? [('—', '我的发帖'), ('—', '我的回帖'), ('—', '关注的吧')]
+        : [
+            (store.publishedCount.toString(), '我的发帖'),
+            (store.replyCount.toString(), '我的回帖'),
+            (store.followedBoards.toString(), '关注的吧'),
+          ];
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 15),
       decoration: BoxDecoration(
@@ -485,7 +710,7 @@ class _StatsStrip extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      '${stats[index].$1}',
+                      stats[index].$1,
                       style: const TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 22,

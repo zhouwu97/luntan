@@ -13,6 +13,7 @@ type userSummary struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	Nickname string `json:"nickname"`
+	Level    int    `json:"level,omitempty"`
 }
 
 type communitySummary struct {
@@ -22,23 +23,25 @@ type communitySummary struct {
 }
 
 type postResponse struct {
-	ID             string           `json:"id"`
-	Author         userSummary      `json:"author"`
-	Community      communitySummary `json:"community"`
-	Type           string           `json:"type"`
-	Title          string           `json:"title"`
-	Content        string           `json:"content,omitempty"`
-	ContentPreview string           `json:"content_preview,omitempty"`
-	CommentCount   int64            `json:"comment_count"`
-	LikeCount      int64            `json:"like_count"`
-	BookmarkCount  int64            `json:"bookmark_count,omitempty"`
-	ShareCount     int64            `json:"share_count,omitempty"`
-	ViewCount      int64            `json:"view_count"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at,omitempty"`
-	PublishedAt    *time.Time       `json:"published_at,omitempty"`
-	Publication    string           `json:"publication_status,omitempty"`
-	Moderation     string           `json:"moderation_status,omitempty"`
+	ID             string              `json:"id"`
+	Author         userSummary         `json:"author"`
+	Community      communitySummary    `json:"community"`
+	Type           string              `json:"type"`
+	Title          string              `json:"title"`
+	Content        string              `json:"content,omitempty"`
+	ContentPreview string              `json:"content_preview,omitempty"`
+	CommentCount   int64               `json:"comment_count"`
+	LikeCount      int64               `json:"like_count"`
+	BookmarkCount  int64               `json:"bookmark_count,omitempty"`
+	ShareCount     int64               `json:"share_count,omitempty"`
+	ViewCount      int64               `json:"view_count"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
+	PublishedAt    *time.Time          `json:"published_at,omitempty"`
+	Publication    string              `json:"publication_status,omitempty"`
+	Moderation     string              `json:"moderation_status,omitempty"`
+	Media          []postMediaResponse `json:"media,omitempty"`
+	ViewerState    *viewerPostState    `json:"viewer_state,omitempty"`
 }
 
 type feedPostRow struct {
@@ -81,8 +84,16 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		query += " AND (p.published_at, p.id) < ($1, $2)"
 		args = append(args, cursor.PublishedAt, cursor.ID)
 	}
+	if communityID := r.URL.Query().Get("community_id"); communityID != "" {
+		query += fmt.Sprintf(" AND p.community_id = $%d", len(args)+1)
+		args = append(args, communityID)
+	}
 	limitPosition := len(args) + 1
-	query += fmt.Sprintf(" ORDER BY p.published_at DESC, p.id DESC LIMIT $%d", limitPosition)
+	if r.URL.Query().Get("sort") == "featured" {
+		query += fmt.Sprintf(" ORDER BY p.comment_count DESC, p.published_at DESC, p.id DESC LIMIT $%d", limitPosition)
+	} else {
+		query += fmt.Sprintf(" ORDER BY p.published_at DESC, p.id DESC LIMIT $%d", limitPosition)
+	}
 	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -110,6 +121,12 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]postResponse, 0, len(rowsData))
 	for _, row := range rowsData {
+		if includePostDetails(r) {
+			if err := s.enrichPostResponse(r.Context(), r, &row.post, true); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		}
 		items = append(items, row.post)
 	}
 	var nextCursor string

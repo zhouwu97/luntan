@@ -86,5 +86,14 @@ class _FakeCommentRepository implements CommentRepository {
   }) async => _comment('c4', content);
 
   @override
+  Future<CommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit = 20,
+  }) async {
+    return CommentPage(items: [_comment('r1', 'thread reply')], hasMore: false);
+  }
+
+  @override
   Future<void> deleteComment(String commentId) async {}
 }

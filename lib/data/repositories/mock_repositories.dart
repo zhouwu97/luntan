@@ -129,6 +129,37 @@ class MockCommentRepository implements CommentRepository, CommentMutationReposit
   }
 
   @override
+  Future<CommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final all = _store.commentsByPost.values.expand((items) => items).toList();
+    Comment? source;
+    for (final item in all) {
+      if (item.id == commentId) {
+        source = item;
+        break;
+      }
+    }
+    if (source == null) return const CommentPage(items: []);
+    final rootId = source.rootId ?? source.id;
+    final sorted = all
+        .where(
+          (item) => item.rootId == rootId && item.id != commentId,
+        )
+        .toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final start = int.tryParse(cursor ?? '') ?? 0;
+    final end = (start + limit.clamp(1, 50)).clamp(0, sorted.length).toInt();
+    return CommentPage(
+      items: sorted.sublist(start, end),
+      nextCursor: end < sorted.length ? '$end' : null,
+      hasMore: end < sorted.length,
+    );
+  }
+
+  @override
   Future<Comment> createComment({
     required String postId,
     required String content,

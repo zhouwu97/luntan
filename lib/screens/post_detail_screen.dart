@@ -5,8 +5,8 @@ import '../controllers/comments_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../controllers/post_detail_controller.dart';
 import '../data/api/api_client.dart';
+import '../data/api/comment_repository.dart';
 import '../data/api/poll_repository.dart';
-import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_author_row.dart';
@@ -15,10 +15,9 @@ import '../widgets/post_media_preview.dart';
 class PostDetailScreen extends StatefulWidget {
   const PostDetailScreen({
     super.key,
-    required this.store,
     required this.controller,
-    this.commentsController,
-    this.interactionController,
+    required this.commentsController,
+    required this.interactionController,
     this.currentUserId,
     this.focusComments = false,
     required this.onToggleLike,
@@ -30,10 +29,9 @@ class PostDetailScreen extends StatefulWidget {
     this.pollRepository,
   });
 
-  final ForumStore store;
   final PostDetailController controller;
-  final CommentsController? commentsController;
-  final InteractionController? interactionController;
+  final CommentsController commentsController;
+  final InteractionController interactionController;
   final String? currentUserId;
   final bool focusComments;
   final Future<void> Function(Post) onToggleLike;
@@ -62,7 +60,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.controller.load();
-      widget.commentsController?.load();
+      widget.commentsController.load();
     });
     commentsScrollController.addListener(_loadMoreComments);
   }
@@ -77,10 +75,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   void _loadMoreComments() {
-    final controller = widget.commentsController;
-    if (controller != null &&
-        commentsScrollController.position.extentAfter < 240) {
-      controller.loadMore();
+    if (commentsScrollController.position.extentAfter < 240) {
+      widget.commentsController.loadMore();
     }
   }
 
@@ -89,7 +85,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final content = replyController.text.trim();
     if (content.isEmpty) return;
     final comments = widget.commentsController;
-    if (comments == null) return;
     setState(() => isSending = true);
     final target = replyTarget;
     final before = post.commentCount;
@@ -132,13 +127,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final listenables = <Listenable>[widget.controller];
-    if (widget.commentsController != null) {
-      listenables.add(widget.commentsController!);
-    }
-    if (widget.interactionController != null) {
-      listenables.add(widget.interactionController!);
-    }
+    final listenables = <Listenable>[widget.controller, widget.commentsController, widget.interactionController];
     return AnimatedBuilder(
       animation: Listenable.merge(listenables),
       builder: (context, _) {
@@ -167,8 +156,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         final post = state.detail!.post;
         _focusCommentsIfNeeded();
         final commentsController = widget.commentsController;
-        final allComments =
-            commentsController?.items ?? widget.store.commentsFor(post);
+        final allComments = commentsController.items;
         final roots = allComments
             .where((comment) => comment.parentId == null)
             .toList();
@@ -343,17 +331,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 13),
-                    if (commentsController?.isLoading == true &&
+                    if (commentsController.isLoading == true &&
                         allComments.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 36),
                         child: Center(child: CircularProgressIndicator()),
                       ),
-                    if (commentsController?.errorMessage != null &&
+                    if (commentsController.errorMessage != null &&
                         allComments.isEmpty)
-                      _CommentError(onRetry: () => commentsController!.load()),
+                      _CommentError(onRetry: commentsController.load),
                     if (allComments.isEmpty &&
-                        commentsController?.isLoading != true)
+                        commentsController.isLoading != true)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 45),
                         child: Center(
@@ -372,25 +360,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         comment: comment,
                         floor: entry.key + 2,
                         children: children,
-                        store: widget.store,
-                        liked:
-                            widget.interactionController?.likedCommentIds
-                                .contains(comment.id) ??
-                            widget.store.isCommentLiked(comment),
+                        liked: widget.interactionController.likedCommentIds
+                            .contains(comment.id),
                         onReply: () => setState(() => replyTarget = comment),
                         onLike: () => _likeComment(comment),
                         onMore: () => _showCommentMenu(comment),
+                        onViewAllReplies: () =>
+                            _openReplyThread(comment),
                       );
                     }),
-                    if (commentsController?.isLoadingMore == true)
+                    if (commentsController.isLoadingMore == true)
                       const Padding(
                         padding: EdgeInsets.all(14),
                         child: Center(
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       ),
-                    if (commentsController != null &&
-                        !commentsController.hasMore &&
+                    if (!commentsController.hasMore &&
                         allComments.isNotEmpty)
                       const Padding(
                         padding: EdgeInsets.only(top: 8),
@@ -429,13 +415,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _likeComment(Comment comment) async {
-    final interaction = widget.interactionController;
-    if (interaction == null) return;
     try {
-      await interaction.toggleCommentLike(comment);
+      await widget.interactionController.toggleCommentLike(comment);
     } catch (error) {
       if (mounted) widget.onFeedback(userFacingApiMessage(error));
     }
+  }
+
+  void _openReplyThread(Comment comment) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _CommentThreadSheet(
+        rootComment: comment,
+        repository: widget.commentsController.repository,
+      ),
+    );
   }
 
   void _showPostMenu(Post post) {
@@ -671,11 +667,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       ),
     );
     controller.dispose();
-    if (value == null || value.isEmpty || widget.commentsController == null) {
+    if (value == null || value.isEmpty) {
       return;
     }
     try {
-      final updated = await widget.commentsController!.edit(comment, value);
+      final updated = await widget.commentsController.edit(comment, value);
       if (updated == null) widget.onFeedback('当前模式暂不支持编辑评论');
     } catch (error) {
       if (mounted) {
@@ -685,14 +681,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _deleteComment(Comment comment) async {
-    final controller = widget.commentsController;
-    if (controller == null) return;
     final state = widget.controller.state;
     final post = state.detail?.post;
     if (post == null) return;
     final before = post.commentCount;
     try {
-      await controller.delete(comment);
+      await widget.commentsController.delete(comment);
       if (post.commentCount == before && before > 0) {
         post.commentCount = before - 1;
       }
@@ -961,23 +955,23 @@ class _CommentTile extends StatelessWidget {
     required this.comment,
     required this.floor,
     required this.children,
-    required this.store,
     required this.liked,
     required this.onReply,
     required this.onLike,
     required this.onMore,
+    required this.onViewAllReplies,
   });
   final Comment comment;
   final int floor;
   final List<Comment> children;
-  final ForumStore store;
   final bool liked;
   final VoidCallback onReply;
   final VoidCallback onLike;
   final VoidCallback onMore;
+  final VoidCallback onViewAllReplies;
   @override
   Widget build(BuildContext context) {
-    final author = comment.author ?? store.userById(comment.authorId);
+    final author = comment.author;
     return Padding(
       padding: const EdgeInsets.only(bottom: 17),
       child: Column(
@@ -1098,8 +1092,7 @@ class _CommentTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: children.take(3).map((child) {
-                  final childAuthor =
-                      child.author ?? store.userById(child.authorId);
+                  final childAuthor = child.author;
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
@@ -1114,15 +1107,18 @@ class _CommentTile extends StatelessWidget {
                 }).toList(),
               ),
             ),
-          if (children.length > 3)
-            const Padding(
-              padding: EdgeInsets.only(left: 43, top: 5),
-              child: Text(
-                '查看全部回复 ›',
-                style: TextStyle(
-                  color: AppTheme.primary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+          if (comment.replyCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 43, top: 5),
+              child: GestureDetector(
+                onTap: onViewAllReplies,
+                child: const Text(
+                  '查看全部回复 ›',
+                  style: TextStyle(
+                    color: AppTheme.primary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
@@ -1148,4 +1144,233 @@ class _Tag extends StatelessWidget {
       style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700),
     ),
   );
+}
+
+/// 楼中楼：从入口评论分页拉取整条回复线程。
+class _CommentThreadSheet extends StatefulWidget {
+  const _CommentThreadSheet({
+    required this.rootComment,
+    required this.repository,
+  });
+
+  final Comment rootComment;
+  final CommentRepository repository;
+
+  @override
+  State<_CommentThreadSheet> createState() => _CommentThreadSheetState();
+}
+
+class _CommentThreadSheetState extends State<_CommentThreadSheet> {
+  final List<Comment> replies = [];
+  final ScrollController scrollController = ScrollController();
+  String? nextCursor;
+  bool hasMore = true;
+  bool loading = false;
+  bool loadingMore = false;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    scrollController.addListener(_maybeLoadMore);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    scrollController
+      ..removeListener(_maybeLoadMore)
+      ..dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      loading = true;
+      errorMessage = null;
+    });
+    try {
+      final page = await widget.repository.listReplies(
+        commentId: widget.rootComment.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        replies
+          ..clear()
+          ..addAll(page.items);
+        nextCursor = page.nextCursor;
+        hasMore = page.hasMore;
+      });
+    } catch (_) {
+      if (mounted) setState(() => errorMessage = '回复加载失败，请重试');
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  void _maybeLoadMore() {
+    if (scrollController.position.extentAfter < 160) _loadMore();
+  }
+
+  Future<void> _loadMore() async {
+    if (loading || loadingMore || !hasMore || nextCursor == null) return;
+    setState(() => loadingMore = true);
+    try {
+      final page = await widget.repository.listReplies(
+        commentId: widget.rootComment.id,
+        cursor: nextCursor,
+      );
+      if (!mounted) return;
+      setState(() {
+        replies.addAll(page.items);
+        nextCursor = page.nextCursor;
+        hasMore = page.hasMore;
+      });
+    } catch (_) {
+      // 滚动到底部触发加载失败时保留当前内容，允许再次滚动重试。
+    } finally {
+      if (mounted) setState(() => loadingMore = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final root = widget.rootComment;
+    final header =
+        '回复 ${root.author?.nickname ?? '匿名用户'}：${root.content}';
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.72,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                header,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const Divider(height: 1, color: AppTheme.border),
+            Expanded(
+              child: loading && replies.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : errorMessage != null && replies.isEmpty
+                  ? Center(
+                      child: TextButton(
+                        onPressed: _load,
+                        child: Text('$errorMessage，点此重试'),
+                      ),
+                    )
+                  : replies.isEmpty
+                  ? const Center(
+                      child: Text(
+                        '还没有更多回复',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      itemCount: replies.length + 1,
+                      itemBuilder: (context, index) {
+                        if (index == replies.length) {
+                          return loadingMore
+                              ? const Padding(
+                                  padding: EdgeInsets.all(10),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              : const SizedBox(height: 8);
+                        }
+                        final reply = replies[index];
+                        final author = reply.author;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 15,
+                                backgroundColor: AppTheme.surfaceBlue,
+                                child: Text(
+                                  (author?.nickname ?? '匿').characters.first,
+                                  style: const TextStyle(
+                                    color: AppTheme.primary,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 9),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            author?.nickname ?? '匿名用户',
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: AppTheme.textPrimary,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          relativeTimeLabel(reply.createdAt),
+                                          style: const TextStyle(
+                                            color: AppTheme.textSecondary,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      reply.content,
+                                      style: const TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontSize: 13,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (reply.likeCount > 0)
+                                Text(
+                                  '♥ ${reply.likeCount}',
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

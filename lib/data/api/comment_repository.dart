@@ -20,6 +20,12 @@ abstract interface class CommentRepository {
     int limit,
   });
 
+  Future<CommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit,
+  });
+
   Future<Comment> createComment({
     required String postId,
     required String content,
@@ -57,6 +63,30 @@ class ApiCommentRepository implements CommentRepository, CommentMutationReposito
   }) async {
     final payload = await _client.getJson(
       '/api/v1/posts/$postId/comments',
+      queryParameters: {'limit': '$limit', 'cursor': ?cursor},
+    );
+    final rawItems = payload['items'];
+    final items = rawItems is List
+        ? rawItems
+              .whereType<Map>()
+              .map((item) => _commentFromJson(Map<String, dynamic>.from(item)))
+              .toList()
+        : <Comment>[];
+    return CommentPage(
+      items: items,
+      nextCursor: payload['next_cursor'] as String?,
+      hasMore: payload['has_more'] == true,
+    );
+  }
+
+  @override
+  Future<CommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/comments/$commentId/replies',
       queryParameters: {'limit': '$limit', 'cursor': ?cursor},
     );
     final rawItems = payload['items'];

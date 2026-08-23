@@ -111,6 +111,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		pollID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/polls/"), "/vote")
 		s.votePoll(w, r, pollID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/replies"):
+		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/replies")
+		s.listCommentReplies(w, r, commentID)
+		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/replies"):
 		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/replies")
 		s.createReply(w, r, commentID)

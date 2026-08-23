@@ -155,3 +155,87 @@ func TestFeedSortsAgainstPostgres(t *testing.T) {
 		requireFeedOrder(t, got, tc.want, tc.sort)
 	}
 }
+
+// 楼中楼：入口评论下按创建时间分页拉取整条回复线程（含孙级回复）。
+func TestCommentThreadAgainstPostgres(t *testing.T) {
+	s := feedIntegrationServer(t)
+	_, postIDs := insertFeedFixtures(t, s)
+	postID := postIDs["p1"]
+	var authorID string
+	if err := s.db.QueryRow(`SELECT author_id FROM posts WHERE id = $1`, postID).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	rootID := "itest-ct-root-" + suffix
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`
+		INSERT INTO comments (id, post_id, author_id, root_id, parent_id, content,
+			publication_status, moderation_status, created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, $1, NULL, 'root', 'published', 'normal', $4, $4, $4)`,
+		rootID, postID, authorID, now); err != nil {
+		t.Fatal(err)
+	}
+	replyIDs := []string{"r1", "r2", "r3", "r4"}
+	inserted := make([]string, 0, len(replyIDs))
+	for i, key := range replyIDs {
+		id := "itest-ct-" + key + "-" + suffix
+		createdAt := now.Add(time.Duration(i) * time.Minute)
+		parent := rootID
+		if key == "r4" {
+			parent = "itest-ct-r1-" + suffix // 孙级回复挂在 r1 下
+		}
+		if _, err := s.db.Exec(`
+			INSERT INTO comments (id, post_id, author_id, root_id, parent_id, content,
+				publication_status, moderation_status, created_at, updated_at, published_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'published', 'normal', $7, $7, $7)`,
+			id, postID, authorID, rootID, parent, key, createdAt); err != nil {
+			t.Fatal(err)
+		}
+		inserted = append(inserted, id)
+	}
+
+	fetchReplies := func() []string {
+		var all []string
+		cursor := ""
+		for page := 0; page < 10; page++ {
+			u := fmt.Sprintf("/api/v1/comments/%s/replies?limit=2", rootID)
+			if cursor != "" {
+				u += "&cursor=" + url.QueryEscape(cursor)
+			}
+			req := httptest.NewRequest(http.MethodGet, u, nil)
+			rec := httptest.NewRecorder()
+			s.listCommentReplies(rec, req, rootID)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("page=%d status=%d body=%s", page, rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Items []struct {
+					ID string `json:"id"`
+				} `json:"items"`
+				Next *string `json:"next_cursor"`
+				More bool    `json:"has_more"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range payload.Items {
+				all = append(all, item.ID)
+			}
+			if payload.Next == nil || !payload.More {
+				break
+			}
+			cursor = *payload.Next
+		}
+		return all
+	}
+
+	got := fetchReplies()
+	if len(got) != len(inserted) {
+		t.Fatalf("thread replies got %d ids, want %d: %v", len(got), len(inserted), got)
+	}
+	for i := range inserted {
+		if got[i] != inserted[i] {
+			t.Fatalf("thread reply order=%v, want %v", got, inserted)
+		}
+	}
+}

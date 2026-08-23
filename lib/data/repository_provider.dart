@@ -62,7 +62,9 @@ class ForumRepositories {
   }) {
     const baseUrl = String.fromEnvironment('API_BASE_URL');
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
-    final actualTokenStore = tokenStore ?? MemoryTokenStore();
+    // API 模式下未显式注入令牌存储时默认使用平台安全存储，避免进程重启后
+    // 会话丢失；MemoryTokenStore 只应出现在测试注入路径。
+    final actualTokenStore = tokenStore ?? SecureTokenStore();
     final authenticatedClient = ApiClient(
       baseUri: Uri.parse(baseUrl),
       tokenStore: actualTokenStore,

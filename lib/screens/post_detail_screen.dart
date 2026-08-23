@@ -107,8 +107,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       });
       widget.onFeedback('回复已发布');
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '回复失败，请重试'));
+      }
     } finally {
       if (mounted) setState(() => isSending = false);
     }
@@ -132,10 +133,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final listenables = <Listenable>[widget.controller];
-    if (widget.commentsController != null)
+    if (widget.commentsController != null) {
       listenables.add(widget.commentsController!);
-    if (widget.interactionController != null)
+    }
+    if (widget.interactionController != null) {
       listenables.add(widget.interactionController!);
+    }
     return AnimatedBuilder(
       animation: Listenable.merge(listenables),
       builder: (context, _) {
@@ -542,14 +545,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (value == null ||
         value.$1.isEmpty ||
         value.$2.isEmpty ||
-        widget.onEditPost == null)
+        widget.onEditPost == null) {
       return;
+    }
     try {
       await widget.onEditPost!(post, value.$1, value.$2);
       if (mounted) widget.onFeedback('帖子已更新');
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '编辑失败，请重试'));
+      }
     }
   }
 
@@ -579,8 +584,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       await widget.onDeletePost!(post);
       if (mounted) Navigator.of(context).pop();
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '删除失败，请重试'));
+      }
     }
   }
 
@@ -635,8 +641,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         widget.onFeedback('感谢反馈，我们会尽快处理');
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '举报失败，请稍后重试'));
+      }
     }
   }
 
@@ -664,14 +671,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       ),
     );
     controller.dispose();
-    if (value == null || value.isEmpty || widget.commentsController == null)
+    if (value == null || value.isEmpty || widget.commentsController == null) {
       return;
+    }
     try {
       final updated = await widget.commentsController!.edit(comment, value);
       if (updated == null) widget.onFeedback('当前模式暂不支持编辑评论');
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '评论编辑失败，请重试'));
+      }
     }
   }
 
@@ -684,12 +693,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final before = post.commentCount;
     try {
       await controller.delete(comment);
-      if (post.commentCount == before && before > 0)
+      if (post.commentCount == before && before > 0) {
         post.commentCount = before - 1;
+      }
       if (mounted) setState(() {});
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '删除失败，请重试'));
+      }
     }
   }
 }
@@ -726,18 +737,21 @@ class _PollPanelState extends State<_PollPanel> {
         pollId: pollId,
         optionIds: selected.toList(),
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           voted = true;
         });
+      }
       // 服务器重新计算票数，刷新后再展示权威结果。
-      if (mounted)
+      if (mounted) {
         setState(() => future = widget.repository.getPoll(widget.postId));
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('投票失败，请重试')));
+      }
     } finally {
       if (mounted) setState(() => submitting = false);
     }
@@ -747,11 +761,12 @@ class _PollPanelState extends State<_PollPanel> {
   Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>?>(
     future: future,
     builder: (context, snapshot) {
-      if (snapshot.connectionState != ConnectionState.done)
+      if (snapshot.connectionState != ConnectionState.done) {
         return const Padding(
           padding: EdgeInsets.symmetric(vertical: 12),
           child: LinearProgressIndicator(),
         );
+      }
       final value = snapshot.data;
       if (value == null) return const SizedBox.shrink();
       final raw = value['options'];
@@ -782,46 +797,58 @@ class _PollPanelState extends State<_PollPanel> {
               ),
             ),
             const SizedBox(height: 8),
-            ...options.map((option) {
+            if (allowMultiple) ...options.map((option) {
               final id = '${option['id'] ?? ''}';
               final count = option['vote_count'] is num
                   ? (option['vote_count'] as num).toInt()
                   : 0;
-              // ignore: deprecated_member_use
-              if (allowMultiple) {
-                return CheckboxListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  value: selected.contains(id),
-                  onChanged: voted
-                      ? null
-                      : (value) => setState(() {
-                          if (value == true) {
-                            selected.add(id);
-                          } else {
-                            selected.remove(id);
-                          }
-                        }),
-                  title: Text('${option['label'] ?? ''}'),
-                  secondary: voted ? Text('$count') : null,
-                );
-              }
-              return RadioListTile<String>(
+              return CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                value: id,
-                groupValue: selected.isEmpty ? null : selected.first,
+                value: selected.contains(id),
                 onChanged: voted
                     ? null
                     : (value) => setState(() {
-                        selected
-                          ..clear()
-                          ..add(value!);
+                        if (value == true) {
+                          selected.add(id);
+                        } else {
+                          selected.remove(id);
+                        }
                       }),
                 title: Text('${option['label'] ?? ''}'),
                 secondary: voted ? Text('$count') : null,
               );
-            }),
+            }) else
+              RadioGroup<String>(
+                groupValue: selected.isEmpty ? null : selected.first,
+                onChanged: voted
+                    ? (_) {}
+                    : (value) => setState(() {
+                        if (value != null) {
+                          selected
+                            ..clear()
+                            ..add(value);
+                        }
+                      }),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ...options.map((option) {
+                      final id = '${option['id'] ?? ''}';
+                      final count = option['vote_count'] is num
+                          ? (option['vote_count'] as num).toInt()
+                          : 0;
+                      return RadioListTile<String>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: id,
+                        title: Text('${option['label'] ?? ''}'),
+                        secondary: voted ? Text('$count') : null,
+                      );
+                    }),
+                  ],
+                ),
+              ),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton(

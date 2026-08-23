@@ -220,13 +220,16 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 	accessExpires := now.Add(accessTokenLifetime)
 	refreshExpires := now.Add(refreshTokenLifetime)
 	newRefreshID := newID("rft")
-	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = $1, replaced_by_id = $2, last_used_at = $1 WHERE id = $3`, now, newRefreshID, oldRefreshID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = $1, last_used_at = $1 WHERE id = $2`, now, oldRefreshID); err != nil {
 		return AuthResponse{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET access_token_hash = $1, expires_at = $2, last_used_at = $3, user_agent = $4, ip_address = $5 WHERE id = $6 AND revoked_at IS NULL`, tokenHash(accessToken), accessExpires, now, metadata.UserAgent, metadata.IPAddress, sessionID); err != nil {
 		return AuthResponse{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO refresh_tokens (id, session_id, user_id, token_hash, expires_at, created_at, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $6)`, newRefreshID, sessionID, user.ID, tokenHash(newRefreshToken), refreshExpires, now); err != nil {
+		return AuthResponse{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET replaced_by_id = $1 WHERE id = $2`, newRefreshID, oldRefreshID); err != nil {
 		return AuthResponse{}, err
 	}
 	if err := tx.Commit(); err != nil {

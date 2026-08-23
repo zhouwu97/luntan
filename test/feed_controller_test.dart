@@ -69,6 +69,45 @@ void main() {
     expect(feed.calls, hasLength(1));
   });
 
+  test('applyDetailResult 把详情页状态增量同步回列表', () async {
+    final initial = Post(
+      id: 'a',
+      authorId: 'author-1',
+      communityId: 'campus',
+      title: 'old title',
+      content: 'old content',
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+    final feed = _RecordingFeed([
+      FeedPage(items: [initial], hasMore: false),
+    ]);
+    final controller = FeedController(repository: feed);
+    await controller.initialLoad();
+
+    final detail = Post(
+      id: 'a',
+      authorId: 'author-1',
+      communityId: 'campus',
+      title: 'new title',
+      content: 'new content',
+      commentCount: 3,
+      likeCount: 7,
+      bookmarkCount: 2,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+      viewerState: ViewerPostState(hasLiked: true, hasBookmarked: true),
+    )..isLiked = true;
+
+    controller.applyDetailResult(detail);
+    final synced = controller.state.items.single;
+    expect(synced.isLiked, isTrue);
+    expect(synced.title, 'new title');
+    expect(synced.likeCount, 7);
+    expect(synced.commentCount, 3);
+    expect(feed.calls, hasLength(1), reason: '增量同步不应触发新的网络请求');
+  });
+
   test('loadMore 按 id 去重追加', () async {
     final feed = _RecordingFeed([
       FeedPage(items: [_post('a', 'x'), _post('b', 'x')], hasMore: true, nextCursor: 'c1'),

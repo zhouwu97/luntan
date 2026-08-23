@@ -130,6 +130,90 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
+func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, commentID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
+		return
+	}
+	var rootID string
+	err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(root_id, id) FROM comments WHERE id = $1 AND deleted_at IS NULL`, commentID).Scan(&rootID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrCommentNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var cursor *commentCursor
+	if value := r.URL.Query().Get("cursor"); value != "" {
+		decoded, decodeErr := decodeCommentCursor(value)
+		if decodeErr != nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			return
+		}
+		cursor = &decoded
+	}
+	query := `
+		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
+		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
+		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
+		       c.created_at, c.updated_at
+		FROM comments c
+		JOIN users u ON u.id = c.author_id
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE c.root_id = $1 AND c.id <> $1 AND c.deleted_at IS NULL
+		  AND c.publication_status = 'published' AND c.moderation_status = 'normal'`
+	args := []any{rootID}
+	if cursor != nil {
+		query += " AND (c.created_at, c.id) > ($2, $3)"
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	query += fmt.Sprintf(" ORDER BY c.created_at ASC, c.id ASC LIMIT $%d", limitPosition)
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]commentResponse, 0, limit+1)
+	for rows.Next() {
+		var item commentResponse
+		var authorID, rowRootID, parentID, replyTo string
+		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rowRootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		item.Author.ID = authorID
+		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rowRootID), optionalString(parentID), optionalString(replyTo)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore && len(items) > 0 {
+		encoded, encodeErr := encodeCommentCursor(commentCursor{CreatedAt: items[len(items)-1].CreatedAt, ID: items[len(items)-1].ID})
+		if encodeErr != nil {
+			writeInternalError(w, r, encodeErr)
+			return
+		}
+		nextCursor = encoded
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
+}
+
 func (s *Server) createComment(w http.ResponseWriter, r *http.Request, postID, forcedParentID string) {
 	if !s.requireDatabase(w, r) {
 		return

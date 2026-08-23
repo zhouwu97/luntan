@@ -158,7 +158,6 @@ class _LuntanAppState extends State<LuntanApp> {
     final detailController = PostDetailController(repository: repositories.post, postId: post.id);
     final commentsController = CommentsController(repository: repositories.comments!, postId: post.id);
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PostDetailScreen(
-      store: store,
       controller: detailController,
       commentsController: commentsController,
       interactionController: interactionController,
@@ -172,9 +171,14 @@ class _LuntanAppState extends State<LuntanApp> {
       onReport: report,
       pollRepository: repositories.poll,
     ))).then((_) {
+      // 详情页返回时用其最终帖子状态做增量同步，避免无条件整页刷新。
+      // 编辑/删除等结构化变更已由各自回调刷新 Feed。
+      final detailPost = detailController.state.detail?.post;
       detailController.dispose();
       commentsController.dispose();
-      if (apiMode) feedController.refresh();
+      if (apiMode && detailPost != null) {
+        feedController.applyDetailResult(detailPost);
+      }
     });
   }
 

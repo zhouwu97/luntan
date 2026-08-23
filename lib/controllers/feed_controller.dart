@@ -154,4 +154,42 @@ class FeedController extends ChangeNotifier {
     }
     return repository.getLatestFeed(cursor: cursor);
   }
+
+  /// 详情页返回后把该帖的互动/计数同步回列表，避免无条件整页刷新。
+  /// 结构化变更（编辑标题/正文、删除）由各自回调负责刷新。
+  void applyDetailResult(Post detail) {
+    final index = _state.items.indexWhere((post) => post.id == detail.id);
+    if (index < 0) return;
+    final feedPost = _state.items[index];
+    var changed = false;
+    if (feedPost.isLiked != detail.isLiked) {
+      feedPost.isLiked = detail.isLiked;
+      changed = true;
+    }
+    if (feedPost.isBookmarked != detail.isBookmarked) {
+      feedPost.isBookmarked = detail.isBookmarked;
+      changed = true;
+    }
+    if (feedPost.likeCount != detail.likeCount) {
+      feedPost.likeCount = detail.likeCount;
+      changed = true;
+    }
+    if (feedPost.bookmarkCount != detail.bookmarkCount) {
+      feedPost.bookmarkCount = detail.bookmarkCount;
+      changed = true;
+    }
+    if (feedPost.commentCount != detail.commentCount) {
+      feedPost.commentCount = detail.commentCount;
+      changed = true;
+    }
+    if (feedPost.title != detail.title) {
+      feedPost.title = detail.title;
+      changed = true;
+    }
+    if (feedPost.content != detail.content) {
+      feedPost.content = detail.content;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
 }

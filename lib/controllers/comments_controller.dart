@@ -11,6 +11,9 @@ class CommentsController extends ChangeNotifier {
 
   final CommentRepository _repository;
   final String postId;
+
+  /// 暴露给楼中楼视图做独立的分页拉取。
+  CommentRepository get repository => _repository;
   final List<Comment> items = [];
   String? nextCursor;
   bool hasMore = true;

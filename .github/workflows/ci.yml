@@ -25,6 +25,22 @@ jobs:
 
   go:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: luntan
+          POSTGRES_PASSWORD: luntan
+          POSTGRES_DB: luntan_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U luntan"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://luntan:luntan@localhost:5432/luntan_test?sslmode=disable
     defaults:
       run:
         working-directory: server

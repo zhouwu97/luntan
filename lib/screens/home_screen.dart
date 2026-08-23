@@ -65,7 +65,12 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     scrollController = ScrollController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.feedController.initialLoad();
+      if (!mounted) return;
+      // 首屏让 FeedController 与当前板块/排序对齐，避免 API 模式加载出全板块数据。
+      widget.feedController.setQuery(
+        communityId: widget.store.selectedSection.communityId,
+        sort: widget.store.selectedSort.name,
+      );
     });
   }
 
@@ -87,7 +92,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Post> get _visiblePosts {
-    final posts = widget.feedController.state.items
+    final posts = widget.feedController.state.items;
+    // API 模式：板块与排序由服务端过滤，客户端只展示服务端结果，不再二次筛选/重排。
+    if (widget.feedRepository != null) return posts;
+    final filtered = posts
         .where(
           (post) =>
               post.communityId == widget.store.selectedSection.communityId,
@@ -100,11 +108,11 @@ class _HomeScreenState extends State<HomeScreen> {
         })
         .toList();
     if (widget.store.selectedSort == FeedSort.latest) {
-      posts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } else if (widget.store.selectedSort == FeedSort.featured) {
-      posts.sort((a, b) => b.commentCount.compareTo(a.commentCount));
+      filtered.sort((a, b) => b.commentCount.compareTo(a.commentCount));
     }
-    return posts;
+    return filtered;
   }
 
   void openSearch() {

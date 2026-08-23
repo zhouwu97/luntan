@@ -436,7 +436,7 @@ class _FeatureEntries extends StatelessWidget {
     (Icons.local_fire_department_outlined, '热门帖子', AppTheme.orange),
     (Icons.checkroom_outlined, '穿搭分享', AppTheme.pink),
     (Icons.calendar_month_outlined, '活动', AppTheme.mint),
-    (Icons.shopping_bag_outlined, '二手集市', AppTheme.purple),
+    (Icons.sports_esports_outlined, '玩法分享', AppTheme.purple),
   ];
 
   @override

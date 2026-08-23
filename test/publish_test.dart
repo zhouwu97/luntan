@@ -93,4 +93,7 @@ class _FakePublishRepository implements PublishRepository {
     required int size,
     required String sha256,
   }) => throw UnimplementedError();
+
+  @override
+  Future<void> deleteMedia(String mediaId) async {}
 }

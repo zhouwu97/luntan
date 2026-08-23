@@ -210,6 +210,37 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 	httpserver.WriteJSON(w, http.StatusOK, mediaResponse(asset))
 }
 
+// deleteMedia 由作者清理尚未关联帖子的已上传媒体（放弃发布或单图删除），
+// 防止 pending/ready 孤儿媒体长期堆积。
+func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(mediaID) == "" {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	result, err := s.db.ExecContext(r.Context(), `UPDATE media_assets SET deleted_at = now(), updated_at = now() WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`, mediaID, user.ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if affected == 0 {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func mediaResponse(asset mediaAsset) map[string]any {
 	return map[string]any{"id": asset.ID, "object_key": asset.ObjectKey, "mime_type": asset.MimeType, "width": asset.Width, "height": asset.Height, "size": asset.Size, "sha256": asset.SHA256, "status": asset.Status, "created_at": asset.CreatedAt, "updated_at": asset.UpdatedAt, "completed_at": nullableTime(asset.CompletedAt)}
 }

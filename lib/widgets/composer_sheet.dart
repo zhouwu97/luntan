@@ -1,5 +1,7 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 import '../controllers/publish_controller.dart';
 import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
-import '../domain/models.dart';
 import '../theme/app_theme.dart';
 import 'post_media_preview.dart';
 
@@ -74,20 +75,50 @@ class PostEditorDialog extends StatefulWidget {
   State<PostEditorDialog> createState() => _PostEditorDialogState();
 }
 
+enum _DraftImageStatus { pending, uploading, done, failed }
+
+/// 编辑器里选中的一张待发布图片：独立跟踪字节、摘要、上传状态与失败信息。
+class _DraftImage {
+  _DraftImage({required this.file});
+  final XFile file;
+  Uint8List? bytes;
+  String? mimeType;
+  int? width;
+  int? height;
+  String? mediaId;
+  _DraftImageStatus status = _DraftImageStatus.pending;
+  String? error;
+}
+
 class _PostEditorDialogState extends State<PostEditorDialog> {
   final titleController = TextEditingController();
   final bodyController = TextEditingController();
   final pollOptionControllers = [TextEditingController(), TextEditingController()];
   ForumSection section = ForumSection.unboxing;
-  List<MediaAsset> selectedMedia = const [];
-  final List<XFile> selectedFiles = <XFile>[];
+  List<MediaAsset> selectedMedia = const []; // mock 模式示例图
+  final List<_DraftImage> images = <_DraftImage>[];
   String? errorText;
   bool submitting = false;
+  bool _submitted = false;
+
+  static const int maxImages = 9;
+  static const int maxFileBytes = 10 * 1024 * 1024;
+  static const int maxTotalBytes = 30 * 1024 * 1024;
+
+  bool get _usesRealUpload => widget.publishController != null;
 
   List<MediaAsset> get sampleMedia => ForumStore.seeded().posts.expand((post) => post.images).take(9).toList();
 
   @override
   void dispose() {
+    if (!_submitted && _usesRealUpload) {
+      // 用户放弃发布时清理已经上传但仍未入帖的媒体，避免服务端堆积 pending。
+      for (final image in images) {
+        final mediaId = image.mediaId;
+        if (mediaId == null) continue;
+        widget.publishController!.deleteMedia(mediaId).catchError((_) {});
+      }
+    }
     titleController.dispose();
     bodyController.dispose();
     for (final controller in pollOptionControllers) {
@@ -104,36 +135,23 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     if (body.isEmpty) return setState(() => errorText = '正文不能为空');
     final pollOptions = pollOptionControllers.map((controller) => controller.text.trim()).where((value) => value.isNotEmpty).toList();
     if (widget.isPoll && pollOptions.length < 2) return setState(() => errorText = '投票至少需要两个选项');
+    if (_usesRealUpload && images.any((image) => image.status != _DraftImageStatus.done)) {
+      final failed = images.any((image) => image.status == _DraftImageStatus.failed);
+      return setState(
+        () => errorText = failed ? '有图片上传失败，请重试或删除后再发布' : '图片仍在上传，请稍候',
+      );
+    }
     setState(() => submitting = true);
     _finishSubmit(title: title, body: body, pollOptions: pollOptions);
   }
 
   Future<void> _finishSubmit({required String title, required String body, required List<String> pollOptions}) async {
     try {
-      final mediaIds = <String>[];
-      final publisher = widget.publishController;
-      if (publisher != null) {
-        for (final file in selectedFiles) {
-          final bytes = await file.readAsBytes();
-          if (bytes.length > 10 * 1024 * 1024) {
-            throw const PublishException('单张图片不能超过 10 MB');
-          }
-          final mimeType = _mimeType(file.name);
-          final extension = file.name.toLowerCase();
-          if (!(extension.endsWith('.jpg') || extension.endsWith('.jpeg') || extension.endsWith('.png') || extension.endsWith('.webp'))) {
-            throw const PublishException('仅支持 JPG、PNG、WEBP 图片');
-          }
-          final digest = sha256.convert(bytes).toString();
-          final mediaId = await publisher.uploadMedia(
-            fileName: file.name,
-            mimeType: mimeType,
-            bytes: bytes,
-            sha256: digest,
-          );
-          mediaIds.add(mediaId);
-        }
-      }
+      final mediaIds = _usesRealUpload
+          ? images.map((image) => image.mediaId!).toList()
+          : <String>[];
       if (!mounted) return;
+      _submitted = true;
       Navigator.of(context).pop(PostDraft(
         title: title,
         body: body,
@@ -144,28 +162,101 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         mediaIds: mediaIds,
         pollOptions: pollOptions,
       ));
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
-      setState(() {
-        submitting = false;
-        errorText = error is PublishException ? error.message : '图片上传失败，请重试';
-      });
+      Navigator.of(context).pop();
     }
   }
 
   Future<void> _pickImages() async {
-    if (submitting || selectedFiles.length >= 9) return;
+    if (submitting || images.length >= maxImages) return;
     final files = await ImagePicker().pickMultiImage(imageQuality: 92);
     if (!mounted || files.isEmpty) return;
+    final additions = <_DraftImage>[];
     setState(() {
-      selectedFiles.addAll(files.take(9 - selectedFiles.length));
-      selectedMedia = [
-        ...selectedMedia,
-        ...files.take(9 - selectedMedia.length).map(
-          (file) => MediaAsset(id: 'local-${file.name}-${file.hashCode}', type: MediaType.image, label: file.name),
-        ),
-      ];
+      for (final file in files.take(maxImages - images.length)) {
+        final image = _DraftImage(file: file);
+        images.add(image);
+        additions.add(image);
+      }
     });
+    for (final image in additions) {
+      _upload(image);
+    }
+  }
+
+  Future<void> _upload(_DraftImage image) async {
+    final publisher = widget.publishController;
+    if (publisher == null) return;
+    if (image.status == _DraftImageStatus.done ||
+        image.status == _DraftImageStatus.uploading) {
+      return;
+    }
+    setState(() {
+      image.status = _DraftImageStatus.uploading;
+      image.error = null;
+    });
+    try {
+      final bytes = image.bytes = await image.file.readAsBytes();
+      _assertValidImage(image.file.name, bytes);
+      final totalBytes =
+          images
+              .map((item) => item.bytes?.length ?? 0)
+              .fold<int>(0, (sum, item) => sum + item);
+      if (totalBytes > maxTotalBytes) {
+        throw const PublishException('图片总量不能超过 30 MB');
+      }
+      final digest = sha256.convert(bytes).toString();
+      final mediaId = await publisher.uploadMedia(
+        fileName: image.file.name,
+        mimeType: image.mimeType ??= _mimeType(image.file.name),
+        bytes: bytes,
+        sha256: digest,
+        width: image.width ?? 0,
+        height: image.height ?? 0,
+      );
+      if (!mounted) return;
+      setState(() {
+        image.mediaId = mediaId;
+        image.status = _DraftImageStatus.done;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        image.status = _DraftImageStatus.failed;
+        image.error = error is PublishException ? error.message : '图片上传失败，请重试';
+      });
+    }
+  }
+
+  void _deleteImage(_DraftImage image) {
+    if (!_usesRealUpload) return;
+    if (image.status == _DraftImageStatus.uploading) return;
+    setState(() {
+      images.remove(image);
+      errorText = null;
+    });
+    if (image.mediaId != null) {
+      widget.publishController!.deleteMedia(image.mediaId!).catchError((_) {});
+    }
+  }
+
+  void _assertValidImage(String fileName, List<int> bytes) {
+    if (bytes.length > maxFileBytes) {
+      throw const PublishException('单张图片不能超过 10 MB');
+    }
+    final extension = fileName.toLowerCase();
+    if (!(extension.endsWith('.jpg') ||
+        extension.endsWith('.jpeg') ||
+        extension.endsWith('.png') ||
+        extension.endsWith('.webp'))) {
+      throw const PublishException('仅支持 JPG、PNG、WEBP 图片');
+    }
+  }
+
+  Future<void> _addSampleImage() async {
+    final additions = [...sampleMedia.take(maxImages - selectedMedia.length)];
+    setState(() => selectedMedia = [...selectedMedia, ...additions]);
   }
 
   String _mimeType(String fileName) {
@@ -205,17 +296,93 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
               const Text('图片', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Row(children: [
-                OutlinedButton.icon(onPressed: submitting ? null : (widget.publishController == null && widget.enableSampleMedia ? () => setState(() => selectedMedia = [...selectedMedia, ...sampleMedia.take(1)]) : _pickImages), icon: const Icon(Icons.add_photo_alternate_outlined), label: Text(widget.publishController == null && widget.enableSampleMedia ? '添加示例图' : '选择图片')),
-                const SizedBox(width: 8),
-                Text('${selectedMedia.length} / 9', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-              ]),
-              if (selectedMedia.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SizedBox(height: 86, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: selectedMedia.length, separatorBuilder: (_, _) => const SizedBox(width: 8), itemBuilder: (_, index) => Stack(children: [
-                  SizedBox(width: 86, height: 86, child: PostMediaPreview(images: [selectedMedia[index]])),
-                  Positioned(right: 0, top: 0, child: IconButton(onPressed: submitting ? null : () => setState(() { final mediaCopy = [...selectedMedia]..removeAt(index); selectedMedia = mediaCopy; selectedFiles.removeAt(index); }), icon: const Icon(Icons.cancel, color: Colors.white, size: 20))),
-                ]))),
-              ],
+                OutlinedButton.icon(
+                        onPressed: submitting
+                            ? null
+                            : (_usesRealUpload
+                                ? _pickImages
+                                : widget.enableSampleMedia
+                                ? _addSampleImage
+                                : _pickImages),
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        label: Text(
+                          _usesRealUpload
+                              ? '选择图片'
+                              : widget.enableSampleMedia
+                              ? '添加示例图'
+                              : '选择图片',
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _usesRealUpload
+                            ? '${images.length} / $maxImages'
+                            : '${selectedMedia.length} / $maxImages',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ]),
+                    if (_usesRealUpload && images.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 104,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: images.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (_, index) {
+                            final image = images[index];
+                            return _DraftImageThumb(
+                              image: image,
+                              onRetry: () => _upload(image),
+                              onDelete: () => _deleteImage(image),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                    if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 86,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: selectedMedia.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
+                          itemBuilder: (_, index) => Stack(
+                            children: [
+                              SizedBox(
+                                width: 86,
+                                height: 86,
+                                child: PostMediaPreview(
+                                  images: [selectedMedia[index]],
+                                ),
+                              ),
+                              Positioned(
+                                right: 0,
+                                top: 0,
+                                child: IconButton(
+                                  onPressed: submitting
+                                      ? null
+                                      : () => setState(
+                                          () => selectedMedia = [
+                                            ...selectedMedia,
+                                          ]..removeAt(index),
+                                        ),
+                                  icon: const Icon(
+                                    Icons.cancel,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
               if (errorText != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(errorText!, style: const TextStyle(color: AppTheme.pink, fontSize: 12))),
             ],
           ),
@@ -224,3 +391,110 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     );
   }
 }
+
+class _DraftImageThumb extends StatelessWidget {
+  const _DraftImageThumb({
+    required this.image,
+    required this.onRetry,
+    required this.onDelete,
+  });
+
+  final _DraftImage image;
+  final VoidCallback onRetry;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = image.bytes;
+    final status = image.status;
+    final Widget preview = bytes == null
+        ? Container(
+            color: AppTheme.surfaceBlue,
+            alignment: Alignment.center,
+            child: const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        : Image.memory(bytes, fit: BoxFit.cover);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 86,
+          height: 68,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ClipRRect(borderRadius: BorderRadius.circular(10), child: preview),
+              if (status == _DraftImageStatus.done)
+                const Positioned(
+                  right: 4,
+                  top: 4,
+                  child: _StatusDot(color: AppTheme.mint, icon: Icons.check),
+                )
+              else if (status == _DraftImageStatus.failed)
+                Positioned(
+                  right: 4,
+                  top: 4,
+                  child: GestureDetector(
+                    onTap: onRetry,
+                    child: const _StatusDot(
+                      color: AppTheme.pink,
+                      icon: Icons.refresh,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 86,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _statusLabel(status),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                onPressed: onDelete,
+                iconSize: 16,
+                icon: const Icon(
+                  Icons.close_rounded,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatusDot extends StatelessWidget {
+  const _StatusDot({required this.color, required this.icon});
+  final Color color;
+  final IconData icon;
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    padding: const EdgeInsets.all(2),
+    child: Icon(icon, color: Colors.white, size: 12),
+  );
+}
+
+String _statusLabel(_DraftImageStatus status) => switch (status) {
+  _DraftImageStatus.pending => '等待上传',
+  _DraftImageStatus.uploading => '上传中…',
+  _DraftImageStatus.done => '上传成功',
+  _DraftImageStatus.failed => '上传失败',
+};

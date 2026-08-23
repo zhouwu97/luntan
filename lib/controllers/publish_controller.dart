@@ -69,6 +69,8 @@ class PublishController extends ChangeNotifier {
     return ticket.mediaId;
   }
 
+  Future<void> deleteMedia(String mediaId) => _repository.deleteMedia(mediaId);
+
   Future<Map<String, dynamic>>? createPoll({
     required String postId,
     required String question,

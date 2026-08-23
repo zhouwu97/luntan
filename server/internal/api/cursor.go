@@ -10,6 +10,9 @@ import (
 type feedCursor struct {
 	PublishedAt time.Time `json:"published_at"`
 	ID          string    `json:"id"`
+	// Score 只在基于评分的排序（recommended/hot/featured）中出现，
+	// latest 排序的游标不含该字段。
+	Score *float64 `json:"score,omitempty"`
 }
 
 func encodeFeedCursor(cursor feedCursor) (string, error) {

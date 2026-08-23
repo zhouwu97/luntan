@@ -50,10 +50,16 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
       ..removeWhere((post) => post.publicationStatus != PublicationStatus.published || post.moderationStatus != ModerationStatus.normal)
       ..removeWhere((post) => communityId != null && post.communityId != communityId)
       ..sort((a, b) {
-        final byDate = sort == 'featured'
-            ? (b.isFeatured ? 1 : 0).compareTo(a.isFeatured ? 1 : 0)
-            : b.createdAt.compareTo(a.createdAt);
-        return byDate == 0 ? b.id.compareTo(a.id) : byDate;
+        final int by;
+        switch (sort) {
+          case 'featured':
+            by = (b.isFeatured ? 1 : 0).compareTo(a.isFeatured ? 1 : 0);
+          case 'hot':
+            by = b.commentCount.compareTo(a.commentCount);
+          default:
+            by = b.createdAt.compareTo(a.createdAt);
+        }
+        return by == 0 ? b.id.compareTo(a.id) : by;
       });
     final start = int.tryParse(cursor ?? '') ?? 0;
     if (start >= posts.length) return const FeedPage(items: [], hasMore: false);

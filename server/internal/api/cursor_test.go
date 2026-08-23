@@ -20,6 +20,26 @@ func TestFeedCursorRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFeedCursorRoundTripWithScore(t *testing.T) {
+	score := 42.5
+	original := feedCursor{
+		PublishedAt: time.Date(2026, 8, 22, 12, 0, 0, 123, time.UTC),
+		ID:          "post-2",
+		Score:       &score,
+	}
+	encoded, err := encodeFeedCursor(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeFeedCursor(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Score == nil || *decoded.Score != score {
+		t.Fatalf("score changed after round trip: %#v", decoded.Score)
+	}
+}
+
 func TestFeedCursorRejectsInvalidValue(t *testing.T) {
 	if _, err := decodeFeedCursor("not-a-cursor"); err == nil {
 		t.Fatal("invalid cursor was accepted")

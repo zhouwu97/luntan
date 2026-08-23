@@ -12,7 +12,7 @@ typedef PostMedia = MediaAsset;
 /// Mock/过渡层把现有三个板块映射成动态 Community，后续接 API 时可移除。
 enum ForumSection { unboxing, community, daily }
 
-enum FeedSort { recommended, latest, featured }
+enum FeedSort { recommended, latest, featured, hot }
 
 extension ForumSectionLabel on ForumSection {
   String get label => switch (this) {
@@ -41,6 +41,7 @@ extension FeedSortLabel on FeedSort {
         FeedSort.recommended => '推荐',
         FeedSort.latest => '最新',
         FeedSort.featured => '精华',
+        FeedSort.hot => '热门',
       };
 }
 

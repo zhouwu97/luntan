@@ -47,6 +47,25 @@ type postResponse struct {
 type feedPostRow struct {
 	post        postResponse
 	publishedAt time.Time
+	score       *float64
+}
+
+// feedSortColumns 返回 feed 排序对应的评分表达式与 ORDER BY 片段。
+// scoreExpr 为空表示按发布时间排序（latest），游标不携带评分；
+// 否则游标携带 (score, published_at, id) 三元组做键集分页。
+func feedSortColumns(sort string) (scoreExpr, orderBy string) {
+	ageHours := "EXTRACT(EPOCH FROM (now() - p.published_at)) / 3600.0"
+	switch sort {
+	case "recommended":
+		scoreExpr = "(p.like_count * 4 + p.comment_count * 3 + p.bookmark_count * 5 + p.share_count * 2 + p.view_count * 0.05) / POWER(" + ageHours + " + 2, 1.25)"
+	case "hot":
+		scoreExpr = "(p.like_count + p.comment_count + 2 * p.bookmark_count + p.share_count) / POWER(" + ageHours + " + 2, 1.5)"
+	case "featured":
+		scoreExpr = "p.bookmark_count * 5 + p.like_count * 3 + p.comment_count * 2 + p.share_count * 2"
+	default:
+		return "", "ORDER BY p.published_at DESC, p.id DESC"
+	}
+	return scoreExpr, "ORDER BY (" + scoreExpr + ") DESC, p.published_at DESC, p.id DESC"
 }
 
 func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +77,8 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
 		return
 	}
+	scoreExpr, orderBy := feedSortColumns(r.URL.Query().Get("sort"))
+	scored := scoreExpr != ""
 	var cursor *feedCursor
 	if value := r.URL.Query().Get("cursor"); value != "" {
 		decoded, err := decodeFeedCursor(value)
@@ -65,13 +86,21 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 			return
 		}
+		if scored && decoded.Score == nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
+			return
+		}
 		cursor = &decoded
 	}
 
-	query := `
+	columns := `
 		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), p.community_id, c.slug, c.name,
 		       p.type, p.title, p.content, p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
-		       p.created_at, p.updated_at, p.published_at
+		       p.created_at, p.updated_at, p.published_at`
+	if scored {
+		columns += ", " + scoreExpr + " AS feed_score"
+	}
+	query := columns + `
 		FROM posts p
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -79,21 +108,26 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL
 		  AND c.status = 'active' AND c.deleted_at IS NULL`
-	args := make([]any, 0, 3)
+	args := make([]any, 0, 4)
 	if cursor != nil {
-		query += " AND (p.published_at, p.id) < ($1, $2)"
-		args = append(args, cursor.PublishedAt, cursor.ID)
+		if scored {
+			score := 0.0
+			if cursor.Score != nil {
+				score = *cursor.Score
+			}
+			query += " AND (" + scoreExpr + ", p.published_at, p.id) < ($1, $2, $3)"
+			args = append(args, score, cursor.PublishedAt, cursor.ID)
+		} else {
+			query += " AND (p.published_at, p.id) < ($1, $2)"
+			args = append(args, cursor.PublishedAt, cursor.ID)
+		}
 	}
 	if communityID := r.URL.Query().Get("community_id"); communityID != "" {
 		query += fmt.Sprintf(" AND p.community_id = $%d", len(args)+1)
 		args = append(args, communityID)
 	}
 	limitPosition := len(args) + 1
-	if r.URL.Query().Get("sort") == "featured" {
-		query += fmt.Sprintf(" ORDER BY p.comment_count DESC, p.published_at DESC, p.id DESC LIMIT $%d", limitPosition)
-	} else {
-		query += fmt.Sprintf(" ORDER BY p.published_at DESC, p.id DESC LIMIT $%d", limitPosition)
-	}
+	query += " " + orderBy + fmt.Sprintf(" LIMIT $%d", limitPosition)
 	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -104,7 +138,18 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	rowsData := make([]feedPostRow, 0, limit+1)
 	for rows.Next() {
 		var row feedPostRow
-		if err := rows.Scan(&row.post.ID, &row.post.Author.ID, &row.post.Author.Username, &row.post.Author.Nickname, &row.post.Community.ID, &row.post.Community.Slug, &row.post.Community.Name, &row.post.Type, &row.post.Title, &row.post.ContentPreview, &row.post.CommentCount, &row.post.LikeCount, &row.post.BookmarkCount, &row.post.ShareCount, &row.post.ViewCount, &row.post.CreatedAt, &row.post.UpdatedAt, &row.publishedAt); err != nil {
+		destinations := []any{
+			&row.post.ID, &row.post.Author.ID, &row.post.Author.Username, &row.post.Author.Nickname,
+			&row.post.Community.ID, &row.post.Community.Slug, &row.post.Community.Name, &row.post.Type,
+			&row.post.Title, &row.post.ContentPreview, &row.post.CommentCount, &row.post.LikeCount,
+			&row.post.BookmarkCount, &row.post.ShareCount, &row.post.ViewCount, &row.post.CreatedAt,
+			&row.post.UpdatedAt, &row.publishedAt,
+		}
+		if scored {
+			row.score = new(float64)
+			destinations = append(destinations, row.score)
+		}
+		if err := rows.Scan(destinations...); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -131,7 +176,12 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	var nextCursor string
 	if hasMore && len(rowsData) > 0 {
-		nextCursor, err = encodeFeedCursor(feedCursor{PublishedAt: rowsData[len(rowsData)-1].publishedAt, ID: rowsData[len(rowsData)-1].post.ID})
+		last := rowsData[len(rowsData)-1]
+		next := feedCursor{PublishedAt: last.publishedAt, ID: last.post.ID}
+		if scored {
+			next.Score = last.score
+		}
+		nextCursor, err = encodeFeedCursor(next)
 		if err != nil {
 			writeInternalError(w, r, err)
 			return

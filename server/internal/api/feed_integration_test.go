@@ -9,9 +9,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/auth"
 	"github.com/zhouwu97/luntan/server/internal/platform/database"
 )
 
@@ -237,5 +239,59 @@ func TestCommentThreadAgainstPostgres(t *testing.T) {
 		if got[i] != inserted[i] {
 			t.Fatalf("thread reply order=%v, want %v", got, inserted)
 		}
+	}
+}
+
+// 屏蔽用户后，其帖子不再出现在该用户的 Feed 中；未登录公开查看不受影响。
+func TestFeedExcludesBlockedAuthorAgainstPostgres(t *testing.T) {
+	s := feedIntegrationServer(t)
+	communityID, _ := insertFeedFixtures(t, s)
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	blockedUser := "itest-blocked-" + suffix
+	blockedUsername := "blocked_" + suffix
+	viewerUser := "itest-viewer-" + suffix
+	blockedPost := "itest-blocked-post-" + suffix
+	insertUser := func(id, username string) {
+		t.Helper()
+		if _, err := s.db.Exec(`INSERT INTO users (id, username, status) VALUES ($1, $2, 'active')`, id, username); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO user_profiles (user_id, nickname) VALUES ($1, $2)`, id, "itest"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertUser(blockedUser, blockedUsername)
+	insertUser(viewerUser, "viewer_"+suffix)
+	if _, err := s.db.Exec(`INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2)`, viewerUser, blockedUser); err != nil {
+		t.Fatal(err)
+	}
+	publishedAt := time.Now().UTC().Add(-2 * time.Hour)
+	if _, err := s.db.Exec(`
+		INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status,
+			title, content, comment_count, like_count, bookmark_count, share_count, view_count,
+			created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, 'normal', 'published', 'normal', 'blocked', 'body', 0, 0, 0, 0, 0, $4, $4, $4)`,
+		blockedPost, blockedUser, communityID, publishedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	original := resolveOptionalViewer
+	t.Cleanup(func() { resolveOptionalViewer = original })
+
+	resolveOptionalViewer = func(_ *Server, _ *http.Request) (auth.User, bool) {
+		return auth.User{}, false
+	}
+	public := fetchFeedIDs(t, s, "latest", communityID)
+	if !slices.Contains(public, blockedPost) {
+		t.Fatalf("public feed should include blocked-author post, got %v", public)
+	}
+
+	resolveOptionalViewer = func(_ *Server, _ *http.Request) (auth.User, bool) {
+		return auth.User{ID: viewerUser}, true
+	}
+	filtered := fetchFeedIDs(t, s, "latest", communityID)
+	if slices.Contains(filtered, blockedPost) {
+		t.Fatalf("feed should exclude blocked-author post, got %v", filtered)
 	}
 }

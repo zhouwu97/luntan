@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/auth"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
 
@@ -48,6 +49,13 @@ type feedPostRow struct {
 	post        postResponse
 	publishedAt time.Time
 	score       *float64
+}
+
+// resolveOptionalViewer 解析 Feed 的当前查看者（可选）：未登录或 token 无效
+// 时不阻断公开内容读取，仅用于屏蔽过滤等查看者相关逻辑。包级函数便于
+// 集成测试注入固定查看者。
+var resolveOptionalViewer = func(s *Server, r *http.Request) (auth.User, bool) {
+	return s.optionalAuthenticatedUser(r.Context(), r)
 }
 
 // feedSortColumns 返回 feed 排序对应的评分表达式与 ORDER BY 片段。
@@ -125,6 +133,11 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if communityID := r.URL.Query().Get("community_id"); communityID != "" {
 		query += fmt.Sprintf(" AND p.community_id = $%d", len(args)+1)
 		args = append(args, communityID)
+	}
+	// 查看者屏蔽了作者时，该作者的帖子不进入 Feed。
+	if viewer, ok := resolveOptionalViewer(s, r); ok {
+		query += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks WHERE blocker_id = $%d AND blocked_id = p.author_id)", len(args)+1)
+		args = append(args, viewer.ID)
 	}
 	limitPosition := len(args) + 1
 	query += " " + orderBy + fmt.Sprintf(" LIMIT $%d", limitPosition)

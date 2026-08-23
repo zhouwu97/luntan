@@ -79,8 +79,14 @@ class FeedController extends ChangeNotifier {
 
   Future<void> setQuery({String? communityId, String sort = 'recommended'}) async {
     if (_communityId == communityId && _sort == sort && _state.status != FeedStatus.initial) return;
+    final queryChanged = _communityId != communityId || _sort != sort;
     _communityId = communityId;
     _sort = sort;
+    if (queryChanged) {
+      // 查询条件变化时清空当前列表，避免短暂展示上一个板块/排序的内容。
+      _knownIds.clear();
+      _state = const FeedState();
+    }
     await _loadFirstPage();
   }
 

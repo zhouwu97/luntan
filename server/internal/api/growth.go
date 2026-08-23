@@ -378,6 +378,11 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		writeAuthError(w, r, ErrIdempotencyKeyRequired)
+		return
+	}
 	var input struct {
 		ProductID string `json:"product_id"`
 	}
@@ -391,17 +396,32 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	var balance int64
+	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, user.ID).Scan(&balance); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var existingOrderID, existingProductID, existingStatus string
+	var existingPoints int64
+	err = tx.QueryRowContext(r.Context(), `SELECT id, product_id, points, status FROM store_orders WHERE user_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&existingOrderID, &existingProductID, &existingPoints, &existingStatus)
+	if err == nil {
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": existingOrderID, "product_id": existingProductID, "points": existingPoints, "balance": balance, "status": existingStatus})
+		return
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		writeInternalError(w, r, err)
+		return
+	}
 	var productName string
 	var points int64
 	if err := tx.QueryRowContext(r.Context(), `SELECT name, points FROM store_products WHERE id = $1 AND active = true FOR UPDATE`, input.ProductID).Scan(&productName, &points); err == sql.ErrNoRows {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
 	} else if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	var balance int64
-	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, user.ID).Scan(&balance); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -415,11 +435,11 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orderID := newPostID()
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status) VALUES ($1, $2, $3, $4, 'pending')`, orderID, user.ID, input.ProductID, points); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status, idempotency_key) VALUES ($1, $2, $3, $4, 'pending', $5)`, orderID, user.ID, input.ProductID, points, idempotencyKey); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason) VALUES ($1, $2, 'store', $3, $4, $5)`, newPostID(), user.ID, -points, newBalance, productName); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, 'store', $3, $4, $5, $6)`, newPostID(), user.ID, -points, newBalance, productName, idempotencyKey); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

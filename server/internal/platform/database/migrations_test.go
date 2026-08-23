@@ -14,7 +14,7 @@ func TestMigrationFilesAreOrderedAndPaired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 15 || files[0].Version != "000001" || files[1].Version != "000002" || files[2].Version != "000003" || files[3].Version != "000004" || files[4].Version != "000005" || files[5].Version != "000006" || files[6].Version != "000007" || files[7].Version != "000008" || files[8].Version != "000009" || files[9].Version != "000010" || files[10].Version != "000011" || files[11].Version != "000012" || files[12].Version != "000013" || files[13].Version != "000014" || files[14].Version != "000015" {
+	if len(files) != 16 || files[0].Version != "000001" || files[1].Version != "000002" || files[2].Version != "000003" || files[3].Version != "000004" || files[4].Version != "000005" || files[5].Version != "000006" || files[6].Version != "000007" || files[7].Version != "000008" || files[8].Version != "000009" || files[9].Version != "000010" || files[10].Version != "000011" || files[11].Version != "000012" || files[12].Version != "000013" || files[13].Version != "000014" || files[14].Version != "000015" || files[15].Version != "000016" {
 		t.Fatalf("unexpected migration order: %#v", files)
 	}
 	for _, file := range files {

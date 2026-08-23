@@ -178,6 +178,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/media/"), "/complete")
 		s.completeMedia(w, r, mediaID)
 		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/media/"):
+		s.deleteMedia(w, r, strings.TrimPrefix(path, "/api/v1/media/"))
+		return
 	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || strings.HasPrefix(path, "/api/v1/users/") || strings.HasPrefix(path, "/api/v1/notifications/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return

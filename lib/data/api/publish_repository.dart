@@ -25,6 +25,9 @@ abstract interface class PublishRepository {
     required int size,
     required String sha256,
   });
+
+  /// 清理尚未关联帖子的已上传媒体（放弃发布或单图删除）。
+  Future<void> deleteMedia(String mediaId);
 }
 
 abstract interface class PollPublishRepository {
@@ -169,5 +172,10 @@ class ApiPublishRepository implements PublishRepository, PollPublishRepository {
     } catch (error) {
       throw PublishException('媒体上传失败：$error');
     }
+  }
+
+  @override
+  Future<void> deleteMedia(String mediaId) async {
+    await _client.deleteJson('/api/v1/media/$mediaId');
   }
 }

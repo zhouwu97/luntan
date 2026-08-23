@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# QA artifacts: local verification outputs (server binaries, source zips),
+# never source; commit anything produced here only if it becomes a script.
+.qa/

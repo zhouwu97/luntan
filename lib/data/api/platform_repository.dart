@@ -13,7 +13,7 @@ class NotificationPage {
 }
 
 class ForumNotification {
-  const ForumNotification({
+  ForumNotification({
     required this.id,
     required this.type,
     required this.actorId,
@@ -30,8 +30,64 @@ class ForumNotification {
   final String actorName;
   final String targetType;
   final String targetId;
-  final bool isRead;
+  bool isRead;
   final DateTime createdAt;
+}
+
+class SearchPost {
+  const SearchPost({
+    required this.id,
+    required this.title,
+    required this.contentPreview,
+    required this.communityId,
+    required this.communityName,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String title;
+  final String contentPreview;
+  final String communityId;
+  final String communityName;
+  final DateTime createdAt;
+}
+
+class SearchUser {
+  const SearchUser({required this.id, required this.username, required this.nickname});
+
+  final String id;
+  final String username;
+  final String nickname;
+}
+
+class SearchCommunity {
+  const SearchCommunity({
+    required this.id,
+    required this.slug,
+    required this.name,
+    required this.description,
+    required this.followerCount,
+  });
+
+  final String id;
+  final String slug;
+  final String name;
+  final String description;
+  final int followerCount;
+}
+
+class SearchResult {
+  const SearchResult({
+    this.posts = const [],
+    this.users = const [],
+    this.communities = const [],
+  });
+
+  final List<SearchPost> posts;
+  final List<SearchUser> users;
+  final List<SearchCommunity> communities;
+
+  bool get isEmpty => posts.isEmpty && users.isEmpty && communities.isEmpty;
 }
 
 class PlatformRepository {
@@ -91,14 +147,42 @@ class PlatformRepository {
     return value is num ? value.toInt() : int.tryParse('$value') ?? 0;
   }
 
-  Future<Map<String, dynamic>> search(
+  Future<SearchResult> search(
     String query, {
     String type = 'all',
     int limit = 20,
-  }) {
-    return _client.getJson(
+  }) async {
+    final payload = await _client.getJson(
       '/api/v1/search',
       queryParameters: {'q': query, 'type': type, 'limit': '$limit'},
+    );
+    return SearchResult(
+      posts: _searchList(payload['posts'])
+          .map((value) => SearchPost(
+                id: _string(value['id']),
+                title: _string(value['title']),
+                contentPreview: _string(value['content_preview']),
+                communityId: _string(value['community_id']),
+                communityName: _string(value['community_name']),
+                createdAt: _date(value['created_at']),
+              ))
+          .toList(),
+      users: _searchList(payload['users'])
+          .map((value) => SearchUser(
+                id: _string(value['id']),
+                username: _string(value['username']),
+                nickname: _string(value['nickname']),
+              ))
+          .toList(),
+      communities: _searchList(payload['communities'])
+          .map((value) => SearchCommunity(
+                id: _string(value['id']),
+                slug: _string(value['slug']),
+                name: _string(value['name']),
+                description: _string(value['description']),
+                followerCount: _int(value['follower_count']),
+              ))
+          .toList(),
     );
   }
 
@@ -131,6 +215,16 @@ class PlatformRepository {
   }
 
   String _string(dynamic value) => value is String ? value : '';
+
+  int _int(dynamic value) =>
+      value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+  List<Map<String, dynamic>> _searchList(dynamic value) => value is List
+      ? value
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList()
+      : <Map<String, dynamic>>[];
 
   DateTime _date(dynamic value) => value is String
       ? DateTime.tryParse(value) ??

@@ -16,8 +16,9 @@ class ExchangeStoreScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (apiRepository != null)
+    if (apiRepository != null) {
       return _ApiExchangeStoreScreen(repository: apiRepository!);
+    }
     final localStore = store!;
     return AnimatedBuilder(
       animation: localStore,
@@ -154,10 +155,12 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       body: FutureBuilder<List<ApiStoreProduct>>(
         future: productsFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done)
+          if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError)
+          }
+          if (snapshot.hasError) {
             return Center(child: Text('商店加载失败：${snapshot.error}'));
+          }
           final items = snapshot.data ?? const <ApiStoreProduct>[];
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
@@ -230,12 +233,13 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text('已兑换${product.name}，请留意领取通知')));
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(userFacingApiMessage(error, fallback: '兑换失败，请稍后重试')),
           ),
         );
+      }
     } finally {
       if (mounted) setState(() => _redeeming.remove(product.id));
     }

@@ -18,20 +18,21 @@ type communityCategoryResponse struct {
 }
 
 type communityResponse struct {
-	ID            string `json:"id"`
-	CategoryID    string `json:"category_id"`
-	Slug          string `json:"slug"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	AvatarMediaID string `json:"avatar_media_id,omitempty"`
-	BannerMediaID string `json:"banner_media_id,omitempty"`
-	Visibility    string `json:"visibility"`
-	JoinPolicy    string `json:"join_policy"`
-	Status        string `json:"status"`
-	MemberCount   int64  `json:"member_count"`
-	FollowerCount int64  `json:"follower_count"`
-	PostCount     int64  `json:"post_count"`
-	SortOrder     int    `json:"sort_order"`
+	ID            string         `json:"id"`
+	CategoryID    string         `json:"category_id"`
+	Slug          string         `json:"slug"`
+	Name          string         `json:"name"`
+	Description   string         `json:"description"`
+	AvatarMediaID string         `json:"avatar_media_id,omitempty"`
+	BannerMediaID string         `json:"banner_media_id,omitempty"`
+	Visibility    string         `json:"visibility"`
+	JoinPolicy    string         `json:"join_policy"`
+	Status        string         `json:"status"`
+	MemberCount   int64          `json:"member_count"`
+	FollowerCount int64          `json:"follower_count"`
+	PostCount     int64          `json:"post_count"`
+	SortOrder     int            `json:"sort_order"`
+	ViewerState   map[string]any `json:"viewer_state,omitempty"`
 }
 
 func (s *Server) listCategories(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +106,19 @@ func (s *Server) getCommunity(w http.ResponseWriter, r *http.Request, id string)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		item.ViewerState = map[string]any{}
+		var isFollowing, isMember bool
+		if err := s.db.QueryRowContext(r.Context(), `
+			SELECT EXISTS (SELECT 1 FROM community_follows WHERE user_id = $1 AND community_id = $2),
+			       EXISTS (SELECT 1 FROM community_members WHERE user_id = $1 AND community_id = $2 AND status = 'active')`, viewer.ID, item.ID).
+			Scan(&isFollowing, &isMember); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		item.ViewerState["is_following"] = isFollowing
+		item.ViewerState["is_member"] = isMember
 	}
 	httpserver.WriteJSON(w, http.StatusOK, item)
 }

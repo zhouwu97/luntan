@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
+import '../data/api/platform_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 
@@ -28,6 +29,8 @@ class FeaturePage extends StatefulWidget {
     this.onLike,
     this.onBookmark,
     this.feedRepository,
+    this.platformRepository,
+    this.postRepository,
   });
 
   final FeatureType type;
@@ -36,6 +39,8 @@ class FeaturePage extends StatefulWidget {
   final ValueChanged<Post>? onLike;
   final ValueChanged<Post>? onBookmark;
   final FeedRepository? feedRepository;
+  final PlatformRepository? platformRepository;
+  final PostRepository? postRepository;
 
   @override
   State<FeaturePage> createState() => _FeaturePageState();
@@ -50,6 +55,8 @@ class _FeaturePageState extends State<FeaturePage> {
   ValueChanged<Post>? get onLike => widget.onLike;
   ValueChanged<Post>? get onBookmark => widget.onBookmark;
   FeedRepository? get feedRepository => widget.feedRepository;
+  PlatformRepository? get platformRepository => widget.platformRepository;
+  PostRepository? get postRepository => widget.postRepository;
 
   @override
   void initState() {
@@ -187,6 +194,18 @@ class _FeaturePageState extends State<FeaturePage> {
   }
 
   Future<List<Post>> _remotePosts() async {
+    if (type == FeatureType.ranking &&
+        platformRepository != null &&
+        postRepository != null) {
+      final ranking = await platformRepository!.getRanking(limit: 20);
+      final details = await Future.wait(
+        ranking.map((item) => postRepository!.getPost(item.id)),
+      );
+      return [
+        for (final detail in details)
+          if (detail != null) detail.post,
+      ];
+    }
     final repository = feedRepository!;
     final page = repository is QueryableFeedRepository
         ? await (repository as QueryableFeedRepository).getFeed(
@@ -275,7 +294,7 @@ class _FeaturePageState extends State<FeaturePage> {
     FeatureType.ranking => '看看最近最受欢迎的帖子，给认真分享的人一点掌声。',
     FeatureType.hot => '社区里正在被大家讨论的内容，今天也来逛逛吧。',
     FeatureType.outfit => '桌搭、宿舍布置和校园生活灵感，都可以在这里找到。',
-    FeatureType.activity => '活动模型和报名能力正在建设中，暂时没有可展示的活动。',
+    FeatureType.activity => '校园活动内容集中展示，打开帖子查看时间、地点和参与方式。',
     FeatureType.gameShare => '分享游戏、桌游、社团活动和校园玩法，找到一起玩的同学。',
     FeatureType.myReplies => '这里会展示你参与过的回复，先去帖子里聊两句吧。',
   };

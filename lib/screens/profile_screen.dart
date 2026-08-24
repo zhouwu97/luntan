@@ -28,6 +28,7 @@ class ProfileScreen extends StatelessWidget {
     this.onOpenPostId,
     this.onLogout,
     this.onRequireAuth,
+    this.onOpenModeration,
   });
 
   final ForumStore store;
@@ -37,7 +38,7 @@ class ProfileScreen extends StatelessWidget {
   final VoidCallback onOpenMessages;
   final ValueChanged<String> onFeedback;
   final AuthUser? currentUser;
-  final String currentUserId;
+  final String? currentUserId;
   final bool isApiMode;
   final ProfileRepository? profileRepository;
   final StoreRepository? storeRepository;
@@ -45,6 +46,7 @@ class ProfileScreen extends StatelessWidget {
   final ValueChanged<String>? onOpenPostId;
   final Future<void> Function()? onLogout;
   final VoidCallback? onRequireAuth;
+  final VoidCallback? onOpenModeration;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +63,7 @@ class ProfileScreen extends StatelessWidget {
         storeRepository: storeRepository,
         bookmarkRepository: bookmarkRepository,
         onOpenPostId: onOpenPostId,
+        onOpenModeration: onOpenModeration,
       );
     }
     return AnimatedBuilder(
@@ -228,7 +231,7 @@ class ProfileScreen extends StatelessWidget {
       _ => <Post>[],
     };
     final comments = label == '我的评论'
-        ? store.commentsByAuthor(currentUserId)
+        ? store.commentsByAuthor(currentUserId ?? '')
         : <Comment>[];
     showModalBottomSheet<void>(
       context: context,
@@ -453,6 +456,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.bookmarkRepository,
     this.onOpenPostId,
     this.onLogout,
+    this.onOpenModeration,
   });
 
   final ProfileRepository repository;
@@ -460,6 +464,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final VoidCallback onOpenMessages;
   final ValueChanged<String> onFeedback;
   final Future<void> Function()? onLogout;
+  final VoidCallback? onOpenModeration;
   final StoreRepository? storeRepository;
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
@@ -546,7 +551,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '@${profile.username} · Lv.${profile.level}',
+                      '@${profile.username} · Lv.${profile.level} · 信任${profile.trustLevel}',
                       style: const TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
@@ -755,6 +760,18 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                 onTap: () async {
                   Navigator.pop(sheetContext);
                   await widget.onLogout!();
+                },
+              ),
+            if (widget.onOpenModeration != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.gavel_outlined,
+                  color: AppTheme.primary,
+                ),
+                title: const Text('审核中心'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  widget.onOpenModeration!();
                 },
               ),
             ListTile(
@@ -1041,19 +1058,20 @@ class _RecentPosts extends StatelessWidget {
   });
 
   final ForumStore store;
-  final String currentUserId;
+  final String? currentUserId;
   final ValueChanged<Post> onOpenPost;
 
   @override
   Widget build(BuildContext context) {
-    final posts =
-        store.posts.where((post) => post.authorId == currentUserId).toList()
-          ..sort((a, b) {
-            final byTime = (b.publishedAt ?? b.createdAt).compareTo(
-              a.publishedAt ?? a.createdAt,
-            );
-            return byTime == 0 ? b.id.compareTo(a.id) : byTime;
-          });
+    final posts = currentUserId == null
+        ? <Post>[]
+        : store.posts.where((post) => post.authorId == currentUserId).toList();
+    posts.sort((a, b) {
+      final byTime = (b.publishedAt ?? b.createdAt).compareTo(
+        a.publishedAt ?? a.createdAt,
+      );
+      return byTime == 0 ? b.id.compareTo(a.id) : byTime;
+    });
     final recentPosts = posts.take(3).toList();
     return Container(
       decoration: BoxDecoration(

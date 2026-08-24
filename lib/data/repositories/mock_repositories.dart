@@ -540,6 +540,7 @@ class MockPublishRepository
     required String content,
     required String idempotencyKey,
     List<String> mediaIds = const [],
+    Map<String, dynamic>? market,
   }) async {
     final section = ForumSection.values.firstWhere(
       (item) => item.communityId == communityId,

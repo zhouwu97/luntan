@@ -76,11 +76,15 @@ class PostDraft {
     required this.section,
     this.isGameShare = false,
     this.isPoll = false,
+    this.isMarket = false,
     this.media = const [],
     this.mediaIds = const [],
     this.pollOptions = const [],
     this.allowMultiple = false,
     this.pollEndsAt,
+    this.marketPrice,
+    this.marketCondition = '',
+    this.marketDelivery = '',
   });
 
   final String title;
@@ -88,11 +92,15 @@ class PostDraft {
   final ForumSection section;
   final bool isGameShare;
   final bool isPoll;
+  final bool isMarket;
   final List<MediaAsset> media;
   final List<String> mediaIds;
   final List<String> pollOptions;
   final bool allowMultiple;
   final DateTime? pollEndsAt;
+  final double? marketPrice;
+  final String marketCondition;
+  final String marketDelivery;
 }
 
 class StoreProduct {

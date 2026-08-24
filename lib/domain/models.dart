@@ -92,6 +92,8 @@ class Community {
     this.followerCount = 0,
     this.postCount = 0,
     this.sortOrder = 0,
+    this.isFollowing = false,
+    this.isMember = false,
   });
 
   final String id;
@@ -108,6 +110,8 @@ class Community {
   final int followerCount;
   final int postCount;
   final int sortOrder;
+  final bool isFollowing;
+  final bool isMember;
 }
 
 class ViewerPostState {

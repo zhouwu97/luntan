@@ -10,10 +10,12 @@ class NotificationsScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.onOpenPostId,
+    this.onOpenPost,
   });
 
   final PlatformRepository repository;
   final ValueChanged<String> onOpenPostId;
+  final void Function(String postId, String? commentId)? onOpenPost;
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -126,13 +128,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         if (items.isNotEmpty)
           TextButton(
             onPressed: () async {
-              await widget.repository.markAllNotificationsRead();
-              if (!mounted) return;
-              setState(() {
-                for (final item in items) {
-                  item.isRead = true;
-                }
-              });
+              try {
+                await widget.repository.markAllNotificationsRead();
+                if (!context.mounted) return;
+                setState(() {
+                  for (final item in items) {
+                    item.isRead = true;
+                  }
+                });
+              } catch (error) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(userFacingApiMessage(error))),
+                );
+              }
             },
             child: const Text('全部已读'),
           ),
@@ -242,7 +251,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             }
             if (!context.mounted) return;
             if (item.targetType == 'post') {
-              widget.onOpenPostId(item.targetId);
+              final commentId = item.targetData['comment_id'];
+              if (widget.onOpenPost != null) {
+                widget.onOpenPost!(
+                  item.targetId,
+                  commentId is String ? commentId : null,
+                );
+              } else {
+                widget.onOpenPostId(item.targetId);
+              }
             }
           },
         );

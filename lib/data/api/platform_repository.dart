@@ -31,6 +31,7 @@ class ForumNotification {
     required this.actorName,
     required this.targetType,
     required this.targetId,
+    this.targetData = const <String, dynamic>{},
     required this.isRead,
     required this.createdAt,
   });
@@ -41,6 +42,7 @@ class ForumNotification {
   final String actorName;
   final String targetType;
   final String targetId;
+  final Map<String, dynamic> targetData;
   bool isRead;
   final DateTime createdAt;
 }
@@ -109,6 +111,54 @@ class SearchResult {
   bool get isEmpty => posts.isEmpty && users.isEmpty && communities.isEmpty;
 }
 
+class RankingItem {
+  const RankingItem({
+    required this.id,
+    required this.title,
+    required this.communityId,
+    required this.score,
+  });
+
+  final String id;
+  final String title;
+  final String communityId;
+  final double score;
+}
+
+class ModerationCase {
+  const ModerationCase({
+    required this.id,
+    required this.targetType,
+    required this.targetId,
+    required this.source,
+    required this.riskLevel,
+    required this.status,
+    required this.communityId,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String targetType;
+  final String targetId;
+  final String source;
+  final String riskLevel;
+  final String status;
+  final String communityId;
+  final DateTime createdAt;
+}
+
+class ModerationCasePage {
+  const ModerationCasePage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<ModerationCase> items;
+  final String? nextCursor;
+  final bool hasMore;
+}
+
 class PlatformRepository {
   PlatformRepository(this._client);
 
@@ -144,6 +194,9 @@ class PlatformRepository {
                   : _string(actor['username']),
               targetType: _string(value['target_type']),
               targetId: _string(value['target_id']),
+              targetData: value['target_data'] is Map
+                  ? Map<String, dynamic>.from(value['target_data'] as Map)
+                  : const <String, dynamic>{},
               isRead: value['is_read'] == true,
               createdAt: _date(value['created_at']),
             );
@@ -225,6 +278,75 @@ class PlatformRepository {
   }
 
   Future<Map<String, dynamic>> getHome() => _client.getJson('/api/v1/home');
+
+  Future<List<RankingItem>> getRanking({
+    String window = '24h',
+    int limit = 20,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/ranking',
+      queryParameters: {'window': window, 'limit': '$limit'},
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <RankingItem>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      final score = value['score'];
+      return RankingItem(
+        id: _string(value['id']),
+        title: _string(value['title']),
+        communityId: _string(value['community_id']),
+        score: score is num ? score.toDouble() : double.tryParse('$score') ?? 0,
+      );
+    }).toList();
+  }
+
+  Future<ModerationCasePage> listModerationCases({
+    String status = '',
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/moderation/cases',
+      queryParameters: {
+        'limit': '$limit',
+        if (status.isNotEmpty) 'status': status,
+        ...?(cursor == null ? null : {'cursor': cursor}),
+      },
+    );
+    final raw = payload['items'];
+    final items = raw is List
+        ? raw.whereType<Map>().map((item) {
+            final value = Map<String, dynamic>.from(item);
+            return ModerationCase(
+              id: _string(value['id']),
+              targetType: _string(value['target_type']),
+              targetId: _string(value['target_id']),
+              source: _string(value['source']),
+              riskLevel: _string(value['risk_level']),
+              status: _string(value['status']),
+              communityId: _string(value['community_id']),
+              createdAt: _date(value['created_at']),
+            );
+          }).toList()
+        : <ModerationCase>[];
+    return ModerationCasePage(
+      items: items,
+      nextCursor: payload['next_cursor'] as String?,
+      hasMore: payload['has_more'] == true,
+    );
+  }
+
+  Future<void> applyModerationAction({
+    required String caseId,
+    required String action,
+    String reason = '',
+  }) async {
+    await _client.postJson(
+      '/api/v1/moderation/cases/$caseId/actions',
+      body: {'action': action, 'reason': reason},
+    );
+  }
 
   Future<void> report({
     required String targetType,

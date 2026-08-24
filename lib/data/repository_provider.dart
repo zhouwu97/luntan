@@ -9,6 +9,7 @@ import 'api/publish_repository.dart';
 import 'api/profile_repository.dart';
 import 'api/poll_repository.dart';
 import 'api/store_repository.dart';
+import 'api/user_repository.dart';
 import 'api/secure_token_store.dart';
 import 'mock_forum_data.dart';
 import 'repositories/mock_repositories.dart';
@@ -29,6 +30,7 @@ class ForumRepositories {
     this.poll,
     this.store,
     this.bookmarks,
+    this.users,
     this.isApiMode = false,
   });
 
@@ -45,6 +47,7 @@ class ForumRepositories {
   final PollRepository? poll;
   final StoreRepository? store;
   final BookmarkRepository? bookmarks;
+  final UserRepository? users;
   final bool isApiMode;
 
   factory ForumRepositories.mock({ForumStore? store}) {
@@ -90,6 +93,7 @@ class ForumRepositories {
       profile: ProfileRepository(authenticatedClient),
       poll: PollRepository(authenticatedClient),
       store: StoreRepository(authenticatedClient),
+      users: ApiUserRepository(authenticatedClient),
       isApiMode: true,
     );
   }

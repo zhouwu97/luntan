@@ -18,6 +18,8 @@ import 'screens/home_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/entity_screens.dart';
+import 'screens/moderation_console_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
@@ -127,6 +129,10 @@ class _LuntanAppState extends State<LuntanApp> {
           Navigator.of(sheetContext).pop();
           _showPostEditor(isGameShare: true);
         },
+        onCreateMarket: () {
+          Navigator.of(sheetContext).pop();
+          _showPostEditor(isMarket: true);
+        },
       ),
     );
   }
@@ -134,12 +140,14 @@ class _LuntanAppState extends State<LuntanApp> {
   Future<void> _showPostEditor({
     bool isGameShare = false,
     bool isPoll = false,
+    bool isMarket = false,
   }) async {
     await showDialog<void>(
       context: context,
       builder: (_) => PostEditorDialog(
         isGameShare: isGameShare,
         isPoll: isPoll,
+        isMarket: isMarket,
         onPublish: _publishDraft,
         publishController: apiMode ? publishController : null,
         enableSampleMedia: !apiMode,
@@ -153,6 +161,8 @@ class _LuntanAppState extends State<LuntanApp> {
           ? 'game_share'
           : result.isPoll
           ? 'poll'
+          : result.isMarket
+          ? 'market'
           : 'normal';
       await (result.isPoll
           ? publishController.publishPoll(
@@ -170,6 +180,14 @@ class _LuntanAppState extends State<LuntanApp> {
               title: result.title,
               content: result.body,
               mediaIds: result.mediaIds,
+              market: result.isMarket
+                  ? {
+                      'price': result.marketPrice,
+                      'currency': 'CNY',
+                      'condition': result.marketCondition,
+                      'delivery': result.marketDelivery,
+                    }
+                  : null,
             ));
       await feedController.setQuery(
         communityId: result.section.communityId,
@@ -185,7 +203,11 @@ class _LuntanAppState extends State<LuntanApp> {
     }
   }
 
-  void openPost(Post post, {bool focusComments = false}) {
+  void openPost(
+    Post post, {
+    bool focusComments = false,
+    String? focusCommentId,
+  }) {
     if (!apiMode) store.recordHistory(post);
     if (apiMode && repositories.profile != null && post.id.isNotEmpty) {
       // 浏览历史是服务端事实；失败不阻塞打开帖子，详情页仍可正常阅读。
@@ -206,14 +228,15 @@ class _LuntanAppState extends State<LuntanApp> {
               controller: detailController,
               commentsController: commentsController,
               interactionController: interactionController,
-              currentUserId: currentUser?.id ?? 'user-1',
+              currentUserId: currentUser?.id,
               focusComments: focusComments,
+              focusCommentId: focusCommentId,
               onToggleLike: togglePostLike,
               onToggleBookmark: toggleBookmark,
               onFeedback: _showQuickFeedback,
               onDeletePost: deletePost,
               onEditPost: editPost,
-              onReport: report,
+              onReport: apiMode ? report : null,
               pollRepository: repositories.poll,
             ),
           ),
@@ -230,7 +253,7 @@ class _LuntanAppState extends State<LuntanApp> {
         });
   }
 
-  void openPostId(String postId) {
+  void openPostId(String postId, {String? focusCommentId}) {
     openPost(
       Post(
         id: postId,
@@ -241,6 +264,8 @@ class _LuntanAppState extends State<LuntanApp> {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       ),
+      focusComments: focusCommentId != null,
+      focusCommentId: focusCommentId,
     );
   }
 
@@ -311,11 +336,63 @@ class _LuntanAppState extends State<LuntanApp> {
 
   Future<void> report(String targetType, String targetId) async {
     final platform = repositories.platform;
-    if (platform == null) return;
+    if (platform == null) {
+      throw const ApiException(
+        type: ApiErrorType.unknown,
+        message: '当前模式暂不支持举报',
+      );
+    }
     await platform.report(
       targetType: targetType,
       targetId: targetId,
       reasonCode: 'other',
+    );
+  }
+
+  void openUserProfile(String userId) {
+    final users = repositories.users;
+    if (users == null) {
+      _showQuickFeedback('当前模式暂不支持用户主页');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UserProfileScreen(
+          repository: users,
+          userId: userId,
+          isAuthenticated: authController?.status == AuthStatus.authenticated,
+          onRequireAuth: _openLogin,
+          onFeedback: _showQuickFeedback,
+          onOpenPostId: openPostId,
+        ),
+      ),
+    );
+  }
+
+  void openCommunity(String communityId) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CommunityDetailScreen(
+          repository: repositories.community,
+          communityId: communityId,
+          isAuthenticated: authController?.status == AuthStatus.authenticated,
+          onRequireAuth: _openLogin,
+          onFeedback: _showQuickFeedback,
+        ),
+      ),
+    );
+  }
+
+  void openModeration() {
+    final platform = repositories.platform;
+    if (platform == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ModerationConsoleScreen(
+          repository: platform,
+          onFeedback: _showQuickFeedback,
+        ),
+      ),
     );
   }
 
@@ -343,6 +420,8 @@ class _LuntanAppState extends State<LuntanApp> {
               builder: (_) => NotificationsScreen(
                 repository: repositories.platform!,
                 onOpenPostId: openPostId,
+                onOpenPost: (postId, commentId) =>
+                    openPostId(postId, focusCommentId: commentId),
               ),
             ),
           )
@@ -404,6 +483,8 @@ class _LuntanAppState extends State<LuntanApp> {
             feedController: feedController,
             onOpenPost: openPost,
             onOpenPostId: openPostId,
+            onOpenUserId: openUserProfile,
+            onOpenCommunityId: openCommunity,
             onOpenComments: (post) => openPost(post, focusComments: true),
             onOpenProfile: () => setState(() => currentTab = 2),
             onOpenComposer: showComposer,
@@ -419,18 +500,20 @@ class _LuntanAppState extends State<LuntanApp> {
             communityRepository: repositories.isApiMode
                 ? repositories.community
                 : null,
+            postRepository: repositories.isApiMode ? repositories.post : null,
           ),
           const SizedBox.shrink(),
           ProfileScreen(
             store: store,
             currentUser: currentUser,
-            currentUserId: currentUser?.id ?? 'user-1',
+            currentUserId: currentUser?.id,
             isApiMode: apiMode,
             onOpenPost: openPost,
             onOpenHome: () => setState(() => currentTab = 0),
             onOpenComposer: showComposer,
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
+            onOpenModeration: apiMode ? openModeration : null,
             onLogout: _logout,
             onRequireAuth: _openLogin,
             profileRepository: repositories.profile,

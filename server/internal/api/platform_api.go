@@ -91,7 +91,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	query := `
 		SELECT n.id, n.type, COALESCE(n.actor_id, ''), COALESCE(u.username, ''), COALESCE(up.nickname, ''),
-		       n.target_type, n.target_id, n.is_read, n.created_at, n.read_at
+		       n.target_type, n.target_id, n.target_data, n.is_read, n.created_at, n.read_at
 		FROM notifications n
 		LEFT JOIN users u ON u.id = n.actor_id
 		LEFT JOIN user_profiles up ON up.user_id = n.actor_id
@@ -126,26 +126,34 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	type notificationResponse struct {
-		ID         string      `json:"id"`
-		Type       string      `json:"type"`
-		Actor      userSummary `json:"actor"`
-		TargetType string      `json:"target_type"`
-		TargetID   string      `json:"target_id"`
-		IsRead     bool        `json:"is_read"`
-		CreatedAt  time.Time   `json:"created_at"`
-		ReadAt     *time.Time  `json:"read_at,omitempty"`
+		ID         string         `json:"id"`
+		Type       string         `json:"type"`
+		Actor      userSummary    `json:"actor"`
+		TargetType string         `json:"target_type"`
+		TargetID   string         `json:"target_id"`
+		TargetData map[string]any `json:"target_data,omitempty"`
+		IsRead     bool           `json:"is_read"`
+		CreatedAt  time.Time      `json:"created_at"`
+		ReadAt     *time.Time     `json:"read_at,omitempty"`
 	}
 	items := make([]notificationResponse, 0, limit+1)
 	for rows.Next() {
 		var item notificationResponse
 		var actorID sql.NullString
+		var rawTargetData []byte
 		var readAt sql.NullTime
-		if err := rows.Scan(&item.ID, &item.Type, &actorID, &item.Actor.Username, &item.Actor.Nickname, &item.TargetType, &item.TargetID, &item.IsRead, &item.CreatedAt, &readAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &actorID, &item.Actor.Username, &item.Actor.Nickname, &item.TargetType, &item.TargetID, &rawTargetData, &item.IsRead, &item.CreatedAt, &readAt); err != nil {
 			// actor_id 是 text，使用独立字符串扫描，避免 NULL 参与时间类型扫描。
 			writeInternalError(w, r, err)
 			return
 		}
 		item.Actor.ID = actorID.String
+		if len(rawTargetData) > 0 {
+			if err := json.Unmarshal(rawTargetData, &item.TargetData); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		}
 		if readAt.Valid {
 			item.ReadAt = &readAt.Time
 		}

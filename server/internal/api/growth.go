@@ -12,6 +12,7 @@ import (
 )
 
 var ErrInsufficientPoints = errors.New("insufficient points")
+var ErrPollAlreadyVoted = errors.New("poll already voted")
 
 type pollInput struct {
 	Question      string     `json:"question"`
@@ -109,7 +110,38 @@ func (s *Server) getPoll(w http.ResponseWriter, r *http.Request, postID string) 
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": pollID, "post_id": postID, "question": question, "allow_multiple": allowMultiple, "ends_at": nullableTime(endsAt), "options": options})
+	viewerState := map[string]any{
+		"has_voted":  false,
+		"option_ids": []string{},
+		"can_vote":   !(endsAt.Valid && !endsAt.Time.After(time.Now())),
+	}
+	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		votedRows, queryErr := s.db.QueryContext(r.Context(), `SELECT option_id FROM poll_votes WHERE poll_id = $1 AND user_id = $2 ORDER BY option_id ASC`, pollID, viewer.ID)
+		if queryErr != nil {
+			writeInternalError(w, r, queryErr)
+			return
+		}
+		votedOptionIDs := make([]string, 0)
+		for votedRows.Next() {
+			var optionID string
+			if scanErr := votedRows.Scan(&optionID); scanErr != nil {
+				votedRows.Close()
+				writeInternalError(w, r, scanErr)
+				return
+			}
+			votedOptionIDs = append(votedOptionIDs, optionID)
+		}
+		if rowsErr := votedRows.Err(); rowsErr != nil {
+			votedRows.Close()
+			writeInternalError(w, r, rowsErr)
+			return
+		}
+		votedRows.Close()
+		viewerState["has_voted"] = len(votedOptionIDs) > 0
+		viewerState["option_ids"] = votedOptionIDs
+		viewerState["can_vote"] = len(votedOptionIDs) == 0 && viewerState["can_vote"].(bool)
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": pollID, "post_id": postID, "question": question, "allow_multiple": allowMultiple, "ends_at": nullableTime(endsAt), "options": options, "viewer_state": viewerState})
 }
 
 func (s *Server) votePoll(w http.ResponseWriter, r *http.Request, pollID string) {
@@ -170,6 +202,39 @@ func (s *Server) votePoll(w http.ResponseWriter, r *http.Request, pollID string)
 			return
 		}
 	}
+	var existingOptionIDs []string
+	existingRows, err := tx.QueryContext(r.Context(), `SELECT option_id FROM poll_votes WHERE poll_id = $1 AND user_id = $2 ORDER BY option_id ASC`, pollID, user.ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	for existingRows.Next() {
+		var optionID string
+		if err := existingRows.Scan(&optionID); err != nil {
+			existingRows.Close()
+			writeInternalError(w, r, err)
+			return
+		}
+		existingOptionIDs = append(existingOptionIDs, optionID)
+	}
+	if err := existingRows.Err(); err != nil {
+		existingRows.Close()
+		writeInternalError(w, r, err)
+		return
+	}
+	existingRows.Close()
+	if len(existingOptionIDs) > 0 {
+		if !sameStringSet(existingOptionIDs, input.OptionIDs) {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusConflict, Code: "ALREADY_VOTED", Message: "你已经参与过该投票，不能修改选项"})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		httpserver.WriteJSON(w, http.StatusOK, map[string]any{"poll_id": pollID, "option_ids": input.OptionIDs, "already_voted": true})
+		return
+	}
 	for _, optionID := range input.OptionIDs {
 		result, err := tx.ExecContext(r.Context(), `INSERT INTO poll_votes (poll_id, option_id, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, pollID, optionID, user.ID)
 		if err != nil {
@@ -193,6 +258,25 @@ func (s *Server) votePoll(w http.ResponseWriter, r *http.Request, pollID string)
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"poll_id": pollID, "option_ids": input.OptionIDs})
+}
+
+func sameStringSet(first, second []string) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(first))
+	for _, value := range first {
+		seen[value] = struct{}{}
+	}
+	if len(seen) != len(second) {
+		return false
+	}
+	for _, value := range second {
+		if _, ok := seen[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) createMarketItem(w http.ResponseWriter, r *http.Request, postID string) {

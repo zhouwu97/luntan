@@ -20,15 +20,54 @@ class BookmarkFoldersScreen extends StatefulWidget {
 
 class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
   late Future<BookmarkFolderPage> _future;
+  BookmarkFolderPage _page = const BookmarkFolderPage(items: []);
+  bool _loadingMore = false;
   bool _creating = false;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.listFolders();
+    _future = _loadPage();
   }
 
-  void _reload() => setState(() => _future = widget.repository.listFolders());
+  Future<BookmarkFolderPage> _loadPage({String? cursor}) async {
+    final page = await widget.repository.listFolders(cursor: cursor);
+    _page = page;
+    return page;
+  }
+
+  void _reload() => setState(() {
+    _loadingMore = false;
+    _future = _loadPage();
+  });
+
+  void _loadMoreFolders() {
+    if (_loadingMore || !_page.hasMore || _page.nextCursor == null) return;
+    final cursor = _page.nextCursor;
+    setState(() {
+      _loadingMore = true;
+      _future = _appendFolders(cursor!);
+    });
+  }
+
+  Future<BookmarkFolderPage> _appendFolders(String cursor) async {
+    try {
+      final page = await widget.repository.listFolders(cursor: cursor);
+      final seen = _page.items.map((item) => item.id).toSet();
+      final merged = BookmarkFolderPage(
+        items: [
+          ..._page.items,
+          ...page.items.where((item) => seen.add(item.id)),
+        ],
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore && page.nextCursor != cursor,
+      );
+      _page = merged;
+      return merged;
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,16 +85,17 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
       body: FutureBuilder<BookmarkFolderPage>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
+          if (snapshot.connectionState != ConnectionState.done &&
+              _page.items.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError || !snapshot.hasData) {
+          if (snapshot.hasError && _page.items.isEmpty) {
             return _MessageState(
               message: '收藏夹加载失败',
               action: TextButton(onPressed: _reload, child: const Text('重试')),
             );
           }
-          final folders = snapshot.data!.items;
+          final folders = snapshot.data?.items ?? _page.items;
           if (folders.isEmpty) {
             return _MessageState(
               message: '还没有收藏夹',
@@ -68,32 +108,40 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
           }
           return RefreshIndicator(
             onRefresh: () async => _reload(),
-            child: ReorderableListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-              itemCount: folders.length,
-              onReorder: (oldIndex, newIndex) =>
-                  _reorderFolders(folders, oldIndex, newIndex),
-              itemBuilder: (context, index) => _FolderCard(
-                key: ValueKey(folders[index].id),
-                folder: folders[index],
-                onTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => BookmarkFolderScreen(
-                        repository: widget.repository,
-                        folder: folders[index],
-                        onOpenPostId: widget.onOpenPostId,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification.metrics.extentAfter < 240) {
+                  _loadMoreFolders();
+                }
+                return false;
+              },
+              child: ReorderableListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                itemCount: folders.length,
+                onReorder: (oldIndex, newIndex) =>
+                    _reorderFolders(folders, oldIndex, newIndex),
+                itemBuilder: (context, index) => _FolderCard(
+                  key: ValueKey(folders[index].id),
+                  folder: folders[index],
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => BookmarkFolderScreen(
+                          repository: widget.repository,
+                          folder: folders[index],
+                          onOpenPostId: widget.onOpenPostId,
+                        ),
                       ),
-                    ),
-                  );
-                  if (mounted) _reload();
-                },
-                onRename: folders[index].isDefault
-                    ? null
-                    : () => _renameFolder(folders[index]),
-                onDelete: folders[index].isDefault
-                    ? null
-                    : () => _deleteFolder(folders[index]),
+                    );
+                    if (mounted) _reload();
+                  },
+                  onRename: folders[index].isDefault
+                      ? null
+                      : () => _renameFolder(folders[index]),
+                  onDelete: folders[index].isDefault
+                      ? null
+                      : () => _deleteFolder(folders[index]),
+                ),
               ),
             ),
           );
@@ -234,11 +282,64 @@ class BookmarkFolderScreen extends StatefulWidget {
 
 class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
   late Future<BookmarkPostPage> _future;
+  BookmarkPostPage _page = const BookmarkPostPage(items: []);
+  bool _loadingMore = false;
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.listFolderPosts(widget.folder.id);
+    _future = _loadPage();
+  }
+
+  Future<BookmarkPostPage> _loadPage({String? cursor}) async {
+    final page = await widget.repository.listFolderPosts(
+      widget.folder.id,
+      cursor: cursor,
+    );
+    _page = page;
+    return page;
+  }
+
+  void _reload() => setState(() {
+    _generation += 1;
+    _loadingMore = false;
+    _future = _loadPage();
+  });
+
+  void _loadMorePosts() {
+    if (_loadingMore || !_page.hasMore || _page.nextCursor == null) return;
+    final cursor = _page.nextCursor!;
+    final generation = _generation;
+    setState(() {
+      _loadingMore = true;
+      _future = _appendPage(cursor, generation);
+    });
+  }
+
+  Future<BookmarkPostPage> _appendPage(String cursor, int generation) async {
+    try {
+      final page = await widget.repository.listFolderPosts(
+        widget.folder.id,
+        cursor: cursor,
+      );
+      if (generation != _generation) return _page;
+      final seen = _page.items.map((item) => item.id).toSet();
+      final merged = BookmarkPostPage(
+        items: [
+          ..._page.items,
+          ...page.items.where((item) => seen.add(item.id)),
+        ],
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore && page.nextCursor != cursor,
+      );
+      _page = merged;
+      return merged;
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() => _loadingMore = false);
+      }
+    }
   }
 
   @override
@@ -248,58 +349,69 @@ class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
       body: FutureBuilder<BookmarkPostPage>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
+          if (snapshot.connectionState != ConnectionState.done &&
+              _page.items.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError || !snapshot.hasData) {
+          if (snapshot.hasError && _page.items.isEmpty) {
             return _MessageState(
               message: '收藏内容加载失败',
-              action: TextButton(
-                onPressed: () => setState(
-                  () => _future = widget.repository.listFolderPosts(
-                    widget.folder.id,
-                  ),
-                ),
-                child: const Text('重试'),
-              ),
+              action: TextButton(onPressed: _reload, child: const Text('重试')),
             );
           }
-          final items = snapshot.data!.items;
+          final items = snapshot.data?.items ?? _page.items;
           if (items.isEmpty) {
             return const _MessageState(message: '这个收藏夹还没有内容');
           }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-            itemCount: items.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return Card(
-                margin: EdgeInsets.zero,
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  leading: const CircleAvatar(
-                    backgroundColor: AppTheme.surfaceBlue,
-                    child: Icon(
-                      Icons.article_outlined,
-                      color: AppTheme.primary,
+          return RefreshIndicator(
+            onRefresh: () async => _reload(),
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (notification.metrics.extentAfter < 240) {
+                  _loadMorePosts();
+                }
+                return false;
+              },
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                itemCount: items.length + (_loadingMore ? 1 : 0),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  if (index >= items.length) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  final item = items[index];
+                  return Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      leading: const CircleAvatar(
+                        backgroundColor: AppTheme.surfaceBlue,
+                        child: Icon(
+                          Icons.article_outlined,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                      title: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${item.communityName} · ${item.commentCount} 回复',
+                      ),
+                      onTap: () => widget.onOpenPostId(item.id),
                     ),
-                  ),
-                  title: Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    '${item.communityName} · ${item.commentCount} 回复',
-                  ),
-                  onTap: () => widget.onOpenPostId(item.id),
-                ),
-              );
-            },
+                  );
+                },
+              ),
+            ),
           );
         },
       ),

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ var (
 	ErrBlocked              = errors.New("blocked by user")
 	ErrInvalidReport        = errors.New("invalid report")
 	ErrReportTargetNotFound = errors.New("report target not found")
+	ErrNotificationNotFound = errors.New("notification not found")
+	ErrInvalidSearchCursor  = errors.New("invalid search cursor")
 )
 
 func usersBlockEachOther(ctx context.Context, db *sql.DB, firstUserID, secondUserID string) (bool, error) {
@@ -31,6 +34,20 @@ type notificationCursor struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
 	Category  string    `json:"category"`
+}
+
+type searchCursor struct {
+	Kind      string    `json:"kind"`
+	Rank      float64   `json:"rank"`
+	SortOrder int       `json:"sort_order,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	ID        string    `json:"id"`
+}
+
+type searchPage struct {
+	Items      []map[string]any
+	NextCursor string
+	HasMore    bool
 }
 
 func parseNotificationCategory(value string) (string, error) {
@@ -78,7 +95,12 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		FROM notifications n
 		LEFT JOIN users u ON u.id = n.actor_id
 		LEFT JOIN user_profiles up ON up.user_id = n.actor_id
-		WHERE n.user_id = $1`
+		WHERE n.user_id = $1
+		  AND (n.actor_id IS NULL OR NOT EXISTS (
+			SELECT 1 FROM blocks b
+			WHERE (b.blocker_id = n.user_id AND b.blocked_id = n.actor_id)
+			   OR (b.blocker_id = n.actor_id AND b.blocked_id = n.user_id)
+		  ))`
 	args := []any{user.ID}
 	const replyTypes = "'reply', 'comment.created', 'comment.replied'"
 	const likeTypes = "'like', 'bookmark', 'follow', 'post.liked', 'post.bookmarked', 'user.followed'"
@@ -157,8 +179,18 @@ func (s *Server) markNotificationRead(w http.ResponseWriter, r *http.Request, no
 	if !ok {
 		return
 	}
-	if _, err := s.db.ExecContext(r.Context(), `UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2`, notificationID, user.ID); err != nil {
+	result, err := s.db.ExecContext(r.Context(), `UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2`, notificationID, user.ID)
+	if err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if affected == 0 {
+		writeAuthError(w, r, ErrNotificationNotFound)
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": notificationID, "is_read": true})
@@ -183,12 +215,12 @@ func (s *Server) unreadNotificationCount(w http.ResponseWriter, r *http.Request)
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	_, ok := s.authenticatedUser(w, r)
+	user, ok := s.authenticatedUser(w, r)
 	if !ok {
 		return
 	}
 	var count int64
-	if err := s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM notifications WHERE user_id = $1 AND is_read = false`).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM notifications WHERE user_id = $1 AND is_read = false`, user.ID).Scan(&count); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -212,115 +244,259 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SEARCH_TYPE", Message: "搜索类型不支持"})
 		return
 	}
+	rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	if rawCursor != "" && searchType == "all" {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "综合搜索请先选择帖子、用户或板块分类"})
+		return
+	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
 	response := map[string]any{}
+	var nextCursor any
+	var hasMore bool
 	if searchType == "all" || searchType == "posts" {
-		items, queryErr := s.searchPosts(r, query, limit)
+		page, queryErr := s.searchPosts(r, query, limit, rawCursor)
 		if queryErr != nil {
-			writeInternalError(w, r, queryErr)
+			if errors.Is(queryErr, ErrInvalidSearchCursor) {
+				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			} else {
+				writeInternalError(w, r, queryErr)
+			}
 			return
 		}
-		response["posts"] = items
+		response["posts"] = page.Items
+		if searchType == "posts" {
+			nextCursor = nullableSearchCursor(page)
+			hasMore = page.HasMore
+		}
 	}
 	if searchType == "all" || searchType == "users" {
-		items, queryErr := s.searchUsers(r, query, limit)
+		page, queryErr := s.searchUsers(r, query, limit, rawCursor)
 		if queryErr != nil {
-			writeInternalError(w, r, queryErr)
+			if errors.Is(queryErr, ErrInvalidSearchCursor) {
+				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			} else {
+				writeInternalError(w, r, queryErr)
+			}
 			return
 		}
-		response["users"] = items
+		response["users"] = page.Items
+		if searchType == "users" {
+			nextCursor = nullableSearchCursor(page)
+			hasMore = page.HasMore
+		}
 	}
 	if searchType == "all" || searchType == "communities" {
-		items, queryErr := s.searchCommunities(r, query, limit)
+		page, queryErr := s.searchCommunities(r, query, limit, rawCursor)
 		if queryErr != nil {
-			writeInternalError(w, r, queryErr)
+			if errors.Is(queryErr, ErrInvalidSearchCursor) {
+				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			} else {
+				writeInternalError(w, r, queryErr)
+			}
 			return
 		}
-		response["communities"] = items
+		response["communities"] = page.Items
+		if searchType == "communities" {
+			nextCursor = nullableSearchCursor(page)
+			hasMore = page.HasMore
+		}
 	}
+	response["next_cursor"] = nextCursor
+	response["has_more"] = hasMore
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) searchPosts(r *http.Request, query string, limit int) ([]map[string]any, error) {
+func (s *Server) searchPosts(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
+	rankExpression := "ts_rank(p.search_vector, plainto_tsquery('simple', $1))"
+	args := []any{query}
+	where := `p.search_vector @@ plainto_tsquery('simple', $1)
+		  AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL`
+	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		where += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $%d AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $%d))", len(args)+1, len(args)+1)
+		args = append(args, viewer.ID)
+	}
+	if rawCursor != "" {
+		cursor, err := decodeSearchCursor(rawCursor)
+		if err != nil {
+			return searchPage{}, err
+		}
+		if cursor.Kind != "" && cursor.Kind != "posts" {
+			return searchPage{}, ErrInvalidSearchCursor
+		}
+		where += fmt.Sprintf(" AND (%s, p.created_at, p.id) < ($%d, $%d, $%d)", rankExpression, len(args)+1, len(args)+2, len(args)+3)
+		args = append(args, cursor.Rank, cursor.CreatedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT p.id, p.title, LEFT(p.content, 200), p.community_id, c.name, p.created_at,
-		       ts_rank(p.search_vector, plainto_tsquery('simple', $1))
+		       `+rankExpression+`
 		FROM posts p
 		JOIN communities c ON c.id = p.community_id
-		WHERE p.search_vector @@ plainto_tsquery('simple', $1)
-		  AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL
-		ORDER BY ts_rank(p.search_vector, plainto_tsquery('simple', $1)) DESC, p.created_at DESC, p.id DESC
-		LIMIT $2`, query, limit)
+		WHERE `+where+`
+		ORDER BY `+rankExpression+` DESC, p.created_at DESC, p.id DESC
+		LIMIT $`+strconv.Itoa(limitPosition), args...)
 	if err != nil {
-		return nil, err
+		return searchPage{}, err
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, title, preview, communityID, communityName string
 		var createdAt time.Time
 		var rank float64
 		if err := rows.Scan(&id, &title, &preview, &communityID, &communityName, &createdAt, &rank); err != nil {
-			return nil, err
+			return searchPage{}, err
 		}
 		items = append(items, map[string]any{"id": id, "title": title, "content_preview": preview, "community_id": communityID, "community_name": communityName, "created_at": createdAt, "rank": rank})
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return searchPage{}, err
+	}
+	page := searchPage{Items: items, HasMore: len(items) > limit}
+	if page.HasMore {
+		page.Items = page.Items[:limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, _ = encodeSearchCursor(searchCursor{Kind: "posts", Rank: last["rank"].(float64), CreatedAt: last["created_at"].(time.Time), ID: last["id"].(string)})
+	}
+	return page, nil
 }
 
-func (s *Server) searchUsers(r *http.Request, query string, limit int) ([]map[string]any, error) {
+func (s *Server) searchUsers(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
+	rankExpression := "ts_rank(u.search_vector, plainto_tsquery('simple', $1))"
+	args := []any{query}
+	where := `u.search_vector @@ plainto_tsquery('simple', $1) AND u.status = 'active' AND u.deleted_at IS NULL`
+	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		where += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $%d AND b.blocked_id = u.id) OR (b.blocker_id = u.id AND b.blocked_id = $%d))", len(args)+1, len(args)+1)
+		args = append(args, viewer.ID)
+	}
+	if rawCursor != "" {
+		cursor, err := decodeSearchCursor(rawCursor)
+		if err != nil {
+			return searchPage{}, err
+		}
+		if cursor.Kind != "" && cursor.Kind != "users" {
+			return searchPage{}, ErrInvalidSearchCursor
+		}
+		where += fmt.Sprintf(" AND (%s < $%d OR (%s = $%d AND u.id > $%d))", rankExpression, len(args)+1, rankExpression, len(args)+1, len(args)+2)
+		args = append(args, cursor.Rank, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT u.id, u.username, COALESCE(up.nickname, u.username), u.created_at,
-		       ts_rank(u.search_vector, plainto_tsquery('simple', $1))
+		       `+rankExpression+`
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE u.search_vector @@ plainto_tsquery('simple', $1) AND u.status = 'active' AND u.deleted_at IS NULL
-		ORDER BY ts_rank(u.search_vector, plainto_tsquery('simple', $1)) DESC, u.id ASC
-		LIMIT $2`, query, limit)
+		WHERE `+where+`
+		ORDER BY `+rankExpression+` DESC, u.id ASC
+		LIMIT $`+strconv.Itoa(limitPosition), args...)
 	if err != nil {
-		return nil, err
+		return searchPage{}, err
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, username, nickname string
 		var createdAt time.Time
 		var rank float64
 		if err := rows.Scan(&id, &username, &nickname, &createdAt, &rank); err != nil {
-			return nil, err
+			return searchPage{}, err
 		}
 		items = append(items, map[string]any{"id": id, "username": username, "nickname": nickname, "created_at": createdAt, "rank": rank})
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return searchPage{}, err
+	}
+	page := searchPage{Items: items, HasMore: len(items) > limit}
+	if page.HasMore {
+		page.Items = page.Items[:limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, _ = encodeSearchCursor(searchCursor{Kind: "users", Rank: last["rank"].(float64), ID: last["id"].(string)})
+	}
+	return page, nil
 }
 
-func (s *Server) searchCommunities(r *http.Request, query string, limit int) ([]map[string]any, error) {
+func (s *Server) searchCommunities(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
+	rankExpression := "ts_rank(c.search_vector, plainto_tsquery('simple', $1))"
+	args := []any{query}
+	where := `c.search_vector @@ plainto_tsquery('simple', $1) AND c.status = 'active' AND c.deleted_at IS NULL`
+	if rawCursor != "" {
+		cursor, err := decodeSearchCursor(rawCursor)
+		if err != nil {
+			return searchPage{}, err
+		}
+		if cursor.Kind != "" && cursor.Kind != "communities" {
+			return searchPage{}, ErrInvalidSearchCursor
+		}
+		where += fmt.Sprintf(" AND (%s < $%d OR (%s = $%d AND (c.sort_order > $%d OR (c.sort_order = $%d AND c.id > $%d))))", rankExpression, len(args)+1, rankExpression, len(args)+1, len(args)+2, len(args)+2, len(args)+3)
+		args = append(args, cursor.Rank, cursor.SortOrder, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT c.id, c.slug, c.name, c.description, c.post_count, c.follower_count,
-		       ts_rank(c.search_vector, plainto_tsquery('simple', $1))
+		SELECT c.id, c.slug, c.name, c.description, c.post_count, c.follower_count, c.sort_order,
+		       `+rankExpression+`
 		FROM communities c
-		WHERE c.search_vector @@ plainto_tsquery('simple', $1) AND c.status = 'active' AND c.deleted_at IS NULL
-		ORDER BY ts_rank(c.search_vector, plainto_tsquery('simple', $1)) DESC, c.sort_order ASC, c.id ASC
-		LIMIT $2`, query, limit)
+		WHERE `+where+`
+		ORDER BY `+rankExpression+` DESC, c.sort_order ASC, c.id ASC
+		LIMIT $`+strconv.Itoa(limitPosition), args...)
 	if err != nil {
-		return nil, err
+		return searchPage{}, err
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, slug, name, description string
 		var postCount, followerCount int64
+		var sortOrder int
 		var rank float64
-		if err := rows.Scan(&id, &slug, &name, &description, &postCount, &followerCount, &rank); err != nil {
-			return nil, err
+		if err := rows.Scan(&id, &slug, &name, &description, &postCount, &followerCount, &sortOrder, &rank); err != nil {
+			return searchPage{}, err
 		}
-		items = append(items, map[string]any{"id": id, "slug": slug, "name": name, "description": description, "post_count": postCount, "follower_count": followerCount, "rank": rank})
+		items = append(items, map[string]any{"id": id, "slug": slug, "name": name, "description": description, "post_count": postCount, "follower_count": followerCount, "sort_order": sortOrder, "rank": rank})
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return searchPage{}, err
+	}
+	page := searchPage{Items: items, HasMore: len(items) > limit}
+	if page.HasMore {
+		page.Items = page.Items[:limit]
+		last := page.Items[len(page.Items)-1]
+		page.NextCursor, _ = encodeSearchCursor(searchCursor{Kind: "communities", Rank: last["rank"].(float64), SortOrder: last["sort_order"].(int), ID: last["id"].(string)})
+	}
+	return page, nil
+}
+
+func encodeSearchCursor(cursor searchCursor) (string, error) {
+	data, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeSearchCursor(value string) (searchCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return searchCursor{}, fmt.Errorf("%w: %v", ErrInvalidSearchCursor, err)
+	}
+	var cursor searchCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" {
+		return searchCursor{}, ErrInvalidSearchCursor
+	}
+	return cursor, nil
+}
+
+func nullableSearchCursor(page searchPage) any {
+	if page.NextCursor == "" {
+		return nil
+	}
+	return page.NextCursor
 }
 
 type reportInput struct {

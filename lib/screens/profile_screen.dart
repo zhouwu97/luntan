@@ -27,6 +27,7 @@ class ProfileScreen extends StatelessWidget {
     this.bookmarkRepository,
     this.onOpenPostId,
     this.onLogout,
+    this.onRequireAuth,
   });
 
   final ForumStore store;
@@ -43,9 +44,13 @@ class ProfileScreen extends StatelessWidget {
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
   final Future<void> Function()? onLogout;
+  final VoidCallback? onRequireAuth;
 
   @override
   Widget build(BuildContext context) {
+    if (isApiMode && currentUser == null) {
+      return _GuestProfileScreen(onRequireAuth: onRequireAuth);
+    }
     if (isApiMode && profileRepository != null) {
       return _ApiProfileScreen(
         repository: profileRepository!,
@@ -384,6 +389,57 @@ class ProfileScreen extends StatelessWidget {
     final success = store.redeem(product);
     onFeedback(success ? '已兑换${product.name}，请留意领取通知' : '积分不足，再攒一攒就可以兑换啦');
   }
+}
+
+class _GuestProfileScreen extends StatelessWidget {
+  const _GuestProfileScreen({this.onRequireAuth});
+
+  final VoidCallback? onRequireAuth;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircleAvatar(
+                radius: 34,
+                backgroundColor: AppTheme.surfaceBlue,
+                child: Icon(
+                  Icons.person_outline_rounded,
+                  size: 36,
+                  color: AppTheme.primary,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                '登录后查看我的内容',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '收藏、历史、评论和积分都将在这里汇总',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: onRequireAuth,
+                child: const Text('登录 / 注册'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// 正式模式的个人中心只依赖服务器返回的聚合数据和列表，不读取 ForumStore。

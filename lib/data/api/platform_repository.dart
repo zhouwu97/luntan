@@ -96,11 +96,15 @@ class SearchResult {
     this.posts = const [],
     this.users = const [],
     this.communities = const [],
+    this.nextCursor,
+    this.hasMore = false,
   });
 
   final List<SearchPost> posts;
   final List<SearchUser> users;
   final List<SearchCommunity> communities;
+  final String? nextCursor;
+  final bool hasMore;
 
   bool get isEmpty => posts.isEmpty && users.isEmpty && communities.isEmpty;
 }
@@ -153,7 +157,7 @@ class PlatformRepository {
   }
 
   Future<void> markNotificationRead(String notificationId) async {
-    await _client.postJson('/api/v1/notifications/$notificationId/read');
+    await _client.patchJson('/api/v1/notifications/$notificationId/read');
   }
 
   Future<void> markAllNotificationsRead() async {
@@ -170,10 +174,17 @@ class PlatformRepository {
     String query, {
     String type = 'all',
     int limit = 20,
+    String? cursor,
   }) async {
+    final queryParameters = <String, String>{
+      'q': query,
+      'type': type,
+      'limit': '$limit',
+      'cursor': ?cursor,
+    };
     final payload = await _client.getJson(
       '/api/v1/search',
-      queryParameters: {'q': query, 'type': type, 'limit': '$limit'},
+      queryParameters: queryParameters,
     );
     return SearchResult(
       posts: _searchList(payload['posts'])
@@ -208,6 +219,8 @@ class PlatformRepository {
             ),
           )
           .toList(),
+      nextCursor: payload['next_cursor'] as String?,
+      hasMore: payload['has_more'] == true,
     );
   }
 

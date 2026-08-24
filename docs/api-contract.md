@@ -8,12 +8,12 @@
 - **Base URL**：`$API_BASE_URL/api/v1`（`API_BASE_URL` 编译期注入）。
 - **认证**：除公开读接口外，均需 `Authorization: Bearer <access_token>`。
   access token 过期返回 `401`，客户端用 refresh token 走 `/auth/refresh`
-  （服务端轮换 refresh token）。refresh 失败后清理本端凭证并回到登录页。
+  （服务端轮换 refresh token）。只有服务端明确返回 refresh token 失效时才清理本端凭证；网络超时、断网和 5xx 保留会话，等待重试。
 - **错误响应**：`HTTP 4xx/5xx` + JSON
   ```json
-  { "error": { "code": "INVALID_CURSOR", "message": "cursor 无效" } }
+  { "code": "INVALID_CURSOR", "message": "cursor 无效", "request_id": "req_xxx", "details": null }
   ```
-  `code` 稳定可枚举，`message` 面向用户、可本地化。
+  `code` 稳定可枚举，`message` 面向用户、可本地化；客户端保留 `code`、`request_id` 和 `details`。
 - **分页**：键集游标，不返回 offset。
   - `latest`：游标 `(published_at, id)`，保序键即发布时间。
   - `recommended` / `hot` / `featured`：游标 `(score, published_at, id)`，
@@ -92,7 +92,7 @@
 
 | 方法 | 路径 | 登录 | 说明 |
 |---|---|---|---|
-| POST | `/posts` | 是 | 发帖（需幂等键） |
+| POST | `/posts` | 是 | 发帖（需幂等键；投票/集市正文与帖子原子创建） |
 | GET | `/posts/{id}?include_details=1` | 否 | 详情 |
 | PATCH | `/posts/{id}` | 是 | 编辑 |
 | DELETE | `/posts/{id}` | 是 | 删除 |
@@ -108,13 +108,26 @@
 ```json
 {
   "community_id": "string",
-  "type": "normal|game_share|poll|question",
+  "type": "normal|game_share|poll|market|question",
   "title": "string",
   "content": "string",
-  "media_ids": ["string"]
+  "media_ids": ["string"],
+  "poll": {
+    "question": "string",
+    "options": ["A", "B"],
+    "allow_multiple": false,
+    "ends_at": "RFC3339|null"
+  },
+  "market": {
+    "price": 12.5,
+    "currency": "CNY",
+    "condition": "九成新",
+    "delivery": "面交"
+  }
 }
 ```
 头：`Idempotency-Key: <uuid>`。响应：`{ "id": "string", ... }`。
+`type=poll` 时 `poll` 必填，`type=market` 时 `market` 必填；所有子资源在同一事务中提交，任一步失败全部回滚。
 
 ### 收藏夹 Bookmark Folders
 
@@ -136,13 +149,14 @@
 | 方法 | 路径 | 登录 | 说明 |
 |---|---|---|---|
 | GET | `/posts/{id}/comments?cursor=&limit=` | 是 | 按帖分页 |
-| POST | `/posts/{id}/comments` | 是 | 发布评论（支持 `parent_id` 楼中楼） |
-| POST | `/comments/{id}/replies` | 是 | 回复评论 |
+| POST | `/posts/{id}/comments` | 是 | 发布评论（支持 `parent_id` 楼中楼，需幂等键） |
+| POST | `/comments/{id}/replies` | 是 | 回复评论（需幂等键） |
 | PATCH | `/comments/{id}` | 是 | 编辑 |
 | DELETE | `/comments/{id}` | 是 | 删除 |
 | PUT/DELETE | `/comments/{id}/like` | 是 | 评论点赞/取消 |
 
 分页结构与 feed 一致（`{items, next_cursor, has_more}`）。
+评论创建请求必须带 `Idempotency-Key`；服务端按 `(user_id, idempotency_key)` 去重，重试返回首次创建的评论。
 
 ### 媒体 Media
 
@@ -189,10 +203,10 @@ pending，服务端有清理接口。
 | 方法 | 路径 | 登录 | 说明 |
 |---|---|---|---|
 | GET | `/notifications?cursor=` | 是 | 通知分页 |
-| POST/PATCH | `/notifications/read-all` | 是 | 全部已读 |
-| POST/PATCH | `/notifications/{id}` | 是 | 单条已读 |
+| POST | `/notifications/read-all` | 是 | 全部已读 |
+| PATCH | `/notifications/{id}/read` | 是 | 单条已读 |
 | GET | `/notifications/unread-count` | 是 | 未读数 |
-| GET | `/search?q=&type=&cursor=` | 是 | 综合/帖子/用户/社区搜索 |
+| GET | `/search?q=&type=&cursor=` | 是 | 搜索；选择帖子/用户/社区分类后使用 cursor 分页，综合搜索不接受 cursor |
 
 ## 已知错误码
 

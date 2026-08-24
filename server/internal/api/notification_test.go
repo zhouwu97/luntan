@@ -1,8 +1,14 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestNotificationCategoryValidation(t *testing.T) {
@@ -38,5 +44,99 @@ func TestNotificationCursorIsBoundToCategory(t *testing.T) {
 	}
 	if cursor.Category == "like" {
 		t.Fatal("reply cursor must not be reusable for like category")
+	}
+}
+
+func TestUnreadNotificationCountUsesAuthenticatedUserID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("user-a", "a", "active", "A", 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM notifications WHERE user_id = $1 AND is_read = false`)).
+		WithArgs("user-a").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(3)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/unread-count", nil)
+	req.Header.Set("Authorization", "Bearer access-a")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"unread_count":3`) {
+		t.Fatalf("unread count response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMarkNotificationReadUsesPatchReadRouteAndRejectsOtherUsers(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("user-a", "a", "active", "A", 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2`)).
+		WithArgs("notification-b", "user-a").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/notifications/notification-b/read", nil)
+	req.Header.Set("Authorization", "Bearer access-a")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusNotFound || !strings.Contains(res.Body.String(), `"code":"NOTIFICATION_NOT_FOUND"`) {
+		t.Fatalf("missing notification response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNotificationReadRouteDoesNotAcceptLegacyPath(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("legacy notification route status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMarkNotificationReadUpdatesRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("user-a", "a", "active", "A", 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2`)).
+		WithArgs("notification-a", "user-a").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/notifications/notification-a/read", nil)
+	req.Header.Set("Authorization", "Bearer access-a")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"is_read":true`) {
+		t.Fatalf("read response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

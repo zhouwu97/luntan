@@ -184,14 +184,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/block"):
 		s.toggleBlock(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/block"), false)
 		return
-	case (r.Method == http.MethodPost || r.Method == http.MethodPatch) && path == "/api/v1/notifications/read-all":
+	case r.Method == http.MethodPost && path == "/api/v1/notifications/read-all":
 		s.markAllNotificationsRead(w, r)
 		return
 	case r.Method == http.MethodGet && path == "/api/v1/notifications/unread-count":
 		s.unreadNotificationCount(w, r)
 		return
-	case (r.Method == http.MethodPost || r.Method == http.MethodPatch) && strings.HasPrefix(path, "/api/v1/notifications/"):
-		s.markNotificationRead(w, r, strings.TrimPrefix(path, "/api/v1/notifications/"))
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/notifications/") && strings.HasSuffix(path, "/read"):
+		notificationID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/notifications/"), "/read")
+		s.markNotificationRead(w, r, notificationID)
 		return
 	case r.Method == http.MethodPost && path == "/api/v1/reports":
 		s.createReport(w, r)
@@ -440,6 +441,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_REPORT", Message: "举报参数不合法"}
 	case errors.Is(err, ErrReportTargetNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "REPORT_TARGET_NOT_FOUND", Message: "举报目标不存在"}
+	case errors.Is(err, ErrNotificationNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "NOTIFICATION_NOT_FOUND", Message: "通知不存在"}
 	case errors.Is(err, ErrPermissionDenied):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "PERMISSION_DENIED", Message: "没有执行该操作的权限"}
 	case errors.Is(err, ErrInvalidModerationAction):

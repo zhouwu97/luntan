@@ -42,7 +42,7 @@ void main() {
     expect(page.items.single.actorName, 'User');
     expect(calls, [
       'GET /api/v1/notifications?limit=20&category=reply',
-      'POST /api/v1/notifications/n1/read',
+      'PATCH /api/v1/notifications/n1/read',
       'POST /api/v1/notifications/read-all',
       'POST /api/v1/reports',
       'PUT /api/v1/users/u2/block',

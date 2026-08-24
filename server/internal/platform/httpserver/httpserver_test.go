@@ -18,8 +18,18 @@ func TestHealth(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("health status = %d, want 200", res.Code)
 	}
-	if !strings.Contains(res.Body.String(), `"status":"ok"`) {
+	if !strings.Contains(res.Body.String(), `"status":"ok"`) || !strings.Contains(res.Body.String(), `"version":"dev"`) || !strings.Contains(res.Body.String(), `"commit":"unknown"`) {
 		t.Fatalf("health body = %s", res.Body.String())
+	}
+}
+
+func TestVersion(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	res := httptest.NewRecorder()
+	NewHandler(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"status":"ok"`) {
+		t.Fatalf("version response: status=%d body=%s", res.Code, res.Body.String())
 	}
 }
 

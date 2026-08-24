@@ -31,6 +31,12 @@ type Options struct {
 	TrustedProxyCIDRs []string
 }
 
+// BuildVersion 和 BuildCommit 由构建命令通过 -ldflags 注入，开发环境使用默认值。
+var (
+	BuildVersion = "dev"
+	BuildCommit  = "unknown"
+)
+
 func (e AppError) Error() string { return e.Code }
 
 func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
@@ -59,7 +65,9 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/health":
-			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			WriteJSON(w, http.StatusOK, buildInfoPayload("ok"))
+		case r.Method == http.MethodGet && r.URL.Path == "/version":
+			WriteJSON(w, http.StatusOK, buildInfoPayload("ok"))
 		case r.Method == http.MethodGet && r.URL.Path == "/metrics":
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 			metrics.write(w)
@@ -83,6 +91,14 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 	}
 	root = clientIPMiddleware(root, resolver)
 	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger)), nil
+}
+
+func buildInfoPayload(status string) map[string]string {
+	return map[string]string{
+		"status":  status,
+		"version": BuildVersion,
+		"commit":  BuildCommit,
+	}
 }
 
 func splitCommaSeparated(value string) []string {

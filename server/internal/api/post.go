@@ -119,6 +119,10 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	if err := awardPointsTx(r.Context(), tx, user.ID, "post", "发布帖子", "post:create:"+postID, s.pointRewards.PostCreate); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := enqueueOutboxTx(tx, "post.created", "post", postID, map[string]any{
 		"author_id":    user.ID,
 		"community_id": input.CommunityID,
@@ -249,7 +253,7 @@ func validPostInput(input postWriteInput) bool {
 		return false
 	}
 	switch input.Type {
-	case "normal", "guide", "question", "game_share", "poll", "market":
+	case "normal", "guide", "question", "game_share", "poll", "market", "activity":
 		return true
 	default:
 		return false
@@ -305,7 +309,7 @@ func attachMedia(ctx context.Context, tx *sql.Tx, postID, ownerID string, mediaI
 		}
 		seen[mediaID] = struct{}{}
 		var id string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM media_assets WHERE id = $1 AND owner_id = $2 AND status = 'ready' AND deleted_at IS NULL`, mediaID, ownerID).Scan(&id)
+		err := tx.QueryRowContext(ctx, `SELECT id FROM media_assets WHERE id = $1 AND owner_id = $2 AND status = 'ready' AND deleted_at IS NULL FOR UPDATE`, mediaID, ownerID).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrInvalidPost
 		}

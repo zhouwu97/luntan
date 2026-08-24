@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -23,6 +25,12 @@ type AppError struct {
 	Details any
 }
 
+type Options struct {
+	RateLimitEnabled  bool
+	RateLimitStore    RateLimitStore
+	TrustedProxyCIDRs []string
+}
+
 func (e AppError) Error() string { return e.Code }
 
 func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
@@ -30,8 +38,23 @@ func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
 }
 
 func NewHandlerWithAPI(db *sql.DB, logger *slog.Logger, apiHandler http.Handler) http.Handler {
+	handler, err := NewHandlerWithAPIOptions(db, logger, apiHandler, Options{
+		RateLimitEnabled:  rateLimitEnabled(),
+		TrustedProxyCIDRs: splitCommaSeparated(os.Getenv("TRUSTED_PROXY_CIDRS")),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return handler
+}
+
+func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.Handler, options Options) (http.Handler, error) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	resolver, err := newClientIPResolver(options.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
 	}
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -55,10 +78,22 @@ func NewHandlerWithAPI(db *sql.DB, logger *slog.Logger, apiHandler http.Handler)
 		}
 	})
 	var root http.Handler = router
-	if rateLimitEnabled() {
-		root = newRateLimiter().middleware(root)
+	if options.RateLimitEnabled {
+		root = newRateLimiter(options.RateLimitStore).middleware(root)
 	}
-	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger))
+	root = clientIPMiddleware(root, resolver)
+	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger)), nil
+}
+
+func splitCommaSeparated(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 func pingDatabase(ctx context.Context, db *sql.DB) error {

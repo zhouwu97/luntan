@@ -1,19 +1,26 @@
 import '../../domain/models.dart';
 import '../../domain/repositories.dart';
+import '../api/api_client.dart';
 import '../api/comment_repository.dart';
+import '../api/bookmark_repository.dart';
 import '../api/interaction_repository.dart';
 import '../api/publish_repository.dart';
 import '../mock_forum_data.dart';
 
 class MockCommunityRepository implements CommunityRepository {
-  MockCommunityRepository({ForumStore? store}) : _store = store ?? ForumStore.seeded();
+  MockCommunityRepository({ForumStore? store})
+    : _store = store ?? ForumStore.seeded();
 
   final ForumStore _store;
 
   @override
-  Future<List<Community>> getCommunities({String? categoryId, CommunityStatus? status}) async {
+  Future<List<Community>> getCommunities({
+    String? categoryId,
+    CommunityStatus? status,
+  }) async {
     return _store.communities.where((community) {
-      final matchesCategory = categoryId == null || community.categoryId == categoryId;
+      final matchesCategory =
+          categoryId == null || community.categoryId == categoryId;
       final matchesStatus = status == null || community.status == status;
       return matchesCategory && matchesStatus;
     }).toList();
@@ -29,7 +36,8 @@ class MockCommunityRepository implements CommunityRepository {
 }
 
 class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
-  MockFeedRepository({ForumStore? store}) : _store = store ?? ForumStore.seeded();
+  MockFeedRepository({ForumStore? store})
+    : _store = store ?? ForumStore.seeded();
 
   final ForumStore _store;
 
@@ -43,12 +51,20 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
     String? cursor,
     int limit = 20,
     String? communityId,
-    String sort = 'recommended',
+    String sort = 'latest',
+    String? postType,
+    bool? hasMedia,
   }) async {
     final normalizedLimit = limit.clamp(1, 50).toInt();
     final posts = [..._store.posts]
-      ..removeWhere((post) => post.publicationStatus != PublicationStatus.published || post.moderationStatus != ModerationStatus.normal)
-      ..removeWhere((post) => communityId != null && post.communityId != communityId)
+      ..removeWhere(
+        (post) =>
+            post.publicationStatus != PublicationStatus.published ||
+            post.moderationStatus != ModerationStatus.normal,
+      )
+      ..removeWhere(
+        (post) => communityId != null && post.communityId != communityId,
+      )
       ..sort((a, b) {
         final int by;
         switch (sort) {
@@ -57,26 +73,35 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
           case 'hot':
             by = b.commentCount.compareTo(a.commentCount);
           default:
-            by = b.createdAt.compareTo(a.createdAt);
+            by = (b.publishedAt ?? b.createdAt).compareTo(
+              a.publishedAt ?? a.createdAt,
+            );
         }
         return by == 0 ? b.id.compareTo(a.id) : by;
       });
     final start = int.tryParse(cursor ?? '') ?? 0;
     if (start >= posts.length) return const FeedPage(items: [], hasMore: false);
     final end = (start + normalizedLimit).clamp(0, posts.length).toInt();
-    return FeedPage(items: posts.sublist(start, end), nextCursor: end < posts.length ? '$end' : null, hasMore: end < posts.length);
+    return FeedPage(
+      items: posts.sublist(start, end),
+      nextCursor: end < posts.length ? '$end' : null,
+      hasMore: end < posts.length,
+    );
   }
 }
 
 class MockPostRepository implements PostRepository, PostMutationRepository {
-  MockPostRepository({ForumStore? store}) : _store = store ?? ForumStore.seeded();
+  MockPostRepository({ForumStore? store})
+    : _store = store ?? ForumStore.seeded();
 
   final ForumStore _store;
 
   @override
   Future<PostDetail?> getPost(String id) async {
     for (final post in _store.posts) {
-      if (post.id == id && post.publicationStatus == PublicationStatus.published && post.moderationStatus == ModerationStatus.normal) {
+      if (post.id == id &&
+          post.publicationStatus == PublicationStatus.published &&
+          post.moderationStatus == ModerationStatus.normal) {
         return PostDetail(post: post);
       }
     }
@@ -105,10 +130,229 @@ class MockPostRepository implements PostRepository, PostMutationRepository {
   }
 }
 
+class MockBookmarkRepository implements BookmarkRepository {
+  MockBookmarkRepository({ForumStore? store})
+    : _store = store ?? ForumStore.seeded() {
+    final now = DateTime.now().toUtc();
+    _folders['default'] = BookmarkFolder(
+      id: 'default',
+      name: '默认收藏夹',
+      isDefault: true,
+      sortOrder: 0,
+      itemCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    );
+    _items['default'] = _store.bookmarkedPosts.map((post) => post.id).toSet();
+    _refreshCounts();
+  }
+
+  final ForumStore _store;
+  final Map<String, BookmarkFolder> _folders = <String, BookmarkFolder>{};
+  final Map<String, Set<String>> _items = <String, Set<String>>{};
+  int _nextFolder = 1;
+
+  @override
+  Future<BookmarkFolderPage> listFolders({
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final values = _folders.values.toList()
+      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    final start = int.tryParse(cursor ?? '') ?? 0;
+    final end = (start + limit.clamp(1, 50)).clamp(0, values.length).toInt();
+    return BookmarkFolderPage(
+      items: values.sublist(start, end),
+      nextCursor: end < values.length ? '$end' : null,
+      hasMore: end < values.length,
+    );
+  }
+
+  @override
+  Future<BookmarkFolder> createFolder(
+    String name, {
+    String? idempotencyKey,
+  }) async {
+    final normalized = name.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.isEmpty || normalized.runes.length > 40) {
+      throw const ApiException(type: ApiErrorType.unknown, message: '收藏夹名称不合法');
+    }
+    if (_folders.values.any(
+      (folder) => folder.name.toLowerCase() == normalized.toLowerCase(),
+    )) {
+      throw const ApiException(
+        type: ApiErrorType.conflict,
+        message: '收藏夹名称已存在',
+      );
+    }
+    final now = DateTime.now().toUtc();
+    final id = 'folder-${_nextFolder++}';
+    final folder = BookmarkFolder(
+      id: id,
+      name: normalized,
+      isDefault: false,
+      sortOrder: _folders.length,
+      itemCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    );
+    _folders[id] = folder;
+    _items[id] = <String>{};
+    return folder;
+  }
+
+  @override
+  Future<BookmarkFolder> renameFolder(String folderId, String name) async {
+    final folder = _folders[folderId];
+    if (folder == null) {
+      throw const ApiException(type: ApiErrorType.notFound, message: '收藏夹不存在');
+    }
+    if (folder.isDefault) {
+      throw const ApiException(
+        type: ApiErrorType.unknown,
+        message: '默认收藏夹不能重命名',
+      );
+    }
+    final normalized = name.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (_folders.values.any(
+      (item) =>
+          item.id != folderId &&
+          item.name.toLowerCase() == normalized.toLowerCase(),
+    )) {
+      throw const ApiException(
+        type: ApiErrorType.conflict,
+        message: '收藏夹名称已存在',
+      );
+    }
+    final updated = folder.copyWith(name: normalized);
+    _folders[folderId] = updated;
+    return updated;
+  }
+
+  @override
+  Future<BookmarkFolder> reorderFolder(String folderId, int sortOrder) async {
+    final folder = _folders[folderId];
+    if (folder == null) {
+      throw const ApiException(type: ApiErrorType.notFound, message: '收藏夹不存在');
+    }
+    final updated = folder.copyWith(sortOrder: sortOrder);
+    _folders[folderId] = updated;
+    return updated;
+  }
+
+  @override
+  Future<void> deleteFolder(String folderId) async {
+    final folder = _folders[folderId];
+    if (folder == null) {
+      throw const ApiException(type: ApiErrorType.notFound, message: '收藏夹不存在');
+    }
+    if (folder.isDefault) {
+      throw const ApiException(
+        type: ApiErrorType.unknown,
+        message: '默认收藏夹不能删除',
+      );
+    }
+    final defaultItems = _items['default']!;
+    for (final postId in _items[folderId] ?? <String>{}) {
+      final elsewhere = _items.entries.any(
+        (entry) => entry.key != folderId && entry.value.contains(postId),
+      );
+      if (!elsewhere) defaultItems.add(postId);
+    }
+    _items.remove(folderId);
+    _folders.remove(folderId);
+    _refreshCounts();
+  }
+
+  @override
+  Future<BookmarkPostPage> listFolderPosts(
+    String folderId, {
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final ids = _items[folderId] ?? <String>{};
+    final posts = _store.posts.where((post) => ids.contains(post.id)).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final start = int.tryParse(cursor ?? '') ?? 0;
+    final end = (start + limit.clamp(1, 50)).clamp(0, posts.length).toInt();
+    return BookmarkPostPage(
+      items: posts
+          .sublist(start, end)
+          .map(
+            (post) => BookmarkPost(
+              id: post.id,
+              title: post.title,
+              contentPreview: post.content,
+              communityId: post.communityId,
+              communityName: post.community?.name ?? post.section.label,
+              commentCount: post.commentCount,
+              likeCount: post.likeCount,
+              bookmarkCount: post.bookmarkCount,
+              createdAt: post.createdAt,
+            ),
+          )
+          .toList(),
+      nextCursor: end < posts.length ? '$end' : null,
+      hasMore: end < posts.length,
+    );
+  }
+
+  @override
+  Future<BookmarkSelection> getPostFolders(String postId) async {
+    final selected = _items.entries
+        .where((entry) => entry.value.contains(postId))
+        .map((entry) => entry.key)
+        .toList();
+    final folders =
+        _folders.values
+            .map(
+              (folder) =>
+                  folder.copyWith(selected: selected.contains(folder.id)),
+            )
+            .toList()
+          ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return BookmarkSelection(folders: folders, selectedFolderIds: selected);
+  }
+
+  @override
+  Future<BookmarkSelection> setPostFolders(
+    String postId,
+    List<String> folderIds,
+  ) async {
+    final selected = folderIds.toSet();
+    for (final folderId in selected) {
+      if (!_folders.containsKey(folderId)) {
+        throw const ApiException(
+          type: ApiErrorType.notFound,
+          message: '收藏夹不存在',
+        );
+      }
+    }
+    for (final items in _items.values) {
+      items.remove(postId);
+    }
+    for (final folderId in selected) {
+      _items[folderId]!.add(postId);
+    }
+    _refreshCounts();
+    return getPostFolders(postId);
+  }
+
+  void _refreshCounts() {
+    for (final entry in _folders.entries) {
+      _folders[entry.key] = entry.value.copyWith(
+        itemCount: _items[entry.key]?.length ?? 0,
+      );
+    }
+  }
+}
+
 /// Mock 模式也走与 API 模式相同的 Repository/Controller 链路，避免页面
 /// 通过 ForumStore 直接写入而掩盖真实模式的问题。
-class MockCommentRepository implements CommentRepository, CommentMutationRepository {
-  MockCommentRepository({ForumStore? store}) : _store = store ?? ForumStore.seeded();
+class MockCommentRepository
+    implements CommentRepository, CommentMutationRepository {
+  MockCommentRepository({ForumStore? store})
+    : _store = store ?? ForumStore.seeded();
 
   final ForumStore _store;
 
@@ -118,7 +362,11 @@ class MockCommentRepository implements CommentRepository, CommentMutationReposit
     String? cursor,
     int limit = 20,
   }) async {
-    final comments = _store.commentsByPost[postId] ?? const <Comment>[];
+    final comments = [...(_store.commentsByPost[postId] ?? const <Comment>[])]
+      ..sort((a, b) {
+        final byTime = a.createdAt.compareTo(b.createdAt);
+        return byTime == 0 ? a.id.compareTo(b.id) : byTime;
+      });
     final start = int.tryParse(cursor ?? '') ?? 0;
     final end = (start + limit.clamp(1, 50)).clamp(0, comments.length).toInt();
     return CommentPage(
@@ -144,12 +392,11 @@ class MockCommentRepository implements CommentRepository, CommentMutationReposit
     }
     if (source == null) return const CommentPage(items: []);
     final rootId = source.rootId ?? source.id;
-    final sorted = all
-        .where(
-          (item) => item.rootId == rootId && item.id != commentId,
-        )
-        .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final sorted =
+        all
+            .where((item) => item.rootId == rootId && item.id != commentId)
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     final start = int.tryParse(cursor ?? '') ?? 0;
     final end = (start + limit.clamp(1, 50)).clamp(0, sorted.length).toInt();
     return CommentPage(
@@ -198,9 +445,9 @@ class MockCommentRepository implements CommentRepository, CommentMutationReposit
     for (final post in _store.posts) {
       final comments = _store.commentsByPost[post.id];
       final comment = comments?.cast<Comment?>().firstWhere(
-            (item) => item?.id == commentId,
-            orElse: () => null,
-          );
+        (item) => item?.id == commentId,
+        orElse: () => null,
+      );
       if (comment != null) {
         _store.deleteComment(post, comment);
         return;
@@ -243,25 +490,44 @@ class MockCommentRepository implements CommentRepository, CommentMutationReposit
 
 class MockInteractionRepository implements InteractionRepository {
   @override
-  Future<void> setPostLike({required String postId, required bool active}) async {}
+  Future<void> setPostLike({
+    required String postId,
+    required bool active,
+  }) async {}
 
   @override
-  Future<void> setCommentLike({required String commentId, required bool active}) async {}
+  Future<void> setCommentLike({
+    required String commentId,
+    required bool active,
+  }) async {}
 
   @override
-  Future<void> setBookmark({required String postId, required bool active}) async {}
+  Future<void> setBookmark({
+    required String postId,
+    required bool active,
+  }) async {}
 
   @override
-  Future<void> setUserFollow({required String userId, required bool active}) async {}
+  Future<void> setUserFollow({
+    required String userId,
+    required bool active,
+  }) async {}
 
   @override
-  Future<void> setCommunityFollow({required String communityId, required bool active}) async {}
+  Future<void> setCommunityFollow({
+    required String communityId,
+    required bool active,
+  }) async {}
 
   @override
-  Future<void> setCommunityMembership({required String communityId, required bool active}) async {}
+  Future<void> setCommunityMembership({
+    required String communityId,
+    required bool active,
+  }) async {}
 }
 
-class MockPublishRepository implements PublishRepository, PollPublishRepository {
+class MockPublishRepository
+    implements PublishRepository, PollPublishRepository {
   MockPublishRepository({required ForumStore store}) : _store = store;
 
   final ForumStore _store;
@@ -279,13 +545,15 @@ class MockPublishRepository implements PublishRepository, PollPublishRepository 
       (item) => item.communityId == communityId,
       orElse: () => ForumSection.unboxing,
     );
-    _store.addPost(PostDraft(
-      title: title,
-      body: content,
-      section: section,
-      isGameShare: type == 'game_share',
-      isPoll: type == 'poll',
-    ));
+    _store.addPost(
+      PostDraft(
+        title: title,
+        body: content,
+        section: section,
+        isGameShare: type == 'game_share',
+        isPoll: type == 'poll',
+      ),
+    );
     return {'id': _store.posts.first.id, 'idempotency_key': idempotencyKey};
   }
 

@@ -1,5 +1,16 @@
 import 'api_client.dart';
 
+enum NotificationCategory {
+  all('all'),
+  reply('reply'),
+  like('like'),
+  system('system');
+
+  const NotificationCategory(this.value);
+
+  final String value;
+}
+
 class NotificationPage {
   const NotificationPage({
     required this.items,
@@ -53,7 +64,11 @@ class SearchPost {
 }
 
 class SearchUser {
-  const SearchUser({required this.id, required this.username, required this.nickname});
+  const SearchUser({
+    required this.id,
+    required this.username,
+    required this.nickname,
+  });
 
   final String id;
   final String username;
@@ -98,8 +113,12 @@ class PlatformRepository {
   Future<NotificationPage> listNotifications({
     String? cursor,
     int limit = 20,
+    NotificationCategory category = NotificationCategory.all,
   }) async {
-    final query = <String, String>{'limit': '$limit'};
+    final query = <String, String>{
+      'limit': '$limit',
+      'category': category.value,
+    };
     if (cursor != null) query['cursor'] = cursor;
     final payload = await _client.getJson(
       '/api/v1/notifications',
@@ -158,30 +177,36 @@ class PlatformRepository {
     );
     return SearchResult(
       posts: _searchList(payload['posts'])
-          .map((value) => SearchPost(
-                id: _string(value['id']),
-                title: _string(value['title']),
-                contentPreview: _string(value['content_preview']),
-                communityId: _string(value['community_id']),
-                communityName: _string(value['community_name']),
-                createdAt: _date(value['created_at']),
-              ))
+          .map(
+            (value) => SearchPost(
+              id: _string(value['id']),
+              title: _string(value['title']),
+              contentPreview: _string(value['content_preview']),
+              communityId: _string(value['community_id']),
+              communityName: _string(value['community_name']),
+              createdAt: _date(value['created_at']),
+            ),
+          )
           .toList(),
       users: _searchList(payload['users'])
-          .map((value) => SearchUser(
-                id: _string(value['id']),
-                username: _string(value['username']),
-                nickname: _string(value['nickname']),
-              ))
+          .map(
+            (value) => SearchUser(
+              id: _string(value['id']),
+              username: _string(value['username']),
+              nickname: _string(value['nickname']),
+            ),
+          )
           .toList(),
       communities: _searchList(payload['communities'])
-          .map((value) => SearchCommunity(
-                id: _string(value['id']),
-                slug: _string(value['slug']),
-                name: _string(value['name']),
-                description: _string(value['description']),
-                followerCount: _int(value['follower_count']),
-              ))
+          .map(
+            (value) => SearchCommunity(
+              id: _string(value['id']),
+              slug: _string(value['slug']),
+              name: _string(value['name']),
+              description: _string(value['description']),
+              followerCount: _int(value['follower_count']),
+            ),
+          )
           .toList(),
     );
   }

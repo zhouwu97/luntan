@@ -50,7 +50,8 @@ abstract interface class CommentMutationRepository {
   });
 }
 
-class ApiCommentRepository implements CommentRepository, CommentMutationRepository {
+class ApiCommentRepository
+    implements CommentRepository, CommentMutationRepository {
   ApiCommentRepository(this._client);
 
   final ApiClient _client;
@@ -160,23 +161,29 @@ Comment _commentFromJson(Map<String, dynamic> json) {
   final now = DateTime.now().toUtc();
   final createdAt = _date(json['created_at'], now);
   final updatedAt = _date(json['updated_at'], createdAt);
+  final viewerState = json['viewer_state'] is Map
+      ? Map<String, dynamic>.from(json['viewer_state'] as Map)
+      : const <String, dynamic>{};
   return Comment(
     id: _string(json['id']),
     postId: _string(json['post_id']),
     authorId: _string(authorJson['id']),
-    author: authorJson.isEmpty ? null : User(
-      id: _string(authorJson['id']),
-      username: _string(authorJson['username']),
-      nickname: _string(authorJson['nickname']),
-      level: _int(authorJson['level']),
-      createdAt: now,
-      updatedAt: now,
-    ),
+    author: authorJson.isEmpty
+        ? null
+        : User(
+            id: _string(authorJson['id']),
+            username: _string(authorJson['username']),
+            nickname: _string(authorJson['nickname']),
+            level: _int(authorJson['level']),
+            createdAt: now,
+            updatedAt: now,
+          ),
     rootId: _nullableString(json['root_id']),
     parentId: _nullableString(json['parent_id']),
     replyToUserId: _nullableString(json['reply_to_user_id']),
     content: _string(json['content']),
     likeCount: _int(json['like_count']),
+    isLiked: viewerState['has_liked'] == true,
     replyCount: _int(json['reply_count']),
     publicationStatus: _enumByName(
       CommentPublicationStatus.values,

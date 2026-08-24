@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	AppEnv                     string
@@ -11,6 +14,7 @@ type Config struct {
 	ObjectStorageUploadBaseURL string
 	ObjectStorageSigningSecret string
 	RateLimitEnabled           bool
+	TrustedProxyCIDRs          []string
 }
 
 func Load() Config {
@@ -23,7 +27,19 @@ func Load() Config {
 		ObjectStorageUploadBaseURL: os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"),
 		ObjectStorageSigningSecret: os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
 		RateLimitEnabled:           valueOrDefault("RATE_LIMIT_ENABLED", "false") == "true",
+		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
 	}
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 func valueOrDefault(key, fallback string) string {

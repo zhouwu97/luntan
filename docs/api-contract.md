@@ -98,6 +98,8 @@
 | DELETE | `/posts/{id}` | 是 | 删除 |
 | PUT/DELETE | `/posts/{id}/like` | 是 | 点赞/取消 |
 | PUT/DELETE | `/posts/{id}/bookmark` | 是 | 收藏/取消 |
+| GET | `/posts/{id}/bookmark-folders` | 是 | 获取帖子所在收藏夹 |
+| PUT | `/posts/{id}/bookmark-folders` | 是 | 覆盖帖子收藏夹归属；空数组表示取消收藏 |
 | POST | `/posts/{id}/history` | 是 | 记录浏览历史 |
 | POST | `/posts/{id}/poll` | 是 | 创建投票 |
 | POST | `/posts/{id}/market` | 是 | 创建集市帖 |
@@ -113,6 +115,21 @@
 }
 ```
 头：`Idempotency-Key: <uuid>`。响应：`{ "id": "string", ... }`。
+
+### 收藏夹 Bookmark Folders
+
+| 方法 | 路径 | 登录 | 说明 |
+|---|---|---|---|
+| GET | `/me/bookmark-folders?cursor=&limit=` | 是 | 收藏夹列表及内容数量 |
+| POST | `/me/bookmark-folders` | 是 | 新建收藏夹 |
+| PATCH | `/me/bookmark-folders/{id}` | 是 | 重命名或调整 `sort_order` |
+| DELETE | `/me/bookmark-folders/{id}` | 是 | 删除自定义收藏夹；默认收藏夹不可删除 |
+| GET | `/me/bookmark-folders/{id}/posts?cursor=&limit=` | 是 | 收藏夹内容分页 |
+
+`bookmarks(post_id, user_id)` 仍表示唯一的收藏事实；
+`bookmark_folder_items(folder_id, post_id)` 只表示分类关系。一个帖子进入多个收藏夹
+只增加一次 `bookmark_count`。旧的 bookmark PUT 会自动归入默认收藏夹，旧 DELETE
+会清除所有收藏夹归属并取消收藏。删除自定义收藏夹时，没有其他归属的帖子会回到默认收藏夹。
 
 ### 评论 Comments
 
@@ -143,13 +160,29 @@ pending，服务端有清理接口。
 | 方法 | 路径 | 登录 | 说明 |
 |---|---|---|---|
 | GET | `/store/products` | 是 | 商品列表 |
-| GET | `/me/points` | 是 | 我的积分余额 |
+| GET | `/me/points` | 是 | 我的积分余额与流水 |
 | POST | `/store/orders` | 是 | 兑换（需幂等键） |
 | GET | `/me/store-orders` | 是 | 我的兑换记录 |
 
 兑换请求头 `Idempotency-Key` 与正文 `{ "product_id": "string" }` 共同保证
 幂等；重复请求返回既有订单，不重复扣分。错误码含 `INSUFFICIENT_POINTS`、
 `PRODUCT_UNAVAILABLE`。
+
+`/me/points` 响应包含：
+```json
+{
+  "balance": 3980,
+  "transactions": [{
+    "id": "string", "source": "store", "delta": -350,
+    "balance_after": 3980, "reason": "主题贴纸包",
+    "created_at": "2026-08-24T08:00:00Z"
+  }]
+}
+```
+
+发帖与评论奖励统一通过幂等事件键写入流水；奖励数值由
+`POINT_REWARD_POST_CREATE`、`POINT_REWARD_COMMENT_CREATE` 配置，未配置时为 0，
+避免在规则确认前擅自改变积分余额。
 
 ### 通知与搜索
 
@@ -182,6 +215,10 @@ pending，服务端有清理接口。
 | `INVALID_POST` / `INVALID_COMMENT` / `INVALID_MEDIA` | 400 | 内容不合法 |
 | `INVALID_LIMIT` / `INVALID_CURSOR` / `INVALID_WINDOW` | 400 | 分页/窗口参数不合法 |
 | `INSUFFICIENT_POINTS` | 409 | 积分不足 |
+| `BOOKMARK_FOLDER_NOT_FOUND` | 404 | 收藏夹不存在 |
+| `BOOKMARK_FOLDER_NAME_TAKEN` | 409 | 收藏夹名称已存在 |
+| `DEFAULT_BOOKMARK_FOLDER_PROTECTED` | 400 | 默认收藏夹不能删除或重命名 |
+| `INVALID_BOOKMARK_FOLDER_NAME` | 400 | 收藏夹名称不合法 |
 | `STORAGE_UNAVAILABLE` / `DATABASE_UNAVAILABLE` | 503 | 依赖服务不可用 |
 | `BLOCKED` | 403 | 该互动已被阻止 |
 

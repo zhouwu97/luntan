@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/auth"
@@ -85,6 +86,11 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
 		return
 	}
+	filter, err := parseFeedFilter(r.URL.Query().Get("post_type"), r.URL.Query().Get("has_media"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_FILTER", Message: "Feed 筛选条件无效"})
+		return
+	}
 	scoreExpr, orderBy := feedSortColumns(r.URL.Query().Get("sort"))
 	scored := scoreExpr != ""
 	var cursor *feedCursor
@@ -133,6 +139,13 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if communityID := r.URL.Query().Get("community_id"); communityID != "" {
 		query += fmt.Sprintf(" AND p.community_id = $%d", len(args)+1)
 		args = append(args, communityID)
+	}
+	if filter.PostType != "" {
+		query += fmt.Sprintf(" AND p.type = $%d", len(args)+1)
+		args = append(args, filter.PostType)
+	}
+	if filter.HasMedia {
+		query += " AND EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id)"
 	}
 	// 查看者屏蔽了作者时，该作者的帖子不进入 Feed。
 	if viewer, ok := resolveOptionalViewer(s, r); ok {
@@ -201,6 +214,28 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nullableString(nextCursor), "has_more": hasMore})
+}
+
+type feedFilter struct {
+	PostType string
+	HasMedia bool
+}
+
+func parseFeedFilter(postType, hasMedia string) (feedFilter, error) {
+	filter := feedFilter{PostType: strings.TrimSpace(postType)}
+	switch filter.PostType {
+	case "", "normal", "guide", "question", "game_share", "poll", "market", "activity":
+	default:
+		return feedFilter{}, fmt.Errorf("invalid post type")
+	}
+	switch strings.TrimSpace(hasMedia) {
+	case "", "false", "0":
+	case "true", "1":
+		filter.HasMedia = true
+	default:
+		return feedFilter{}, fmt.Errorf("invalid has_media")
+	}
+	return filter, nil
 }
 
 func parseLimit(value string) (int, error) {

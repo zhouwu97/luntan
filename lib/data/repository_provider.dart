@@ -1,6 +1,7 @@
 import 'api/api_client.dart';
 import 'api/api_repositories.dart';
 import 'api/auth_repository.dart';
+import 'api/bookmark_repository.dart';
 import 'api/comment_repository.dart';
 import 'api/interaction_repository.dart';
 import 'api/platform_repository.dart';
@@ -27,6 +28,7 @@ class ForumRepositories {
     this.profile,
     this.poll,
     this.store,
+    this.bookmarks,
     this.isApiMode = false,
   });
 
@@ -42,6 +44,7 @@ class ForumRepositories {
   final ProfileRepository? profile;
   final PollRepository? poll;
   final StoreRepository? store;
+  final BookmarkRepository? bookmarks;
   final bool isApiMode;
 
   factory ForumRepositories.mock({ForumStore? store}) {
@@ -52,6 +55,7 @@ class ForumRepositories {
       post: MockPostRepository(store: actualStore),
       comments: MockCommentRepository(store: actualStore),
       interactions: MockInteractionRepository(),
+      bookmarks: MockBookmarkRepository(store: actualStore),
       publish: MockPublishRepository(store: actualStore),
     );
   }
@@ -74,9 +78,13 @@ class ForumRepositories {
       feed: ApiFeedRepository(authenticatedClient),
       post: ApiPostRepository(authenticatedClient),
       apiClient: authenticatedClient,
-      auth: AuthRepository(client: authenticatedClient, tokenStore: actualTokenStore),
+      auth: AuthRepository(
+        client: authenticatedClient,
+        tokenStore: actualTokenStore,
+      ),
       comments: ApiCommentRepository(authenticatedClient),
       interactions: ApiInteractionRepository(authenticatedClient),
+      bookmarks: ApiBookmarkRepository(authenticatedClient),
       platform: ApiPlatformRepository(authenticatedClient),
       publish: ApiPublishRepository(authenticatedClient),
       profile: ProfileRepository(authenticatedClient),

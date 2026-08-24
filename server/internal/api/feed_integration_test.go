@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -293,5 +294,44 @@ func TestFeedExcludesBlockedAuthorAgainstPostgres(t *testing.T) {
 	filtered := fetchFeedIDs(t, s, "latest", communityID)
 	if slices.Contains(filtered, blockedPost) {
 		t.Fatalf("feed should exclude blocked-author post, got %v", filtered)
+	}
+}
+
+func TestCommentsExposeViewerLikeStateAgainstPostgres(t *testing.T) {
+	s := feedIntegrationServer(t)
+	_, postIDs := insertFeedFixtures(t, s)
+	postID := postIDs["p1"]
+	var authorID string
+	if err := s.db.QueryRow(`SELECT author_id FROM posts WHERE id = $1`, postID).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	viewer, err := auth.NewService(s.db).Register(context.Background(), auth.RegisterInput{
+		Username: "comment_viewer_" + suffix,
+		Password: "安全密码12345",
+		Nickname: "评论查看者",
+	}, auth.SessionMetadata{UserAgent: "comment-integration-test", IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commentID := "viewer-comment-" + suffix
+	if _, err := s.db.Exec(`
+		INSERT INTO comments (id, post_id, author_id, root_id, content, like_count,
+			publication_status, moderation_status, created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, $1, 'viewer state', 1, 'published', 'normal', now(), now(), now())`,
+		commentID, postID, authorID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO comment_reactions (comment_id, user_id, reaction_type) VALUES ($1, $2, 'like')`, commentID, viewer.User.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/"+postID+"/comments", nil)
+	req.Header.Set("Authorization", "Bearer "+viewer.AccessToken)
+	res := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"viewer_state":{"has_liked":true}`) {
+		t.Fatalf("comments viewer state: status=%d body=%s", res.Code, res.Body.String())
 	}
 }

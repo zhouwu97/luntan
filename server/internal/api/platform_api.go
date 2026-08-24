@@ -30,6 +30,19 @@ func usersBlockEachOther(ctx context.Context, db *sql.DB, firstUserID, secondUse
 type notificationCursor struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
+	Category  string    `json:"category"`
+}
+
+func parseNotificationCategory(value string) (string, error) {
+	if value == "" {
+		return "all", nil
+	}
+	switch value {
+	case "all", "reply", "like", "system":
+		return value, nil
+	default:
+		return "", errors.New("invalid notification category")
+	}
 }
 
 func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
@@ -45,10 +58,15 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
+	category, err := parseNotificationCategory(strings.TrimSpace(r.URL.Query().Get("category")))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CATEGORY", Message: "通知分类无效"})
+		return
+	}
 	var cursor *notificationCursor
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		decoded, decodeErr := decodeNotificationCursor(raw)
-		if decodeErr != nil {
+		if decodeErr != nil || decoded.Category != category {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 			return
 		}
@@ -62,6 +80,16 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN user_profiles up ON up.user_id = n.actor_id
 		WHERE n.user_id = $1`
 	args := []any{user.ID}
+	const replyTypes = "'reply', 'comment.created', 'comment.replied'"
+	const likeTypes = "'like', 'bookmark', 'follow', 'post.liked', 'post.bookmarked', 'user.followed'"
+	switch category {
+	case "reply":
+		query += " AND n.type IN (" + replyTypes + ")"
+	case "like":
+		query += " AND n.type IN (" + likeTypes + ")"
+	case "system":
+		query += " AND n.type NOT IN (" + replyTypes + ", " + likeTypes + ")"
+	}
 	if cursor != nil {
 		query += " AND (n.created_at, n.id) < ($2, $3)"
 		args = append(args, cursor.CreatedAt, cursor.ID)
@@ -111,7 +139,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	var nextCursor any
 	if hasMore && len(items) > 0 {
-		encoded, encodeErr := encodeNotificationCursor(notificationCursor{CreatedAt: items[len(items)-1].CreatedAt, ID: items[len(items)-1].ID})
+		encoded, encodeErr := encodeNotificationCursor(notificationCursor{CreatedAt: items[len(items)-1].CreatedAt, ID: items[len(items)-1].ID, Category: category})
 		if encodeErr != nil {
 			writeInternalError(w, r, encodeErr)
 			return
@@ -445,6 +473,13 @@ func decodeNotificationCursor(value string) (notificationCursor, error) {
 	}
 	var cursor notificationCursor
 	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" || cursor.CreatedAt.IsZero() {
+		return notificationCursor{}, errors.New("invalid notification cursor")
+	}
+	// 兼容旧版“全部”列表游标；分类游标始终和分类绑定，不能串用。
+	if cursor.Category == "" {
+		cursor.Category = "all"
+	}
+	if _, err := parseNotificationCategory(cursor.Category); err != nil {
 		return notificationCursor{}, errors.New("invalid notification cursor")
 	}
 	return cursor, nil

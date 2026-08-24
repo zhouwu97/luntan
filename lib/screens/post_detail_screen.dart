@@ -127,7 +127,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final listenables = <Listenable>[widget.controller, widget.commentsController, widget.interactionController];
+    final listenables = <Listenable>[
+      widget.controller,
+      widget.commentsController,
+      widget.interactionController,
+    ];
     return AnimatedBuilder(
       animation: Listenable.merge(listenables),
       builder: (context, _) {
@@ -360,13 +364,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         comment: comment,
                         floor: entry.key + 2,
                         children: children,
-                        liked: widget.interactionController.likedCommentIds
-                            .contains(comment.id),
+                        liked: comment.isLiked,
                         onReply: () => setState(() => replyTarget = comment),
                         onLike: () => _likeComment(comment),
                         onMore: () => _showCommentMenu(comment),
-                        onViewAllReplies: () =>
-                            _openReplyThread(comment),
+                        onViewAllReplies: () => _openReplyThread(comment),
                       );
                     }),
                     if (commentsController.isLoadingMore == true)
@@ -376,8 +378,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       ),
-                    if (!commentsController.hasMore &&
-                        allComments.isNotEmpty)
+                    if (!commentsController.hasMore && allComments.isNotEmpty)
                       const Padding(
                         padding: EdgeInsets.only(top: 8),
                         child: Center(
@@ -791,28 +792,30 @@ class _PollPanelState extends State<_PollPanel> {
               ),
             ),
             const SizedBox(height: 8),
-            if (allowMultiple) ...options.map((option) {
-              final id = '${option['id'] ?? ''}';
-              final count = option['vote_count'] is num
-                  ? (option['vote_count'] as num).toInt()
-                  : 0;
-              return CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                value: selected.contains(id),
-                onChanged: voted
-                    ? null
-                    : (value) => setState(() {
-                        if (value == true) {
-                          selected.add(id);
-                        } else {
-                          selected.remove(id);
-                        }
-                      }),
-                title: Text('${option['label'] ?? ''}'),
-                secondary: voted ? Text('$count') : null,
-              );
-            }) else
+            if (allowMultiple)
+              ...options.map((option) {
+                final id = '${option['id'] ?? ''}';
+                final count = option['vote_count'] is num
+                    ? (option['vote_count'] as num).toInt()
+                    : 0;
+                return CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: selected.contains(id),
+                  onChanged: voted
+                      ? null
+                      : (value) => setState(() {
+                          if (value == true) {
+                            selected.add(id);
+                          } else {
+                            selected.remove(id);
+                          }
+                        }),
+                  title: Text('${option['label'] ?? ''}'),
+                  secondary: voted ? Text('$count') : null,
+                );
+              })
+            else
               RadioGroup<String>(
                 groupValue: selected.isEmpty ? null : selected.first,
                 onChanged: voted
@@ -1062,7 +1065,7 @@ class _CommentTile extends StatelessWidget {
                             minimumSize: const Size(48, 28),
                           ),
                           child: Text(
-                            '${liked ? '♥' : '♡'} ${comment.likeCount + (liked ? 1 : 0)}',
+                            '${liked ? '♥' : '♡'} ${comment.likeCount}',
                           ),
                         ),
                         IconButton(
@@ -1236,8 +1239,7 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
   @override
   Widget build(BuildContext context) {
     final root = widget.rootComment;
-    final header =
-        '回复 ${root.author?.nickname ?? '匿名用户'}：${root.content}';
+    final header = '回复 ${root.author?.nickname ?? '匿名用户'}：${root.content}';
     return SafeArea(
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.72,

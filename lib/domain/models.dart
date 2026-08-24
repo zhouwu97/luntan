@@ -21,7 +21,6 @@ enum PostType {
   article,
   video,
   activity,
-  market,
 }
 
 enum PublicationStatus { draft, published, deleted }

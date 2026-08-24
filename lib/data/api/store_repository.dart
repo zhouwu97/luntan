@@ -33,6 +33,7 @@ class ApiStoreProduct {
     required this.emoji,
     required this.points,
     required this.color,
+    required this.redeemedCount,
   });
   final String id;
   final String name;
@@ -40,6 +41,25 @@ class ApiStoreProduct {
   final String emoji;
   final int points;
   final int color;
+  final int redeemedCount;
+}
+
+class StoreOrder {
+  const StoreOrder({
+    required this.id,
+    required this.productId,
+    required this.productName,
+    required this.points,
+    required this.status,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String productId;
+  final String productName;
+  final int points;
+  final String status;
+  final DateTime createdAt;
 }
 
 class StoreRepository {
@@ -59,6 +79,7 @@ class StoreRepository {
         emoji: _string(data['emoji']),
         points: _int(data['points']),
         color: _int(data['color']),
+        redeemedCount: _int(data['redeemed_count']),
       );
     }).toList();
   }
@@ -89,6 +110,23 @@ class StoreRepository {
       balance: _int(value['balance']),
       transactions: transactions,
     );
+  }
+
+  Future<List<StoreOrder>> orders() async {
+    final value = await _client.getJson('/api/v1/me/store-orders');
+    final raw = value['items'];
+    if (raw is! List) return const <StoreOrder>[];
+    return raw.whereType<Map>().map((item) {
+      final data = Map<String, dynamic>.from(item);
+      return StoreOrder(
+        id: _string(data['id']),
+        productId: _string(data['product_id']),
+        productName: _string(data['product_name']),
+        points: _int(data['points']),
+        status: _string(data['status']),
+        createdAt: _date(data['created_at'], DateTime.now().toUtc()),
+      );
+    }).toList();
   }
 
   Future<Map<String, dynamic>> redeem(

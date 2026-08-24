@@ -21,13 +21,6 @@ type pollInput struct {
 	EndsAt        *time.Time `json:"ends_at"`
 }
 
-type marketInput struct {
-	Price     float64 `json:"price"`
-	Currency  string  `json:"currency"`
-	Condition string  `json:"condition"`
-	Delivery  string  `json:"delivery"`
-}
-
 func (s *Server) createPoll(w http.ResponseWriter, r *http.Request, postID string) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -111,11 +104,14 @@ func (s *Server) getPoll(w http.ResponseWriter, r *http.Request, postID string) 
 		return
 	}
 	viewerState := map[string]any{
-		"has_voted":  false,
-		"option_ids": []string{},
-		"can_vote":   !(endsAt.Valid && !endsAt.Time.After(time.Now())),
+		"has_voted":               false,
+		"option_ids":              []string{},
+		"can_vote":                false,
+		"authentication_required": true,
 	}
 	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		viewerState["authentication_required"] = false
+		viewerState["can_vote"] = !(endsAt.Valid && !endsAt.Time.After(time.Now()))
 		votedRows, queryErr := s.db.QueryContext(r.Context(), `SELECT option_id FROM poll_votes WHERE poll_id = $1 AND user_id = $2 ORDER BY option_id ASC`, pollID, viewer.ID)
 		if queryErr != nil {
 			writeInternalError(w, r, queryErr)
@@ -279,51 +275,6 @@ func sameStringSet(first, second []string) bool {
 	return true
 }
 
-func (s *Server) createMarketItem(w http.ResponseWriter, r *http.Request, postID string) {
-	if !s.requireDatabase(w, r) {
-		return
-	}
-	user, ok := s.authenticatedUser(w, r)
-	if !ok {
-		return
-	}
-	var input marketInput
-	if err := decodeJSON(r, &input); err != nil || !validMarketInput(&input) {
-		writeAuthError(w, r, ErrInvalidPost)
-		return
-	}
-	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND author_id = $2 AND type = 'market' AND deleted_at IS NULL`, postID, user.ID).Scan(&existing)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeAuthError(w, r, ErrPostNotFound)
-		return
-	}
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	tx, err := s.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	defer tx.Rollback()
-	if err := insertMarketItemTx(r.Context(), tx, postID, user.ID, &input); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	var itemID string
-	if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM market_items WHERE post_id = $1`, postID).Scan(&itemID); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"id": itemID, "post_id": postID, "seller_id": user.ID, "price": input.Price, "currency": input.Currency, "condition": input.Condition, "sold": false, "delivery": input.Delivery})
-}
-
 func validPollInput(input *pollInput) bool {
 	if input == nil || strings.TrimSpace(input.Question) == "" || len([]rune(input.Question)) > 200 || len(input.Options) < 2 || len(input.Options) > 10 {
 		return false
@@ -342,10 +293,6 @@ func validPollInput(input *pollInput) bool {
 	return true
 }
 
-func validMarketInput(input *marketInput) bool {
-	return input != nil && input.Price >= 0 && strings.TrimSpace(input.Condition) != "" && len([]rune(input.Condition)) <= 100
-}
-
 func insertPollTx(ctx context.Context, tx *sql.Tx, postID string, input *pollInput) error {
 	if !validPollInput(input) {
 		return ErrInvalidPost
@@ -362,18 +309,6 @@ func insertPollTx(ctx context.Context, tx *sql.Tx, postID string, input *pollInp
 		}
 	}
 	return nil
-}
-
-func insertMarketItemTx(ctx context.Context, tx *sql.Tx, postID, sellerID string, input *marketInput) error {
-	if !validMarketInput(input) {
-		return ErrInvalidPost
-	}
-	currency := strings.TrimSpace(input.Currency)
-	if currency == "" {
-		currency = "CNY"
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO market_items (id, post_id, seller_id, price, currency, item_condition, delivery) VALUES ($1, $2, $3, $4, $5, $6, $7)`, newPostID(), postID, sellerID, input.Price, currency, strings.TrimSpace(input.Condition), strings.TrimSpace(input.Delivery))
-	return err
 }
 
 func (s *Server) ranking(w http.ResponseWriter, r *http.Request) {
@@ -397,7 +332,7 @@ func (s *Server) ranking(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id, title, community_id, (like_count * 3 + comment_count * 4 + bookmark_count * 2 + view_count * 0.1) / (1 + EXTRACT(EPOCH FROM (now() - published_at)) / 3600) AS score FROM posts WHERE publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL AND published_at >= now() - $1::interval ORDER BY score DESC, id DESC LIMIT $2`, interval, limit)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT id, title, community_id, (like_count * 3 + comment_count * 4 + bookmark_count * 2 + view_count * 0.1) / (1 + EXTRACT(EPOCH FROM (now() - published_at)) / 3600) AS score FROM posts WHERE publication_status = 'published' AND moderation_status = 'normal' AND type <> 'market' AND deleted_at IS NULL AND published_at >= now() - $1::interval ORDER BY score DESC, id DESC LIMIT $2`, interval, limit)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -457,7 +392,14 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id, name, description, emoji, points, color FROM store_products WHERE active = true ORDER BY points ASC, id ASC`)
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT p.id, p.name, p.description, p.emoji, p.points, p.color,
+		       COUNT(o.id) FILTER (WHERE o.status <> 'cancelled') AS redeemed_count
+		FROM store_products p
+		LEFT JOIN store_orders o ON o.product_id = p.id
+		WHERE p.active = true
+		GROUP BY p.id, p.name, p.description, p.emoji, p.points, p.color
+		ORDER BY redeemed_count DESC, p.points ASC, p.id ASC`)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -468,11 +410,12 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 		var id, name, description, emoji string
 		var points int64
 		var color int
-		if err := rows.Scan(&id, &name, &description, &emoji, &points, &color); err != nil {
+		var redeemedCount int64
+		if err := rows.Scan(&id, &name, &description, &emoji, &points, &color, &redeemedCount); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "description": description, "emoji": emoji, "points": points, "color": color})
+		items = append(items, map[string]any{"id": id, "name": name, "description": description, "emoji": emoji, "points": points, "color": color, "redeemed_count": redeemedCount})
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)

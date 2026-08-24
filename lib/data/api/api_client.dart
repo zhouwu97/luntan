@@ -113,6 +113,7 @@ class ApiClient {
     http.Client? client,
     this.timeout = const Duration(seconds: 10),
     TokenStore? tokenStore,
+    this.onSessionInvalidated,
   }) : _baseUri = baseUri,
        _client = client ?? http.Client(),
        _tokenStore = tokenStore;
@@ -121,7 +122,9 @@ class ApiClient {
   final http.Client _client;
   final Duration timeout;
   final TokenStore? _tokenStore;
+  void Function()? onSessionInvalidated;
   Future<void>? _refreshInFlight;
+  bool _sessionInvalidationNotified = false;
 
   Future<Map<String, dynamic>> getJson(
     String path, {
@@ -198,7 +201,14 @@ class ApiClient {
         allowRefresh &&
         _tokenStore != null &&
         _canRefreshForPath(path)) {
-      await _refreshSingleFlight();
+      try {
+        await _refreshSingleFlight();
+      } catch (error) {
+        if (_shouldClearCredentials(error)) {
+          _notifySessionInvalidated();
+        }
+        rethrow;
+      }
       response = await _send(
         method: method,
         path: path,
@@ -208,6 +218,7 @@ class ApiClient {
       );
       if (response.statusCode == 401) {
         await _tokenStore.clear();
+        _notifySessionInvalidated();
       }
     }
     return _decodeResponse(response);
@@ -333,6 +344,7 @@ class ApiClient {
           expiresIn: (payload['expires_in'] as num?)?.toInt(),
         ),
       );
+      _sessionInvalidationNotified = false;
     } catch (error) {
       if (_shouldClearCredentials(error)) await store.clear();
       rethrow;
@@ -391,6 +403,12 @@ class ApiClient {
       error is ApiException &&
       error.type == ApiErrorType.unauthorized &&
       error.statusCode == 401;
+
+  void _notifySessionInvalidated() {
+    if (_sessionInvalidationNotified) return;
+    _sessionInvalidationNotified = true;
+    onSessionInvalidated?.call();
+  }
 
   String? _stringFromPayload(dynamic payload, String key) {
     final value = _valueFromPayload(payload, key);

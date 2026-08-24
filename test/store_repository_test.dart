@@ -41,4 +41,55 @@ void main() {
     expect(overview.transactions.single.balanceAfter, 3980);
     client.close();
   });
+
+  test('StoreRepository loads exchange orders', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (request) async => request.url.path == '/api/v1/me/store-orders'
+            ? http.Response.bytes(
+                utf8.encode(
+                  '{"items":[{"id":"order-1","product_id":"p1","product_name":"贴纸包","points":350,"status":"pending","created_at":"2026-08-24T08:00:00Z"}]}',
+                ),
+                200,
+                headers: const {
+                  'content-type': 'application/json; charset=utf-8',
+                },
+              )
+            : http.Response('{}', 200),
+      ),
+    );
+
+    final orders = await StoreRepository(client).orders();
+
+    expect(orders.single.id, 'order-1');
+    expect(orders.single.productName, '贴纸包');
+    expect(orders.single.points, 350);
+    expect(orders.single.status, 'pending');
+    client.close();
+  });
+
+  test('StoreRepository maps redeemed_count for the product ranking', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (request) async => request.url.path == '/api/v1/store/products'
+            ? http.Response.bytes(
+                utf8.encode(
+                  '{"items":[{"id":"p1","name":"校园徽章","description":"纪念品","emoji":"🏅","points":120,"color":16766842,"redeemed_count":42}]}',
+                ),
+                200,
+                headers: const {
+                  'content-type': 'application/json; charset=utf-8',
+                },
+              )
+            : http.Response('{}', 200),
+      ),
+    );
+
+    final products = await StoreRepository(client).products();
+
+    expect(products.single.redeemedCount, 42);
+    client.close();
+  });
 }

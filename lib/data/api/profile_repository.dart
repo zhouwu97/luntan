@@ -28,6 +28,53 @@ class ProfileSummary {
   final int followingCount;
 }
 
+abstract class ProfileListItem {
+  const ProfileListItem({required this.id, required this.communityName});
+
+  final String id;
+  final String communityName;
+}
+
+class ProfilePostItem extends ProfileListItem {
+  const ProfilePostItem({
+    required super.id,
+    required super.communityName,
+    required this.title,
+    required this.contentPreview,
+    required this.communityId,
+    required this.commentCount,
+    required this.likeCount,
+    required this.bookmarkCount,
+    required this.publishedAt,
+  });
+
+  final String title;
+  final String contentPreview;
+  final String communityId;
+  final int commentCount;
+  final int likeCount;
+  final int bookmarkCount;
+  final DateTime publishedAt;
+}
+
+class ProfileCommentItem extends ProfileListItem {
+  const ProfileCommentItem({
+    required super.id,
+    required super.communityName,
+    required this.postId,
+    required this.postTitle,
+    required this.content,
+    required this.communityId,
+    required this.createdAt,
+  });
+
+  final String postId;
+  final String postTitle;
+  final String content;
+  final String communityId;
+  final DateTime createdAt;
+}
+
 class ProfileListPage {
   const ProfileListPage({
     required this.items,
@@ -35,7 +82,7 @@ class ProfileListPage {
     this.hasMore = false,
   });
 
-  final List<Map<String, dynamic>> items;
+  final List<ProfileListItem> items;
   final String? nextCursor;
   final bool hasMore;
 }
@@ -75,11 +122,13 @@ class ProfileRepository {
     );
     final raw = value['items'];
     final items = raw is List
-        ? raw
-              .whereType<Map>()
-              .map((item) => Map<String, dynamic>.from(item))
-              .toList()
-        : <Map<String, dynamic>>[];
+        ? raw.whereType<Map>().map((item) {
+            final data = Map<String, dynamic>.from(item);
+            return kind == 'comments'
+                ? _commentFromJson(data)
+                : _postFromJson(data);
+          }).toList()
+        : <ProfileListItem>[];
     return ProfileListPage(
       items: items,
       nextCursor: value['next_cursor'] as String?,
@@ -95,4 +144,38 @@ class ProfileRepository {
   String _string(dynamic value) => value is String ? value : '';
   int _int(dynamic value, {int fallback = 0}) =>
       value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
+
+  ProfilePostItem _postFromJson(Map<String, dynamic> value) {
+    final publishedAt = _date(
+      value['published_at'] ?? value['created_at'],
+      DateTime.now().toUtc(),
+    );
+    return ProfilePostItem(
+      id: _string(value['id']),
+      title: _string(value['title']),
+      contentPreview: _string(value['content_preview']),
+      communityId: _string(value['community_id']),
+      communityName: _string(value['community_name']),
+      commentCount: _int(value['comment_count']),
+      likeCount: _int(value['like_count']),
+      bookmarkCount: _int(value['bookmark_count']),
+      publishedAt: publishedAt,
+    );
+  }
+
+  ProfileCommentItem _commentFromJson(Map<String, dynamic> value) {
+    final createdAt = _date(value['created_at'], DateTime.now().toUtc());
+    return ProfileCommentItem(
+      id: _string(value['id'] ?? value['comment_id']),
+      postId: _string(value['post_id']),
+      postTitle: _string(value['post_title']),
+      content: _string(value['content']),
+      communityId: _string(value['community_id']),
+      communityName: _string(value['community_name']),
+      createdAt: createdAt,
+    );
+  }
+
+  DateTime _date(dynamic value, DateTime fallback) =>
+      DateTime.tryParse('$value')?.toUtc() ?? fallback;
 }

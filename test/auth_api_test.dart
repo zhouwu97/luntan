@@ -118,6 +118,38 @@ void main() {
   });
 
   test(
+    'ApiClient notifies the app once when the session is invalidated',
+    () async {
+      final store = MemoryTokenStore(
+        accessToken: 'expired-access',
+        refreshToken: 'refresh-1',
+      );
+      var invalidationCalls = 0;
+      final client = ApiClient(
+        baseUri: Uri.parse('https://example.com'),
+        tokenStore: store,
+        onSessionInvalidated: () => invalidationCalls++,
+        client: MockClient((request) async {
+          return http.Response(
+            '{"code":"INVALID_TOKEN","message":"expired"}',
+            401,
+          );
+        }),
+      );
+
+      final first = client.getJson('/api/v1/feed/latest');
+      final second = client.getJson('/api/v1/feed/latest');
+      await expectLater(
+        Future.wait<Map<String, dynamic>>([first, second]),
+        throwsA(isA<ApiException>()),
+      );
+
+      expect(invalidationCalls, 1);
+      client.close();
+    },
+  );
+
+  test(
     'AuthRepository persists login tokens and clears them on logout',
     () async {
       final store = MemoryTokenStore();

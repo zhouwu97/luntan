@@ -39,7 +39,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final queryController = TextEditingController();
   final List<String> recentSearches = <String>[
     '新生攻略',
-    '二手电脑',
+    '键盘推荐',
     '食堂',
     '社团',
     '考研',

@@ -20,6 +20,18 @@ class AuthController extends ChangeNotifier {
   AuthUser? user;
   ApiException? error;
 
+  /// 由 API 客户端在 refresh token 也失效时调用，统一清理根状态。
+  void invalidateSession() {
+    user = null;
+    error = const ApiException(
+      type: ApiErrorType.unauthorized,
+      statusCode: 401,
+      message: '登录状态已失效',
+    );
+    status = AuthStatus.unauthenticated;
+    notifyListeners();
+  }
+
   Future<void> initialize() async {
     try {
       user = await _repository.me();

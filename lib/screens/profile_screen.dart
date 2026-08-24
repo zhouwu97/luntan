@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/api/api_client.dart';
 import '../data/api/auth_repository.dart';
 import '../data/api/bookmark_repository.dart';
 import '../data/api/profile_repository.dart';
@@ -9,6 +10,8 @@ import '../theme/app_theme.dart';
 import 'exchange_store_screen.dart';
 import 'bookmark_folders_screen.dart';
 import 'points_screen.dart';
+
+typedef OpenPostById = void Function(String postId, {String? focusCommentId});
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
@@ -26,9 +29,12 @@ class ProfileScreen extends StatelessWidget {
     this.storeRepository,
     this.bookmarkRepository,
     this.onOpenPostId,
+    this.onOpenPostById,
     this.onLogout,
+    this.onDeleteAccount,
     this.onRequireAuth,
     this.onOpenModeration,
+    this.onOpenRelations,
   });
 
   final ForumStore store;
@@ -44,9 +50,12 @@ class ProfileScreen extends StatelessWidget {
   final StoreRepository? storeRepository;
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
+  final OpenPostById? onOpenPostById;
   final Future<void> Function()? onLogout;
+  final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenModeration;
+  final void Function(String userId, bool followers)? onOpenRelations;
 
   @override
   Widget build(BuildContext context) {
@@ -60,10 +69,13 @@ class ProfileScreen extends StatelessWidget {
         onOpenMessages: onOpenMessages,
         onFeedback: onFeedback,
         onLogout: onLogout,
+        onDeleteAccount: onDeleteAccount,
         storeRepository: storeRepository,
         bookmarkRepository: bookmarkRepository,
         onOpenPostId: onOpenPostId,
+        onOpenPostById: onOpenPostById,
         onOpenModeration: onOpenModeration,
+        onOpenRelations: onOpenRelations,
       );
     }
     return AnimatedBuilder(
@@ -225,13 +237,17 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showList(BuildContext context, String label) {
+    final userId = currentUserId ?? 'user-1';
     final posts = switch (label) {
       '我的收藏' => store.bookmarkedPosts,
       '我的点赞' => store.likedPosts,
+      '我的发布' || '我的发帖' =>
+        store.posts.where((post) => post.authorId == userId).toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
       _ => <Post>[],
     };
     final comments = label == '我的评论'
-        ? store.commentsByAuthor(currentUserId ?? '')
+        ? store.commentsByAuthor(userId)
         : <Comment>[];
     showModalBottomSheet<void>(
       context: context,
@@ -254,7 +270,11 @@ class ProfileScreen extends StatelessWidget {
                 child: posts.isEmpty && comments.isEmpty
                     ? Center(
                         child: Text(
-                          label == '我的发帖' || label == '我的回帖' || label == '关注的吧'
+                          label == '我的发布' ||
+                                  label == '我的发帖' ||
+                                  label == '我的评论' ||
+                                  label == '我的回帖' ||
+                                  label == '关注的吧'
                               ? '$label暂未接入'
                               : '$label暂时为空，去首页逛逛吧',
                           style: const TextStyle(color: AppTheme.textSecondary),
@@ -278,7 +298,12 @@ class ProfileScreen extends StatelessWidget {
                               ),
                               onTap: () {
                                 Navigator.pop(context);
-                                onOpenPost(post);
+                                final openById = onOpenPostById;
+                                if (openById != null) {
+                                  openById(post.id);
+                                } else {
+                                  onOpenPost(post);
+                                }
                               },
                             ),
                           ),
@@ -304,7 +329,12 @@ class ProfileScreen extends StatelessWidget {
                               ),
                               onTap: () {
                                 Navigator.pop(context);
-                                onOpenPost(post);
+                                final openById = onOpenPostById;
+                                if (openById != null) {
+                                  openById(post.id, focusCommentId: comment.id);
+                                } else {
+                                  onOpenPost(post);
+                                }
                               },
                             );
                           }),
@@ -455,8 +485,11 @@ class _ApiProfileScreen extends StatefulWidget {
     this.storeRepository,
     this.bookmarkRepository,
     this.onOpenPostId,
+    this.onOpenPostById,
     this.onLogout,
+    this.onDeleteAccount,
     this.onOpenModeration,
+    this.onOpenRelations,
   });
 
   final ProfileRepository repository;
@@ -464,10 +497,13 @@ class _ApiProfileScreen extends StatefulWidget {
   final VoidCallback onOpenMessages;
   final ValueChanged<String> onFeedback;
   final Future<void> Function()? onLogout;
+  final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onOpenModeration;
+  final void Function(String userId, bool followers)? onOpenRelations;
   final StoreRepository? storeRepository;
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
+  final OpenPostById? onOpenPostById;
 
   @override
   State<_ApiProfileScreen> createState() => _ApiProfileScreenState();
@@ -618,18 +654,27 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
               children: [
                 _ApiStat(
                   value: profile.postCount,
-                  label: '我的发帖',
-                  onTap: () => _showList('我的发帖'),
+                  label: '我的发布',
+                  onTap: () => _showList('我的发布'),
                 ),
                 _ApiStat(
                   value: profile.commentCount,
-                  label: '我的回帖',
-                  onTap: () => _showList('我的回帖'),
+                  label: '我的评论',
+                  onTap: () => _showList('我的评论'),
                 ),
                 _ApiStat(
                   value: profile.followerCount,
                   label: '粉丝',
-                  onTap: () {},
+                  onTap: widget.onOpenRelations == null
+                      ? null
+                      : () => widget.onOpenRelations!(profile.id, true),
+                ),
+                _ApiStat(
+                  value: profile.followingCount,
+                  label: '关注',
+                  onTap: widget.onOpenRelations == null
+                      ? null
+                      : () => widget.onOpenRelations!(profile.id, false),
                 ),
               ],
             ),
@@ -683,7 +728,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: () => _showList('我的发帖'),
+            onPressed: () => _showList('我的发布'),
             icon: const Icon(Icons.article_outlined),
             label: const Text('查看我的全部帖子'),
           ),
@@ -703,8 +748,8 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
 
   Future<void> _showList(String label) async {
     final kind = switch (label) {
-      '我的发帖' => 'posts',
-      '我的回帖' || '我的评论' => 'comments',
+      '我的发布' || '我的发帖' => 'posts',
+      '我的评论' || '我的回帖' => 'comments',
       '我的收藏' => 'bookmarks',
       '我的点赞' => 'likes',
       '浏览历史' => 'history',
@@ -720,6 +765,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
         kind: kind,
         repository: widget.repository,
         onOpenPost: widget.onOpenPost,
+        onOpenPostById: widget.onOpenPostById,
       ),
     );
   }
@@ -762,6 +808,48 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                   await widget.onLogout!();
                 },
               ),
+            if (widget.onDeleteAccount != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.person_off_outlined,
+                  color: AppTheme.pink,
+                ),
+                title: const Text('注销账号'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final confirmed =
+                      await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('确认注销账号？'),
+                          content: const Text(
+                            '账号、认证信息、互动和通知将被清理，且无法恢复。请确认你已备份需要保留的内容。',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('取消'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('继续注销'),
+                            ),
+                          ],
+                        ),
+                      ) ??
+                      false;
+                  if (!confirmed || !mounted) return;
+                  try {
+                    await widget.onDeleteAccount!();
+                  } catch (error) {
+                    if (mounted) {
+                      widget.onFeedback(
+                        userFacingApiMessage(error, fallback: '注销失败，请稍后重试'),
+                      );
+                    }
+                  }
+                },
+              ),
             if (widget.onOpenModeration != null)
               ListTile(
                 leading: const Icon(
@@ -789,47 +877,28 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   }
 }
 
-Post _profilePostFromJson(Map<String, dynamic> value) {
-  final now = DateTime.tryParse('${value['created_at']}') ?? DateTime.now();
-  return Post(
-    id: '${value['id'] ?? ''}',
-    authorId: '',
-    communityId: '${value['community_id'] ?? ''}',
-    title: '${value['title'] ?? ''}',
-    content: '${value['content_preview'] ?? ''}',
-    commentCount: _profileInt(value['comment_count']),
-    likeCount: _profileInt(value['like_count']),
-    bookmarkCount: _profileInt(value['bookmark_count']),
-    createdAt: now,
-    updatedAt: now,
-    publishedAt: now,
-  );
-}
-
-int _profileInt(dynamic value) =>
-    value is num ? value.toInt() : int.tryParse('$value') ?? 0;
-
-/// 个人中心列表 sheet：游标分页 + 浏览历史清空。
+/// 个人中心列表 sheet：帖子和评论使用不同的数据结构与游标。
 class _ProfileListSheet extends StatefulWidget {
   const _ProfileListSheet({
     required this.label,
     required this.kind,
     required this.repository,
     required this.onOpenPost,
+    this.onOpenPostById,
   });
 
   final String label;
   final String kind;
   final ProfileRepository repository;
   final ValueChanged<Post> onOpenPost;
+  final OpenPostById? onOpenPostById;
 
   @override
   State<_ProfileListSheet> createState() => _ProfileListSheetState();
 }
 
 class _ProfileListSheetState extends State<_ProfileListSheet> {
-  final List<Post> posts = [];
-  final List<String> communityNames = [];
+  final List<ProfileListItem> items = [];
   final ScrollController scrollController = ScrollController();
   String? nextCursor;
   bool hasMore = true;
@@ -865,12 +934,9 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
       final page = await widget.repository.list(widget.kind);
       if (!mounted) return;
       setState(() {
-        posts
+        items
           ..clear()
-          ..addAll(page.items.map(_profilePostFromJson));
-        communityNames
-          ..clear()
-          ..addAll(page.items.map((item) => '${item['community_name'] ?? ''}'));
+          ..addAll(page.items);
         nextCursor = page.nextCursor;
         hasMore = page.hasMore;
       });
@@ -891,10 +957,7 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
       );
       if (!mounted) return;
       setState(() {
-        posts.addAll(page.items.map(_profilePostFromJson));
-        communityNames.addAll(
-          page.items.map((item) => '${item['community_name'] ?? ''}'),
-        );
+        items.addAll(page.items);
         nextCursor = page.nextCursor;
         hasMore = page.hasMore;
       });
@@ -907,7 +970,7 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
 
   Future<void> _clearHistory() async {
     await widget.repository.clearHistory();
-    _load();
+    if (mounted) _load();
   }
 
   @override
@@ -932,7 +995,7 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
                       ),
                     ),
                   ),
-                  if (isHistory && posts.isNotEmpty)
+                  if (isHistory && items.isNotEmpty)
                     TextButton(
                       onPressed: _clearHistory,
                       child: const Text('清空'),
@@ -951,10 +1014,10 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
   bool get _isHistory => widget.kind == 'history';
 
   Widget _body() {
-    if (loading && posts.isEmpty) {
+    if (loading && items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (errorMessage != null && posts.isEmpty) {
+    if (errorMessage != null && items.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -968,7 +1031,7 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
         ),
       );
     }
-    if (posts.isEmpty) {
+    if (items.isEmpty) {
       return Center(
         child: Text(
           '${widget.label}暂时为空，去首页逛逛吧',
@@ -979,10 +1042,10 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
     return ListView.separated(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 22),
-      itemCount: posts.length + 1,
+      itemCount: items.length + 1,
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
-        if (index == posts.length) {
+        if (index == items.length) {
           return loadingMore
               ? const Padding(
                   padding: EdgeInsets.all(10),
@@ -992,28 +1055,86 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
                 )
               : const SizedBox(height: 6);
         }
-        final post = posts[index];
+        final item = items[index];
+        final String title;
+        final String subtitle;
+        final bool isComment;
+        if (item is ProfileCommentItem) {
+          isComment = true;
+          title = item.content;
+          subtitle =
+              '${item.postTitle} · ${item.communityName} · '
+              '${relativeTimeLabel(item.createdAt)}';
+        } else {
+          final post = item as ProfilePostItem;
+          isComment = false;
+          title = post.title;
+          subtitle =
+              '${post.communityName} · ${post.commentCount} 回复 · '
+              '发布于${relativeTimeLabel(post.publishedAt)}';
+        }
         return ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(
-            _isHistory ? Icons.history_rounded : Icons.article_outlined,
-            color: AppTheme.primary,
+            isComment
+                ? Icons.mode_comment_outlined
+                : (_isHistory ? Icons.history_rounded : Icons.article_outlined),
+            color: isComment ? AppTheme.mint : AppTheme.primary,
           ),
-          title: Text(post.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+          title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text(
-            '${communityNames[index]} · ${post.commentCount} 回复 · '
-            '${widget.kind == 'comments' ? '评论于' : '发布于'}${relativeTimeLabel(post.createdAt)}',
-            maxLines: 1,
+            subtitle,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
           onTap: () {
             Navigator.pop(context);
-            widget.onOpenPost(post);
+            if (item is ProfileCommentItem) {
+              final onOpenPostById = widget.onOpenPostById;
+              if (onOpenPostById != null) {
+                onOpenPostById(item.postId, focusCommentId: item.id);
+                return;
+              }
+              widget.onOpenPost(_postFromComment(item));
+              return;
+            }
+            final post = item as ProfilePostItem;
+            final onOpenPostById = widget.onOpenPostById;
+            if (onOpenPostById != null) {
+              onOpenPostById(post.id);
+            } else {
+              widget.onOpenPost(_postFromItem(post));
+            }
           },
         );
       },
     );
   }
+
+  Post _postFromItem(ProfilePostItem item) => Post(
+    id: item.id,
+    authorId: '',
+    communityId: item.communityId,
+    title: item.title,
+    content: item.contentPreview,
+    commentCount: item.commentCount,
+    likeCount: item.likeCount,
+    bookmarkCount: item.bookmarkCount,
+    createdAt: item.publishedAt,
+    updatedAt: item.publishedAt,
+    publishedAt: item.publishedAt,
+  );
+
+  Post _postFromComment(ProfileCommentItem item) => Post(
+    id: item.postId,
+    authorId: '',
+    communityId: item.communityId,
+    title: item.postTitle,
+    content: '',
+    createdAt: item.createdAt,
+    updatedAt: item.createdAt,
+    publishedAt: item.createdAt,
+  );
 }
 
 class _ApiStat extends StatelessWidget {
@@ -1024,7 +1145,7 @@ class _ApiStat extends StatelessWidget {
   });
   final int value;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) => Expanded(
     child: GestureDetector(
@@ -1235,10 +1356,10 @@ class _StatsStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stats = isApiMode
-        ? [('—', '我的发帖'), ('—', '我的回帖'), ('—', '关注的吧')]
+        ? [('—', '我的发布'), ('—', '我的评论'), ('—', '关注的吧')]
         : [
-            (store.publishedCount.toString(), '我的发帖'),
-            (store.replyCount.toString(), '我的回帖'),
+            (store.publishedCount.toString(), '我的发布'),
+            (store.replyCount.toString(), '我的评论'),
             (store.followedBoards.toString(), '关注的吧'),
           ];
     return Container(

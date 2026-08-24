@@ -76,7 +76,8 @@ class ForumPostCard extends StatelessWidget {
                   ),
                 ),
               ],
-              PostMediaPreview(images: post.images, onTap: onOpen),
+              // 图片区域交给整卡 InkWell 处理，避免在卡片内部再嵌套一套手势竞争。
+              PostMediaPreview(images: post.images),
               const SizedBox(height: 7),
               Row(
                 children: [

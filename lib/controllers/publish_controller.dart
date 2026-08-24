@@ -18,7 +18,6 @@ class PublishController extends ChangeNotifier {
     required String title,
     required String content,
     List<String> mediaIds = const [],
-    Map<String, dynamic>? market,
   }) {
     final running = _inFlight;
     if (running != null) return running;
@@ -34,7 +33,6 @@ class PublishController extends ChangeNotifier {
           title: title,
           content: content,
           mediaIds: mediaIds,
-          market: market,
           idempotencyKey: idempotencyKey,
         ).whenComplete(() {
           if (identical(_inFlight, future)) _inFlight = null;
@@ -151,7 +149,6 @@ class PublishController extends ChangeNotifier {
     required String title,
     required String content,
     required List<String> mediaIds,
-    Map<String, dynamic>? market,
     required String idempotencyKey,
   }) async {
     try {
@@ -161,7 +158,6 @@ class PublishController extends ChangeNotifier {
         title: title,
         content: content,
         mediaIds: mediaIds,
-        market: market,
         idempotencyKey: idempotencyKey,
       );
       _pendingIdempotencyKey = null;

@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -39,7 +40,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		SELECT u.id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.avatar_media_id, ''), COALESCE(up.bio, ''),
 		       COALESCE(up.level, 1), COALESCE(up.trust_level, 'new'), u.status, u.created_at,
-		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published'),
+		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market'),
 		       (SELECT count(*) FROM user_follows f WHERE f.followee_id = u.id),
 		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
 		FROM users u
@@ -129,4 +130,99 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 		nextCursor = encodeProfileCursor(last["created_at"].(time.Time), last["id"].(string))
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore, "user_id": userID})
+}
+
+// listUserRelations 提供关注者/关注列表的稳定游标分页，避免客户端只展示聚合数字。
+func (s *Server) listUserRelations(w http.ResponseWriter, r *http.Request, userID, relation string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
+		return
+	}
+	if relation != "followers" && relation != "following" {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_RELATION", Message: "关系类型无效"})
+		return
+	}
+
+	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
+	viewerID := ""
+	if hasViewer {
+		viewerID = viewer.ID
+	}
+
+	joinColumn := "f.followee_id"
+	whereColumn := "f.follower_id"
+	if relation == "followers" {
+		joinColumn = "f.follower_id"
+		whereColumn = "f.followee_id"
+	}
+	// 固定保留 viewer 参数，让列表查询一次性带回关系状态，避免每个用户再查一次。
+	args := []any{userID, viewerID}
+	where := fmt.Sprintf("f.%s = $1", whereColumn[2:])
+	if rawCursor := r.URL.Query().Get("cursor"); rawCursor != "" {
+		created, id, err := decodeProfileCursor(rawCursor)
+		if err != nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			return
+		}
+		where += " AND (f.created_at, u.id) < ($3, $4)"
+		args = append(args, created, id)
+	}
+	args = append(args, limit+1)
+	limitPosition := len(args)
+	query := fmt.Sprintf(`
+		SELECT u.id, u.username, COALESCE(up.nickname, u.username),
+		       COALESCE(up.avatar_media_id, ''), f.created_at,
+		       EXISTS (SELECT 1 FROM user_follows vf WHERE vf.follower_id = $2 AND vf.followee_id = u.id),
+		       EXISTS (SELECT 1 FROM blocks vb WHERE (vb.blocker_id = $2 AND vb.blocked_id = u.id) OR (vb.blocker_id = u.id AND vb.blocked_id = $2)),
+		       ($2 <> '' AND $2 <> u.id AND NOT EXISTS (SELECT 1 FROM blocks vb WHERE (vb.blocker_id = $2 AND vb.blocked_id = u.id) OR (vb.blocker_id = u.id AND vb.blocked_id = $2)))
+		FROM user_follows f
+		JOIN users u ON u.id = %s
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE %s AND u.deleted_at IS NULL
+		ORDER BY f.created_at DESC, u.id DESC LIMIT $%d`, joinColumn, where, limitPosition)
+	rows, err := s.db.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]any, 0, limit+1)
+	for rows.Next() {
+		var id, username, nickname, avatarMediaID string
+		var createdAt time.Time
+		var isFollowing, isBlocked, canFollow bool
+		if err := rows.Scan(&id, &username, &nickname, &avatarMediaID, &createdAt, &isFollowing, &isBlocked, &canFollow); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		items = append(items, map[string]any{
+			"id": id, "username": username, "nickname": nickname,
+			"avatar_media_id": avatarMediaID, "created_at": createdAt,
+			"viewer_state": map[string]any{
+				"is_following": isFollowing, "is_blocked": isBlocked, "can_follow": canFollow,
+			},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		nextCursor = encodeProfileCursor(last["created_at"].(time.Time), last["id"].(string))
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"items": items, "next_cursor": nextCursor, "has_more": hasMore,
+		"user_id": userID, "relation": relation,
+	})
 }

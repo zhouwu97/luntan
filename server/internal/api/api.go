@@ -69,6 +69,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/posts")
 		s.listUserPosts(w, r, userID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/followers"):
+		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/followers")
+		s.listUserRelations(w, r, userID, "followers")
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/following"):
+		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/following")
+		s.listUserRelations(w, r, userID, "following")
+		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/"):
 		s.getUserProfile(w, r, strings.TrimPrefix(path, "/api/v1/users/"))
 		return
@@ -140,8 +148,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.createPoll(w, r, postID)
 		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/market"):
-		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/market")
-		s.createMarketItem(w, r, postID)
+		writeAuthError(w, r, ErrMarketDisabled)
 		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/polls/") && strings.HasSuffix(path, "/vote"):
 		pollID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/polls/"), "/vote")
@@ -410,6 +417,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "IDEMPOTENCY_KEY_REQUIRED", Message: "缺少 Idempotency-Key"}
 	case errors.Is(err, ErrInvalidPost):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_POST", Message: "帖子内容不合法"}
+	case errors.Is(err, ErrMarketDisabled):
+		appErr = httpserver.AppError{Status: http.StatusGone, Code: "FEATURE_DISABLED", Message: "该帖子类型已停止使用"}
 	case errors.Is(err, ErrInsufficientPoints):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "INSUFFICIENT_POINTS", Message: "积分不足"}
 	case errors.Is(err, ErrBookmarkFolderNotFound):

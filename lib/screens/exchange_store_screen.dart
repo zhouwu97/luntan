@@ -139,6 +139,7 @@ class _ApiExchangeStoreScreen extends StatefulWidget {
 class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   late Future<List<ApiStoreProduct>> productsFuture;
   late Future<int> balanceFuture;
+  late Future<List<StoreOrder>> ordersFuture;
 
   final Set<String> _redeeming = <String>{};
   @override
@@ -146,6 +147,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
     super.initState();
     productsFuture = widget.repository.products();
     balanceFuture = widget.repository.balance();
+    ordersFuture = widget.repository.orders();
   }
 
   @override
@@ -206,7 +208,51 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                 itemBuilder: (_, index) => _ApiProductCard(
                   product: items[index],
                   onRedeem: () => _redeem(items[index]),
+                  busy: _redeeming.contains(items[index].id),
                 ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                '我的兑换',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              FutureBuilder<List<StoreOrder>>(
+                future: ordersFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const LinearProgressIndicator();
+                  }
+                  final orders = snapshot.data ?? const <StoreOrder>[];
+                  if (orders.isEmpty) {
+                    return const Text(
+                      '还没有兑换记录',
+                      style: TextStyle(color: AppTheme.textSecondary),
+                    );
+                  }
+                  return Column(
+                    children: orders
+                        .map(
+                          (order) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(
+                              Icons.card_giftcard_outlined,
+                              color: AppTheme.primary,
+                            ),
+                            title: Text(order.productName),
+                            subtitle: Text(
+                              '${order.points} 积分 · ${relativeTimeLabel(order.createdAt)}',
+                            ),
+                            trailing: Text(_orderStatus(order.status)),
+                          ),
+                        )
+                        .toList(),
+                  );
+                },
               ),
             ],
           );
@@ -228,7 +274,11 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
           .toString();
       await widget.repository.redeem(product.id, idempotencyKey: requestKey);
       if (!mounted) return;
-      setState(() => balanceFuture = widget.repository.balance());
+      setState(() {
+        productsFuture = widget.repository.products();
+        balanceFuture = widget.repository.balance();
+        ordersFuture = widget.repository.orders();
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('已兑换${product.name}，请留意领取通知')));
@@ -244,12 +294,25 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       if (mounted) setState(() => _redeeming.remove(product.id));
     }
   }
+
+  String _orderStatus(String status) => switch (status) {
+    'pending' => '待领取',
+    'claimed' => '已领取',
+    'completed' => '已完成',
+    'cancelled' => '已取消',
+    _ => status.isEmpty ? '处理中' : status,
+  };
 }
 
 class _ApiProductCard extends StatelessWidget {
-  const _ApiProductCard({required this.product, required this.onRedeem});
+  const _ApiProductCard({
+    required this.product,
+    required this.onRedeem,
+    this.busy = false,
+  });
   final ApiStoreProduct product;
   final VoidCallback onRedeem;
+  final bool busy;
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(13),
@@ -302,11 +365,14 @@ class _ApiProductCard extends StatelessWidget {
             SizedBox(
               height: 30,
               child: FilledButton(
-                onPressed: onRedeem,
+                onPressed: busy ? null : onRedeem,
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
-                child: const Text('兑换', style: TextStyle(fontSize: 11)),
+                child: Text(
+                  busy ? '兑换中…' : '兑换',
+                  style: const TextStyle(fontSize: 11),
+                ),
               ),
             ),
           ],

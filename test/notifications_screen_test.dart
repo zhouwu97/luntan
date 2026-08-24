@@ -35,6 +35,30 @@ class _RecordingPlatformRepository extends PlatformRepository {
 }
 
 void main() {
+  test('通知目标路由支持帖子评论、用户和社区', () {
+    final opened = <String>[];
+    final notification = ForumNotification(
+      id: 'n1',
+      type: 'follow',
+      actorId: 'u1',
+      actorName: '用户',
+      targetType: 'user',
+      targetId: 'u2',
+      isRead: false,
+      createdAt: DateTime.utc(2026, 8, 24),
+    );
+
+    NotificationTargetRouter.open(
+      notification: notification,
+      onOpenPost: (postId, commentId) =>
+          opened.add('post:$postId:${commentId ?? ''}'),
+      onOpenUser: (userId) => opened.add('user:$userId'),
+      onOpenCommunity: (communityId) => opened.add('community:$communityId'),
+    );
+
+    expect(opened, ['user:u2']);
+  });
+
   testWidgets('打开消息页不自动全部已读，切换分类改为服务端查询', (tester) async {
     final repository = _RecordingPlatformRepository();
 

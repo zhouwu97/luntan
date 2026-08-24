@@ -7,6 +7,7 @@ import '../controllers/feed_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
+import '../data/api/store_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
@@ -38,6 +39,7 @@ class HomeScreen extends StatefulWidget {
     this.feedRepository,
     this.communityRepository,
     this.postRepository,
+    this.storeRepository,
   });
 
   final ForumStore store;
@@ -60,6 +62,7 @@ class HomeScreen extends StatefulWidget {
   final FeedRepository? feedRepository;
   final CommunityRepository? communityRepository;
   final PostRepository? postRepository;
+  final StoreRepository? storeRepository;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -235,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
           feedRepository: widget.feedRepository,
           platformRepository: widget.platform,
           postRepository: widget.postRepository,
+          storeRepository: widget.storeRepository,
         ),
       ),
     );
@@ -297,9 +301,16 @@ class _HomeScreenState extends State<HomeScreen> {
                         SliverToBoxAdapter(
                           child: _FeedToolbar(
                             selected: selectedSort,
-                            onReply: widget.onOpenProfile,
-                            onPublish: widget.onOpenComposer,
                             onSortChanged: _selectSort,
+                          ),
+                        ),
+                        SliverToBoxAdapter(
+                          child: _QuickActions(
+                            unread:
+                                widget.unread ?? widget.store.unreadMessages,
+                            onOpenProfile: widget.onOpenProfile,
+                            onOpenMessages: widget.onOpenMessages,
+                            onOpenComposer: widget.onOpenComposer,
                           ),
                         ),
                         if (feedState.isBusy)
@@ -678,16 +689,9 @@ class _FeatureEntries extends StatelessWidget {
 }
 
 class _FeedToolbar extends StatelessWidget {
-  const _FeedToolbar({
-    required this.selected,
-    required this.onReply,
-    required this.onPublish,
-    required this.onSortChanged,
-  });
+  const _FeedToolbar({required this.selected, required this.onSortChanged});
 
   final FeedSort selected;
-  final VoidCallback onReply;
-  final VoidCallback onPublish;
   final ValueChanged<FeedSort> onSortChanged;
 
   @override
@@ -695,42 +699,132 @@ class _FeedToolbar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
-        children: [
-          Expanded(
-            child: Row(
-              children: FeedSort.values
-                  .map(
-                    (sort) => Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: GestureDetector(
-                        onTap: () {
-                          onSortChanged(sort);
-                        },
-                        child: _SortItem(
-                          label: sort.label,
-                          active: selected == sort,
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-          _ToolbarButton(
-            label: '我的评论',
-            icon: Icons.chat_bubble_outline_rounded,
-            onTap: onReply,
-          ),
-          const SizedBox(width: 4),
-          _ToolbarButton(
-            label: '发布',
-            icon: Icons.edit_outlined,
-            onTap: onPublish,
-          ),
-        ],
+        children: FeedSort.values
+            .map(
+              (sort) => Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: GestureDetector(
+                  onTap: () => onSortChanged(sort),
+                  child: _SortItem(label: sort.label, active: selected == sort),
+                ),
+              ),
+            )
+            .toList(),
       ),
     );
   }
+}
+
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({
+    required this.unread,
+    required this.onOpenProfile,
+    required this.onOpenMessages,
+    required this.onOpenComposer,
+  });
+
+  final int unread;
+  final VoidCallback onOpenProfile;
+  final VoidCallback onOpenMessages;
+  final VoidCallback onOpenComposer;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+    child: Row(
+      children: [
+        _QuickAction(
+          icon: Icons.chat_bubble_outline_rounded,
+          label: '我的评论',
+          onTap: onOpenProfile,
+        ),
+        _QuickAction(
+          icon: Icons.article_outlined,
+          label: '我的发布',
+          onTap: onOpenProfile,
+        ),
+        _QuickAction(
+          icon: Icons.notifications_none_rounded,
+          label: '消息',
+          badge: unread,
+          onTap: onOpenMessages,
+        ),
+        _QuickAction(
+          icon: Icons.add_circle_outline_rounded,
+          label: '发帖',
+          onTap: onOpenComposer,
+        ),
+      ],
+    ),
+  );
+}
+
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.badge = 0,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final int badge;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, color: AppTheme.primary, size: 21),
+                if (badge > 0)
+                  Positioned(
+                    right: -12,
+                    top: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.pink,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        badge > 99 ? '99+' : '$badge',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _FeedError extends StatelessWidget {

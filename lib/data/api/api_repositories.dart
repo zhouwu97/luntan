@@ -279,7 +279,6 @@ PostType _postTypeFromWire(dynamic value) => switch (value) {
   'article' => PostType.article,
   'video' => PostType.video,
   'activity' => PostType.activity,
-  'market' => PostType.market,
   _ => PostType.normal,
 };
 

@@ -34,9 +34,9 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		target *int64
 		query  string
 	}{
-		{&posts, `SELECT count(*) FROM posts WHERE author_id = $1 AND publication_status = 'published' AND deleted_at IS NULL`},
+		{&posts, `SELECT count(*) FROM posts WHERE author_id = $1 AND publication_status = 'published' AND type <> 'market' AND deleted_at IS NULL`},
 		{&comments, `SELECT count(*) FROM comments WHERE author_id = $1 AND publication_status = 'published' AND deleted_at IS NULL`},
-		{&receivedLikes, `SELECT count(*) FROM post_reactions pr JOIN posts p ON p.id = pr.post_id WHERE p.author_id = $1 AND p.deleted_at IS NULL`},
+		{&receivedLikes, `SELECT count(*) FROM post_reactions pr JOIN posts p ON p.id = pr.post_id WHERE p.author_id = $1 AND p.type <> 'market' AND p.deleted_at IS NULL`},
 		{&followers, `SELECT count(*) FROM user_follows WHERE followee_id = $1`},
 		{&following, `SELECT count(*) FROM user_follows WHERE follower_id = $1`},
 	}
@@ -67,7 +67,11 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
-	// 个人中心第一版使用 created_at/id 作为稳定游标；history 使用 viewed_at。
+	if kind == "comments" {
+		s.profileCommentList(w, r, user.ID, limit)
+		return
+	}
+	// 帖子类个人列表按发布时间；history 使用 viewed_at。
 	query, args, err := profileListQuery(kind, user.ID, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
@@ -93,6 +97,7 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 			"community_id": communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
+			"published_at": createdAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -111,19 +116,82 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
+// profileCommentList 返回真实评论记录，一条评论对应一条列表项。
+// 评论和帖子各自使用独立的时间字段与游标，避免把“评论过的帖子”误当成“我的评论”。
+func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, userID string, limit int) {
+	query, args, err := profileCommentListQuery(userID, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+		return
+	}
+	rows, err := s.db.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0, limit+1)
+	for rows.Next() {
+		var commentID, postID, content, postTitle, communityID, communityName string
+		var createdAt time.Time
+		if err := rows.Scan(&commentID, &postID, &content, &createdAt, &postTitle, &communityID, &communityName); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		items = append(items, map[string]any{
+			"id": commentID, "post_id": postID, "post_title": postTitle,
+			"content": content, "community_id": communityID,
+			"community_name": communityName, "created_at": createdAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1]
+		nextCursor = encodeProfileCursor(last["created_at"].(time.Time), last["id"].(string))
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
+}
+
+func profileCommentListQuery(userID, rawCursor string, limit int) (string, []any, error) {
+	args := []any{userID}
+	where := `c.author_id = $1 AND c.publication_status = 'published' AND c.deleted_at IS NULL
+		AND p.publication_status = 'published' AND p.deleted_at IS NULL AND p.type <> 'market'`
+	if rawCursor != "" {
+		createdAt, id, err := decodeProfileCursor(rawCursor)
+		if err != nil {
+			return "", nil, err
+		}
+		where += " AND (c.created_at, c.id) < ($2, $3)"
+		args = append(args, createdAt, id)
+	}
+	args = append(args, limit+1)
+	return fmt.Sprintf(`
+		SELECT c.id, c.post_id, c.content, c.created_at,
+		       p.title, p.community_id, cm.name
+		FROM comments c
+		JOIN posts p ON p.id = c.post_id
+		JOIN communities cm ON cm.id = p.community_id
+		WHERE %s
+		ORDER BY c.created_at DESC, c.id DESC
+		LIMIT $%d`, where, len(args)), args, nil
+}
+
 func profileListQuery(kind, userID, rawCursor string, limit int) (string, []any, error) {
-	where := "p.deleted_at IS NULL AND p.publication_status = 'published'"
+	where := "p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market'"
 	args := []any{userID}
 	join := "JOIN communities c ON c.id = p.community_id"
-	// 帖子列表按发布时间，评论列表按当前用户最后一次评论的时间。
-	// 这样“我的评论”不会因为帖子本身发布时间较早而排在新评论后面。
 	timestampColumn := "COALESCE(p.published_at, p.created_at)"
 	switch kind {
 	case "posts":
 		where += " AND p.author_id = $1"
-	case "comments":
-		timestampColumn = "(SELECT MAX(c0.created_at) FROM comments c0 WHERE c0.post_id = p.id AND c0.author_id = $1 AND c0.deleted_at IS NULL AND c0.publication_status = 'published')"
-		where += " AND EXISTS (SELECT 1 FROM comments c0 WHERE c0.post_id = p.id AND c0.author_id = $1 AND c0.deleted_at IS NULL AND c0.publication_status = 'published')"
 	case "likes":
 		where += " AND EXISTS (SELECT 1 FROM post_reactions r0 WHERE r0.post_id = p.id AND r0.user_id = $1 AND r0.reaction_type = 'like')"
 	case "bookmarks":
@@ -160,7 +228,7 @@ func (s *Server) recordHistory(w http.ResponseWriter, r *http.Request, postID st
 		return
 	}
 	var exists string
-	if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`, postID).Scan(&exists); err == sql.ErrNoRows {
+	if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND type <> 'market' AND deleted_at IS NULL`, postID).Scan(&exists); err == sql.ErrNoRows {
 		writeAuthError(w, r, ErrPostNotFound)
 		return
 	} else if err != nil {

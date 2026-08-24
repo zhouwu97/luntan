@@ -84,6 +84,30 @@ func TestCreatePostRequiresBearerToken(t *testing.T) {
 	}
 }
 
+func TestCreatePostRejectsRetiredMarketType(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(`{"community_id":"c1","type":"market","title":"旧类型","content":"不应创建","market":{"price":1,"condition":"used"}}`))
+	req.Header.Set("Authorization", "Bearer access-token")
+	req.Header.Set("Idempotency-Key", "market-key-1")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusGone || !strings.Contains(res.Body.String(), `"code":"FEATURE_DISABLED"`) {
+		t.Fatalf("retired market response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreatePostWritesRevisionAndIsIdempotentByUserKey(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -194,6 +218,58 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	NewHandler(db).ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"has_more":true`) || !strings.Contains(res.Body.String(), `"next_cursor":"`) {
 		t.Fatalf("comments response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProfileCommentsReturnsRealCommentRowsAndStableCursor(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	created := time.Date(2026, 8, 24, 23, 20, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 1))
+	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id, c\.content, c\.created_at.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
+		WithArgs("u1", 2).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "content", "created_at", "title", "community_id", "name"}).
+			AddRow("comment-1", "post-1", "评论一", created, "帖子一", "c1", "大型拆箱").
+			AddRow("comment-2", "post-2", "评论二", created.Add(-time.Minute), "帖子二", "c1", "大型拆箱"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/comments?limit=1", nil)
+	req.Header.Set("Authorization", "Bearer access-token")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"post_id":"post-1"`) || !strings.Contains(res.Body.String(), `"content":"评论一"`) || !strings.Contains(res.Body.String(), `"has_more":true`) {
+		t.Fatalf("profile comments response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreProductsOrdersByRedeemedCount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`(?s)SELECT p\.id, p\.name.*COUNT\(o\.id\).*ORDER BY redeemed_count DESC`).
+		WithArgs().
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "emoji", "points", "color", "redeemed_count"}).
+			AddRow("p1", "校园徽章", "纪念品", "🏅", int64(120), 16766842, int64(42)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/store/products", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"redeemed_count":42`) {
+		t.Fatalf("store products response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

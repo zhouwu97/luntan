@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -193,7 +194,34 @@ func (s *Server) createBookmarkFolder(w http.ResponseWriter, r *http.Request) {
 	if idempotencyKey != "" {
 		idempotencyValue = idempotencyKey
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO bookmark_folders (id, user_id, name, is_default, sort_order, idempotency_key, created_at, updated_at) VALUES ($1, $2, $3, false, $4, $5, $6, $6)`, id, user.ID, name, sortOrder, idempotencyValue, now); err != nil {
+	var insertedID string
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO bookmark_folders (id, user_id, name, is_default, sort_order, idempotency_key, created_at, updated_at) VALUES ($1, $2, $3, false, $4, $5, $6, $6) ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`, id, user.ID, name, sortOrder, idempotencyValue, now).Scan(&insertedID)
+	if errors.Is(err, sql.ErrNoRows) && idempotencyKey != "" {
+		// 另一个相同请求已经提交；ON CONFLICT DO NOTHING 不会使事务进入 aborted，
+		// 可以在当前事务内读取已提交的收藏夹并返回幂等结果。
+		var existingID, existingName string
+		var existingDefault bool
+		var existingSortOrder int
+		var existingCreatedAt, existingUpdatedAt time.Time
+		var existingCount int64
+		err = tx.QueryRowContext(r.Context(), `
+			SELECT f.id, f.name, f.is_default, f.sort_order, f.created_at, f.updated_at,
+			       COUNT(fi.post_id)
+			FROM bookmark_folders f
+			LEFT JOIN bookmark_folder_items fi ON fi.folder_id = f.id
+			WHERE f.user_id = $1 AND f.idempotency_key = $2
+			GROUP BY f.id`, user.ID, idempotencyKey).
+			Scan(&existingID, &existingName, &existingDefault, &existingSortOrder, &existingCreatedAt, &existingUpdatedAt, &existingCount)
+		if err == nil {
+			if err := tx.Commit(); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			httpserver.WriteJSON(w, http.StatusOK, bookmarkFolderJSON(existingID, existingName, existingDefault, existingSortOrder, existingCount, existingCreatedAt, existingUpdatedAt))
+			return
+		}
+	}
+	if err != nil {
 		if isUniqueViolation(err) {
 			writeAuthError(w, r, ErrBookmarkFolderNameTaken)
 			return
@@ -481,9 +509,13 @@ func (s *Server) setPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 		writeInternalError(w, r, err)
 		return
 	}
-	for _, folderID := range folderIDs {
+	// 删除收藏夹会锁住同一行；这里也按稳定顺序锁定所有目标收藏夹，
+	// 避免删除与加入并发时出现外键错误，也避免两个请求以相反顺序互相等待。
+	lockedFolderIDs := append([]string(nil), folderIDs...)
+	sort.Strings(lockedFolderIDs)
+	for _, folderID := range lockedFolderIDs {
 		var ownedID string
-		if err := tx.QueryRowContext(r.Context(), `SELECT id FROM bookmark_folders WHERE id = $1 AND user_id = $2`, folderID, user.ID).Scan(&ownedID); errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(r.Context(), `SELECT id FROM bookmark_folders WHERE id = $1 AND user_id = $2 FOR UPDATE`, folderID, user.ID).Scan(&ownedID); errors.Is(err, sql.ErrNoRows) {
 			writeAuthError(w, r, ErrBookmarkFolderNotFound)
 			return
 		} else if err != nil {

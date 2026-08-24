@@ -13,6 +13,8 @@ type feedCursor struct {
 	// Score 只在基于评分的排序（recommended/hot/featured）中出现，
 	// latest 排序的游标不含该字段。
 	Score *float64 `json:"score,omitempty"`
+	// AsOf 固定评分所使用的时间，避免跨页请求之间 now() 漂移导致上一页最后一条再次出现。
+	AsOf *time.Time `json:"as_of,omitempty"`
 }
 
 func encodeFeedCursor(cursor feedCursor) (string, error) {

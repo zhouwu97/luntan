@@ -36,16 +36,18 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 	if delta == 0 {
 		return nil
 	}
+	var balance int64
+	if err := tx.QueryRowContext(ctx, `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&balance); err != nil {
+		return err
+	}
+	// 必须在用户行锁建立后再检查一次。否则两个相同事件并发时，
+	// 两个事务都可能先读到“没有流水”，随后第二个事务会撞上唯一索引。
 	var existingBalance int64
 	err := tx.QueryRowContext(ctx, `SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`, userID, idempotencyKey).Scan(&existingBalance)
 	if err == nil {
 		return nil
 	}
 	if err != sql.ErrNoRows {
-		return err
-	}
-	var balance int64
-	if err := tx.QueryRowContext(ctx, `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&balance); err != nil {
 		return err
 	}
 	newBalance := balance + delta

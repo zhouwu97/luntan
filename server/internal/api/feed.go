@@ -63,14 +63,18 @@ var resolveOptionalViewer = func(s *Server, r *http.Request) (auth.User, bool) {
 // scoreExpr 为空表示按发布时间排序（latest），游标不携带评分；
 // 否则游标携带 (score, published_at, id) 三元组做键集分页。
 func feedSortColumns(sort string) (scoreExpr, orderBy string) {
-	ageHours := "EXTRACT(EPOCH FROM (now() - p.published_at)) / 3600.0"
+	return feedSortColumnsAt(sort, "CURRENT_TIMESTAMP")
+}
+
+func feedSortColumnsAt(sort, asOfPlaceholder string) (scoreExpr, orderBy string) {
+	ageHours := "EXTRACT(EPOCH FROM (" + asOfPlaceholder + " - p.published_at)) / 3600.0"
 	switch sort {
 	case "recommended":
-		scoreExpr = "(p.like_count * 4 + p.comment_count * 3 + p.bookmark_count * 5 + p.share_count * 2 + p.view_count * 0.05) / POWER(" + ageHours + " + 2, 1.25)"
+		scoreExpr = "((p.like_count * 4 + p.comment_count * 3 + p.bookmark_count * 5 + p.share_count * 2 + p.view_count * 0.05) / POWER(" + ageHours + " + 2, 1.25))::double precision"
 	case "hot":
-		scoreExpr = "(p.like_count + p.comment_count + 2 * p.bookmark_count + p.share_count) / POWER(" + ageHours + " + 2, 1.5)"
+		scoreExpr = "((p.like_count + p.comment_count + 2 * p.bookmark_count + p.share_count) / POWER(" + ageHours + " + 2, 1.5))::double precision"
 	case "featured":
-		scoreExpr = "p.bookmark_count * 5 + p.like_count * 3 + p.comment_count * 2 + p.share_count * 2"
+		scoreExpr = "(p.bookmark_count * 5 + p.like_count * 3 + p.comment_count * 2 + p.share_count * 2)::double precision"
 	default:
 		return "", "ORDER BY p.published_at DESC, p.id DESC"
 	}
@@ -91,8 +95,9 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_FILTER", Message: "Feed 筛选条件无效"})
 		return
 	}
-	scoreExpr, orderBy := feedSortColumns(r.URL.Query().Get("sort"))
-	scored := scoreExpr != ""
+	sortMode := r.URL.Query().Get("sort")
+	scored := sortMode == "recommended" || sortMode == "hot" || sortMode == "featured"
+	usesAsOf := sortMode == "recommended" || sortMode == "hot"
 	var cursor *feedCursor
 	if value := r.URL.Query().Get("cursor"); value != "" {
 		decoded, err := decodeFeedCursor(value)
@@ -106,6 +111,21 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor = &decoded
 	}
+	var feedAsOf time.Time
+	if usesAsOf {
+		if cursor != nil && cursor.AsOf != nil {
+			feedAsOf = cursor.AsOf.UTC()
+		} else if err := s.db.QueryRowContext(r.Context(), `SELECT CURRENT_TIMESTAMP`).Scan(&feedAsOf); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	asOfPlaceholder := "CURRENT_TIMESTAMP"
+	if usesAsOf {
+		asOfPlaceholder = "$1"
+	}
+	scoreExpr, orderBy := feedSortColumnsAt(sortMode, asOfPlaceholder)
+	scored = scoreExpr != ""
 
 	columns := `
 		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), p.community_id, c.slug, c.name,
@@ -122,14 +142,18 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL
 		  AND c.status = 'active' AND c.deleted_at IS NULL`
-	args := make([]any, 0, 4)
+	args := make([]any, 0, 5)
+	if usesAsOf {
+		args = append(args, feedAsOf)
+	}
 	if cursor != nil {
 		if scored {
 			score := 0.0
 			if cursor.Score != nil {
 				score = *cursor.Score
 			}
-			query += " AND (" + scoreExpr + ", p.published_at, p.id) < ($1, $2, $3)"
+			position := len(args) + 1
+			query += fmt.Sprintf(" AND ("+scoreExpr+", p.published_at, p.id) < ($%d, $%d, $%d)", position, position+1, position+2)
 			args = append(args, score, cursor.PublishedAt, cursor.ID)
 		} else {
 			query += " AND (p.published_at, p.id) < ($1, $2)"
@@ -206,6 +230,10 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		next := feedCursor{PublishedAt: last.publishedAt, ID: last.post.ID}
 		if scored {
 			next.Score = last.score
+			asOf := feedAsOf
+			if usesAsOf {
+				next.AsOf = &asOf
+			}
 		}
 		nextCursor, err = encodeFeedCursor(next)
 		if err != nil {

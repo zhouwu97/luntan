@@ -19,7 +19,7 @@ extension FeatureTypePresentation on FeatureType {
   };
 }
 
-class FeaturePage extends StatelessWidget {
+class FeaturePage extends StatefulWidget {
   const FeaturePage({
     super.key,
     required this.type,
@@ -36,6 +36,32 @@ class FeaturePage extends StatelessWidget {
   final ValueChanged<Post>? onLike;
   final ValueChanged<Post>? onBookmark;
   final FeedRepository? feedRepository;
+
+  @override
+  State<FeaturePage> createState() => _FeaturePageState();
+}
+
+class _FeaturePageState extends State<FeaturePage> {
+  Future<List<Post>>? remoteFuture;
+
+  FeatureType get type => widget.type;
+  ForumStore get store => widget.store;
+  ValueChanged<Post> get onOpenPost => widget.onOpenPost;
+  ValueChanged<Post>? get onLike => widget.onLike;
+  ValueChanged<Post>? get onBookmark => widget.onBookmark;
+  FeedRepository? get feedRepository => widget.feedRepository;
+
+  @override
+  void initState() {
+    super.initState();
+    if (feedRepository != null) remoteFuture = _remotePosts();
+  }
+
+  void _retry() {
+    setState(() {
+      remoteFuture = _remotePosts();
+    });
+  }
 
   String get title => type.label;
 
@@ -76,7 +102,7 @@ class FeaturePage extends StatelessWidget {
       return Scaffold(
         appBar: AppBar(title: Text(title)),
         body: FutureBuilder<List<Post>>(
-          future: _remotePosts(),
+          future: remoteFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
@@ -90,7 +116,7 @@ class FeaturePage extends StatelessWidget {
                       '内容加载失败',
                       style: TextStyle(color: AppTheme.textSecondary),
                     ),
-                    TextButton(onPressed: () {}, child: const Text('返回重试')),
+                    TextButton(onPressed: _retry, child: const Text('返回重试')),
                   ],
                 ),
               );
@@ -170,27 +196,22 @@ class FeaturePage extends StatelessWidget {
                 ? 'hot'
                 : 'recommended',
             limit: 50,
+            postType: switch (type) {
+              FeatureType.activity => 'activity',
+              FeatureType.gameShare => 'game_share',
+              _ => null,
+            },
+            hasMedia: type == FeatureType.outfit ? true : null,
           )
         : await repository.getLatestFeed(limit: 50);
     final items = page.items;
     if (type == FeatureType.ranking || type == FeatureType.hot) {
       return items.take(20).toList();
     }
-    if (type == FeatureType.activity) {
-      return items.where((post) => post.type == PostType.activity).toList();
-    }
-    if (type == FeatureType.gameShare) {
-      return items
-          .where(
-            (post) =>
-                post.type == PostType.gameShare || post.tags.contains('玩法分享'),
-          )
-          .toList();
-    }
-    if (type == FeatureType.outfit) {
-      return items
-          .where((post) => post.media.isNotEmpty || post.tags.contains('穿搭分享'))
-          .toList();
+    if (type == FeatureType.activity ||
+        type == FeatureType.gameShare ||
+        type == FeatureType.outfit) {
+      return items;
     }
     return const <Post>[];
   }

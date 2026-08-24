@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 
@@ -17,6 +16,7 @@ type Server struct {
 	db           *sql.DB
 	authService  *auth.Service
 	mediaStorage mediaStorage
+	pointRewards PointRewardRules
 }
 
 func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
@@ -24,7 +24,7 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 	if len(authServices) > 0 && authServices[0] != nil {
 		authService = authServices[0]
 	}
-	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv()}
+	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv()}
 }
 
 func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaStorage) http.Handler {
@@ -34,7 +34,14 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 	if storage == nil {
 		storage = unavailableMediaStorage{}
 	}
-	return &Server{db: db, authService: authService, mediaStorage: storage}
+	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv()}
+}
+
+// NewHandlerWithPointRewards 供集成测试和灰度环境显式注入奖励配置。
+func NewHandlerWithPointRewards(db *sql.DB, rules PointRewardRules) http.Handler {
+	server := NewHandler(db).(*Server)
+	server.pointRewards = rules
+	return server
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +64,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && path == "/api/v1/me/profile":
 		s.profile(w, r)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/me/bookmark-folders":
+		s.listBookmarkFolders(w, r)
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/me/bookmark-folders":
+		s.createBookmarkFolder(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/me/bookmark-folders/") && strings.HasSuffix(path, "/posts"):
+		folderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/me/bookmark-folders/"), "/posts")
+		s.listBookmarkFolderPosts(w, r, folderID)
+		return
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/me/bookmark-folders/"):
+		s.updateBookmarkFolder(w, r, strings.TrimPrefix(path, "/api/v1/me/bookmark-folders/"))
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/me/bookmark-folders/"):
+		s.deleteBookmarkFolder(w, r, strings.TrimPrefix(path, "/api/v1/me/bookmark-folders/"))
 		return
 	case r.Method == http.MethodGet && isProfileListPath(path):
 		s.profileList(w, r, strings.TrimPrefix(path, "/api/v1/me/"))
@@ -81,6 +104,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/like"):
 		s.togglePostLike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/like"), false)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/bookmark-folders"):
+		s.getPostBookmarkFolders(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/bookmark-folders"))
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/bookmark-folders"):
+		s.setPostBookmarkFolders(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/bookmark-folders"))
 		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/bookmark"):
 		s.toggleBookmark(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/bookmark"), true)
@@ -347,11 +376,7 @@ func bearerToken(header string) (string, bool) {
 }
 
 func requestMetadata(r *http.Request) auth.SessionMetadata {
-	ipAddress := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		ipAddress = host
-	}
-	return auth.SessionMetadata{UserAgent: r.UserAgent(), IPAddress: ipAddress}
+	return auth.SessionMetadata{UserAgent: r.UserAgent(), IPAddress: httpserver.ClientIP(r)}
 }
 
 func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
@@ -379,12 +404,22 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_POST", Message: "帖子内容不合法"}
 	case errors.Is(err, ErrInsufficientPoints):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "INSUFFICIENT_POINTS", Message: "积分不足"}
+	case errors.Is(err, ErrBookmarkFolderNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "BOOKMARK_FOLDER_NOT_FOUND", Message: "收藏夹不存在"}
+	case errors.Is(err, ErrDefaultBookmarkFolder):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "DEFAULT_BOOKMARK_FOLDER_PROTECTED", Message: "默认收藏夹不能删除或重命名"}
+	case errors.Is(err, ErrInvalidBookmarkFolderName):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BOOKMARK_FOLDER_NAME", Message: "收藏夹名称不能为空且不能超过 40 个字"}
+	case errors.Is(err, ErrBookmarkFolderNameTaken):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "BOOKMARK_FOLDER_NAME_TAKEN", Message: "收藏夹名称已存在"}
 	case errors.Is(err, ErrInvalidMedia):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MEDIA", Message: "媒体参数不合法"}
 	case errors.Is(err, ErrMediaNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "MEDIA_NOT_FOUND", Message: "媒体不存在"}
 	case errors.Is(err, ErrMediaNotOwned):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "MEDIA_NOT_OWNED", Message: "没有操作该媒体的权限"}
+	case errors.Is(err, ErrMediaInUse):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "MEDIA_IN_USE", Message: "媒体已被帖子使用，请先在帖子编辑中移除"}
 	case errors.Is(err, ErrStorageUnavailable):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "STORAGE_UNAVAILABLE", Message: "媒体存储暂时不可用"}
 	case errors.Is(err, ErrCommentNotFound):

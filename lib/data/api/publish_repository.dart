@@ -54,12 +54,14 @@ class MediaUploadTicket {
     required this.mediaId,
     required this.uploadUrl,
     required this.uploadMethod,
+    required this.mimeType,
     required this.expiresAt,
   });
 
   final String mediaId;
   final Uri uploadUrl;
   final String uploadMethod;
+  final String mimeType;
   final DateTime expiresAt;
 }
 
@@ -143,6 +145,7 @@ class ApiPublishRepository implements PublishRepository, PollPublishRepository {
       mediaId: mediaId,
       uploadUrl: Uri.parse(uploadUrl),
       uploadMethod: uploadMethod,
+      mimeType: mimeType,
       expiresAt: expiresAt,
     );
   }
@@ -161,16 +164,27 @@ class ApiPublishRepository implements PublishRepository, PollPublishRepository {
       await _client.uploadBytes(
         ticket.uploadUrl,
         bytes,
-        contentType: 'application/octet-stream',
+        contentType: ticket.mimeType,
       );
-      return _client.postJson(
+      return await _client.postJson(
         '/api/v1/media/${ticket.mediaId}/complete',
         body: {'size': size, 'sha256': sha256},
       );
     } on ApiException {
+      await _deleteMediaSilently(ticket.mediaId);
       rethrow;
     } catch (error) {
+      await _deleteMediaSilently(ticket.mediaId);
       throw PublishException('媒体上传失败：$error');
+    }
+  }
+
+  Future<void> _deleteMediaSilently(String mediaId) async {
+    try {
+      await deleteMedia(mediaId);
+    } catch (_) {
+      // 完成请求可能已经成功但响应丢失，此时服务端会拒绝删除已挂帖媒体。
+      // 清理失败不能覆盖原始上传错误，后续由媒体回收任务兜底。
     }
   }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/controllers/feed_controller.dart';
@@ -21,6 +23,8 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'recommended',
+    String? postType,
+    bool? hasMedia,
   }) {
     calls.add((cursor: cursor, communityId: communityId, sort: sort));
     final page = pages[index < pages.length ? index : pages.length - 1];
@@ -29,15 +33,44 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
   }
 }
 
+class _PendingFeedRequest {
+  _PendingFeedRequest({required this.communityId});
+
+  final String? communityId;
+  final Completer<FeedPage> completer = Completer<FeedPage>();
+}
+
+class _PendingFeed implements FeedRepository, QueryableFeedRepository {
+  final List<_PendingFeedRequest> requests = <_PendingFeedRequest>[];
+
+  @override
+  Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
+      getFeed(cursor: cursor, limit: limit);
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+    String? postType,
+    bool? hasMedia,
+  }) {
+    final request = _PendingFeedRequest(communityId: communityId);
+    requests.add(request);
+    return request.completer.future;
+  }
+}
+
 Post _post(String id, String communityId) => Post(
-      id: id,
-      authorId: 'author-1',
-      communityId: communityId,
-      title: 'title',
-      content: 'content',
-      createdAt: DateTime(2026, 1, 1),
-      updatedAt: DateTime(2026, 1, 1),
-    );
+  id: id,
+  authorId: 'author-1',
+  communityId: communityId,
+  title: 'title',
+  content: 'content',
+  createdAt: DateTime(2026, 1, 1),
+  updatedAt: DateTime(2026, 1, 1),
+);
 
 void main() {
   test('setQuery 切换板块/排序时清空旧内容并透传参数', () async {
@@ -67,6 +100,34 @@ void main() {
     await controller.setQuery(communityId: null, sort: 'recommended');
 
     expect(feed.calls, hasLength(1));
+  });
+
+  test('乱序完成的旧板块请求不能覆盖最后一次选择', () async {
+    final feed = _PendingFeed();
+    final controller = FeedController(repository: feed);
+
+    final first = controller.setQuery(communityId: 'campus');
+    final second = controller.setQuery(communityId: 'gaming');
+    expect(feed.requests.map((request) => request.communityId), [
+      'campus',
+      'gaming',
+    ]);
+
+    feed.requests[1].completer.complete(
+      FeedPage(items: [_post('gaming-post', 'gaming')]),
+    );
+    await second;
+    expect(controller.state.items.single.id, 'gaming-post');
+
+    feed.requests[0].completer.complete(
+      FeedPage(items: [_post('campus-post', 'campus')]),
+    );
+    await first;
+    expect(
+      controller.state.items.single.id,
+      'gaming-post',
+      reason: '旧请求晚返回时不得覆盖当前查询',
+    );
   });
 
   test('applyDetailResult 把详情页状态增量同步回列表', () async {
@@ -110,7 +171,11 @@ void main() {
 
   test('loadMore 按 id 去重追加', () async {
     final feed = _RecordingFeed([
-      FeedPage(items: [_post('a', 'x'), _post('b', 'x')], hasMore: true, nextCursor: 'c1'),
+      FeedPage(
+        items: [_post('a', 'x'), _post('b', 'x')],
+        hasMore: true,
+        nextCursor: 'c1',
+      ),
       FeedPage(items: [_post('b', 'x'), _post('c', 'x')]),
     ]);
     final controller = FeedController(repository: feed);
@@ -120,5 +185,34 @@ void main() {
 
     expect(controller.state.items.map((post) => post.id), ['a', 'b', 'c']);
     expect(controller.state.hasMore, isFalse);
+  });
+
+  test('切换查询后旧分页请求不能追加到新列表', () async {
+    final feed = _PendingFeed();
+    final controller = FeedController(repository: feed);
+
+    final initial = controller.setQuery(communityId: 'campus');
+    feed.requests[0].completer.complete(
+      FeedPage(
+        items: [_post('campus-1', 'campus')],
+        hasMore: true,
+        nextCursor: 'campus-next',
+      ),
+    );
+    await initial;
+
+    final oldPage = controller.loadMore();
+    final nextQuery = controller.setQuery(communityId: 'gaming');
+    feed.requests[2].completer.complete(
+      FeedPage(items: [_post('gaming-1', 'gaming')]),
+    );
+    await nextQuery;
+
+    feed.requests[1].completer.complete(
+      FeedPage(items: [_post('campus-2', 'campus')]),
+    );
+    await oldPage;
+
+    expect(controller.state.items.map((post) => post.id), ['gaming-1']);
   });
 }

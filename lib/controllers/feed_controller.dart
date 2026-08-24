@@ -48,9 +48,12 @@ class FeedController extends ChangeNotifier {
 
   final FeedRepository _repository;
   FeedState _state = const FeedState();
-  bool _loadingMore = false;
+  int _generation = 0;
+  int? _loadingMoreGeneration;
   final Set<String> _knownIds = <String>{};
   String? _communityId;
+  // 保持控制器旧接口的默认值；首页会显式传入 FeedSort.latest，避免影响
+  // 其他调用方和已有的查询去重语义。
   String _sort = 'recommended';
 
   FeedState get state => _state;
@@ -58,15 +61,16 @@ class FeedController extends ChangeNotifier {
   /// 账号切换时清理上一个用户的列表和游标，避免把旧会话的阅读态
   /// 短暂展示给新用户。
   void reset() {
+    _generation += 1;
     _knownIds.clear();
-    _loadingMore = false;
+    _loadingMoreGeneration = null;
     _state = const FeedState();
     notifyListeners();
   }
 
   Future<void> initialLoad() async {
     if (_state.status != FeedStatus.initial) return;
-    await _loadFirstPage();
+    await _startFirstPage();
   }
 
   Future<void> refresh() async {
@@ -74,11 +78,18 @@ class FeedController extends ChangeNotifier {
         _state.status == FeedStatus.loadingMore) {
       return;
     }
-    await _loadFirstPage();
+    await _startFirstPage();
   }
 
-  Future<void> setQuery({String? communityId, String sort = 'recommended'}) async {
-    if (_communityId == communityId && _sort == sort && _state.status != FeedStatus.initial) return;
+  Future<void> setQuery({
+    String? communityId,
+    String sort = 'recommended',
+  }) async {
+    if (_communityId == communityId &&
+        _sort == sort &&
+        _state.status != FeedStatus.initial) {
+      return;
+    }
     final queryChanged = _communityId != communityId || _sort != sort;
     _communityId = communityId;
     _sort = sort;
@@ -87,19 +98,35 @@ class FeedController extends ChangeNotifier {
       _knownIds.clear();
       _state = const FeedState();
     }
-    await _loadFirstPage();
+    await _startFirstPage();
   }
 
   Future<void> loadMore() async {
-    if (_loadingMore || !_state.hasMore || _state.nextCursor == null) return;
-    _loadingMore = true;
+    final generation = _generation;
+    if (_loadingMoreGeneration == generation ||
+        !_state.hasMore ||
+        _state.nextCursor == null) {
+      return;
+    }
+    final cursor = _state.nextCursor;
+    final communityId = _communityId;
+    final sort = _sort;
+    _loadingMoreGeneration = generation;
     _state = _state.copyWith(status: FeedStatus.loadingMore, clearError: true);
     notifyListeners();
     try {
-      final page = await _fetch(cursor: _state.nextCursor);
-      final incoming = page.items.where((item) => _knownIds.add(item.id)).toList();
+      final page = await _fetch(
+        cursor: cursor,
+        communityId: communityId,
+        sort: sort,
+      );
+      if (generation != _generation) return;
+      final incoming = page.items
+          .where((item) => _knownIds.add(item.id))
+          .toList();
       final items = [..._state.items, ...incoming];
-      final cursorRepeated = page.nextCursor != null && page.nextCursor == _state.nextCursor;
+      final cursorRepeated =
+          page.nextCursor != null && page.nextCursor == cursor;
       _state = FeedState(
         status: items.isEmpty ? FeedStatus.empty : FeedStatus.success,
         items: items,
@@ -107,22 +134,36 @@ class FeedController extends ChangeNotifier {
         hasMore: cursorRepeated ? false : page.hasMore,
       );
     } catch (error) {
+      if (generation != _generation) return;
       _state = _state.copyWith(
         status: _state.items.isEmpty ? FeedStatus.error : FeedStatus.success,
         error: error,
       );
     } finally {
-      _loadingMore = false;
-      notifyListeners();
+      if (_loadingMoreGeneration == generation) {
+        _loadingMoreGeneration = null;
+        if (generation == _generation) notifyListeners();
+      }
     }
   }
 
-  Future<void> _loadFirstPage() async {
+  Future<void> _startFirstPage() {
+    final generation = ++_generation;
+    _loadingMoreGeneration = null;
+    return _loadFirstPage(generation, communityId: _communityId, sort: _sort);
+  }
+
+  Future<void> _loadFirstPage(
+    int generation, {
+    required String? communityId,
+    required String sort,
+  }) async {
     final previousItems = _state.items;
     _state = FeedState(status: FeedStatus.loading, items: previousItems);
     notifyListeners();
     try {
-      final page = await _fetch();
+      final page = await _fetch(communityId: communityId, sort: sort);
+      if (generation != _generation) return;
       _knownIds
         ..clear()
         ..addAll(page.items.map((item) => item.id));
@@ -133,23 +174,28 @@ class FeedController extends ChangeNotifier {
         hasMore: page.hasMore,
       );
     } catch (error) {
+      if (generation != _generation) return;
       _state = FeedState(
         status: previousItems.isEmpty ? FeedStatus.error : FeedStatus.success,
         items: previousItems,
         error: error,
       );
     }
-    notifyListeners();
+    if (generation == _generation) notifyListeners();
   }
 
-  Future<FeedPage> _fetch({String? cursor}) {
+  Future<FeedPage> _fetch({
+    String? cursor,
+    required String? communityId,
+    required String sort,
+  }) {
     final repository = _repository;
     if (repository is QueryableFeedRepository) {
       final queryable = repository as QueryableFeedRepository;
       return queryable.getFeed(
         cursor: cursor,
-        communityId: _communityId,
-        sort: _sort,
+        communityId: communityId,
+        sort: sort,
       );
     }
     return repository.getLatestFeed(cursor: cursor);

@@ -13,7 +13,12 @@ import '../theme/app_theme.dart';
 import 'post_media_preview.dart';
 
 class ComposerSheet extends StatelessWidget {
-  const ComposerSheet({super.key, required this.onCreatePost, required this.onCreatePoll, required this.onCreateGameShare});
+  const ComposerSheet({
+    super.key,
+    required this.onCreatePost,
+    required this.onCreatePoll,
+    required this.onCreateGameShare,
+  });
 
   final VoidCallback onCreatePost;
   final VoidCallback onCreatePoll;
@@ -23,28 +28,82 @@ class ComposerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Center(child: Container(width: 38, height: 4, decoration: BoxDecoration(color: AppTheme.border, borderRadius: BorderRadius.circular(4)))),
-        const SizedBox(height: 18),
-        const Text('发布到论坛', style: TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 5),
-        const Text('选择一种发布方式，进入完整编辑页', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
-        const SizedBox(height: 18),
-        Row(children: [
-          Expanded(child: _PublishOption(icon: Icons.article_rounded, label: '普通帖子', color: AppTheme.primary, onTap: onCreatePost)),
-          const SizedBox(width: 10),
-          Expanded(child: _PublishOption(icon: Icons.poll_rounded, label: '发起投票', color: AppTheme.mint, onTap: onCreatePoll)),
-          const SizedBox(width: 10),
-          Expanded(child: _PublishOption(icon: Icons.sports_esports_outlined, label: '玩法分享', color: AppTheme.orange, onTap: onCreateGameShare)),
-        ]),
-      ]),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.border,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            '发布到论坛',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            '选择一种发布方式，进入完整编辑页',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: _PublishOption(
+                  icon: Icons.article_rounded,
+                  label: '普通帖子',
+                  color: AppTheme.primary,
+                  onTap: onCreatePost,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _PublishOption(
+                  icon: Icons.poll_rounded,
+                  label: '发起投票',
+                  color: AppTheme.mint,
+                  onTap: onCreatePoll,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _PublishOption(
+                  icon: Icons.sports_esports_outlined,
+                  label: '玩法分享',
+                  color: AppTheme.orange,
+                  onTap: onCreateGameShare,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _PublishOption extends StatelessWidget {
-  const _PublishOption({required this.icon, required this.label, required this.color, required this.onTap});
+  const _PublishOption({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;
@@ -57,17 +116,41 @@ class _PublishOption extends StatelessWidget {
     onTap: onTap,
     child: Ink(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 5),
-      decoration: BoxDecoration(color: color.withValues(alpha: .1), borderRadius: BorderRadius.circular(16)),
-      child: Column(children: [Icon(icon, color: color, size: 30), const SizedBox(height: 8), Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700))]),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 30),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
 
 class PostEditorDialog extends StatefulWidget {
-  const PostEditorDialog({super.key, required this.isGameShare, this.isPoll = false, this.publishController, this.enableSampleMedia = true});
+  const PostEditorDialog({
+    super.key,
+    required this.isGameShare,
+    required this.onPublish,
+    this.isPoll = false,
+    this.publishController,
+    this.enableSampleMedia = true,
+  });
 
   final bool isGameShare;
   final bool isPoll;
+  final Future<void> Function(PostDraft draft) onPublish;
   final PublishController? publishController;
   final bool enableSampleMedia;
 
@@ -93,7 +176,10 @@ class _DraftImage {
 class _PostEditorDialogState extends State<PostEditorDialog> {
   final titleController = TextEditingController();
   final bodyController = TextEditingController();
-  final pollOptionControllers = [TextEditingController(), TextEditingController()];
+  final pollOptionControllers = [
+    TextEditingController(),
+    TextEditingController(),
+  ];
   ForumSection section = ForumSection.unboxing;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
@@ -107,7 +193,8 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   bool get _usesRealUpload => widget.publishController != null;
 
-  List<MediaAsset> get sampleMedia => ForumStore.seeded().posts.expand((post) => post.images).take(9).toList();
+  List<MediaAsset> get sampleMedia =>
+      ForumStore.seeded().posts.expand((post) => post.images).take(9).toList();
 
   @override
   void dispose() {
@@ -133,10 +220,18 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
     if (body.isEmpty) return setState(() => errorText = '正文不能为空');
-    final pollOptions = pollOptionControllers.map((controller) => controller.text.trim()).where((value) => value.isNotEmpty).toList();
-    if (widget.isPoll && pollOptions.length < 2) return setState(() => errorText = '投票至少需要两个选项');
-    if (_usesRealUpload && images.any((image) => image.status != _DraftImageStatus.done)) {
-      final failed = images.any((image) => image.status == _DraftImageStatus.failed);
+    final pollOptions = pollOptionControllers
+        .map((controller) => controller.text.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    if (widget.isPoll && pollOptions.length < 2) {
+      return setState(() => errorText = '投票至少需要两个选项');
+    }
+    if (_usesRealUpload &&
+        images.any((image) => image.status != _DraftImageStatus.done)) {
+      final failed = images.any(
+        (image) => image.status == _DraftImageStatus.failed,
+      );
       return setState(
         () => errorText = failed ? '有图片上传失败，请重试或删除后再发布' : '图片仍在上传，请稍候',
       );
@@ -145,14 +240,16 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     _finishSubmit(title: title, body: body, pollOptions: pollOptions);
   }
 
-  Future<void> _finishSubmit({required String title, required String body, required List<String> pollOptions}) async {
+  Future<void> _finishSubmit({
+    required String title,
+    required String body,
+    required List<String> pollOptions,
+  }) async {
     try {
       final mediaIds = _usesRealUpload
           ? images.map((image) => image.mediaId!).toList()
           : <String>[];
-      if (!mounted) return;
-      _submitted = true;
-      Navigator.of(context).pop(PostDraft(
+      final draft = PostDraft(
         title: title,
         body: body,
         section: section,
@@ -161,10 +258,17 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         media: selectedMedia,
         mediaIds: mediaIds,
         pollOptions: pollOptions,
-      ));
-    } catch (_) {
+      );
+      await widget.onPublish(draft);
       if (!mounted) return;
+      _submitted = true;
       Navigator.of(context).pop();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        submitting = false;
+        errorText = error is PublishException ? error.message : '发布失败，请检查网络后重试';
+      });
     }
   }
 
@@ -199,10 +303,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     try {
       final bytes = image.bytes = await image.file.readAsBytes();
       _assertValidImage(image.file.name, bytes);
-      final totalBytes =
-          images
-              .map((item) => item.bytes?.length ?? 0)
-              .fold<int>(0, (sum, item) => sum + item);
+      final totalBytes = images
+          .map((item) => item.bytes?.length ?? 0)
+          .fold<int>(0, (sum, item) => sum + item);
       if (totalBytes > maxTotalBytes) {
         throw const PublishException('图片总量不能超过 30 MB');
       }
@@ -215,7 +318,12 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         width: image.width ?? 0,
         height: image.height ?? 0,
       );
-      if (!mounted) return;
+      if (!mounted) {
+        // 取消编辑器后，上传协程仍可能晚于 dispose 返回 media_id；
+        // 此时页面已无法把媒体挂到帖子，立即回收避免孤儿媒体。
+        await publisher.deleteMedia(mediaId).catchError((_) {});
+        return;
+      }
       setState(() {
         image.mediaId = mediaId;
         image.status = _DraftImageStatus.done;
@@ -268,122 +376,212 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.isGameShare ? '发布玩法分享' : widget.isPoll ? '发起投票' : '发布普通帖子';
+    final title = widget.isGameShare
+        ? '发布玩法分享'
+        : widget.isPoll
+        ? '发起投票'
+        : '发布普通帖子';
     return Dialog.fullscreen(
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-          leading: TextButton(onPressed: submitting ? null : () => Navigator.of(context).pop(), child: const Text('取消')),
-          actions: [Padding(padding: const EdgeInsets.only(right: 10), child: FilledButton(onPressed: submitting ? null : submit, style: FilledButton.styleFrom(backgroundColor: AppTheme.primary), child: Text(submitting ? '发布中…' : '发布')))],
+          title: Text(
+            title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          leading: TextButton(
+            onPressed: submitting ? null : () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: FilledButton(
+                onPressed: submitting ? null : submit,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                ),
+                child: Text(submitting ? '发布中…' : '发布'),
+              ),
+            ),
+          ],
         ),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
             children: [
-              DropdownButtonFormField<ForumSection>(initialValue: section, decoration: const InputDecoration(labelText: '发布板块'), items: ForumSection.values.map((item) => DropdownMenuItem(value: item, child: Text(item.label))).toList(), onChanged: submitting ? null : (value) => setState(() => section = value ?? section)),
+              DropdownButtonFormField<ForumSection>(
+                initialValue: section,
+                decoration: const InputDecoration(labelText: '发布板块'),
+                items: ForumSection.values
+                    .map(
+                      (item) => DropdownMenuItem(
+                        value: item,
+                        child: Text(item.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: submitting
+                    ? null
+                    : (value) => setState(() => section = value ?? section),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: titleController, enabled: !submitting, maxLength: 40, decoration: const InputDecoration(labelText: '标题', hintText: '给帖子起一个清楚的标题')),
+              TextField(
+                controller: titleController,
+                enabled: !submitting,
+                maxLength: 40,
+                decoration: const InputDecoration(
+                  labelText: '标题',
+                  hintText: '给帖子起一个清楚的标题',
+                ),
+              ),
               const SizedBox(height: 12),
-              TextField(controller: bodyController, enabled: !submitting, maxLength: 2000, minLines: 8, maxLines: 12, decoration: const InputDecoration(labelText: '正文', hintText: '分享你的真实体验、问题或发现…')),
+              TextField(
+                controller: bodyController,
+                enabled: !submitting,
+                maxLength: 2000,
+                minLines: 8,
+                maxLines: 12,
+                decoration: const InputDecoration(
+                  labelText: '正文',
+                  hintText: '分享你的真实体验、问题或发现…',
+                ),
+              ),
               if (widget.isPoll) ...[
                 const SizedBox(height: 12),
-                const Text('投票选项', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w700)),
+                const Text(
+                  '投票选项',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                ...pollOptionControllers.asMap().entries.map((entry) => Padding(padding: const EdgeInsets.only(bottom: 8), child: TextField(controller: entry.value, enabled: !submitting, decoration: InputDecoration(labelText: '选项 ${entry.key + 1}', prefixIcon: const Icon(Icons.radio_button_unchecked_rounded))))),
+                ...pollOptionControllers.asMap().entries.map(
+                  (entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      controller: entry.value,
+                      enabled: !submitting,
+                      decoration: InputDecoration(
+                        labelText: '选项 ${entry.key + 1}',
+                        prefixIcon: const Icon(
+                          Icons.radio_button_unchecked_rounded,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ],
               const SizedBox(height: 12),
-              const Text('图片', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w700)),
+              const Text(
+                '图片',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 8),
-              Row(children: [
-                OutlinedButton.icon(
-                        onPressed: submitting
-                            ? null
-                            : (_usesRealUpload
-                                ? _pickImages
-                                : widget.enableSampleMedia
-                                ? _addSampleImage
-                                : _pickImages),
-                        icon: const Icon(Icons.add_photo_alternate_outlined),
-                        label: Text(
-                          _usesRealUpload
-                              ? '选择图片'
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: submitting
+                        ? null
+                        : (_usesRealUpload
+                              ? _pickImages
                               : widget.enableSampleMedia
-                              ? '添加示例图'
-                              : '选择图片',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _usesRealUpload
-                            ? '${images.length} / $maxImages'
-                            : '${selectedMedia.length} / $maxImages',
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ]),
-                    if (_usesRealUpload && images.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 104,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: images.length,
-                          separatorBuilder: (_, _) => const SizedBox(width: 10),
-                          itemBuilder: (_, index) {
-                            final image = images[index];
-                            return _DraftImageThumb(
-                              image: image,
-                              onRetry: () => _upload(image),
-                              onDelete: () => _deleteImage(image),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                    if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 86,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: selectedMedia.length,
-                          separatorBuilder: (_, _) => const SizedBox(width: 8),
-                          itemBuilder: (_, index) => Stack(
-                            children: [
-                              SizedBox(
-                                width: 86,
-                                height: 86,
-                                child: PostMediaPreview(
-                                  images: [selectedMedia[index]],
-                                ),
-                              ),
-                              Positioned(
-                                right: 0,
-                                top: 0,
-                                child: IconButton(
-                                  onPressed: submitting
-                                      ? null
-                                      : () => setState(
-                                          () => selectedMedia = [
-                                            ...selectedMedia,
-                                          ]..removeAt(index),
-                                        ),
-                                  icon: const Icon(
-                                    Icons.cancel,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                            ],
+                              ? _addSampleImage
+                              : _pickImages),
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(
+                      _usesRealUpload
+                          ? '选择图片'
+                          : widget.enableSampleMedia
+                          ? '添加示例图'
+                          : '选择图片',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _usesRealUpload
+                        ? '${images.length} / $maxImages'
+                        : '${selectedMedia.length} / $maxImages',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              if (_usesRealUpload && images.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 104,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: images.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 10),
+                    itemBuilder: (_, index) {
+                      final image = images[index];
+                      return _DraftImageThumb(
+                        image: image,
+                        onRetry: () => _upload(image),
+                        onDelete: () => _deleteImage(image),
+                      );
+                    },
+                  ),
+                ),
+              ],
+              if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 86,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: selectedMedia.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    itemBuilder: (_, index) => Stack(
+                      children: [
+                        SizedBox(
+                          width: 86,
+                          height: 86,
+                          child: PostMediaPreview(
+                            images: [selectedMedia[index]],
                           ),
                         ),
-                      ),
-                    ],
-              if (errorText != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(errorText!, style: const TextStyle(color: AppTheme.pink, fontSize: 12))),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: IconButton(
+                            onPressed: submitting
+                                ? null
+                                : () => setState(
+                                    () =>
+                                        selectedMedia = [...selectedMedia]
+                                          ..removeAt(index),
+                                  ),
+                            icon: const Icon(
+                              Icons.cancel,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (errorText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    errorText!,
+                    style: const TextStyle(color: AppTheme.pink, fontSize: 12),
+                  ),
+                ),
             ],
           ),
         ),
@@ -427,7 +625,10 @@ class _DraftImageThumb extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ClipRRect(borderRadius: BorderRadius.circular(10), child: preview),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: preview,
+              ),
               if (status == _DraftImageStatus.done)
                 const Positioned(
                   right: 4,

@@ -21,19 +21,24 @@ var (
 )
 
 type commentResponse struct {
-	ID            string      `json:"id"`
-	PostID        string      `json:"post_id"`
-	Author        userSummary `json:"author"`
-	RootID        *string     `json:"root_id,omitempty"`
-	ParentID      *string     `json:"parent_id,omitempty"`
-	ReplyToUserID *string     `json:"reply_to_user_id,omitempty"`
-	Content       string      `json:"content"`
-	LikeCount     int64       `json:"like_count"`
-	ReplyCount    int64       `json:"reply_count"`
-	Publication   string      `json:"publication_status"`
-	Moderation    string      `json:"moderation_status"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID            string              `json:"id"`
+	PostID        string              `json:"post_id"`
+	Author        userSummary         `json:"author"`
+	RootID        *string             `json:"root_id,omitempty"`
+	ParentID      *string             `json:"parent_id,omitempty"`
+	ReplyToUserID *string             `json:"reply_to_user_id,omitempty"`
+	Content       string              `json:"content"`
+	LikeCount     int64               `json:"like_count"`
+	ReplyCount    int64               `json:"reply_count"`
+	Publication   string              `json:"publication_status"`
+	Moderation    string              `json:"moderation_status"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
+	ViewerState   *viewerCommentState `json:"viewer_state,omitempty"`
+}
+
+type viewerCommentState struct {
+	HasLiked bool `json:"has_liked"`
 }
 
 type commentInput struct {
@@ -75,18 +80,28 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		}
 		cursor = &decoded
 	}
-	query := `
+	args := []any{postID}
+	viewerExpression := "false"
+	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
+	if hasViewer {
+		viewerExpression = fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM comment_reactions cr
+			WHERE cr.comment_id = c.id AND cr.user_id = $%d AND cr.reaction_type = 'like'
+		)`, len(args)+1)
+		args = append(args, viewer.ID)
+		hasViewer = true
+	}
+	query := fmt.Sprintf(`
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
 		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
-		       c.created_at, c.updated_at
+		       c.created_at, c.updated_at, %s AS viewer_has_liked
 		FROM comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE c.post_id = $1 AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'`
-	args := []any{postID}
+		WHERE c.post_id = $1 AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'`, viewerExpression)
 	if cursor != nil {
-		query += " AND (c.created_at, c.id) > ($2, $3)"
+		query += fmt.Sprintf(" AND (c.created_at, c.id) > ($%d, $%d)", len(args)+1, len(args)+2)
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
 	limitPosition := len(args) + 1
@@ -102,12 +117,16 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	for rows.Next() {
 		var item commentResponse
 		var authorID, rootID, parentID, replyTo string
-		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var viewerHasLiked bool
+		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 		item.Author.ID = authorID
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rootID), optionalString(parentID), optionalString(replyTo)
+		if hasViewer {
+			item.ViewerState = &viewerCommentState{HasLiked: viewerHasLiked}
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -158,19 +177,28 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		}
 		cursor = &decoded
 	}
-	query := `
+	args := []any{rootID}
+	viewerExpression := "false"
+	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
+	if hasViewer {
+		viewerExpression = fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM comment_reactions cr
+			WHERE cr.comment_id = c.id AND cr.user_id = $%d AND cr.reaction_type = 'like'
+		)`, len(args)+1)
+		args = append(args, viewer.ID)
+	}
+	query := fmt.Sprintf(`
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
 		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
-		       c.created_at, c.updated_at
+		       c.created_at, c.updated_at, %s AS viewer_has_liked
 		FROM comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE c.root_id = $1 AND c.id <> $1 AND c.deleted_at IS NULL
-		  AND c.publication_status = 'published' AND c.moderation_status = 'normal'`
-	args := []any{rootID}
+		  AND c.publication_status = 'published' AND c.moderation_status = 'normal'`, viewerExpression)
 	if cursor != nil {
-		query += " AND (c.created_at, c.id) > ($2, $3)"
+		query += fmt.Sprintf(" AND (c.created_at, c.id) > ($%d, $%d)", len(args)+1, len(args)+2)
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
 	limitPosition := len(args) + 1
@@ -186,12 +214,16 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 	for rows.Next() {
 		var item commentResponse
 		var authorID, rowRootID, parentID, replyTo string
-		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rowRootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var viewerHasLiked bool
+		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rowRootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 		item.Author.ID = authorID
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rowRootID), optionalString(parentID), optionalString(replyTo)
+		if hasViewer {
+			item.ViewerState = &viewerCommentState{HasLiked: viewerHasLiked}
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -316,11 +348,15 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 			return
 		}
 	}
+	if err := awardPointsTx(r.Context(), tx, user.ID, "comment", "参与回复", "comment:create:"+commentID, s.pointRewards.CommentCreate); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	response := commentResponse{ID: commentID, PostID: postID, Author: userSummary{ID: user.ID, Username: user.Username, Nickname: user.Nickname}, RootID: optionalString(rootID), ParentID: optionalString(parentID), ReplyToUserID: optionalString(strings.TrimSpace(input.ReplyToUserID)), Content: input.Content, Publication: "published", Moderation: "normal", CreatedAt: now, UpdatedAt: now}
+	response := commentResponse{ID: commentID, PostID: postID, Author: userSummary{ID: user.ID, Username: user.Username, Nickname: user.Nickname}, RootID: optionalString(rootID), ParentID: optionalString(parentID), ReplyToUserID: optionalString(strings.TrimSpace(input.ReplyToUserID)), Content: input.Content, Publication: "published", Moderation: "normal", CreatedAt: now, UpdatedAt: now, ViewerState: &viewerCommentState{}}
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 

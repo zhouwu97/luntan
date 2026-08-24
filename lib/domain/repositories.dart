@@ -1,7 +1,10 @@
 import 'models.dart';
 
 abstract interface class CommunityRepository {
-  Future<List<Community>> getCommunities({String? categoryId, CommunityStatus? status});
+  Future<List<Community>> getCommunities({
+    String? categoryId,
+    CommunityStatus? status,
+  });
 
   Future<Community?> getCommunity(String id);
 }
@@ -17,7 +20,9 @@ abstract interface class QueryableFeedRepository {
     String? cursor,
     int limit = 20,
     String? communityId,
-    String sort = 'recommended',
+    String sort = 'latest',
+    String? postType,
+    bool? hasMedia,
   });
 }
 

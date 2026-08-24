@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../data/api/auth_repository.dart';
+import '../data/api/bookmark_repository.dart';
 import '../data/api/profile_repository.dart';
 import '../data/api/store_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 import 'exchange_store_screen.dart';
+import 'bookmark_folders_screen.dart';
+import 'points_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
@@ -21,6 +24,8 @@ class ProfileScreen extends StatelessWidget {
     this.isApiMode = false,
     this.profileRepository,
     this.storeRepository,
+    this.bookmarkRepository,
+    this.onOpenPostId,
     this.onLogout,
   });
 
@@ -35,6 +40,8 @@ class ProfileScreen extends StatelessWidget {
   final bool isApiMode;
   final ProfileRepository? profileRepository;
   final StoreRepository? storeRepository;
+  final BookmarkRepository? bookmarkRepository;
+  final ValueChanged<String>? onOpenPostId;
   final Future<void> Function()? onLogout;
 
   @override
@@ -47,6 +54,8 @@ class ProfileScreen extends StatelessWidget {
         onFeedback: onFeedback,
         onLogout: onLogout,
         storeRepository: storeRepository,
+        bookmarkRepository: bookmarkRepository,
+        onOpenPostId: onOpenPostId,
       );
     }
     return AnimatedBuilder(
@@ -69,6 +78,20 @@ class ProfileScreen extends StatelessWidget {
                 isApiMode: isApiMode,
                 onTap: (label) => _showList(context, label),
               ),
+              const SizedBox(height: 14),
+              _PointsBalanceCard(
+                balance: store.points,
+                onOpenPoints: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PointsCenterScreen(store: store),
+                  ),
+                ),
+                onOpenStore: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ExchangeStoreScreen(store: store),
+                  ),
+                ),
+              ),
               const SizedBox(height: 22),
               const Text(
                 '常用功能',
@@ -85,7 +108,7 @@ class ProfileScreen extends StatelessWidget {
                     icon: Icons.star_rounded,
                     label: '我的收藏',
                     color: AppTheme.orange,
-                    onTap: () => _showList(context, '我的收藏'),
+                    onTap: () => _openBookmarks(context),
                   ),
                   _ProfileTool(
                     icon: Icons.thumb_up_rounded,
@@ -129,7 +152,11 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              _RecentPosts(store: store, currentUserId: currentUserId, onOpenPost: onOpenPost),
+              _RecentPosts(
+                store: store,
+                currentUserId: currentUserId,
+                onOpenPost: onOpenPost,
+              ),
               const SizedBox(height: 24),
               Text(
                 '浅蓝论坛 · 把真实的校园生活留在这里',
@@ -166,14 +193,15 @@ class ProfileScreen extends StatelessWidget {
                 onFeedback('隐私设置已打开');
               },
             ),
-            if (onLogout != null) ListTile(
-              leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
-              title: const Text('退出登录'),
-              onTap: () async {
-                Navigator.pop(context);
-                await onLogout!();
-              },
-            ),
+            if (onLogout != null)
+              ListTile(
+                leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
+                title: const Text('退出登录'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await onLogout!();
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.info_outline_rounded),
               title: const Text('关于浅蓝论坛'),
@@ -282,6 +310,23 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
+  void _openBookmarks(BuildContext context) {
+    final repository = bookmarkRepository;
+    final onOpenPostId = this.onOpenPostId;
+    if (repository == null || onOpenPostId == null) {
+      _showList(context, '我的收藏');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BookmarkFoldersScreen(
+          repository: repository,
+          onOpenPostId: onOpenPostId,
+        ),
+      ),
+    );
+  }
+
   void _showHistory(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -349,6 +394,8 @@ class _ApiProfileScreen extends StatefulWidget {
     required this.onOpenMessages,
     required this.onFeedback,
     this.storeRepository,
+    this.bookmarkRepository,
+    this.onOpenPostId,
     this.onLogout,
   });
 
@@ -358,6 +405,8 @@ class _ApiProfileScreen extends StatefulWidget {
   final ValueChanged<String> onFeedback;
   final Future<void> Function()? onLogout;
   final StoreRepository? storeRepository;
+  final BookmarkRepository? bookmarkRepository;
+  final ValueChanged<String>? onOpenPostId;
 
   @override
   State<_ApiProfileScreen> createState() => _ApiProfileScreenState();
@@ -365,14 +414,17 @@ class _ApiProfileScreen extends StatefulWidget {
 
 class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   late Future<ProfileSummary> profileFuture;
+  late Future<PointsOverview>? pointsFuture;
 
   @override
   void initState() {
     super.initState();
     profileFuture = widget.repository.getProfile();
+    pointsFuture = widget.storeRepository?.overview();
   }
 
-  void retry() => setState(() => profileFuture = widget.repository.getProfile());
+  void retry() =>
+      setState(() => profileFuture = widget.repository.getProfile());
 
   @override
   Widget build(BuildContext context) => FutureBuilder<ProfileSummary>(
@@ -383,10 +435,18 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       }
       if (snapshot.hasError || !snapshot.hasData) {
         return Scaffold(
-          body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Text('个人资料加载失败', style: TextStyle(color: AppTheme.textSecondary)),
-            TextButton(onPressed: retry, child: const Text('重试')),
-          ])),
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '个人资料加载失败',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+                TextButton(onPressed: retry, child: const Text('重试')),
+              ],
+            ),
+          ),
         );
       }
       return _content(snapshot.data!);
@@ -399,47 +459,182 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
         children: [
-          _ProfileTopbar(onMessages: widget.onOpenMessages, onSettings: () => _showSettings(context)),
+          _ProfileTopbar(
+            onMessages: widget.onOpenMessages,
+            onSettings: () => _showSettings(context),
+          ),
           const SizedBox(height: 16),
-          Row(children: [
-            const CircleAvatar(radius: 32, backgroundColor: AppTheme.surfaceBlue, child: Icon(Icons.person_rounded, color: AppTheme.primary, size: 32)),
-            const SizedBox(width: 13),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(profile.nickname, style: const TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.w900)),
-              const SizedBox(height: 4),
-              Text('@${profile.username} · Lv.${profile.level}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
-              if (profile.signature.isNotEmpty) ...[const SizedBox(height: 4), Text(profile.signature, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12))],
-            ])),
-          ]),
+          Row(
+            children: [
+              const CircleAvatar(
+                radius: 32,
+                backgroundColor: AppTheme.surfaceBlue,
+                child: Icon(
+                  Icons.person_rounded,
+                  color: AppTheme.primary,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      profile.nickname,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '@${profile.username} · Lv.${profile.level}',
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (profile.signature.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        profile.signature,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
           if (widget.storeRepository != null) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ExchangeStoreScreen(apiRepository: widget.storeRepository!))), icon: const Icon(Icons.card_giftcard_outlined), label: const Text('打开积分商店')),
+            const SizedBox(height: 14),
+            FutureBuilder<PointsOverview>(
+              future: pointsFuture,
+              builder: (context, snapshot) => _PointsBalanceCard(
+                balance: snapshot.data?.balance,
+                onOpenPoints: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PointsCenterScreen(
+                      apiRepository: widget.storeRepository!,
+                    ),
+                  ),
+                ),
+                onOpenStore: () => Navigator.of(context)
+                    .push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ExchangeStoreScreen(
+                          apiRepository: widget.storeRepository!,
+                        ),
+                      ),
+                    )
+                    .then((_) {
+                      if (mounted) {
+                        setState(
+                          () =>
+                              pointsFuture = widget.storeRepository!.overview(),
+                        );
+                      }
+                    }),
+              ),
+            ),
           ],
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.symmetric(vertical: 15),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(AppTheme.cardRadius), border: Border.all(color: AppTheme.border)),
-            child: Row(children: [
-              _ApiStat(value: profile.postCount, label: '我的发帖', onTap: () => _showList('我的发帖')),
-              _ApiStat(value: profile.commentCount, label: '我的回帖', onTap: () => _showList('我的回帖')),
-              _ApiStat(value: profile.followerCount, label: '粉丝', onTap: () {}),
-            ]),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Row(
+              children: [
+                _ApiStat(
+                  value: profile.postCount,
+                  label: '我的发帖',
+                  onTap: () => _showList('我的发帖'),
+                ),
+                _ApiStat(
+                  value: profile.commentCount,
+                  label: '我的回帖',
+                  onTap: () => _showList('我的回帖'),
+                ),
+                _ApiStat(
+                  value: profile.followerCount,
+                  label: '粉丝',
+                  onTap: () {},
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 22),
-          const Text('常用功能', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800)),
+          const Text(
+            '常用功能',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 10),
-          Row(children: [
-            _ProfileTool(icon: Icons.star_rounded, label: '我的收藏', color: AppTheme.orange, onTap: () => _showList('我的收藏')),
-            _ProfileTool(icon: Icons.thumb_up_rounded, label: '我的点赞', color: AppTheme.pink, onTap: () => _showList('我的点赞')),
-            _ProfileTool(icon: Icons.history_rounded, label: '浏览历史', color: AppTheme.primary, onTap: () => _showList('浏览历史')),
-            _ProfileTool(icon: Icons.mode_comment_outlined, label: '我的评论', color: AppTheme.mint, onTap: () => _showList('我的评论')),
-          ]),
+          Row(
+            children: [
+              _ProfileTool(
+                icon: Icons.star_rounded,
+                label: '我的收藏',
+                color: AppTheme.orange,
+                onTap: () => _openBookmarks(),
+              ),
+              _ProfileTool(
+                icon: Icons.thumb_up_rounded,
+                label: '我的点赞',
+                color: AppTheme.pink,
+                onTap: () => _showList('我的点赞'),
+              ),
+              _ProfileTool(
+                icon: Icons.history_rounded,
+                label: '浏览历史',
+                color: AppTheme.primary,
+                onTap: () => _showList('浏览历史'),
+              ),
+              _ProfileTool(
+                icon: Icons.mode_comment_outlined,
+                label: '我的评论',
+                color: AppTheme.mint,
+                onTap: () => _showList('我的评论'),
+              ),
+            ],
+          ),
           const SizedBox(height: 22),
-          const Text('最近发布', style: TextStyle(color: AppTheme.textPrimary, fontSize: 17, fontWeight: FontWeight.w800)),
+          const Text(
+            '最近发布',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 10),
-          OutlinedButton.icon(onPressed: () => _showList('我的发帖'), icon: const Icon(Icons.article_outlined), label: const Text('查看我的全部帖子')),
+          OutlinedButton.icon(
+            onPressed: () => _showList('我的发帖'),
+            icon: const Icon(Icons.article_outlined),
+            label: const Text('查看我的全部帖子'),
+          ),
           const SizedBox(height: 24),
-          Text('浅蓝论坛 · 把真实的校园生活留在这里', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary.withValues(alpha: .7), fontSize: 12)),
+          Text(
+            '浅蓝论坛 · 把真实的校园生活留在这里',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.textSecondary.withValues(alpha: .7),
+              fontSize: 12,
+            ),
+          ),
         ],
       ),
     ),
@@ -468,12 +663,56 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     );
   }
 
+  void _openBookmarks() {
+    final repository = widget.bookmarkRepository;
+    final onOpenPostId = widget.onOpenPostId;
+    if (repository == null || onOpenPostId == null) {
+      _showList('我的收藏');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BookmarkFoldersScreen(
+          repository: repository,
+          onOpenPostId: onOpenPostId,
+        ),
+      ),
+    );
+  }
+
   void _showSettings(BuildContext context) {
-    showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (sheetContext) => SafeArea(child: Wrap(children: [
-      const ListTile(leading: Icon(Icons.palette_outlined), title: Text('浅蓝主题'), trailing: Icon(Icons.check_rounded, color: AppTheme.primary)),
-      if (widget.onLogout != null) ListTile(leading: const Icon(Icons.logout_rounded, color: AppTheme.pink), title: const Text('退出登录'), onTap: () async { Navigator.pop(sheetContext); await widget.onLogout!(); }),
-      ListTile(leading: const Icon(Icons.info_outline_rounded), title: const Text('关于浅蓝论坛'), onTap: () { Navigator.pop(sheetContext); widget.onFeedback('当前版本 v1.0.0'); }),
-    ])));
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Wrap(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.palette_outlined),
+              title: Text('浅蓝主题'),
+              trailing: Icon(Icons.check_rounded, color: AppTheme.primary),
+            ),
+            if (widget.onLogout != null)
+              ListTile(
+                leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
+                title: const Text('退出登录'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  await widget.onLogout!();
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded),
+              title: const Text('关于浅蓝论坛'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                widget.onFeedback('当前版本 v1.0.0');
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -490,6 +729,7 @@ Post _profilePostFromJson(Map<String, dynamic> value) {
     bookmarkCount: _profileInt(value['bookmark_count']),
     createdAt: now,
     updatedAt: now,
+    publishedAt: now,
   );
 }
 
@@ -620,7 +860,10 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
                     ),
                   ),
                   if (isHistory && posts.isNotEmpty)
-                    TextButton(onPressed: _clearHistory, child: const Text('清空')),
+                    TextButton(
+                      onPressed: _clearHistory,
+                      child: const Text('清空'),
+                    ),
                 ],
               ),
             ),
@@ -685,7 +928,8 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
           ),
           title: Text(post.title, maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text(
-            '${communityNames[index]} · ${post.commentCount} 回复',
+            '${communityNames[index]} · ${post.commentCount} 回复 · '
+            '${widget.kind == 'comments' ? '评论于' : '发布于'}${relativeTimeLabel(post.createdAt)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -700,16 +944,45 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
 }
 
 class _ApiStat extends StatelessWidget {
-  const _ApiStat({required this.value, required this.label, required this.onTap});
+  const _ApiStat({
+    required this.value,
+    required this.label,
+    required this.onTap,
+  });
   final int value;
   final String label;
   final VoidCallback onTap;
   @override
-  Widget build(BuildContext context) => Expanded(child: GestureDetector(onTap: onTap, child: Column(children: [Text('$value', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 22, fontWeight: FontWeight.w900)), const SizedBox(height: 4), Text(label, style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11))])));
+  Widget build(BuildContext context) => Expanded(
+    child: GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Text(
+            '$value',
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _RecentPosts extends StatelessWidget {
-  const _RecentPosts({required this.store, required this.currentUserId, required this.onOpenPost});
+  const _RecentPosts({
+    required this.store,
+    required this.currentUserId,
+    required this.onOpenPost,
+  });
 
   final ForumStore store;
   final String currentUserId;
@@ -717,17 +990,22 @@ class _RecentPosts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final posts = store.posts
-        .where((post) => post.authorId == currentUserId)
-        .take(3)
-        .toList();
+    final posts =
+        store.posts.where((post) => post.authorId == currentUserId).toList()
+          ..sort((a, b) {
+            final byTime = (b.publishedAt ?? b.createdAt).compareTo(
+              a.publishedAt ?? a.createdAt,
+            );
+            return byTime == 0 ? b.id.compareTo(a.id) : byTime;
+          });
+    final recentPosts = posts.take(3).toList();
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppTheme.border),
       ),
-      child: posts.isEmpty
+      child: recentPosts.isEmpty
           ? const Padding(
               padding: EdgeInsets.all(18),
               child: Text(
@@ -736,7 +1014,7 @@ class _RecentPosts extends StatelessWidget {
               ),
             )
           : Column(
-              children: posts
+              children: recentPosts
                   .map(
                     (post) => ListTile(
                       title: Text(
@@ -799,7 +1077,9 @@ class _ProfileHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final nickname = user?.nickname.isNotEmpty == true ? user!.nickname : '小理不理';
+    final nickname = user?.nickname.isNotEmpty == true
+        ? user!.nickname
+        : '小理不理';
     final level = user?.level ?? 8;
     return Row(
       children: [
@@ -868,7 +1148,11 @@ class _ProfileHero extends StatelessWidget {
 }
 
 class _StatsStrip extends StatelessWidget {
-  const _StatsStrip({required this.store, required this.onTap, required this.isApiMode});
+  const _StatsStrip({
+    required this.store,
+    required this.onTap,
+    required this.isApiMode,
+  });
 
   final ForumStore store;
   final ValueChanged<String> onTap;
@@ -979,6 +1263,64 @@ class _ProfileTool extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _PointsBalanceCard extends StatelessWidget {
+  const _PointsBalanceCard({
+    required this.balance,
+    required this.onOpenPoints,
+    required this.onOpenStore,
+  });
+
+  final int? balance;
+  final VoidCallback onOpenPoints;
+  final VoidCallback onOpenStore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.monetization_on_rounded, color: AppTheme.orange),
+          const SizedBox(width: 10),
+          Expanded(
+            child: InkWell(
+              onTap: onOpenPoints,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '社区积分余额',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    balance == null ? '加载中…' : '${balance!} 积分',
+                    style: const TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          TextButton(onPressed: onOpenPoints, child: const Text('明细')),
+          TextButton(onPressed: onOpenStore, child: const Text('兑换')),
+        ],
+      ),
+    );
+  }
 }
 
 class _ExchangePreview extends StatelessWidget {

@@ -115,12 +115,15 @@ func profileListQuery(kind, userID, rawCursor string, limit int) (string, []any,
 	where := "p.deleted_at IS NULL AND p.publication_status = 'published'"
 	args := []any{userID}
 	join := "JOIN communities c ON c.id = p.community_id"
-	timestampColumn := "p.created_at"
+	// 帖子列表按发布时间，评论列表按当前用户最后一次评论的时间。
+	// 这样“我的评论”不会因为帖子本身发布时间较早而排在新评论后面。
+	timestampColumn := "COALESCE(p.published_at, p.created_at)"
 	switch kind {
 	case "posts":
 		where += " AND p.author_id = $1"
 	case "comments":
-		where += " AND EXISTS (SELECT 1 FROM comments c0 WHERE c0.post_id = p.id AND c0.author_id = $1 AND c0.deleted_at IS NULL)"
+		timestampColumn = "(SELECT MAX(c0.created_at) FROM comments c0 WHERE c0.post_id = p.id AND c0.author_id = $1 AND c0.deleted_at IS NULL AND c0.publication_status = 'published')"
+		where += " AND EXISTS (SELECT 1 FROM comments c0 WHERE c0.post_id = p.id AND c0.author_id = $1 AND c0.deleted_at IS NULL AND c0.publication_status = 'published')"
 	case "likes":
 		where += " AND EXISTS (SELECT 1 FROM post_reactions r0 WHERE r0.post_id = p.id AND r0.user_id = $1 AND r0.reaction_type = 'like')"
 	case "bookmarks":

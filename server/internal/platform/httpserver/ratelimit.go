@@ -1,7 +1,7 @@
 package httpserver
 
 import (
-	"net"
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -19,19 +19,83 @@ type rateLimitRule struct {
 }
 
 type rateLimitBucket struct {
-	Started time.Time
-	Count   int
+	ExpiresAt time.Time
+	Count     int
+}
+
+// RateLimitStore 是限流状态的持久化接缝；生产环境使用 Redis，
+// 开发和单元测试可使用带回收机制的进程内实现。
+type RateLimitStore interface {
+	Allow(ctx context.Context, key string, limit int, window time.Duration, now time.Time) (bool, error)
+}
+
+type memoryRateLimitStore struct {
+	mu           sync.Mutex
+	buckets      map[string]rateLimitBucket
+	operations   uint64
+	cleanupEvery uint64
+	maxBuckets   int
+}
+
+func newMemoryRateLimitStore() *memoryRateLimitStore {
+	return &memoryRateLimitStore{
+		buckets:      make(map[string]rateLimitBucket),
+		cleanupEvery: 256,
+		maxBuckets:   100_000,
+	}
+}
+
+// NewMemoryRateLimitStore 返回适用于开发或单实例部署的限流存储。
+func NewMemoryRateLimitStore() RateLimitStore { return newMemoryRateLimitStore() }
+
+func (s *memoryRateLimitStore) Allow(_ context.Context, key string, limit int, window time.Duration, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.operations++
+	if s.cleanupEvery > 0 && s.operations%s.cleanupEvery == 0 {
+		s.purgeExpired(now)
+	}
+	bucket, exists := s.buckets[key]
+	if !exists || !now.Before(bucket.ExpiresAt) {
+		if !exists && len(s.buckets) >= s.maxBuckets {
+			s.purgeExpired(now)
+			if len(s.buckets) >= s.maxBuckets {
+				// 基数异常时失败关闭，避免攻击者通过随机来源地址耗尽内存。
+				return false, nil
+			}
+		}
+		s.buckets[key] = rateLimitBucket{ExpiresAt: now.Add(window), Count: 1}
+		return true, nil
+	}
+	if bucket.Count >= limit {
+		return false, nil
+	}
+	bucket.Count++
+	s.buckets[key] = bucket
+	return true, nil
+}
+
+func (s *memoryRateLimitStore) purgeExpired(now time.Time) {
+	for key, bucket := range s.buckets {
+		if !now.Before(bucket.ExpiresAt) {
+			delete(s.buckets, key)
+		}
+	}
 }
 
 type rateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]rateLimitBucket
-	rules   map[string]rateLimitRule
+	store RateLimitStore
+	rules map[string]rateLimitRule
 }
 
-func newRateLimiter() *rateLimiter {
+func newRateLimiter(stores ...RateLimitStore) *rateLimiter {
+	store := RateLimitStore(newMemoryRateLimitStore())
+	if len(stores) > 0 && stores[0] != nil {
+		store = stores[0]
+	}
 	return &rateLimiter{
-		buckets: make(map[string]rateLimitBucket),
+		store: store,
 		rules: map[string]rateLimitRule{
 			"register":     {Limit: 5, Window: time.Minute},
 			"login":        {Limit: 10, Window: time.Minute},
@@ -54,29 +118,18 @@ func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 			return
 		}
 		rule := l.rules[route]
-		key := route + ":" + clientAddress(r)
-		if !l.allow(key, rule, time.Now()) {
+		key := "luntan:rate_limit:" + route + ":" + ClientIP(r)
+		allowed, err := l.store.Allow(r.Context(), key, rule.Limit, rule.Window, time.Now())
+		if err != nil {
+			WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "RATE_LIMIT_UNAVAILABLE", Message: "服务暂时不可用"})
+			return
+		}
+		if !allowed {
 			WriteAppError(w, r, AppError{Status: http.StatusTooManyRequests, Code: "RATE_LIMITED", Message: "请求过于频繁，请稍后再试"})
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (l *rateLimiter) allow(key string, rule rateLimitRule, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	bucket := l.buckets[key]
-	if bucket.Started.IsZero() || now.Sub(bucket.Started) >= rule.Window {
-		l.buckets[key] = rateLimitBucket{Started: now, Count: 1}
-		return true
-	}
-	if bucket.Count >= rule.Limit {
-		return false
-	}
-	bucket.Count++
-	l.buckets[key] = bucket
-	return true
 }
 
 func classifyRateLimitRoute(r *http.Request) string {
@@ -105,14 +158,4 @@ func classifyRateLimitRoute(r *http.Request) string {
 	default:
 		return ""
 	}
-}
-
-func clientAddress(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	if r.RemoteAddr == "" {
-		return "unknown"
-	}
-	return r.RemoteAddr
 }

@@ -90,6 +90,20 @@ func (s *Server) toggleBookmark(w http.ResponseWriter, r *http.Request, postID s
 		writeInternalError(w, r, err)
 		return
 	}
+	if active {
+		defaultFolderID, err := ensureDefaultBookmarkFolderTx(r.Context(), tx, user.ID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `INSERT INTO bookmark_folder_items (folder_id, post_id) VALUES ($1, $2) ON CONFLICT (folder_id, post_id) DO NOTHING`, defaultFolderID, postID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	} else if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1`, postID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if changed {
 		operator := "+ 1"
 		if !active {

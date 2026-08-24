@@ -12,7 +12,17 @@ enum CommunityJoinPolicy { open, approval, inviteOnly }
 
 enum CommunityStatus { active, archived, closed }
 
-enum PostType { normal, image, poll, gameShare, question, article, video, activity, market }
+enum PostType {
+  normal,
+  image,
+  poll,
+  gameShare,
+  question,
+  article,
+  video,
+  activity,
+  market,
+}
 
 enum PublicationStatus { draft, published, deleted }
 
@@ -220,7 +230,7 @@ class Post {
 }
 
 class Comment {
-  const Comment({
+  Comment({
     required this.id,
     required this.postId,
     required this.authorId,
@@ -230,6 +240,7 @@ class Comment {
     this.replyToUserId,
     required this.content,
     this.likeCount = 0,
+    this.isLiked = false,
     this.replyCount = 0,
     this.publicationStatus = CommentPublicationStatus.published,
     this.moderationStatus = ModerationStatus.normal,
@@ -245,7 +256,8 @@ class Comment {
   final String? parentId;
   final String? replyToUserId;
   final String content;
-  final int likeCount;
+  int likeCount;
+  bool isLiked;
   final int replyCount;
   final CommentPublicationStatus publicationStatus;
   final ModerationStatus moderationStatus;
@@ -254,7 +266,13 @@ class Comment {
 }
 
 class Reaction {
-  const Reaction({required this.id, required this.userId, required this.targetId, required this.type, required this.createdAt});
+  const Reaction({
+    required this.id,
+    required this.userId,
+    required this.targetId,
+    required this.type,
+    required this.createdAt,
+  });
 
   final String id;
   final String userId;
@@ -288,6 +306,8 @@ String relativeTimeLabel(DateTime value, {DateTime? now}) {
 }
 
 String compactCountLabel(int value) {
-  if (value >= 1000) return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k';
+  if (value >= 1000) {
+    return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k';
+  }
   return '$value';
 }

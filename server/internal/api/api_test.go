@@ -146,9 +146,10 @@ func TestMediaUploadTokenCreatesPendingAssetWithSignedURL(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "User", 1))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_assets (id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $10)`)).WithArgs(sqlmock.AnyArg(), "u1", sqlmock.AnyArg(), "a.png", "image/png", 100, 80, int64(10), "", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	checksum := strings.Repeat("a", 64)
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_assets (id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $10)`)).WithArgs(sqlmock.AnyArg(), "u1", sqlmock.AnyArg(), "a.png", "image/png", 100, 80, int64(10), checksum, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/media/upload-token", strings.NewReader(`{"file_name":"a.png","mime_type":"image/png","width":100,"height":80,"size":10}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/media/upload-token", strings.NewReader(`{"file_name":"a.png","mime_type":"image/png","width":100,"height":80,"size":10,"sha256":"`+checksum+`"}`))
 	req.Header.Set("Authorization", "Bearer access-token")
 	res := httptest.NewRecorder()
 	NewHandlerWithMedia(db, nil, testMediaStorage{}).ServeHTTP(res, req)
@@ -185,7 +186,7 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
-	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).WithArgs("p1", 2).WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "author_id", "username", "nickname", "root_id", "parent_id", "reply_to_user_id", "content", "like_count", "reply_count", "publication_status", "moderation_status", "created_at", "updated_at"}).AddRow("cm2", "p1", "u1", "user", "User", "cm2", "", "", "第二条", 0, 0, "published", "normal", created, created).AddRow("cm1", "p1", "u1", "user", "User", "cm1", "", "", "第一条", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute)))
+	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).WithArgs("p1", 2).WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "author_id", "username", "nickname", "root_id", "parent_id", "reply_to_user_id", "content", "like_count", "reply_count", "publication_status", "moderation_status", "created_at", "updated_at", "viewer_has_liked"}).AddRow("cm2", "p1", "u1", "user", "User", "cm2", "", "", "第二条", 0, 0, "published", "normal", created, created, false).AddRow("cm1", "p1", "u1", "user", "User", "cm1", "", "", "第一条", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute), false))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/p1/comments?limit=1", nil)
 	res := httptest.NewRecorder()

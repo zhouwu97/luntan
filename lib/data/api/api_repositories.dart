@@ -56,7 +56,9 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
     String? cursor,
     int limit = 20,
     String? communityId,
-    String sort = 'recommended',
+    String sort = 'latest',
+    String? postType,
+    bool? hasMedia,
   }) async {
     final payload = await _client.getJson(
       '/api/v1/feed/latest',
@@ -65,6 +67,8 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
         'cursor': ?cursor,
         'community_id': ?communityId,
         'sort': sort,
+        'post_type': ?postType,
+        if (hasMedia != null) 'has_media': '$hasMedia',
         'include_details': '1',
       },
     );
@@ -88,7 +92,10 @@ class ApiPostRepository implements PostRepository, PostMutationRepository {
   @override
   Future<PostDetail?> getPost(String id) async {
     try {
-      final payload = await _client.getJson('/api/v1/posts/$id', queryParameters: const {'include_details': '1'});
+      final payload = await _client.getJson(
+        '/api/v1/posts/$id',
+        queryParameters: const {'include_details': '1'},
+      );
       return PostDetail(post: _postFromJson(payload));
     } on ApiException catch (error) {
       if (error.type == ApiErrorType.notFound) {
@@ -107,18 +114,22 @@ class ApiPostRepository implements PostRepository, PostMutationRepository {
     required String content,
     List<String> mediaIds = const [],
   }) async {
-    final payload = await _client.patchJson('/api/v1/posts/$postId', body: {
-      'community_id': communityId,
-      'type': type,
-      'title': title,
-      'content': content,
-      'media_ids': mediaIds,
-    });
+    final payload = await _client.patchJson(
+      '/api/v1/posts/$postId',
+      body: {
+        'community_id': communityId,
+        'type': type,
+        'title': title,
+        'content': content,
+        'media_ids': mediaIds,
+      },
+    );
     return _postFromJson(payload);
   }
 
   @override
-  Future<void> deletePost(String postId) => _client.deleteJson('/api/v1/posts/$postId');
+  Future<void> deletePost(String postId) =>
+      _client.deleteJson('/api/v1/posts/$postId');
 }
 
 Community _communityFromJson(Map<String, dynamic> json) {
@@ -167,20 +178,17 @@ Post _postFromJson(Map<String, dynamic> json) {
       ? Map<String, dynamic>.from(json['viewer_state'] as Map)
       : const <String, dynamic>{};
   final media = json['media'] is List
-      ? (json['media'] as List)
-          .whereType<Map>()
-          .map((raw) {
-            final value = Map<String, dynamic>.from(raw);
-            return MediaAsset(
-              id: _string(value['id']),
-              type: value['type'] == 'video' ? MediaType.video : MediaType.image,
-              url: _nullableString(value['url']),
-              width: _nullableInt(value['width']),
-              height: _nullableInt(value['height']),
-              altText: _nullableString(value['alt_text']),
-            );
-          })
-          .toList()
+      ? (json['media'] as List).whereType<Map>().map((raw) {
+          final value = Map<String, dynamic>.from(raw);
+          return MediaAsset(
+            id: _string(value['id']),
+            type: value['type'] == 'video' ? MediaType.video : MediaType.image,
+            url: _nullableString(value['url']),
+            width: _nullableInt(value['width']),
+            height: _nullableInt(value['height']),
+            altText: _nullableString(value['alt_text']),
+          );
+        }).toList()
       : const <MediaAsset>[];
   return Post(
     id: _string(json['id']),
@@ -258,8 +266,10 @@ T _enumByName<T extends Enum>(List<T> values, dynamic value, T fallback) {
 }
 
 String _string(dynamic value) => value is String ? value : '';
-String? _nullableString(dynamic value) => value is String && value.isNotEmpty ? value : null;
-int? _nullableInt(dynamic value) => value is num ? value.toInt() : int.tryParse('$value');
+String? _nullableString(dynamic value) =>
+    value is String && value.isNotEmpty ? value : null;
+int? _nullableInt(dynamic value) =>
+    value is num ? value.toInt() : int.tryParse('$value');
 int _int(dynamic value, {int fallback = 0}) =>
     value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
 DateTime _date(dynamic value, DateTime fallback) =>

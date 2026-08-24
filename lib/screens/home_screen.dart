@@ -112,9 +112,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _selectCommunity(String communityId) {
+  void _selectCommunity(String? communityId) {
     setState(() => selectedCommunityId = communityId);
-    if (!isApiMode) {
+    if (!isApiMode && communityId != null) {
       widget.store.selectSection(_sectionForCommunity(communityId));
     }
     _loadFeed();
@@ -126,19 +126,35 @@ class _HomeScreenState extends State<HomeScreen> {
         status: CommunityStatus.active,
       );
       if (!mounted) return;
-      final currentId = selectedCommunityId;
-      final nextId = result.any((item) => item.id == currentId)
-          ? currentId
-          : result.firstOrNull?.id;
+      final visibleCommunities = _uniqueCommunities(result).take(3).toList();
+      final nextSelectedCommunityId =
+          visibleCommunities.any((item) => item.id == selectedCommunityId)
+          ? selectedCommunityId
+          : visibleCommunities.isEmpty
+          ? null
+          : visibleCommunities.first.id;
+      final shouldReload = nextSelectedCommunityId != selectedCommunityId;
       setState(() {
-        communities = result;
-        selectedCommunityId = nextId;
+        communities = visibleCommunities;
+        selectedCommunityId = nextSelectedCommunityId;
       });
-      _loadFeed();
+      if (shouldReload) _loadFeed();
     } catch (_) {
       if (!mounted) return;
       widget.onFeedback('板块加载失败，稍后可重试');
     }
+  }
+
+  List<Community> _uniqueCommunities(Iterable<Community> source) {
+    final ids = <String>{};
+    final names = <String>{};
+    return source.where((community) {
+      final name = community.name.trim();
+      if (!ids.add(community.id) || (name.isNotEmpty && !names.add(name))) {
+        return false;
+      }
+      return true;
+    }).toList();
   }
 
   ForumSection _sectionForCommunity(String communityId) =>
@@ -159,7 +175,11 @@ class _HomeScreenState extends State<HomeScreen> {
     // API 模式：板块与排序由服务端过滤，客户端只展示服务端结果，不再二次筛选/重排。
     if (widget.feedRepository != null) return posts;
     final filtered = posts
-        .where((post) => post.communityId == selectedCommunityId)
+        .where(
+          (post) =>
+              selectedCommunityId == null ||
+              post.communityId == selectedCommunityId,
+        )
         .where((post) {
           if (selectedSort == FeedSort.featured) {
             return post.isFeatured;
@@ -168,7 +188,12 @@ class _HomeScreenState extends State<HomeScreen> {
         })
         .toList();
     if (selectedSort == FeedSort.latest) {
-      filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      filtered.sort((a, b) {
+        final byTime = (b.publishedAt ?? b.createdAt).compareTo(
+          a.publishedAt ?? a.createdAt,
+        );
+        return byTime == 0 ? b.id.compareTo(a.id) : byTime;
+      });
     } else if (selectedSort == FeedSort.featured) {
       filtered.sort((a, b) => b.commentCount.compareTo(a.commentCount));
     }
@@ -261,7 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         SliverToBoxAdapter(
                           child: _FeedToolbar(
                             selected: selectedSort,
-                            onReply: () => openFeature(FeatureType.myReplies),
+                            onReply: widget.onOpenProfile,
                             onPublish: widget.onOpenComposer,
                             onSortChanged: _selectSort,
                           ),
@@ -508,10 +533,11 @@ class _SectionTabs extends StatelessWidget {
 
   final List<Community> communities;
   final String? selectedCommunityId;
-  final ValueChanged<String> onChanged;
+  final ValueChanged<String?> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final tabs = communities.take(3).toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
       child: Container(
@@ -523,36 +549,58 @@ class _SectionTabs extends StatelessWidget {
           border: Border.all(color: AppTheme.border),
         ),
         child: Row(
-          children: communities.map((community) {
-            final active = selectedCommunityId == community.id;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  onChanged(community.id);
-                },
-                child: AnimatedContainer(
-                  duration: AppTheme.tabMotion,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: active ? AppTheme.textPrimary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    community.name,
-                    style: TextStyle(
-                      color: active ? Colors.white : AppTheme.textSecondary,
-                      fontSize: 13,
-                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-                    ),
+          children: tabs
+              .map(
+                (community) => Expanded(
+                  child: _CommunityTab(
+                    label: community.name,
+                    active: selectedCommunityId == community.id,
+                    onTap: () => onChanged(community.id),
                   ),
                 ),
-              ),
-            );
-          }).toList(),
+              )
+              .toList(),
         ),
       ),
     );
   }
+}
+
+class _CommunityTab extends StatelessWidget {
+  const _CommunityTab({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 2),
+    child: GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: AppTheme.tabMotion,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: active ? AppTheme.textPrimary : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _FeatureEntries extends StatelessWidget {
@@ -656,7 +704,7 @@ class _FeedToolbar extends StatelessWidget {
             ),
           ),
           _ToolbarButton(
-            label: '回复',
+            label: '我的评论',
             icon: Icons.chat_bubble_outline_rounded,
             onTap: onReply,
           ),

@@ -8,6 +8,7 @@ import 'controllers/post_detail_controller.dart';
 import 'controllers/publish_controller.dart';
 import 'data/api/api_client.dart';
 import 'data/api/auth_repository.dart';
+import 'data/api/publish_repository.dart';
 import 'data/mock_forum_data.dart';
 import 'data/repository_provider.dart';
 import 'domain/models.dart';
@@ -19,6 +20,7 @@ import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
+import 'widgets/bookmark_picker_sheet.dart';
 import 'widgets/messages_sheet.dart';
 
 class LuntanApp extends StatefulWidget {
@@ -133,16 +135,19 @@ class _LuntanAppState extends State<LuntanApp> {
     bool isGameShare = false,
     bool isPoll = false,
   }) async {
-    final result = await showDialog<PostDraft>(
+    await showDialog<void>(
       context: context,
       builder: (_) => PostEditorDialog(
         isGameShare: isGameShare,
         isPoll: isPoll,
+        onPublish: _publishDraft,
         publishController: apiMode ? publishController : null,
         enableSampleMedia: !apiMode,
       ),
     );
-    if (!mounted || result == null) return;
+  }
+
+  Future<void> _publishDraft(PostDraft result) async {
     try {
       final type = result.isGameShare
           ? 'game_share'
@@ -173,11 +178,9 @@ class _LuntanAppState extends State<LuntanApp> {
       setState(() => currentTab = 0);
       _showQuickFeedback('帖子已发布');
     } catch (error) {
-      if (mounted) {
-        _showQuickFeedback(
-          userFacingApiMessage(error, fallback: '发布失败，草稿内容可重新填写后重试'),
-        );
-      }
+      throw PublishException(
+        userFacingApiMessage(error, fallback: '发布失败，草稿内容已保留，请重试'),
+      );
     }
   }
 
@@ -252,7 +255,21 @@ class _LuntanAppState extends State<LuntanApp> {
   Future<void> toggleBookmark(Post post) async {
     if (!_requireAuth()) return;
     try {
-      await interactionController.toggleBookmark(post);
+      final bookmarkRepository = repositories.bookmarks;
+      if (bookmarkRepository == null) {
+        await interactionController.toggleBookmark(post);
+        return;
+      }
+      final active = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) =>
+            BookmarkPickerSheet(post: post, repository: bookmarkRepository),
+      );
+      if (active != null) {
+        interactionController.applyBookmarkState(post, active);
+      }
     } catch (error) {
       if (mounted) _showQuickFeedback(userFacingApiMessage(error));
     }
@@ -416,6 +433,8 @@ class _LuntanAppState extends State<LuntanApp> {
             onLogout: _logout,
             profileRepository: repositories.profile,
             storeRepository: repositories.store,
+            bookmarkRepository: repositories.bookmarks,
+            onOpenPostId: openPostId,
           ),
         ],
       ),

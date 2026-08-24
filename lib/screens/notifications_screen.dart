@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
-
-enum _NotificationFilter { all, reply, like, system }
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({
@@ -28,14 +27,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool loading = false;
   bool loadingMore = false;
   String? errorMessage;
-  _NotificationFilter filter = _NotificationFilter.all;
+  NotificationCategory filter = NotificationCategory.all;
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
     scrollController.addListener(_maybeLoadMore);
     load();
-    widget.repository.markAllNotificationsRead();
   }
 
   @override
@@ -51,13 +50,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Future<void> load() async {
+    final generation = ++_generation;
+    final requestedFilter = filter;
     setState(() {
       loading = true;
       errorMessage = null;
+      items.clear();
+      nextCursor = null;
+      hasMore = true;
     });
     try {
-      final page = await widget.repository.listNotifications();
-      if (!mounted) return;
+      final page = await widget.repository.listNotifications(
+        category: requestedFilter,
+      );
+      if (!mounted || generation != _generation || filter != requestedFilter) {
+        return;
+      }
       setState(() {
         items
           ..clear()
@@ -66,18 +74,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         hasMore = page.hasMore;
       });
     } catch (_) {
-      if (mounted) setState(() => errorMessage = '消息加载失败，请重试');
+      if (mounted && generation == _generation) {
+        setState(() => errorMessage = '消息加载失败，请重试');
+      }
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted && generation == _generation) {
+        setState(() => loading = false);
+      }
     }
   }
 
   Future<void> loadMore() async {
     if (loading || loadingMore || !hasMore || nextCursor == null) return;
+    final generation = _generation;
+    final requestedFilter = filter;
+    final requestedCursor = nextCursor;
     setState(() => loadingMore = true);
     try {
-      final page = await widget.repository.listNotifications(cursor: nextCursor);
-      if (!mounted) return;
+      final page = await widget.repository.listNotifications(
+        cursor: requestedCursor,
+        category: requestedFilter,
+      );
+      if (!mounted || generation != _generation || filter != requestedFilter) {
+        return;
+      }
       setState(() {
         items.addAll(page.items);
         nextCursor = page.nextCursor;
@@ -86,29 +106,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } catch (_) {
       // 允许滚动到底部后再次触发。
     } finally {
-      if (mounted) setState(() => loadingMore = false);
+      if (mounted && generation == _generation) {
+        setState(() => loadingMore = false);
+      }
     }
   }
 
-  List<ForumNotification> get _visible => items.where((item) {
-    switch (filter) {
-      case _NotificationFilter.all:
-        return true;
-      case _NotificationFilter.reply:
-        return item.type == 'comment.created' ||
-            item.type == 'comment.replied';
-      case _NotificationFilter.like:
-        return item.type == 'post.liked' ||
-            item.type == 'user.followed' ||
-            item.type.contains('bookmark');
-      case _NotificationFilter.system:
-        return item.type != 'comment.created' &&
-            item.type != 'comment.replied' &&
-            item.type != 'post.liked' &&
-            item.type != 'user.followed' &&
-            !item.type.contains('bookmark');
-    }
-  }).toList();
+  void _selectFilter(NotificationCategory value) {
+    if (value == filter) return;
+    setState(() => filter = value);
+    load();
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -136,18 +144,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
           child: Row(
-            children: _NotificationFilter.values.map((value) {
+            children: NotificationCategory.values.map((value) {
               return Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ChoiceChip(
                   label: Text(switch (value) {
-                    _NotificationFilter.all => '全部',
-                    _NotificationFilter.reply => '回复',
-                    _NotificationFilter.like => '赞与收藏',
-                    _NotificationFilter.system => '系统',
+                    NotificationCategory.all => '全部',
+                    NotificationCategory.reply => '回复',
+                    NotificationCategory.like => '赞与收藏',
+                    NotificationCategory.system => '系统',
                   }),
                   selected: value == filter,
-                  onSelected: (_) => setState(() => filter = value),
+                  onSelected: (_) => _selectFilter(value),
                 ),
               );
             }).toList(),
@@ -167,17 +175,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('消息加载失败', style: TextStyle(color: AppTheme.textSecondary)),
+            const Text(
+              '消息加载失败',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
             TextButton(onPressed: load, child: const Text('重试')),
           ],
         ),
       );
     }
-    final visible = _visible;
-    if (visible.isEmpty) {
+    if (items.isEmpty) {
       return Center(
         child: Text(
-          items.isEmpty ? '暂时没有新消息' : '该分类暂无消息',
+          filter == NotificationCategory.all ? '暂时没有新消息' : '该分类暂无消息',
           style: const TextStyle(color: AppTheme.textSecondary),
         ),
       );
@@ -185,10 +195,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return ListView.separated(
       controller: scrollController,
       padding: const EdgeInsets.all(AppTheme.pagePadding),
-      itemCount: visible.length + 1,
+      itemCount: items.length + 1,
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
-        if (index == visible.length) {
+        if (index == items.length) {
           return loadingMore
               ? const Padding(
                   padding: EdgeInsets.all(12),
@@ -198,7 +208,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 )
               : const SizedBox(height: 8);
         }
-        final item = visible[index];
+        final item = items[index];
         return ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 5),
           leading: CircleAvatar(
@@ -216,9 +226,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           trailing: item.isRead
               ? null
               : const CircleAvatar(radius: 4, backgroundColor: AppTheme.pink),
-          onTap: () {
-            widget.repository.markNotificationRead(item.id);
-            setState(() => item.isRead = true);
+          onTap: () async {
+            if (!item.isRead) {
+              setState(() => item.isRead = true);
+              try {
+                await widget.repository.markNotificationRead(item.id);
+              } catch (error) {
+                if (!context.mounted) return;
+                setState(() => item.isRead = false);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(userFacingApiMessage(error))),
+                );
+                return;
+              }
+            }
+            if (!context.mounted) return;
             if (item.targetType == 'post') {
               widget.onOpenPostId(item.targetId);
             }
@@ -237,10 +259,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       : Icons.campaign_rounded;
 
   String _title(ForumNotification item) => switch (item.type) {
-    'post.liked' => '${item.actorName} 赞了你的帖子',
+    'like' || 'post.liked' => '${item.actorName} 赞了你的帖子',
+    'bookmark' || 'post.bookmarked' => '${item.actorName} 收藏了你的帖子',
     'comment.created' ||
-    'comment.replied' => '${item.actorName} 回复了你',
-    'user.followed' => '${item.actorName} 关注了你',
+    'comment.replied' ||
+    'reply' => '${item.actorName} 回复了你',
+    'follow' || 'user.followed' => '${item.actorName} 关注了你',
     _ => '你有一条新通知',
   };
 }

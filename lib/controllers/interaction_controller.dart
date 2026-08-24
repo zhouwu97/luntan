@@ -10,13 +10,11 @@ class InteractionController extends ChangeNotifier {
 
   final InteractionRepository _repository;
   final Set<String> _inFlight = <String>{};
-  final Set<String> likedCommentIds = <String>{};
 
   bool isInFlight(String target) => _inFlight.contains(target);
 
   void clearUserState() {
     _inFlight.clear();
-    likedCommentIds.clear();
     notifyListeners();
   }
 
@@ -44,13 +42,19 @@ class InteractionController extends ChangeNotifier {
     if (!_inFlight.add(key)) return;
     final next = !post.isBookmarked;
     post.isBookmarked = next;
-    post.bookmarkCount = (post.bookmarkCount + (next ? 1 : -1)).clamp(0, 1 << 30);
+    post.bookmarkCount = (post.bookmarkCount + (next ? 1 : -1)).clamp(
+      0,
+      1 << 30,
+    );
     notifyListeners();
     try {
       await _repository.setBookmark(postId: post.id, active: next);
     } catch (_) {
       post.isBookmarked = !next;
-      post.bookmarkCount = (post.bookmarkCount + (next ? -1 : 1)).clamp(0, 1 << 30);
+      post.bookmarkCount = (post.bookmarkCount + (next ? -1 : 1)).clamp(
+        0,
+        1 << 30,
+      );
       notifyListeners();
       rethrow;
     } finally {
@@ -58,20 +62,33 @@ class InteractionController extends ChangeNotifier {
     }
   }
 
+  /// 收藏夹选择器完成后同步服务端的收藏事实，只有从未收藏到收藏或反向变化时
+  /// 才调整帖子公开的 bookmark_count，避免一个帖子进入多个收藏夹造成重复计数。
+  void applyBookmarkState(Post post, bool active) {
+    if (post.isBookmarked == active) return;
+    post.isBookmarked = active;
+    post.bookmarkCount = (post.bookmarkCount + (active ? 1 : -1)).clamp(
+      0,
+      1 << 30,
+    );
+    notifyListeners();
+  }
+
   Future<void> toggleCommentLike(Comment comment) async {
     final key = 'comment-like:${comment.id}';
     if (!_inFlight.add(key)) return;
-    final next = likedCommentIds.add(comment.id);
-    if (!next) likedCommentIds.remove(comment.id);
+    final next = !comment.isLiked;
+    comment.isLiked = next;
+    comment.likeCount = (comment.likeCount + (next ? 1 : -1)).clamp(0, 1 << 30);
     notifyListeners();
     try {
       await _repository.setCommentLike(commentId: comment.id, active: next);
     } catch (_) {
-      if (next) {
-        likedCommentIds.remove(comment.id);
-      } else {
-        likedCommentIds.add(comment.id);
-      }
+      comment.isLiked = !next;
+      comment.likeCount = (comment.likeCount + (next ? -1 : 1)).clamp(
+        0,
+        1 << 30,
+      );
       notifyListeners();
       rethrow;
     } finally {

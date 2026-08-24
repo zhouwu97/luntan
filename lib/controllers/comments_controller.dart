@@ -31,7 +31,8 @@ class CommentsController extends ChangeNotifier {
       final page = await _repository.listComments(postId: postId);
       items
         ..clear()
-        ..addAll(page.items);
+        ..addAll(page.items)
+        ..sort(_compareByCreatedAt);
       nextCursor = page.nextCursor;
       hasMore = page.hasMore;
     } catch (error) {
@@ -55,7 +56,9 @@ class CommentsController extends ChangeNotifier {
         postId: postId,
         cursor: nextCursor,
       );
-      items.addAll(page.items);
+      items
+        ..addAll(page.items)
+        ..sort(_compareByCreatedAt);
       nextCursor = page.nextCursor;
       hasMore = page.hasMore;
     } catch (error) {
@@ -71,16 +74,18 @@ class CommentsController extends ChangeNotifier {
     final running = _addInFlight;
     if (running != null) return running;
     late final Future<Comment> future;
-    future = _repository.createComment(
-      postId: postId,
-      content: content,
-    ).then((comment) {
-      items.add(comment);
-      notifyListeners();
-      return comment;
-    }).whenComplete(() {
-      if (identical(_addInFlight, future)) _addInFlight = null;
-    });
+    future = _repository
+        .createComment(postId: postId, content: content)
+        .then((comment) {
+          items
+            ..add(comment)
+            ..sort(_compareByCreatedAt);
+          notifyListeners();
+          return comment;
+        })
+        .whenComplete(() {
+          if (identical(_addInFlight, future)) _addInFlight = null;
+        });
     _addInFlight = future;
     return future;
   }
@@ -95,7 +100,9 @@ class CommentsController extends ChangeNotifier {
       content: content,
       replyToUserId: replyToUserId,
     );
-    items.add(comment);
+    items
+      ..add(comment)
+      ..sort(_compareByCreatedAt);
     notifyListeners();
     return comment;
   }
@@ -118,5 +125,10 @@ class CommentsController extends ChangeNotifier {
     if (index >= 0) items[index] = updated;
     notifyListeners();
     return updated;
+  }
+
+  int _compareByCreatedAt(Comment a, Comment b) {
+    final byTime = a.createdAt.compareTo(b.createdAt);
+    return byTime == 0 ? a.id.compareTo(b.id) : byTime;
   }
 }

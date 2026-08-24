@@ -37,10 +37,38 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	var rateLimitStore httpserver.RateLimitStore
+	if cfg.RateLimitEnabled {
+		if cfg.RedisURL == "" {
+			if cfg.AppEnv == "production" {
+				logger.Error("rate_limit_store_missing", "error", "production requires REDIS_URL")
+				os.Exit(1)
+			}
+			logger.Warn("rate_limit_memory_store", "app_env", cfg.AppEnv)
+			rateLimitStore = httpserver.NewMemoryRateLimitStore()
+		} else {
+			redisStore, redisErr := httpserver.NewRedisRateLimitStore(cfg.RedisURL)
+			if redisErr != nil {
+				logger.Error("rate_limit_redis_failed", "error", redisErr.Error())
+				os.Exit(1)
+			}
+			defer redisStore.Close()
+			rateLimitStore = redisStore
+		}
+	}
+	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, api.NewHandler(db), httpserver.Options{
+		RateLimitEnabled:  cfg.RateLimitEnabled,
+		RateLimitStore:    rateLimitStore,
+		TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+	})
+	if err != nil {
+		logger.Error("http_server_configuration_failed", "error", err.Error())
+		os.Exit(1)
+	}
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%s", cfg.HTTPPort),
-		Handler:           httpserver.NewHandlerWithAPI(db, logger, api.NewHandler(db)),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

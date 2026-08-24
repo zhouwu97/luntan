@@ -2,9 +2,11 @@ package api
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +22,11 @@ var (
 type moderationActionInput struct {
 	Action string `json:"action"`
 	Reason string `json:"reason"`
+}
+
+type moderationCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
 }
 
 func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, caseID string) {
@@ -118,52 +125,117 @@ func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !s.hasScopedPermission(r, user.ID, "report.review", "") {
-		writeAuthError(w, r, ErrPermissionDenied)
-		return
-	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT id, target_type, target_id, source, risk_level, status, created_at, resolved_at
-		FROM moderation_cases
-		WHERE ($1 = '' OR status = $1)
-		ORDER BY created_at ASC, id ASC
-		LIMIT $2`, status, limit)
+	var cursor *moderationCursor
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		decoded, decodeErr := decodeModerationCursor(raw)
+		if decodeErr != nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			return
+		}
+		cursor = &decoded
+	}
+	communityExpression := `COALESCE(p.community_id, cp.community_id, '')`
+	args := []any{status, user.ID}
+	query := `
+		SELECT mc.id, mc.target_type, mc.target_id, mc.source, mc.risk_level, mc.status, mc.created_at, mc.resolved_at,
+		       ` + communityExpression + ` AS community_id
+		FROM moderation_cases mc
+		LEFT JOIN posts p ON mc.target_type = 'post' AND p.id = mc.target_id
+		LEFT JOIN comments c ON mc.target_type = 'comment' AND c.id = mc.target_id
+		LEFT JOIN posts cp ON c.post_id = cp.id
+		WHERE ($1 = '' OR mc.status = $1)
+		  AND EXISTS (
+			SELECT 1
+			FROM user_roles ur
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions pmt ON pmt.id = rp.permission_id
+			WHERE ur.user_id = $2 AND pmt.name = 'report.review'
+			  AND (ur.community_id IS NULL OR ur.community_id = ` + communityExpression + `)
+		  )`
+	if cursor != nil {
+		query += " AND (mc.created_at, mc.id) > ($3, $4)"
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	query += " ORDER BY mc.created_at ASC, mc.id ASC LIMIT $" + strconv.Itoa(limitPosition)
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0, limit)
+	items := make([]map[string]any, 0, limit+1)
+	lastCreatedAt := time.Time{}
+	lastID := ""
 	for rows.Next() {
-		var id, targetType, targetID, source, riskLevel, caseStatus string
+		var id, targetType, targetID, source, riskLevel, caseStatus, communityID string
 		var createdAt time.Time
 		var resolvedAt sql.NullTime
-		if err := rows.Scan(&id, &targetType, &targetID, &source, &riskLevel, &caseStatus, &createdAt, &resolvedAt); err != nil {
+		if err := rows.Scan(&id, &targetType, &targetID, &source, &riskLevel, &caseStatus, &createdAt, &resolvedAt, &communityID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		item := map[string]any{"id": id, "target_type": targetType, "target_id": targetID, "source": source, "risk_level": riskLevel, "status": caseStatus, "created_at": createdAt}
+		item := map[string]any{"id": id, "target_type": targetType, "target_id": targetID, "source": source, "risk_level": riskLevel, "status": caseStatus, "community_id": communityID, "created_at": createdAt}
 		if resolvedAt.Valid {
 			item["resolved_at"] = resolvedAt.Time
 		}
 		items = append(items, item)
+		lastCreatedAt, lastID = createdAt, id
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+		last := items[len(items)-1]
+		lastCreatedAt = last["created_at"].(time.Time)
+		lastID = last["id"].(string)
+	}
+	var nextCursor any
+	if hasMore {
+		encoded, encodeErr := encodeModerationCursor(moderationCursor{CreatedAt: lastCreatedAt, ID: lastID})
+		if encodeErr != nil {
+			writeInternalError(w, r, encodeErr)
+			return
+		}
+		nextCursor = encoded
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
+}
+
+func encodeModerationCursor(cursor moderationCursor) (string, error) {
+	data, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeModerationCursor(value string) (moderationCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return moderationCursor{}, err
+	}
+	var cursor moderationCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" || cursor.CreatedAt.IsZero() {
+		return moderationCursor{}, errors.New("invalid moderation cursor")
+	}
+	return cursor, nil
 }
 
 func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targetType, targetID string, input moderationActionInput) error {
 	before := map[string]any{"target_type": targetType, "target_id": targetID}
 	var query string
+	var affected int64
 	switch targetType {
 	case "post":
 		switch input.Action {
@@ -181,12 +253,19 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 		case "restore":
 			query = `UPDATE comments SET moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`
 		case "delete":
-			query = `UPDATE comments SET publication_status = 'deleted', deleted_at = COALESCE(deleted_at, now()), deleted_by = $1, delete_reason = $2, moderation_case_id = $3, updated_at = now() WHERE id = $4`
+			changed, err := softDeleteCommentTx(r.Context(), tx, targetID, operatorID, input.Reason, caseID)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return ErrModerationCaseNotFound
+			}
+			affected = 1
 		}
 	default:
 		return ErrInvalidModerationAction
 	}
-	if query == "" {
+	if query == "" && affected != 1 {
 		return ErrInvalidModerationAction
 	}
 	var args []any
@@ -196,19 +275,28 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 	case "restore":
 		args = []any{targetID}
 	case "delete":
+		if targetType == "comment" {
+			break
+		}
 		args = []any{operatorID, strings.TrimSpace(input.Reason), caseID, targetID}
 	}
-	result, err := tx.ExecContext(r.Context(), query, args...)
-	if err != nil {
-		return err
+	if query != "" {
+		result, err := tx.ExecContext(r.Context(), query, args...)
+		if err != nil {
+			return err
+		}
+		affected, err = result.RowsAffected()
+		if err != nil {
+			return err
+		}
 	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
+	if affected != 1 {
 		return ErrModerationCaseNotFound
 	}
 	after := map[string]any{"action": input.Action, "reason": strings.TrimSpace(input.Reason)}
 	beforeJSON, _ := json.Marshal(before)
 	afterJSON, _ := json.Marshal(after)
+	var err error
 	_, err = tx.ExecContext(r.Context(), `INSERT INTO audit_logs (id, operator_id, action, target_type, target_id, reason, before_data, after_data, request_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10)`, newPostID(), operatorID, "moderation."+input.Action, targetType, targetID, strings.TrimSpace(input.Reason), beforeJSON, afterJSON, r.Header.Get("X-Request-ID"), time.Now().UTC())
 	return err
 }

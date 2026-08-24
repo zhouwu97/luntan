@@ -21,6 +21,9 @@ class CommentsController extends ChangeNotifier {
   bool isLoadingMore = false;
   String? errorMessage;
   Future<Comment>? _addInFlight;
+  String? _pendingCommentIdempotencyKey;
+  final Map<String, Future<Comment>> _replyInFlight = {};
+  final Map<String, String> _pendingReplyIdempotencyKeys = {};
 
   Future<void> load() async {
     if (isLoading) return;
@@ -70,13 +73,22 @@ class CommentsController extends ChangeNotifier {
     }
   }
 
-  Future<Comment> addComment(String content) async {
+  Future<Comment> addComment(String content) {
     final running = _addInFlight;
     if (running != null) return running;
     late final Future<Comment> future;
-    future = _repository
-        .createComment(postId: postId, content: content)
+    final key = _pendingCommentIdempotencyKey ??= _newIdempotencyKey('comment');
+    final create = _repository is IdempotentCommentRepository
+        ? (_repository as IdempotentCommentRepository)
+              .createCommentWithIdempotency(
+                postId: postId,
+                content: content,
+                idempotencyKey: key,
+              )
+        : _repository.createComment(postId: postId, content: content);
+    future = create
         .then((comment) {
+          _pendingCommentIdempotencyKey = null;
           items
             ..add(comment)
             ..sort(_compareByCreatedAt);
@@ -94,18 +106,46 @@ class CommentsController extends ChangeNotifier {
     Comment parent,
     String content, {
     String? replyToUserId,
-  }) async {
-    final comment = await _repository.createReply(
-      commentId: parent.id,
-      content: content,
-      replyToUserId: replyToUserId,
+  }) {
+    final running = _replyInFlight[parent.id];
+    if (running != null) return running;
+    final key = _pendingReplyIdempotencyKeys[parent.id] ??= _newIdempotencyKey(
+      'reply',
     );
-    items
-      ..add(comment)
-      ..sort(_compareByCreatedAt);
-    notifyListeners();
-    return comment;
+    final create = _repository is IdempotentCommentRepository
+        ? (_repository as IdempotentCommentRepository)
+              .createReplyWithIdempotency(
+                commentId: parent.id,
+                content: content,
+                idempotencyKey: key,
+                replyToUserId: replyToUserId,
+              )
+        : _repository.createReply(
+            commentId: parent.id,
+            content: content,
+            replyToUserId: replyToUserId,
+          );
+    late final Future<Comment> future;
+    future = create
+        .then((comment) {
+          _pendingReplyIdempotencyKeys.remove(parent.id);
+          items
+            ..add(comment)
+            ..sort(_compareByCreatedAt);
+          notifyListeners();
+          return comment;
+        })
+        .whenComplete(() {
+          if (identical(_replyInFlight[parent.id], future)) {
+            _replyInFlight.remove(parent.id);
+          }
+        });
+    _replyInFlight[parent.id] = future;
+    return future;
   }
+
+  String _newIdempotencyKey(String prefix) =>
+      '$prefix-${DateTime.now().toUtc().microsecondsSinceEpoch}-${identityHashCode(this)}';
 
   Future<void> delete(Comment comment) async {
     await _repository.deleteComment(comment.id);

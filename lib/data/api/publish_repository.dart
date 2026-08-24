@@ -40,6 +40,20 @@ abstract interface class PollPublishRepository {
   });
 }
 
+/// 投票帖子必须在一次服务端事务中完成帖子、投票和选项写入。
+abstract interface class AtomicPollPublishRepository {
+  Future<Map<String, dynamic>> createPollPost({
+    required String communityId,
+    required String title,
+    required String content,
+    required String idempotencyKey,
+    required List<String> options,
+    bool allowMultiple,
+    DateTime? endsAt,
+    List<String> mediaIds,
+  });
+}
+
 class PublishException implements Exception {
   const PublishException(this.message);
 
@@ -65,7 +79,11 @@ class MediaUploadTicket {
   final DateTime expiresAt;
 }
 
-class ApiPublishRepository implements PublishRepository, PollPublishRepository {
+class ApiPublishRepository
+    implements
+        PublishRepository,
+        PollPublishRepository,
+        AtomicPollPublishRepository {
   ApiPublishRepository(this._client);
 
   final ApiClient _client;
@@ -106,6 +124,34 @@ class ApiPublishRepository implements PublishRepository, PollPublishRepository {
       'options': options,
       'allow_multiple': allowMultiple,
       if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
+    },
+  );
+
+  @override
+  Future<Map<String, dynamic>> createPollPost({
+    required String communityId,
+    required String title,
+    required String content,
+    required String idempotencyKey,
+    required List<String> options,
+    bool allowMultiple = false,
+    DateTime? endsAt,
+    List<String> mediaIds = const [],
+  }) => _client.postJson(
+    '/api/v1/posts',
+    headers: {'Idempotency-Key': idempotencyKey},
+    body: {
+      'community_id': communityId,
+      'type': 'poll',
+      'title': title,
+      'content': content,
+      if (mediaIds.isNotEmpty) 'media_ids': mediaIds,
+      'poll': {
+        'question': title,
+        'options': options,
+        'allow_multiple': allowMultiple,
+        if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
+      },
     },
   );
 

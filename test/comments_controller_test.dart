@@ -34,11 +34,31 @@ void main() {
     await controller.load();
     expect(controller.items, hasLength(1));
   });
+
+  test(
+    'CommentsController prevents duplicate replies while request is in flight',
+    () async {
+      final repository = _FakeCommentRepository();
+      final controller = CommentsController(
+        repository: repository,
+        postId: 'p1',
+      );
+      final parent = repository._comment('parent', 'parent');
+
+      final first = controller.replyTo(parent, 'reply');
+      final second = controller.replyTo(parent, 'reply');
+
+      expect(identical(first, second), isTrue);
+      await Future.wait([first, second]);
+      expect(repository.replyCalls, 1);
+    },
+  );
 }
 
 class _FakeCommentRepository implements CommentRepository {
   bool failFirstLoad = false;
   int page = 0;
+  int replyCalls = 0;
 
   Comment _comment(String id, String content) => Comment(
     id: id,
@@ -83,7 +103,11 @@ class _FakeCommentRepository implements CommentRepository {
     required String commentId,
     required String content,
     String? replyToUserId,
-  }) async => _comment('c4', content);
+  }) async {
+    replyCalls++;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    return _comment('c4', content);
+  }
 
   @override
   Future<CommentPage> listReplies({

@@ -81,7 +81,66 @@ class PublishController extends ChangeNotifier {
     final repository = _repository;
     if (repository is! PollPublishRepository) return null;
     final pollRepository = repository as PollPublishRepository;
-    return pollRepository.createPoll(postId: postId, question: question, options: options, allowMultiple: allowMultiple, endsAt: endsAt);
+    return pollRepository.createPoll(
+      postId: postId,
+      question: question,
+      options: options,
+      allowMultiple: allowMultiple,
+      endsAt: endsAt,
+    );
+  }
+
+  Future<Map<String, dynamic>> publishPoll({
+    required String communityId,
+    required String title,
+    required String content,
+    required List<String> options,
+    bool allowMultiple = false,
+    DateTime? endsAt,
+    List<String> mediaIds = const [],
+  }) {
+    final running = _inFlight;
+    if (running != null) return running;
+    final repository = _repository;
+    if (repository is! AtomicPollPublishRepository) {
+      return Future<Map<String, dynamic>>.error(
+        const PublishException('当前服务不支持原子投票发布，请升级服务端'),
+      );
+    }
+    final atomicRepository = repository as AtomicPollPublishRepository;
+    final idempotencyKey = _pendingIdempotencyKey ??= _newIdempotencyKey();
+    isSubmitting = true;
+    errorMessage = null;
+    notifyListeners();
+    late final Future<Map<String, dynamic>> future;
+    future = atomicRepository
+        .createPollPost(
+          communityId: communityId,
+          title: title,
+          content: content,
+          idempotencyKey: idempotencyKey,
+          options: options,
+          allowMultiple: allowMultiple,
+          endsAt: endsAt,
+          mediaIds: mediaIds,
+        )
+        .then((response) {
+          _pendingIdempotencyKey = null;
+          return response;
+        })
+        .catchError((Object error) {
+          errorMessage = error is PublishException
+              ? error.message
+              : '发布失败，请稍后重试';
+          throw error;
+        })
+        .whenComplete(() {
+          isSubmitting = false;
+          notifyListeners();
+          if (identical(_inFlight, future)) _inFlight = null;
+        });
+    _inFlight = future;
+    return future;
   }
 
   Future<Map<String, dynamic>> _runPublish({

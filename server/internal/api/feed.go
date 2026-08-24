@@ -171,9 +171,9 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if filter.HasMedia {
 		query += " AND EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id)"
 	}
-	// 查看者屏蔽了作者时，该作者的帖子不进入 Feed。
+	// 双向过滤：被屏蔽者不能继续看到屏蔽方的公开内容，屏蔽方也不再看到被屏蔽者。
 	if viewer, ok := resolveOptionalViewer(s, r); ok {
-		query += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks WHERE blocker_id = $%d AND blocked_id = p.author_id)", len(args)+1)
+		query += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks WHERE (blocker_id = $%d AND blocked_id = p.author_id) OR (blocker_id = p.author_id AND blocked_id = $%d))", len(args)+1, len(args)+1)
 		args = append(args, viewer.ID)
 	}
 	limitPosition := len(args) + 1

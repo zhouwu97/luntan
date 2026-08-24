@@ -50,8 +50,29 @@ abstract interface class CommentMutationRepository {
   });
 }
 
+/// API 评论创建需要在服务端按用户和请求键去重。
+abstract interface class IdempotentCommentRepository {
+  Future<Comment> createCommentWithIdempotency({
+    required String postId,
+    required String content,
+    required String idempotencyKey,
+    String? parentId,
+    String? replyToUserId,
+  });
+
+  Future<Comment> createReplyWithIdempotency({
+    required String commentId,
+    required String content,
+    required String idempotencyKey,
+    String? replyToUserId,
+  });
+}
+
 class ApiCommentRepository
-    implements CommentRepository, CommentMutationRepository {
+    implements
+        CommentRepository,
+        CommentMutationRepository,
+        IdempotentCommentRepository {
   ApiCommentRepository(this._client);
 
   final ApiClient _client;
@@ -111,14 +132,13 @@ class ApiCommentRepository
     String? parentId,
     String? replyToUserId,
   }) async {
-    final body = <String, dynamic>{'content': content};
-    if (parentId != null) body['parent_id'] = parentId;
-    if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
-    final payload = await _client.postJson(
-      '/api/v1/posts/$postId/comments',
-      body: body,
+    return createCommentWithIdempotency(
+      postId: postId,
+      content: content,
+      idempotencyKey: _newIdempotencyKey('comment'),
+      parentId: parentId,
+      replyToUserId: replyToUserId,
     );
-    return _commentFromJson(payload);
   }
 
   @override
@@ -127,10 +147,45 @@ class ApiCommentRepository
     required String content,
     String? replyToUserId,
   }) async {
+    return createReplyWithIdempotency(
+      commentId: commentId,
+      content: content,
+      idempotencyKey: _newIdempotencyKey('reply'),
+      replyToUserId: replyToUserId,
+    );
+  }
+
+  @override
+  Future<Comment> createCommentWithIdempotency({
+    required String postId,
+    required String content,
+    required String idempotencyKey,
+    String? parentId,
+    String? replyToUserId,
+  }) async {
+    final body = <String, dynamic>{'content': content};
+    if (parentId != null) body['parent_id'] = parentId;
+    if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
+    final payload = await _client.postJson(
+      '/api/v1/posts/$postId/comments',
+      headers: {'Idempotency-Key': idempotencyKey},
+      body: body,
+    );
+    return _commentFromJson(payload);
+  }
+
+  @override
+  Future<Comment> createReplyWithIdempotency({
+    required String commentId,
+    required String content,
+    required String idempotencyKey,
+    String? replyToUserId,
+  }) async {
     final body = <String, dynamic>{'content': content};
     if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
     final payload = await _client.postJson(
       '/api/v1/comments/$commentId/replies',
+      headers: {'Idempotency-Key': idempotencyKey},
       body: body,
     );
     return _commentFromJson(payload);
@@ -152,6 +207,9 @@ class ApiCommentRepository
     );
     return _commentFromJson(payload);
   }
+
+  String _newIdempotencyKey(String prefix) =>
+      '$prefix-${DateTime.now().toUtc().microsecondsSinceEpoch}-${identityHashCode(this)}';
 }
 
 Comment _commentFromJson(Map<String, dynamic> json) {

@@ -56,7 +56,7 @@ void main() {
   });
 
   test(
-    'ApiClient clears tokens after refresh failure without retry loop',
+    'ApiClient preserves tokens after refresh network failure without retry loop',
     () async {
       final store = MemoryTokenStore(
         accessToken: 'expired-access',
@@ -68,6 +68,9 @@ void main() {
         tokenStore: store,
         client: MockClient((request) async {
           calls++;
+          if (request.url.path == '/api/v1/auth/refresh') {
+            throw http.ClientException('offline');
+          }
           return http.Response(
             '{"code":"INVALID_TOKEN","message":"expired"}',
             401,
@@ -80,11 +83,39 @@ void main() {
         throwsA(isA<ApiException>()),
       );
       expect(calls, 2);
-      expect(await store.readAccessToken(), isNull);
-      expect(await store.readRefreshToken(), isNull);
+      expect(await store.readAccessToken(), 'expired-access');
+      expect(await store.readRefreshToken(), 'refresh-1');
       client.close();
     },
   );
+
+  test('ApiClient clears tokens when refresh token is rejected', () async {
+    final store = MemoryTokenStore(
+      accessToken: 'expired-access',
+      refreshToken: 'refresh-1',
+    );
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      tokenStore: store,
+      client: MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/refresh') {
+          return http.Response(
+            '{"code":"INVALID_TOKEN","message":"expired"}',
+            401,
+          );
+        }
+        return http.Response('{}', 401);
+      }),
+    );
+
+    await expectLater(
+      client.getJson('/api/v1/feed/latest'),
+      throwsA(isA<ApiException>()),
+    );
+    expect(await store.readAccessToken(), isNull);
+    expect(await store.readRefreshToken(), isNull);
+    client.close();
+  });
 
   test(
     'AuthRepository persists login tokens and clears them on logout',
@@ -96,7 +127,7 @@ void main() {
         client: MockClient((request) async {
           if (request.url.path == '/api/v1/auth/login') {
             return http.Response(
-            '{"access_token":"access-1","refresh_token":"refresh-1","token_type":"Bearer","expires_in":900,"user":{"id":"u1","username":"user","nickname":"User","level":1,"status":"active"}}',
+              '{"access_token":"access-1","refresh_token":"refresh-1","token_type":"Bearer","expires_in":900,"user":{"id":"u1","username":"user","nickname":"User","level":1,"status":"active"}}',
               200,
             );
           }

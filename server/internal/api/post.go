@@ -22,11 +22,13 @@ var (
 )
 
 type postWriteInput struct {
-	CommunityID string   `json:"community_id"`
-	Type        string   `json:"type"`
-	Title       string   `json:"title"`
-	Content     string   `json:"content"`
-	MediaIDs    []string `json:"media_ids"`
+	CommunityID string       `json:"community_id"`
+	Type        string       `json:"type"`
+	Title       string       `json:"title"`
+	Content     string       `json:"content"`
+	MediaIDs    []string     `json:"media_ids"`
+	Poll        *pollInput   `json:"poll"`
+	Market      *marketInput `json:"market"`
 }
 
 type postMutationResponse struct {
@@ -114,6 +116,18 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	if err := attachMedia(r.Context(), tx, postID, user.ID, input.MediaIDs, now); err != nil {
 		writeAuthError(w, r, err)
 		return
+	}
+	if input.Type == "poll" {
+		if err := insertPollTx(r.Context(), tx, postID, input.Poll); err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
+	}
+	if input.Type == "market" {
+		if err := insertMarketItemTx(r.Context(), tx, postID, user.ID, input.Market); err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
 	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO post_idempotency_keys (user_id, idempotency_key, post_id, created_at) VALUES ($1, $2, $3, $4)`, user.ID, idempotencyKey, postID, now); err != nil {
 		writeInternalError(w, r, err)
@@ -253,8 +267,12 @@ func validPostInput(input postWriteInput) bool {
 		return false
 	}
 	switch input.Type {
-	case "normal", "guide", "question", "game_share", "poll", "market", "activity":
+	case "normal", "guide", "question", "game_share", "activity":
 		return true
+	case "poll":
+		return validPollInput(input.Poll)
+	case "market":
+		return validMarketInput(input.Market)
 	default:
 		return false
 	}

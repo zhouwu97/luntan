@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -35,16 +36,9 @@ func (s *Server) createPoll(w http.ResponseWriter, r *http.Request, postID strin
 		return
 	}
 	var input pollInput
-	if err := decodeJSON(r, &input); err != nil || strings.TrimSpace(input.Question) == "" || len(input.Options) < 2 || len(input.Options) > 10 {
+	if err := decodeJSON(r, &input); err != nil || !validPollInput(&input) {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
-	}
-	for index := range input.Options {
-		input.Options[index] = strings.TrimSpace(input.Options[index])
-		if input.Options[index] == "" || len([]rune(input.Options[index])) > 200 {
-			writeAuthError(w, r, ErrInvalidPost)
-			return
-		}
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -62,16 +56,14 @@ func (s *Server) createPoll(w http.ResponseWriter, r *http.Request, postID strin
 		writeInternalError(w, r, err)
 		return
 	}
-	pollID := newPostID()
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO polls (id, post_id, question, allow_multiple, ends_at) VALUES ($1, $2, $3, $4, $5)`, pollID, postID, strings.TrimSpace(input.Question), input.AllowMultiple, input.EndsAt); err != nil {
+	if err := insertPollTx(r.Context(), tx, postID, &input); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	for index, label := range input.Options {
-		if _, err := tx.ExecContext(r.Context(), `INSERT INTO poll_options (id, poll_id, label, sort_order) VALUES ($1, $2, $3, $4)`, newPostID(), pollID, label, index); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
+	var pollID string
+	if err := tx.QueryRowContext(r.Context(), `SELECT id FROM polls WHERE post_id = $1`, postID).Scan(&pollID); err != nil {
+		writeInternalError(w, r, err)
+		return
 	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
@@ -212,12 +204,9 @@ func (s *Server) createMarketItem(w http.ResponseWriter, r *http.Request, postID
 		return
 	}
 	var input marketInput
-	if err := decodeJSON(r, &input); err != nil || input.Price < 0 || strings.TrimSpace(input.Condition) == "" || len([]rune(input.Condition)) > 100 {
+	if err := decodeJSON(r, &input); err != nil || !validMarketInput(&input) {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
-	}
-	if input.Currency == "" {
-		input.Currency = "CNY"
 	}
 	var existing string
 	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND author_id = $2 AND type = 'market' AND deleted_at IS NULL`, postID, user.ID).Scan(&existing)
@@ -229,12 +218,78 @@ func (s *Server) createMarketItem(w http.ResponseWriter, r *http.Request, postID
 		writeInternalError(w, r, err)
 		return
 	}
-	itemID := newPostID()
-	if _, err := s.db.ExecContext(r.Context(), `INSERT INTO market_items (id, post_id, seller_id, price, currency, item_condition, delivery) VALUES ($1, $2, $3, $4, $5, $6, $7)`, itemID, postID, user.ID, input.Price, input.Currency, input.Condition, strings.TrimSpace(input.Delivery)); err != nil {
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	if err := insertMarketItemTx(r.Context(), tx, postID, user.ID, &input); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var itemID string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM market_items WHERE post_id = $1`, postID).Scan(&itemID); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"id": itemID, "post_id": postID, "seller_id": user.ID, "price": input.Price, "currency": input.Currency, "condition": input.Condition, "sold": false, "delivery": input.Delivery})
+}
+
+func validPollInput(input *pollInput) bool {
+	if input == nil || strings.TrimSpace(input.Question) == "" || len([]rune(input.Question)) > 200 || len(input.Options) < 2 || len(input.Options) > 10 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(input.Options))
+	for _, option := range input.Options {
+		option = strings.TrimSpace(option)
+		if option == "" || len([]rune(option)) > 200 {
+			return false
+		}
+		if _, exists := seen[option]; exists {
+			return false
+		}
+		seen[option] = struct{}{}
+	}
+	return true
+}
+
+func validMarketInput(input *marketInput) bool {
+	return input != nil && input.Price >= 0 && strings.TrimSpace(input.Condition) != "" && len([]rune(input.Condition)) <= 100
+}
+
+func insertPollTx(ctx context.Context, tx *sql.Tx, postID string, input *pollInput) error {
+	if !validPollInput(input) {
+		return ErrInvalidPost
+	}
+	question := strings.TrimSpace(input.Question)
+	pollID := newPostID()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO polls (id, post_id, question, allow_multiple, ends_at) VALUES ($1, $2, $3, $4, $5)`, pollID, postID, question, input.AllowMultiple, input.EndsAt); err != nil {
+		return err
+	}
+	for index, label := range input.Options {
+		label = strings.TrimSpace(label)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO poll_options (id, poll_id, label, sort_order) VALUES ($1, $2, $3, $4)`, newPostID(), pollID, label, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertMarketItemTx(ctx context.Context, tx *sql.Tx, postID, sellerID string, input *marketInput) error {
+	if !validMarketInput(input) {
+		return ErrInvalidPost
+	}
+	currency := strings.TrimSpace(input.Currency)
+	if currency == "" {
+		currency = "CNY"
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO market_items (id, post_id, seller_id, price, currency, item_condition, delivery) VALUES ($1, $2, $3, $4, $5, $6, $7)`, newPostID(), postID, sellerID, input.Price, currency, strings.TrimSpace(input.Condition), strings.TrimSpace(input.Delivery))
+	return err
 }
 
 func (s *Server) ranking(w http.ResponseWriter, r *http.Request) {

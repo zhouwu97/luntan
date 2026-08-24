@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -100,6 +101,14 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE c.post_id = $1 AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'`, viewerExpression)
+	if hasViewer {
+		query += fmt.Sprintf(` AND NOT EXISTS (
+			SELECT 1 FROM blocks b
+			WHERE (b.blocker_id = $%d AND b.blocked_id = c.author_id)
+			   OR (b.blocker_id = c.author_id AND b.blocked_id = $%d)
+		)`, len(args)+1, len(args)+1)
+		args = append(args, viewer.ID)
+	}
 	if cursor != nil {
 		query += fmt.Sprintf(" AND (c.created_at, c.id) > ($%d, $%d)", len(args)+1, len(args)+2)
 		args = append(args, cursor.CreatedAt, cursor.ID)
@@ -197,6 +206,14 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE c.root_id = $1 AND c.id <> $1 AND c.deleted_at IS NULL
 		  AND c.publication_status = 'published' AND c.moderation_status = 'normal'`, viewerExpression)
+	if hasViewer {
+		query += fmt.Sprintf(` AND NOT EXISTS (
+			SELECT 1 FROM blocks b
+			WHERE (b.blocker_id = $%d AND b.blocked_id = c.author_id)
+			   OR (b.blocker_id = c.author_id AND b.blocked_id = $%d)
+		)`, len(args)+1, len(args)+1)
+		args = append(args, viewer.ID)
+	}
 	if cursor != nil {
 		query += fmt.Sprintf(" AND (c.created_at, c.id) > ($%d, $%d)", len(args)+1, len(args)+2)
 		args = append(args, cursor.CreatedAt, cursor.ID)
@@ -279,6 +296,11 @@ func (s *Server) createReply(w http.ResponseWriter, r *http.Request, parentID st
 }
 
 func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, user auth.User, postID, forcedParentID string) {
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" || len(idempotencyKey) > 128 {
+		writeAuthError(w, r, ErrIdempotencyKeyRequired)
+		return
+	}
 	var input commentInput
 	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, ErrInvalidComment)
@@ -293,12 +315,61 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 	if parentID == "" {
 		parentID = strings.TrimSpace(input.ParentID)
 	}
+	var relationTargetID string
+	if parentID != "" {
+		if err := s.db.QueryRowContext(r.Context(), `SELECT author_id FROM comments WHERE id = $1 AND deleted_at IS NULL`, parentID).Scan(&relationTargetID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeInternalError(w, r, err)
+			return
+		}
+	} else if err := s.db.QueryRowContext(r.Context(), `SELECT author_id FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&relationTargetID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeInternalError(w, r, err)
+		return
+	}
+	if relationTargetID != "" {
+		blocked, err := usersBlockEachOther(r.Context(), s.db, user.ID, relationTargetID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if blocked {
+			writeAuthError(w, r, ErrBlocked)
+			return
+		}
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	defer tx.Rollback()
+	commentID := newPostID()
+	var existingCommentID string
+	err = tx.QueryRowContext(r.Context(), `
+		INSERT INTO comment_idempotency_keys (user_id, idempotency_key, comment_id, created_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, idempotency_key) DO NOTHING
+		RETURNING comment_id`, user.ID, idempotencyKey, commentID, time.Now().UTC()).Scan(&existingCommentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(r.Context(), `SELECT comment_id FROM comment_idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&existingCommentID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		response, loadErr := loadCommentResponseTx(r.Context(), tx, existingCommentID)
+		if loadErr != nil {
+			writeInternalError(w, r, loadErr)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		httpserver.WriteJSON(w, http.StatusOK, response)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	var postExists string
 	err = tx.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`, postID).Scan(&postExists)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -309,7 +380,6 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeInternalError(w, r, err)
 		return
 	}
-	commentID := newPostID()
 	rootID := commentID
 	if parentID != "" {
 		var parentPostID, parentRootID, parentAuthorID string
@@ -328,6 +398,10 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		}
 	}
 	now := time.Now().UTC()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE comment_idempotency_keys SET comment_id = $1 WHERE user_id = $2 AND idempotency_key = $3`, commentID, user.ID, idempotencyKey); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO comments (id, post_id, author_id, root_id, parent_id, reply_to_user_id, content, publication_status, moderation_status, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, 'published', 'normal', $8, $8, $8)`, commentID, postID, user.ID, rootID, parentID, strings.TrimSpace(input.ReplyToUserID), input.Content, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -358,6 +432,33 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 	}
 	response := commentResponse{ID: commentID, PostID: postID, Author: userSummary{ID: user.ID, Username: user.Username, Nickname: user.Nickname}, RootID: optionalString(rootID), ParentID: optionalString(parentID), ReplyToUserID: optionalString(strings.TrimSpace(input.ReplyToUserID)), Content: input.Content, Publication: "published", Moderation: "normal", CreatedAt: now, UpdatedAt: now, ViewerState: &viewerCommentState{}}
 	httpserver.WriteJSON(w, http.StatusCreated, response)
+}
+
+func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID string) (commentResponse, error) {
+	var response commentResponse
+	var authorID, rootID, parentID, replyTo string
+	err := tx.QueryRowContext(ctx, `
+		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
+		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
+		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
+		       c.created_at, c.updated_at
+		FROM comments c
+		JOIN users u ON u.id = c.author_id
+		LEFT JOIN user_profiles up ON up.user_id = c.author_id
+		WHERE c.id = $1`, commentID).Scan(
+		&response.ID, &response.PostID, &authorID, &response.Author.Username, &response.Author.Nickname,
+		&rootID, &parentID, &replyTo, &response.Content, &response.LikeCount, &response.ReplyCount,
+		&response.Publication, &response.Moderation, &response.CreatedAt, &response.UpdatedAt,
+	)
+	if err != nil {
+		return commentResponse{}, err
+	}
+	response.Author.ID = authorID
+	response.RootID = optionalString(rootID)
+	response.ParentID = optionalString(parentID)
+	response.ReplyToUserID = optionalString(replyTo)
+	response.ViewerState = &viewerCommentState{}
+	return response, nil
 }
 
 func (s *Server) updateComment(w http.ResponseWriter, r *http.Request, commentID string) {
@@ -413,9 +514,9 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID
 		return
 	}
 	defer tx.Rollback()
-	var authorID, postID, parentID string
+	var authorID string
 	var deletedAt sql.NullTime
-	err = tx.QueryRowContext(r.Context(), `SELECT author_id, post_id, COALESCE(parent_id, ''), deleted_at FROM comments WHERE id = $1 FOR UPDATE`, commentID).Scan(&authorID, &postID, &parentID, &deletedAt)
+	err = tx.QueryRowContext(r.Context(), `SELECT author_id, deleted_at FROM comments WHERE id = $1 FOR UPDATE`, commentID).Scan(&authorID, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrCommentNotFound)
 		return
@@ -429,27 +530,9 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID
 		return
 	}
 	if !deletedAt.Valid {
-		result, updateErr := tx.ExecContext(r.Context(), `UPDATE comments SET deleted_at = now(), publication_status = 'deleted', updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, commentID)
-		if updateErr != nil {
-			writeInternalError(w, r, updateErr)
+		if _, err := softDeleteCommentTx(r.Context(), tx, commentID, user.ID, "", ""); err != nil {
+			writeInternalError(w, r, err)
 			return
-		}
-		rowsAffected, rowsErr := result.RowsAffected()
-		if rowsErr != nil {
-			writeInternalError(w, r, rowsErr)
-			return
-		}
-		if rowsAffected == 1 {
-			if parentID != "" {
-				if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now() WHERE id = $1`, parentID); err != nil {
-					writeInternalError(w, r, err)
-					return
-				}
-			}
-			if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0), updated_at = now() WHERE id = $1`, postID); err != nil {
-				writeInternalError(w, r, err)
-				return
-			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -457,6 +540,43 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// softDeleteCommentTx 是用户删除和审核删除共用的计数守恒入口。
+// 它只在首次软删除时扣减帖子/父评论聚合计数，重复调用不会重复扣减。
+func softDeleteCommentTx(ctx context.Context, tx *sql.Tx, commentID, deletedBy, reason, caseID string) (bool, error) {
+	var postID, parentID string
+	var deletedAt sql.NullTime
+	err := tx.QueryRowContext(ctx, `SELECT post_id, COALESCE(parent_id, ''), deleted_at FROM comments WHERE id = $1 FOR UPDATE`, commentID).Scan(&postID, &parentID, &deletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrCommentNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if deletedAt.Valid {
+		return false, nil
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE comments SET deleted_at = now(), publication_status = 'deleted', deleted_by = NULLIF($2, ''), delete_reason = $3, moderation_case_id = NULLIF($4, ''), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, commentID, deletedBy, strings.TrimSpace(reason), caseID)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if parentID != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE comments SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now() WHERE id = $1`, parentID); err != nil {
+			return false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0), updated_at = now() WHERE id = $1`, postID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func encodeCommentCursor(cursor commentCursor) (string, error) {

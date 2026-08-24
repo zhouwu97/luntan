@@ -29,17 +29,43 @@ void main() {
     final client = ApiClient(
       baseUri: Uri.parse('https://example.com'),
       client: MockClient(
-        (_) async => http.Response.bytes(utf8.encode('{"code":"NOT_FOUND","message":"不存在"}'), 404),
+        (_) async => http.Response.bytes(
+          utf8.encode('{"code":"NOT_FOUND","message":"not-found"}'),
+          404,
+        ),
       ),
     );
     expect(
       () => client.getJson('/missing'),
       throwsA(
-        isA<ApiException>().having(
-          (error) => error.type,
-          'type',
-          ApiErrorType.notFound,
+        isA<ApiException>()
+            .having((error) => error.type, 'type', ApiErrorType.notFound)
+            .having((error) => error.code, 'code', 'NOT_FOUND')
+            .having((error) => error.message, 'message', 'not-found'),
+      ),
+    );
+  });
+
+  test('ApiClient 保留服务端 request_id 和 details', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          utf8.encode(
+            '{"code":"INVALID_CURSOR","message":"cursor 无效","request_id":"req-1","details":{"field":"cursor"}}',
+          ),
+          400,
         ),
+      ),
+    );
+
+    await expectLater(
+      client.getJson('/feed'),
+      throwsA(
+        isA<ApiException>()
+            .having((error) => error.code, 'code', 'INVALID_CURSOR')
+            .having((error) => error.requestId, 'requestId', 'req-1')
+            .having((error) => error.details, 'details', {'field': 'cursor'}),
       ),
     );
   });

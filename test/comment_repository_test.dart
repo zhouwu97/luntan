@@ -8,6 +8,33 @@ import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/comment_repository.dart';
 
 void main() {
+  test('评论创建携带 Idempotency-Key', () async {
+    String? key;
+    final repository = ApiCommentRepository(
+      ApiClient(
+        baseUri: Uri.parse('https://api.example'),
+        client: MockClient((request) async {
+          key = request.headers['idempotency-key'];
+          return http.Response.bytes(
+            utf8.encode(
+              '{"id":"comment-1","post_id":"post-1","content":"评论","created_at":"2026-08-24T00:00:00Z","updated_at":"2026-08-24T00:00:00Z"}',
+            ),
+            201,
+          );
+        }),
+      ),
+    );
+
+    final comment = await repository.createCommentWithIdempotency(
+      postId: 'post-1',
+      content: '评论',
+      idempotencyKey: 'comment-key-1',
+    );
+
+    expect(comment.id, 'comment-1');
+    expect(key, 'comment-key-1');
+  });
+
   test('评论响应恢复服务端 viewer 点赞状态和准确计数', () async {
     final repository = ApiCommentRepository(
       ApiClient(

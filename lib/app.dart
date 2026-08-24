@@ -154,22 +154,23 @@ class _LuntanAppState extends State<LuntanApp> {
           : result.isPoll
           ? 'poll'
           : 'normal';
-      final response = await publishController.publish(
-        communityId: result.section.communityId,
-        type: type,
-        title: result.title,
-        content: result.body,
-        mediaIds: result.mediaIds,
-      );
-      if (result.isPoll && response['id'] is String) {
-        await publishController.createPoll(
-          postId: response['id'] as String,
-          question: result.title,
-          options: result.pollOptions,
-          allowMultiple: result.allowMultiple,
-          endsAt: result.pollEndsAt,
-        );
-      }
+      await (result.isPoll
+          ? publishController.publishPoll(
+              communityId: result.section.communityId,
+              title: result.title,
+              content: result.body,
+              options: result.pollOptions,
+              allowMultiple: result.allowMultiple,
+              endsAt: result.pollEndsAt,
+              mediaIds: result.mediaIds,
+            )
+          : publishController.publish(
+              communityId: result.section.communityId,
+              type: type,
+              title: result.title,
+              content: result.body,
+              mediaIds: result.mediaIds,
+            ));
       await feedController.setQuery(
         communityId: result.section.communityId,
         sort: 'latest',
@@ -431,6 +432,7 @@ class _LuntanAppState extends State<LuntanApp> {
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
             onLogout: _logout,
+            onRequireAuth: _openLogin,
             profileRepository: repositories.profile,
             storeRepository: repositories.store,
             bookmarkRepository: repositories.bookmarks,

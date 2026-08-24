@@ -21,16 +21,22 @@ class ApiException implements Exception {
     required this.message,
     this.statusCode,
     this.cause,
+    this.code,
+    this.requestId,
+    this.details,
   });
 
   final ApiErrorType type;
   final String message;
   final int? statusCode;
   final Object? cause;
+  final String? code;
+  final String? requestId;
+  final dynamic details;
 
   @override
   String toString() =>
-      'ApiException(type: $type, statusCode: $statusCode, message: $message)';
+      'ApiException(type: $type, code: $code, statusCode: $statusCode, message: $message)';
 }
 
 String userFacingApiMessage(Object error, {String fallback = '操作失败，请稍后重试'}) {
@@ -43,7 +49,8 @@ String userFacingApiMessage(Object error, {String fallback = '操作失败，请
     ApiErrorType.timeout => '网络有点慢，请重试',
     ApiErrorType.networkUnavailable => '网络不可用，请检查网络后重试',
     ApiErrorType.serverError => '服务暂时不可用，请稍后重试',
-    ApiErrorType.conflict => error.message.isEmpty ? '操作冲突，请刷新后重试' : error.message,
+    ApiErrorType.conflict =>
+      error.message.isEmpty ? '操作冲突，请刷新后重试' : error.message,
     ApiErrorType.unknown => error.message.isEmpty ? fallback : error.message,
   };
 }
@@ -327,7 +334,7 @@ class ApiClient {
         ),
       );
     } catch (error) {
-      await store.clear();
+      if (_shouldClearCredentials(error)) await store.clear();
       rethrow;
     }
   }
@@ -350,6 +357,9 @@ class ApiClient {
         type: _mapStatus(response.statusCode),
         statusCode: response.statusCode,
         message: _messageFromPayload(payload),
+        code: _stringFromPayload(payload, 'code'),
+        requestId: _stringFromPayload(payload, 'request_id'),
+        details: _valueFromPayload(payload, 'details'),
       );
     }
     if (payload is! Map<String, dynamic>) {
@@ -376,4 +386,17 @@ class ApiClient {
     }
     return '请求失败';
   }
+
+  bool _shouldClearCredentials(Object error) =>
+      error is ApiException &&
+      error.type == ApiErrorType.unauthorized &&
+      error.statusCode == 401;
+
+  String? _stringFromPayload(dynamic payload, String key) {
+    final value = _valueFromPayload(payload, key);
+    return value is String && value.isNotEmpty ? value : null;
+  }
+
+  dynamic _valueFromPayload(dynamic payload, String key) =>
+      payload is Map<String, dynamic> ? payload[key] : null;
 }

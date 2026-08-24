@@ -263,7 +263,7 @@ func TestPlatformWriteAndNotificationRoutesRequireAuthentication(t *testing.T) {
 		{http.MethodGet, "/api/v1/notifications", ""},
 		{http.MethodPost, "/api/v1/reports", `{"target_type":"post","target_id":"p1","reason_code":"spam"}`},
 		{http.MethodPut, "/api/v1/users/u2/block", ""},
-		{http.MethodPatch, "/api/v1/notifications/n1", ""},
+		{http.MethodPatch, "/api/v1/notifications/n1/read", ""},
 		{http.MethodGet, "/api/v1/moderation/cases", ""},
 	}
 	for _, item := range cases {

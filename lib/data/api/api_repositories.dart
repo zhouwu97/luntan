@@ -2,7 +2,8 @@ import '../../domain/models.dart';
 import '../../domain/repositories.dart';
 import 'api_client.dart';
 
-class ApiCommunityRepository implements CommunityRepository {
+class ApiCommunityRepository
+    implements CommunityRepository, CommunityMutationRepository {
   ApiCommunityRepository(this._client);
 
   final ApiClient _client;
@@ -38,6 +39,25 @@ class ApiCommunityRepository implements CommunityRepository {
       }
       rethrow;
     }
+  }
+
+  @override
+  Future<void> setFollow({required String communityId, required bool active}) {
+    final path = '/api/v1/communities/$communityId/follow';
+    return active
+        ? _client.putJson(path).then((_) {})
+        : _client.deleteJson(path);
+  }
+
+  @override
+  Future<void> setMembership({
+    required String communityId,
+    required bool active,
+  }) {
+    final path = '/api/v1/communities/$communityId/membership';
+    return active
+        ? _client.putJson(path).then((_) {})
+        : _client.deleteJson(path);
   }
 }
 
@@ -158,7 +178,14 @@ Community _communityFromJson(Map<String, dynamic> json) {
     followerCount: _int(json['follower_count']),
     postCount: _int(json['post_count']),
     sortOrder: _int(json['sort_order']),
+    isFollowing: _viewerBool(json, 'is_following'),
+    isMember: _viewerBool(json, 'is_member'),
   );
+}
+
+bool _viewerBool(Map<String, dynamic> json, String key) {
+  final state = json['viewer_state'];
+  return state is Map && state[key] == true;
 }
 
 Post _postFromJson(Map<String, dynamic> json) {

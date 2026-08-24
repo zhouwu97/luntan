@@ -417,7 +417,7 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	if parentID != "" && input.ReplyToUserID != "" {
-		if err := enqueueNotificationTx(tx, input.ReplyToUserID, user.ID, "reply", "comment", parentID, now); err != nil {
+		if err := enqueueNotificationWithDataTx(tx, input.ReplyToUserID, user.ID, "reply", "post", postID, map[string]any{"comment_id": parentID}, now); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

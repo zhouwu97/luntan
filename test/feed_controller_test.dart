@@ -34,9 +34,10 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
 }
 
 class _PendingFeedRequest {
-  _PendingFeedRequest({required this.communityId});
+  _PendingFeedRequest({required this.communityId, required this.cursor});
 
   final String? communityId;
+  final String? cursor;
   final Completer<FeedPage> completer = Completer<FeedPage>();
 }
 
@@ -56,7 +57,10 @@ class _PendingFeed implements FeedRepository, QueryableFeedRepository {
     String? postType,
     bool? hasMedia,
   }) {
-    final request = _PendingFeedRequest(communityId: communityId);
+    final request = _PendingFeedRequest(
+      communityId: communityId,
+      cursor: cursor,
+    );
     requests.add(request);
     return request.completer.future;
   }
@@ -214,5 +218,37 @@ void main() {
     await oldPage;
 
     expect(controller.state.items.map((post) => post.id), ['gaming-1']);
+  });
+
+  test('刷新期间旧的加载更多结果不能拼回刷新后的列表', () async {
+    final feed = _PendingFeed();
+    final controller = FeedController(repository: feed);
+
+    final initial = controller.initialLoad();
+    feed.requests[0].completer.complete(
+      FeedPage(
+        items: [_post('first', 'campus')],
+        hasMore: true,
+        nextCursor: 'page-2',
+      ),
+    );
+    await initial;
+
+    final oldLoadMore = controller.loadMore();
+    expect(feed.requests[1].cursor, 'page-2');
+
+    final refresh = controller.refresh();
+    expect(feed.requests, hasLength(3));
+    feed.requests[2].completer.complete(
+      FeedPage(items: [_post('fresh', 'campus')]),
+    );
+    await refresh;
+
+    feed.requests[1].completer.complete(
+      FeedPage(items: [_post('stale', 'campus')]),
+    );
+    await oldLoadMore;
+
+    expect(controller.state.items.map((post) => post.id), ['fresh']);
   });
 }

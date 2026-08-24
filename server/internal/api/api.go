@@ -65,6 +65,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/me/profile":
 		s.profile(w, r)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/posts"):
+		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/posts")
+		s.listUserPosts(w, r, userID)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/"):
+		s.getUserProfile(w, r, strings.TrimPrefix(path, "/api/v1/users/"))
+		return
 	case r.Method == http.MethodGet && path == "/api/v1/me/bookmark-folders":
 		s.listBookmarkFolders(w, r)
 		return
@@ -443,6 +450,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "REPORT_TARGET_NOT_FOUND", Message: "举报目标不存在"}
 	case errors.Is(err, ErrNotificationNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "NOTIFICATION_NOT_FOUND", Message: "通知不存在"}
+	case errors.Is(err, ErrPollAlreadyVoted):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "ALREADY_VOTED", Message: "你已经参与过该投票，不能修改选项"}
 	case errors.Is(err, ErrPermissionDenied):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "PERMISSION_DENIED", Message: "没有执行该操作的权限"}
 	case errors.Is(err, ErrInvalidModerationAction):

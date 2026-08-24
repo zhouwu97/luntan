@@ -20,6 +20,7 @@ class PostDetailScreen extends StatefulWidget {
     required this.interactionController,
     this.currentUserId,
     this.focusComments = false,
+    this.focusCommentId,
     required this.onToggleLike,
     required this.onToggleBookmark,
     required this.onFeedback,
@@ -34,6 +35,7 @@ class PostDetailScreen extends StatefulWidget {
   final InteractionController interactionController;
   final String? currentUserId;
   final bool focusComments;
+  final String? focusCommentId;
   final Future<void> Function(Post) onToggleLike;
   final Future<void> Function(Post) onToggleBookmark;
   final ValueChanged<String> onFeedback;
@@ -110,12 +112,27 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
-  void _focusCommentsIfNeeded() {
-    if (!widget.focusComments || hasFocusedComments) return;
-    hasFocusedComments = true;
+  void _focusCommentsIfNeeded(List<Comment> allComments) {
+    if ((!widget.focusComments && widget.focusCommentId == null) ||
+        hasFocusedComments) {
+      return;
+    }
+    String? rootCommentId;
+    final targetId = widget.focusCommentId;
+    if (targetId != null) {
+      for (final comment in allComments) {
+        if (comment.id == targetId) {
+          rootCommentId = comment.parentId ?? comment.id;
+          break;
+        }
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final context = commentsKey.currentContext;
+      final context = rootCommentId == null
+          ? commentsKey.currentContext
+          : GlobalObjectKey('comment:$rootCommentId').currentContext;
       if (mounted && context != null) {
+        hasFocusedComments = true;
         Scrollable.ensureVisible(
           context,
           duration: AppTheme.tabMotion,
@@ -158,12 +175,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           );
         }
         final post = state.detail!.post;
-        _focusCommentsIfNeeded();
         final commentsController = widget.commentsController;
         final allComments = commentsController.items;
         final roots = allComments
             .where((comment) => comment.parentId == null)
             .toList();
+        _focusCommentsIfNeeded(allComments);
         return Scaffold(
           appBar: AppBar(
             title: Text(
@@ -361,6 +378,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           .where((item) => item.parentId == comment.id)
                           .toList();
                       return _CommentTile(
+                        key: GlobalObjectKey('comment:${comment.id}'),
                         comment: comment,
                         floor: entry.key + 2,
                         children: children,
@@ -468,14 +486,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 widget.onFeedback('帖子链接已复制');
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: AppTheme.orange),
-              title: const Text('举报帖子'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _report('post', post.id);
-              },
-            ),
+            if (widget.onReport != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.flag_outlined,
+                  color: AppTheme.orange,
+                ),
+                title: const Text('举报帖子'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _report('post', post.id);
+                },
+              ),
             if (canEdit)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
@@ -597,14 +619,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: AppTheme.orange),
-              title: const Text('举报评论'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _report('comment', comment.id);
-              },
-            ),
+            if (widget.onReport != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.flag_outlined,
+                  color: AppTheme.orange,
+                ),
+                title: const Text('举报评论'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _report('comment', comment.id);
+                },
+              ),
             if (canEdit)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
@@ -634,8 +660,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       if (widget.onReport != null) {
         await widget.onReport!(targetType, targetId);
         if (mounted) widget.onFeedback('举报已提交，我们会尽快处理');
-      } else if (mounted) {
-        widget.onFeedback('感谢反馈，我们会尽快处理');
       }
     } catch (error) {
       if (mounted) {
@@ -773,6 +797,15 @@ class _PollPanelState extends State<_PollPanel> {
           : <Map<String, dynamic>>[];
       final pollId = '${value['id'] ?? ''}';
       final allowMultiple = value['allow_multiple'] == true;
+      final viewerState = value['viewer_state'] is Map
+          ? Map<String, dynamic>.from(value['viewer_state'] as Map)
+          : const <String, dynamic>{};
+      final viewerVoted = viewerState['has_voted'] == true;
+      final canVote = viewerState['can_vote'] != false;
+      final locked = voted || viewerVoted || !canVote;
+      final viewerOptionIds = viewerState['option_ids'] is List
+          ? (viewerState['option_ids'] as List).whereType<String>().toSet()
+          : const <String>{};
       return Container(
         margin: const EdgeInsets.only(top: 14),
         padding: const EdgeInsets.all(14),
@@ -801,8 +834,10 @@ class _PollPanelState extends State<_PollPanel> {
                 return CheckboxListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  value: selected.contains(id),
-                  onChanged: voted
+                  value: (viewerVoted ? viewerOptionIds : selected).contains(
+                    id,
+                  ),
+                  onChanged: locked
                       ? null
                       : (value) => setState(() {
                           if (value == true) {
@@ -812,13 +847,13 @@ class _PollPanelState extends State<_PollPanel> {
                           }
                         }),
                   title: Text('${option['label'] ?? ''}'),
-                  secondary: voted ? Text('$count') : null,
+                  secondary: locked ? Text('$count') : null,
                 );
               })
             else
               RadioGroup<String>(
                 groupValue: selected.isEmpty ? null : selected.first,
-                onChanged: voted
+                onChanged: locked
                     ? (_) {}
                     : (value) => setState(() {
                         if (value != null) {
@@ -840,7 +875,7 @@ class _PollPanelState extends State<_PollPanel> {
                         contentPadding: EdgeInsets.zero,
                         value: id,
                         title: Text('${option['label'] ?? ''}'),
-                        secondary: voted ? Text('$count') : null,
+                        secondary: locked ? Text('$count') : null,
                       );
                     }),
                   ],
@@ -849,12 +884,14 @@ class _PollPanelState extends State<_PollPanel> {
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton(
-                onPressed: submitting || voted
+                onPressed: submitting || locked
                     ? null
                     : () => _vote(pollId, allowMultiple, options),
                 child: Text(
-                  voted
+                  viewerVoted || voted
                       ? '已投票'
+                      : !canVote
+                      ? '投票已结束'
                       : submitting
                       ? '提交中…'
                       : '投票',
@@ -955,6 +992,7 @@ class _ReplyBar extends StatelessWidget {
 
 class _CommentTile extends StatelessWidget {
   const _CommentTile({
+    super.key,
     required this.comment,
     required this.floor,
     required this.children,

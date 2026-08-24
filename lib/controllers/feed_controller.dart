@@ -74,10 +74,11 @@ class FeedController extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    if (_state.status == FeedStatus.loading ||
-        _state.status == FeedStatus.loadingMore) {
+    if (_state.status == FeedStatus.loading) {
       return;
     }
+    // 下拉刷新优先级高于正在进行的下一页请求：递增 generation 使旧请求
+    // 的结果失效，避免刷新后又把旧游标的数据拼回列表。
     await _startFirstPage();
   }
 

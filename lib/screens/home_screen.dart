@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../controllers/feed_controller.dart';
 import '../controllers/interaction_controller.dart';
+import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
@@ -29,11 +30,14 @@ class HomeScreen extends StatefulWidget {
     required this.onToggleBookmark,
     required this.onRequireAuth,
     required this.onOpenPostId,
+    this.onOpenUserId,
+    this.onOpenCommunityId,
     this.platform,
     this.unread,
     required this.interactionController,
     this.feedRepository,
     this.communityRepository,
+    this.postRepository,
   });
 
   final ForumStore store;
@@ -48,11 +52,14 @@ class HomeScreen extends StatefulWidget {
   final ValueChanged<Post> onToggleBookmark;
   final VoidCallback onRequireAuth;
   final ValueChanged<String> onOpenPostId;
+  final ValueChanged<String>? onOpenUserId;
+  final ValueChanged<String>? onOpenCommunityId;
   final PlatformRepository? platform;
   final int? unread;
   final InteractionController interactionController;
   final FeedRepository? feedRepository;
   final CommunityRepository? communityRepository;
+  final PostRepository? postRepository;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -209,6 +216,8 @@ class _HomeScreenState extends State<HomeScreen> {
           onOpenPost: widget.onOpenPost,
           onOpenPostId: widget.onOpenPostId,
           interactionController: widget.interactionController,
+          onOpenUserId: widget.onOpenUserId,
+          onOpenCommunityId: widget.onOpenCommunityId,
         ),
       ),
     );
@@ -224,6 +233,8 @@ class _HomeScreenState extends State<HomeScreen> {
           onLike: widget.onToggleLike,
           onBookmark: widget.onToggleBookmark,
           feedRepository: widget.feedRepository,
+          platformRepository: widget.platform,
+          postRepository: widget.postRepository,
         ),
       ),
     );
@@ -385,27 +396,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 widget.onFeedback('帖子链接已复制');
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.flag_outlined, color: AppTheme.orange),
-              title: const Text('举报或屏蔽'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                try {
-                  if (widget.platform != null) {
+            if (widget.platform != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.flag_outlined,
+                  color: AppTheme.orange,
+                ),
+                title: const Text('举报或屏蔽'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  try {
                     await widget.platform!.report(
                       targetType: 'post',
                       targetId: post.id,
                       reasonCode: 'other',
                     );
                     widget.onFeedback('举报已提交，我们会尽快处理');
-                  } else {
-                    widget.onFeedback('感谢反馈，我们会尽快处理');
+                  } catch (error) {
+                    widget.onFeedback(
+                      userFacingApiMessage(error, fallback: '举报失败，请稍后重试'),
+                    );
                   }
-                } catch (error) {
-                  widget.onFeedback('举报失败，请稍后重试');
-                }
-              },
-            ),
+                },
+              ),
           ],
         ),
       ),

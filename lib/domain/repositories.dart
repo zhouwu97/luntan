@@ -9,6 +9,15 @@ abstract interface class CommunityRepository {
   Future<Community?> getCommunity(String id);
 }
 
+abstract interface class CommunityMutationRepository {
+  Future<void> setFollow({required String communityId, required bool active});
+
+  Future<void> setMembership({
+    required String communityId,
+    required bool active,
+  });
+}
+
 abstract interface class FeedRepository {
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20});
 }

@@ -20,12 +20,12 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var nickname, bio string
+	var nickname, bio, trustLevel string
 	var level int
 	if err := s.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.level, 1)
+		SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.level, 1), COALESCE(up.trust_level, 'new')
 		FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id WHERE u.id = $1`, user.ID).
-		Scan(&nickname, &bio, &level); err != nil {
+		Scan(&nickname, &bio, &level, &trustLevel); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -48,7 +48,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
-		"level": level, "signature": bio, "post_count": posts,
+		"level": level, "trust_level": trustLevel, "signature": bio, "post_count": posts,
 		"comment_count": comments, "like_received_count": receivedLikes,
 		"follower_count": followers, "following_count": following,
 	})

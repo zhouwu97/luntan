@@ -92,6 +92,7 @@ func TestCreatePostWritesRevisionAndIsIdempotentByUserKey(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 2))
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`)).WithArgs("u1", "post-key-1").WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT post_id FROM post_idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`)).WithArgs("u1", "post-key-1").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM communities WHERE id = $1 AND status = 'active' AND deleted_at IS NULL`)).WithArgs("c1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("c1"))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7)`)).WithArgs(sqlmock.AnyArg(), "u1", "c1", "normal", "标题", "正文", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))

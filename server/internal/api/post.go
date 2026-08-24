@@ -80,6 +80,12 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	// 同一用户对同一幂等键的并发发布必须串行化，避免两个事务同时查不到记录后竞争唯一键。
+	var advisoryLock any
+	if err := tx.QueryRowContext(r.Context(), `SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`, user.ID, idempotencyKey).Scan(&advisoryLock); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	var existingPostID string
 	err = tx.QueryRowContext(r.Context(), `SELECT post_id FROM post_idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&existingPostID)
 	if err == nil {

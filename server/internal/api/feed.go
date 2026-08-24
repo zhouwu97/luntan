@@ -140,7 +140,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN communities c ON c.id = p.community_id
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
-		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL
+		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
 		  AND c.status = 'active' AND c.deleted_at IS NULL`
 	args := make([]any, 0, 5)
 	if usesAsOf {
@@ -252,7 +252,7 @@ type feedFilter struct {
 func parseFeedFilter(postType, hasMedia string) (feedFilter, error) {
 	filter := feedFilter{PostType: strings.TrimSpace(postType)}
 	switch filter.PostType {
-	case "", "normal", "guide", "question", "game_share", "poll", "market", "activity":
+	case "", "normal", "guide", "question", "game_share", "poll", "activity":
 	default:
 		return feedFilter{}, fmt.Errorf("invalid post type")
 	}

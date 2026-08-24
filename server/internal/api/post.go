@@ -19,16 +19,16 @@ var (
 	ErrForbidden              = errors.New("forbidden")
 	ErrIdempotencyKeyRequired = errors.New("idempotency key required")
 	ErrInvalidPost            = errors.New("invalid post")
+	ErrMarketDisabled         = errors.New("market post type is disabled")
 )
 
 type postWriteInput struct {
-	CommunityID string       `json:"community_id"`
-	Type        string       `json:"type"`
-	Title       string       `json:"title"`
-	Content     string       `json:"content"`
-	MediaIDs    []string     `json:"media_ids"`
-	Poll        *pollInput   `json:"poll"`
-	Market      *marketInput `json:"market"`
+	CommunityID string     `json:"community_id"`
+	Type        string     `json:"type"`
+	Title       string     `json:"title"`
+	Content     string     `json:"content"`
+	MediaIDs    []string   `json:"media_ids"`
+	Poll        *pollInput `json:"poll"`
 }
 
 type postMutationResponse struct {
@@ -69,7 +69,15 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input postWriteInput
-	if err := decodeJSON(r, &input); err != nil || !validPostInput(input) {
+	if err := decodeJSON(r, &input); err != nil {
+		writeAuthError(w, r, ErrInvalidPost)
+		return
+	}
+	if input.Type == "market" {
+		writeAuthError(w, r, ErrMarketDisabled)
+		return
+	}
+	if !validPostInput(input) {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
 	}
@@ -129,12 +137,6 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if input.Type == "market" {
-		if err := insertMarketItemTx(r.Context(), tx, postID, user.ID, input.Market); err != nil {
-			writeAuthError(w, r, err)
-			return
-		}
-	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO post_idempotency_keys (user_id, idempotency_key, post_id, created_at) VALUES ($1, $2, $3, $4)`, user.ID, idempotencyKey, postID, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -172,7 +174,15 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID strin
 		return
 	}
 	var input postWriteInput
-	if err := decodeJSON(r, &input); err != nil || !validPostInput(input) {
+	if err := decodeJSON(r, &input); err != nil {
+		writeAuthError(w, r, ErrInvalidPost)
+		return
+	}
+	if input.Type == "market" {
+		writeAuthError(w, r, ErrMarketDisabled)
+		return
+	}
+	if !validPostInput(input) {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
 	}
@@ -277,8 +287,6 @@ func validPostInput(input postWriteInput) bool {
 		return true
 	case "poll":
 		return validPollInput(input.Poll)
-	case "market":
-		return validMarketInput(input.Market)
 	default:
 		return false
 	}
@@ -369,7 +377,7 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN communities c ON c.id = p.community_id
-		WHERE p.id = $1`, id).Scan(&row.ID, &row.Author.ID, &row.Author.Username, &row.Author.Nickname, &row.Community.ID, &row.Community.Slug, &row.Community.Name, &row.Type, &row.Title, &row.Content, &row.CommentCount, &row.LikeCount, &row.BookmarkCount, &row.ShareCount, &row.ViewCount, &row.CreatedAt, &row.UpdatedAt, &publishedAt, &row.Publication, &row.Moderation, &deletedAt)
+		WHERE p.id = $1 AND p.type <> 'market'`, id).Scan(&row.ID, &row.Author.ID, &row.Author.Username, &row.Author.Nickname, &row.Community.ID, &row.Community.Slug, &row.Community.Name, &row.Type, &row.Title, &row.Content, &row.CommentCount, &row.LikeCount, &row.BookmarkCount, &row.ShareCount, &row.ViewCount, &row.CreatedAt, &row.UpdatedAt, &publishedAt, &row.Publication, &row.Moderation, &deletedAt)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "帖子不存在"})
 		return

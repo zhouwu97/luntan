@@ -76,15 +76,11 @@ class PostDraft {
     required this.section,
     this.isGameShare = false,
     this.isPoll = false,
-    this.isMarket = false,
     this.media = const [],
     this.mediaIds = const [],
     this.pollOptions = const [],
     this.allowMultiple = false,
     this.pollEndsAt,
-    this.marketPrice,
-    this.marketCondition = '',
-    this.marketDelivery = '',
   });
 
   final String title;
@@ -92,15 +88,11 @@ class PostDraft {
   final ForumSection section;
   final bool isGameShare;
   final bool isPoll;
-  final bool isMarket;
   final List<MediaAsset> media;
   final List<String> mediaIds;
   final List<String> pollOptions;
   final bool allowMultiple;
   final DateTime? pollEndsAt;
-  final double? marketPrice;
-  final String marketCondition;
-  final String marketDelivery;
 }
 
 class StoreProduct {
@@ -602,7 +594,7 @@ List<Post> _seedPosts() => [
     id: 'u2',
     authorId: 'user-2',
     title: '图书馆桌面新搭配：平板支架 + 台灯 + 便携键盘',
-    body: '不是纯晒图，顺便把实际使用感受、价格和避坑点也写了一下。',
+    body: '不是纯晒图，顺便把实际使用感受和避坑点也写了一下。',
     section: ForumSection.unboxing,
     tag: '穿搭分享',
     hoursAgo: 5,

@@ -66,10 +66,54 @@ class UserPostPage {
   final bool hasMore;
 }
 
+class UserRelation {
+  const UserRelation({
+    required this.id,
+    required this.username,
+    required this.nickname,
+    this.avatarMediaId,
+    this.isFollowing = false,
+    this.isBlocked = false,
+    this.canFollow = false,
+  });
+
+  final String id;
+  final String username;
+  final String nickname;
+  final String? avatarMediaId;
+  final bool isFollowing;
+  final bool isBlocked;
+  final bool canFollow;
+}
+
+class UserRelationPage {
+  const UserRelationPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<UserRelation> items;
+  final String? nextCursor;
+  final bool hasMore;
+}
+
 abstract interface class UserRepository {
   Future<UserProfile?> getProfile(String userId);
 
   Future<UserPostPage> listPosts(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  });
+
+  Future<UserRelationPage> listFollowers(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  });
+
+  Future<UserRelationPage> listFollowing(
     String userId, {
     String? cursor,
     int limit = 20,
@@ -143,6 +187,68 @@ class ApiUserRepository implements UserRepository {
           }).toList()
         : <UserPost>[];
     return UserPostPage(
+      items: items,
+      nextCursor: value['next_cursor'] as String?,
+      hasMore: value['has_more'] == true,
+    );
+  }
+
+  @override
+  Future<UserRelationPage> listFollowers(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) => _listRelations(
+    userId,
+    relation: 'followers',
+    cursor: cursor,
+    limit: limit,
+  );
+
+  @override
+  Future<UserRelationPage> listFollowing(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) => _listRelations(
+    userId,
+    relation: 'following',
+    cursor: cursor,
+    limit: limit,
+  );
+
+  Future<UserRelationPage> _listRelations(
+    String userId, {
+    required String relation,
+    String? cursor,
+    required int limit,
+  }) async {
+    final value = await _client.getJson(
+      '/api/v1/users/$userId/$relation',
+      queryParameters: {
+        'limit': '$limit',
+        ...?(cursor == null ? null : {'cursor': cursor}),
+      },
+    );
+    final raw = value['items'];
+    final items = raw is List
+        ? raw.whereType<Map>().map((item) {
+            final data = Map<String, dynamic>.from(item);
+            final viewer = data['viewer_state'] is Map
+                ? Map<String, dynamic>.from(data['viewer_state'] as Map)
+                : const <String, dynamic>{};
+            return UserRelation(
+              id: _string(data['id']),
+              username: _string(data['username']),
+              nickname: _string(data['nickname']),
+              avatarMediaId: _nullable(data['avatar_media_id']),
+              isFollowing: viewer['is_following'] == true,
+              isBlocked: viewer['is_blocked'] == true,
+              canFollow: viewer['can_follow'] == true,
+            );
+          }).toList()
+        : <UserRelation>[];
+    return UserRelationPage(
       items: items,
       nextCursor: value['next_cursor'] as String?,
       hasMore: value['has_more'] == true,

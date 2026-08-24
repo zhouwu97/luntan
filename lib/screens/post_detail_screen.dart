@@ -19,6 +19,8 @@ class PostDetailScreen extends StatefulWidget {
     required this.commentsController,
     required this.interactionController,
     this.currentUserId,
+    this.isAuthenticated = true,
+    this.onRequireAuth,
     this.focusComments = false,
     this.focusCommentId,
     required this.onToggleLike,
@@ -34,6 +36,8 @@ class PostDetailScreen extends StatefulWidget {
   final CommentsController commentsController;
   final InteractionController interactionController;
   final String? currentUserId;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
   final bool focusComments;
   final String? focusCommentId;
   final Future<void> Function(Post) onToggleLike;
@@ -83,6 +87,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _submitReply(Post post) async {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
     if (isSending) return;
     final content = replyController.text.trim();
     if (content.isEmpty) return;
@@ -120,12 +128,19 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     String? rootCommentId;
     final targetId = widget.focusCommentId;
     if (targetId != null) {
-      for (final comment in allComments) {
-        if (comment.id == targetId) {
-          rootCommentId = comment.parentId ?? comment.id;
-          break;
-        }
+      final target = allComments.cast<Comment?>().firstWhere(
+        (comment) => comment?.id == targetId,
+        orElse: () => null,
+      );
+      if (target == null &&
+          widget.commentsController.hasMore &&
+          !widget.commentsController.isLoadingMore) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.commentsController.loadMore();
+        });
+        return;
       }
+      rootCommentId = target?.rootId ?? target?.parentId ?? target?.id;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final context = rootCommentId == null
@@ -265,6 +280,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       _PollPanel(
                         repository: widget.pollRepository!,
                         postId: post.id,
+                        isAuthenticated: widget.isAuthenticated,
+                        onRequireAuth: widget.onRequireAuth,
                       ),
                     if (post.images.isNotEmpty)
                       PostMediaPreview(
@@ -416,6 +433,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 controller: replyController,
                 target: replyTarget,
                 sending: isSending,
+                isAuthenticated: widget.isAuthenticated,
+                onRequireAuth: widget.onRequireAuth,
                 onSubmit: () => _submitReply(post),
               ),
             ],
@@ -434,6 +453,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _likeComment(Comment comment) async {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
     try {
       await widget.interactionController.toggleCommentLike(comment);
     } catch (error) {
@@ -725,9 +748,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 }
 
 class _PollPanel extends StatefulWidget {
-  const _PollPanel({required this.repository, required this.postId});
+  const _PollPanel({
+    required this.repository,
+    required this.postId,
+    required this.isAuthenticated,
+    this.onRequireAuth,
+  });
   final PollRepository repository;
   final String postId;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
   @override
   State<_PollPanel> createState() => _PollPanelState();
 }
@@ -802,7 +832,10 @@ class _PollPanelState extends State<_PollPanel> {
           : const <String, dynamic>{};
       final viewerVoted = viewerState['has_voted'] == true;
       final canVote = viewerState['can_vote'] != false;
-      final locked = voted || viewerVoted || !canVote;
+      final authenticationRequired =
+          !widget.isAuthenticated ||
+          viewerState['authentication_required'] == true;
+      final locked = voted || viewerVoted || !canVote || authenticationRequired;
       final viewerOptionIds = viewerState['option_ids'] is List
           ? (viewerState['option_ids'] as List).whereType<String>().toSet()
           : const <String>{};
@@ -884,11 +917,17 @@ class _PollPanelState extends State<_PollPanel> {
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton(
-                onPressed: submitting || locked
+                onPressed: submitting
+                    ? null
+                    : authenticationRequired
+                    ? widget.onRequireAuth
+                    : locked
                     ? null
                     : () => _vote(pollId, allowMultiple, options),
                 child: Text(
-                  viewerVoted || voted
+                  authenticationRequired
+                      ? '登录后参与投票'
+                      : viewerVoted || voted
                       ? '已投票'
                       : !canVote
                       ? '投票已结束'
@@ -942,11 +981,15 @@ class _ReplyBar extends StatelessWidget {
     required this.controller,
     required this.target,
     required this.sending,
+    required this.isAuthenticated,
+    this.onRequireAuth,
     required this.onSubmit,
   });
   final TextEditingController controller;
   final Comment? target;
   final bool sending;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
   final VoidCallback onSubmit;
   @override
   Widget build(BuildContext context) {
@@ -963,6 +1006,13 @@ class _ReplyBar extends StatelessWidget {
             Expanded(
               child: TextField(
                 controller: controller,
+                readOnly: !isAuthenticated,
+                onTap: !isAuthenticated
+                    ? () {
+                        FocusScope.of(context).unfocus();
+                        onRequireAuth?.call();
+                      }
+                    : null,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSubmit(),
                 decoration: InputDecoration(

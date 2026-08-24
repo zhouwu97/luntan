@@ -6,6 +6,8 @@ import 'package:http/testing.dart';
 
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/api_repositories.dart';
+import 'package:luntan/data/api/profile_repository.dart';
+import 'package:luntan/data/api/user_repository.dart';
 
 void main() {
   test('ApiFeedRepository 映射列表和游标', () async {
@@ -52,5 +54,57 @@ void main() {
       ),
     );
     expect(await repository.getPost('missing'), isNull);
+  });
+
+  test('ApiUserRepository 映射关注列表和 viewer 状态', () async {
+    Uri? requestedUri;
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response.bytes(
+          utf8.encode(
+            '{"items":[{"id":"u2","username":"other","nickname":"另一位","viewer_state":{"is_following":true,"can_follow":true}}],"next_cursor":"cursor-2","has_more":true}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+    final repository = ApiUserRepository(client);
+    final page = await repository.listFollowing('u1', limit: 20);
+
+    expect(page.items.single.id, 'u2');
+    expect(page.items.single.isFollowing, isTrue);
+    expect(page.items.single.canFollow, isTrue);
+    expect(page.nextCursor, 'cursor-2');
+    expect(requestedUri?.path, '/api/v1/users/u1/following');
+    client.close();
+  });
+
+  test('ProfileRepository 将我的评论解析为独立评论记录', () async {
+    Uri? requestedUri;
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response.bytes(
+          utf8.encode(
+            '{"items":[{"id":"comment-1","post_id":"post-1","post_title":"帖子标题","content":"我的评论内容","community_id":"c1","community_name":"大型拆箱","created_at":"2026-08-24T23:20:00Z"}],"next_cursor":"cursor-1","has_more":true}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+    final page = await ProfileRepository(client).list('comments');
+
+    final item = page.items.single as ProfileCommentItem;
+    expect(item.id, 'comment-1');
+    expect(item.postId, 'post-1');
+    expect(item.postTitle, '帖子标题');
+    expect(item.content, '我的评论内容');
+    expect(requestedUri?.path, '/api/v1/me/comments');
+    client.close();
   });
 }

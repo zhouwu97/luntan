@@ -8,7 +8,6 @@ abstract interface class PublishRepository {
     required String content,
     required String idempotencyKey,
     List<String> mediaIds,
-    Map<String, dynamic>? market,
   });
 
   Future<MediaUploadTicket> requestMediaUpload({
@@ -97,7 +96,6 @@ class ApiPublishRepository
     required String content,
     required String idempotencyKey,
     List<String> mediaIds = const [],
-    Map<String, dynamic>? market,
   }) {
     return _client.postJson(
       '/api/v1/posts',
@@ -108,7 +106,6 @@ class ApiPublishRepository
         'title': title,
         'content': content,
         if (mediaIds.isNotEmpty) 'media_ids': mediaIds,
-        ...?(market == null ? null : {'market': market}),
       },
     );
   }

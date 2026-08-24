@@ -48,7 +48,6 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 			{"key": "latest", "title": "最新"},
 			{"key": "featured", "title": "精华"},
 			{"key": "question", "title": "问答"},
-			{"key": "market", "title": "市场"},
 		},
 		"featured": featured,
 	})
@@ -83,7 +82,7 @@ func (s *Server) homeFeaturedPosts(r *http.Request) ([]homePost, error) {
 		FROM posts p
 		JOIN communities c ON c.id = p.community_id
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
-		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL
+		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
 		  AND c.status = 'active' AND c.deleted_at IS NULL
 		ORDER BY (p.like_count + p.comment_count * 2) DESC, p.published_at DESC, p.id DESC
 		LIMIT 6`)

@@ -115,10 +115,36 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       ),
     );
     if (action == null) return;
+    if (!mounted) return;
+    if (action == 'delete') {
+      final confirmed =
+          await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('确认删除内容？'),
+              content: const Text('删除后内容将不再公开显示，此操作需要记录审核理由。'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('确认删除'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!confirmed) return;
+    }
+    final reason = await _askReason(action);
+    if (reason == null) return;
     try {
       await widget.repository.applyModerationAction(
         caseId: item.id,
         action: action,
+        reason: reason,
       );
       if (mounted) {
         widget.onFeedback('审核操作已提交');
@@ -129,6 +155,74 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
         widget.onFeedback(userFacingApiMessage(cause, fallback: '审核操作失败'));
       }
     }
+  }
+
+  Future<String?> _askReason(String action) async {
+    const reasons = ['广告', '人身攻击', '违规内容', '灌水', '复核通过', '其他'];
+    var selected = action == 'restore' ? '复核通过' : '违规内容';
+    final detailController = TextEditingController();
+    String? validationError;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(action == 'restore' ? '填写恢复理由' : '填写审核理由'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: selected,
+                decoration: const InputDecoration(labelText: '理由分类'),
+                items: reasons
+                    .map(
+                      (reason) =>
+                          DropdownMenuItem(value: reason, child: Text(reason)),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setDialogState(() {
+                    selected = value;
+                    validationError = null;
+                  });
+                },
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: detailController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: '补充说明（可选）',
+                  errorText: validationError,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final detail = detailController.text.trim();
+                if (selected == '其他' && detail.isEmpty) {
+                  setDialogState(() => validationError = '请选择理由或填写补充说明');
+                  return;
+                }
+                Navigator.pop(
+                  context,
+                  detail.isEmpty ? selected : '$selected：$detail',
+                );
+              },
+              child: const Text('提交'),
+            ),
+          ],
+        ),
+      ),
+    );
+    detailController.dispose();
+    return result;
   }
 
   @override

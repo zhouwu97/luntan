@@ -322,7 +322,7 @@ func (s *Server) searchPosts(r *http.Request, query string, limit int, rawCursor
 	rankExpression := "ts_rank(p.search_vector, plainto_tsquery('simple', $1))"
 	args := []any{query}
 	where := `p.search_vector @@ plainto_tsquery('simple', $1)
-		  AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL`
+		  AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.type <> 'market'`
 	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
 		where += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $%d AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $%d))", len(args)+1, len(args)+1)
 		args = append(args, viewer.ID)

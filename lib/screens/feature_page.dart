@@ -4,6 +4,7 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
 import '../data/api/platform_repository.dart';
+import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 
@@ -11,7 +12,7 @@ enum FeatureType { ranking, hot, outfit, activity, gameShare, myReplies }
 
 extension FeatureTypePresentation on FeatureType {
   String get label => switch (this) {
-    FeatureType.ranking => '排行榜',
+    FeatureType.ranking => '商品榜',
     FeatureType.hot => '热门帖子',
     FeatureType.outfit => '穿搭分享',
     FeatureType.activity => '活动',
@@ -26,28 +27,139 @@ class FeaturePage extends StatefulWidget {
     required this.type,
     required this.store,
     required this.onOpenPost,
+    this.onOpenPostId,
     this.onLike,
     this.onBookmark,
     this.feedRepository,
     this.platformRepository,
     this.postRepository,
+    this.storeRepository,
   });
 
   final FeatureType type;
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
+  final ValueChanged<String>? onOpenPostId;
   final ValueChanged<Post>? onLike;
   final ValueChanged<Post>? onBookmark;
   final FeedRepository? feedRepository;
   final PlatformRepository? platformRepository;
   final PostRepository? postRepository;
+  final StoreRepository? storeRepository;
 
   @override
   State<FeaturePage> createState() => _FeaturePageState();
 }
 
+class _ApiRankingProduct extends StatelessWidget {
+  const _ApiRankingProduct({required this.rank, required this.product});
+
+  final int rank;
+  final ApiStoreProduct product;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: AppTheme.border),
+    ),
+    child: Row(
+      children: [
+        Text(
+          rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '$rank',
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(width: 12),
+        Container(
+          width: 48,
+          height: 48,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Color(product.color),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(product.emoji, style: const TextStyle(fontSize: 27)),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                product.name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                '${product.points} 积分 · 已有 ${product.redeemedCount} 人兑换',
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+              if (product.description.isNotEmpty)
+                Text(
+                  product.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _MockRankingProduct extends StatelessWidget {
+  const _MockRankingProduct({required this.rank, required this.product});
+
+  final int rank;
+  final StoreProduct product;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: AppTheme.border),
+    ),
+    child: Row(
+      children: [
+        Text(rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '$rank'),
+        const SizedBox(width: 12),
+        Text(product.emoji, style: const TextStyle(fontSize: 27)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            '${product.name}\n${product.points} 积分 · 热门兑换',
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              height: 1.45,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _FeaturePageState extends State<FeaturePage> {
   Future<List<Post>>? remoteFuture;
+  Future<List<ApiStoreProduct>>? productsFuture;
 
   FeatureType get type => widget.type;
   ForumStore get store => widget.store;
@@ -57,11 +169,16 @@ class _FeaturePageState extends State<FeaturePage> {
   FeedRepository? get feedRepository => widget.feedRepository;
   PlatformRepository? get platformRepository => widget.platformRepository;
   PostRepository? get postRepository => widget.postRepository;
+  StoreRepository? get storeRepository => widget.storeRepository;
 
   @override
   void initState() {
     super.initState();
-    if (feedRepository != null) remoteFuture = _remotePosts();
+    if (type == FeatureType.ranking && storeRepository != null) {
+      productsFuture = storeRepository!.products();
+    } else if (feedRepository != null) {
+      remoteFuture = _remotePosts();
+    }
   }
 
   void _retry() {
@@ -71,6 +188,15 @@ class _FeaturePageState extends State<FeaturePage> {
   }
 
   String get title => type.label;
+
+  void _openPost(Post post) {
+    final onOpenPostId = widget.onOpenPostId;
+    if (onOpenPostId != null) {
+      onOpenPostId(post.id);
+    } else {
+      onOpenPost(post);
+    }
+  }
 
   List<Post> _posts() {
     if (type == FeatureType.ranking) {
@@ -105,6 +231,42 @@ class _FeaturePageState extends State<FeaturePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (type == FeatureType.ranking && storeRepository != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: FutureBuilder<List<ApiStoreProduct>>(
+          future: productsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('商品榜加载失败'),
+                    TextButton(
+                      onPressed: () => setState(
+                        () => productsFuture = storeRepository!.products(),
+                      ),
+                      child: const Text('重试'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return _productBody(snapshot.data ?? const []);
+          },
+        ),
+      );
+    }
+    if (feedRepository == null && type == FeatureType.ranking) {
+      return Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: _mockProductBody(),
+      );
+    }
     if (feedRepository != null) {
       return Scaffold(
         appBar: AppBar(title: Text(title)),
@@ -182,7 +344,7 @@ class _FeaturePageState extends State<FeaturePage> {
             ...posts.map(
               (post) => ForumPostCard(
                 post: post,
-                onOpen: () => onOpenPost(post),
+                onOpen: () => _openPost(post),
                 onLike: () => onLike?.call(post),
                 onBookmark: () => onBookmark?.call(post),
                 onMenu: () {},
@@ -194,18 +356,6 @@ class _FeaturePageState extends State<FeaturePage> {
   }
 
   Future<List<Post>> _remotePosts() async {
-    if (type == FeatureType.ranking &&
-        platformRepository != null &&
-        postRepository != null) {
-      final ranking = await platformRepository!.getRanking(limit: 20);
-      final details = await Future.wait(
-        ranking.map((item) => postRepository!.getPost(item.id)),
-      );
-      return [
-        for (final detail in details)
-          if (detail != null) detail.post,
-      ];
-    }
     final repository = feedRepository!;
     final page = repository is QueryableFeedRepository
         ? await (repository as QueryableFeedRepository).getFeed(
@@ -281,7 +431,7 @@ class _FeaturePageState extends State<FeaturePage> {
         ...posts.map(
           (post) => ForumPostCard(
             post: post,
-            onOpen: () => onOpenPost(post),
+            onOpen: () => _openPost(post),
             onLike: () => onLike?.call(post),
             onBookmark: () => onBookmark?.call(post),
             onMenu: () {},
@@ -290,8 +440,55 @@ class _FeaturePageState extends State<FeaturePage> {
     ],
   );
 
+  Widget _productBody(List<ApiStoreProduct> products) => ListView(
+    padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+    children: [
+      _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
+      const SizedBox(height: 16),
+      if (products.isEmpty)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 80),
+          child: Center(child: Text('暂时还没有商品')),
+        )
+      else
+        ...products.asMap().entries.map(
+          (entry) =>
+              _ApiRankingProduct(rank: entry.key + 1, product: entry.value),
+        ),
+    ],
+  );
+
+  Widget _mockProductBody() => ListView(
+    padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
+    children: [
+      _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
+      const SizedBox(height: 16),
+      ...storeProducts.asMap().entries.map(
+        (entry) =>
+            _MockRankingProduct(rank: entry.key + 1, product: entry.value),
+      ),
+    ],
+  );
+
+  Widget _featureIntro(String text) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      gradient: AppTheme.primaryGradient,
+      borderRadius: BorderRadius.circular(22),
+    ),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 14,
+        height: 1.5,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
+
   String _description(FeatureType type) => switch (type) {
-    FeatureType.ranking => '看看最近最受欢迎的帖子，给认真分享的人一点掌声。',
+    FeatureType.ranking => '本周热门兑换，用社区积分兑换喜欢的校园好物。',
     FeatureType.hot => '社区里正在被大家讨论的内容，今天也来逛逛吧。',
     FeatureType.outfit => '桌搭、宿舍布置和校园生活灵感，都可以在这里找到。',
     FeatureType.activity => '校园活动内容集中展示，打开帖子查看时间、地点和参与方式。',

@@ -18,13 +18,11 @@ class ComposerSheet extends StatelessWidget {
     required this.onCreatePost,
     required this.onCreatePoll,
     required this.onCreateGameShare,
-    this.onCreateMarket,
   });
 
   final VoidCallback onCreatePost;
   final VoidCallback onCreatePoll;
   final VoidCallback onCreateGameShare;
-  final VoidCallback? onCreateMarket;
 
   @override
   Widget build(BuildContext context) {
@@ -85,13 +83,6 @@ class ComposerSheet extends StatelessWidget {
                 color: AppTheme.orange,
                 onTap: onCreateGameShare,
               ),
-              if (onCreateMarket != null)
-                _PublishOption(
-                  icon: Icons.sell_outlined,
-                  label: '发布闲置',
-                  color: AppTheme.purple,
-                  onTap: onCreateMarket!,
-                ),
             ],
           ),
         ],
@@ -147,14 +138,12 @@ class PostEditorDialog extends StatefulWidget {
     required this.isGameShare,
     required this.onPublish,
     this.isPoll = false,
-    this.isMarket = false,
     this.publishController,
     this.enableSampleMedia = true,
   });
 
   final bool isGameShare;
   final bool isPoll;
-  final bool isMarket;
   final Future<void> Function(PostDraft draft) onPublish;
   final PublishController? publishController;
   final bool enableSampleMedia;
@@ -188,9 +177,6 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   ForumSection section = ForumSection.unboxing;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
-  final priceController = TextEditingController();
-  final conditionController = TextEditingController();
-  final deliveryController = TextEditingController();
   String? errorText;
   bool submitting = false;
   bool _submitted = false;
@@ -216,9 +202,6 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     }
     titleController.dispose();
     bodyController.dispose();
-    priceController.dispose();
-    conditionController.dispose();
-    deliveryController.dispose();
     for (final controller in pollOptionControllers) {
       controller.dispose();
     }
@@ -237,10 +220,6 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         .toList();
     if (widget.isPoll && pollOptions.length < 2) {
       return setState(() => errorText = '投票至少需要两个选项');
-    }
-    final price = double.tryParse(priceController.text.trim());
-    if (widget.isMarket && (price == null || price <= 0)) {
-      return setState(() => errorText = '请输入有效的价格');
     }
     if (_usesRealUpload &&
         images.any((image) => image.status != _DraftImageStatus.done)) {
@@ -270,13 +249,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         section: section,
         isGameShare: widget.isGameShare,
         isPoll: widget.isPoll,
-        isMarket: widget.isMarket,
         media: selectedMedia,
         mediaIds: mediaIds,
         pollOptions: pollOptions,
-        marketPrice: double.tryParse(priceController.text.trim()),
-        marketCondition: conditionController.text.trim(),
-        marketDelivery: deliveryController.text.trim(),
       );
       await widget.onPublish(draft);
       if (!mounted) return;
@@ -395,9 +370,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.isMarket
-        ? '发布闲置'
-        : widget.isGameShare
+    final title = widget.isGameShare
         ? '发布玩法分享'
         : widget.isPoll
         ? '发起投票'
@@ -493,32 +466,6 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                       ),
                     ),
                   ),
-                ),
-              ],
-              if (widget.isMarket) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  controller: priceController,
-                  enabled: !submitting,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: '价格（元）',
-                    prefixText: '¥ ',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: conditionController,
-                  enabled: !submitting,
-                  decoration: const InputDecoration(labelText: '成色 / 状态'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: deliveryController,
-                  enabled: !submitting,
-                  decoration: const InputDecoration(labelText: '交易方式'),
                 ),
               ],
               const SizedBox(height: 12),

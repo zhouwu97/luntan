@@ -5,17 +5,71 @@ import '../data/api/platform_repository.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
 
+typedef NotificationPostOpener =
+    void Function(String postId, String? commentId);
+
+/// 将通知目标统一转换成页面动作，避免通知页面堆积不可维护的条件分支。
+class NotificationTargetRouter {
+  const NotificationTargetRouter._();
+
+  static void open({
+    required ForumNotification notification,
+    required NotificationPostOpener onOpenPost,
+    ValueChanged<String>? onOpenUser,
+    ValueChanged<String>? onOpenCommunity,
+    VoidCallback? onOpenSystem,
+  }) {
+    final targetData = notification.targetData;
+    switch (notification.targetType) {
+      case 'post':
+        onOpenPost(
+          notification.targetId,
+          _stringValue(targetData['comment_id']),
+        );
+      case 'comment':
+        final postId = targetData['post_id'];
+        if (postId is String && postId.isNotEmpty) {
+          onOpenPost(postId, notification.targetId);
+        } else {
+          onOpenSystem?.call();
+        }
+      case 'user':
+        onOpenUser?.call(notification.targetId);
+      case 'community':
+        onOpenCommunity?.call(notification.targetId);
+      case 'system':
+        onOpenSystem?.call();
+      default:
+        final postId = targetData['post_id'];
+        if (postId is String && postId.isNotEmpty) {
+          onOpenPost(postId, _stringValue(targetData['comment_id']));
+        } else {
+          onOpenSystem?.call();
+        }
+    }
+  }
+
+  static String? _stringValue(dynamic value) =>
+      value is String && value.isNotEmpty ? value : null;
+}
+
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({
     super.key,
     required this.repository,
     required this.onOpenPostId,
     this.onOpenPost,
+    this.onOpenUserId,
+    this.onOpenCommunityId,
+    this.onOpenSystem,
   });
 
   final PlatformRepository repository;
   final ValueChanged<String> onOpenPostId;
   final void Function(String postId, String? commentId)? onOpenPost;
+  final ValueChanged<String>? onOpenUserId;
+  final ValueChanged<String>? onOpenCommunityId;
+  final VoidCallback? onOpenSystem;
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -250,17 +304,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               }
             }
             if (!context.mounted) return;
-            if (item.targetType == 'post') {
-              final commentId = item.targetData['comment_id'];
-              if (widget.onOpenPost != null) {
-                widget.onOpenPost!(
-                  item.targetId,
-                  commentId is String ? commentId : null,
-                );
-              } else {
-                widget.onOpenPostId(item.targetId);
-              }
-            }
+            NotificationTargetRouter.open(
+              notification: item,
+              onOpenPost: (postId, commentId) {
+                if (widget.onOpenPost != null) {
+                  widget.onOpenPost!(postId, commentId);
+                } else {
+                  widget.onOpenPostId(postId);
+                }
+              },
+              onOpenUser: widget.onOpenUserId,
+              onOpenCommunity: widget.onOpenCommunityId,
+              onOpenSystem: widget.onOpenSystem,
+            );
           },
         );
       },

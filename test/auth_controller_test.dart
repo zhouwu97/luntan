@@ -48,6 +48,28 @@ void main() {
     expect(controller.user?.id, 'u1');
   });
 
+  test('invalidateSession 清理用户并回到未登录', () async {
+    final store = MemoryTokenStore(
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+    );
+    final controller = _controller(
+      store: store,
+      client: MockClient((request) async {
+        if (request.url.path == '/api/v1/me') {
+          return http.Response(_userJson, 200);
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    await controller.initialize();
+    controller.invalidateSession();
+
+    expect(controller.status, AuthStatus.unauthenticated);
+    expect(controller.user, isNull);
+  });
+
   test('initialize 遇 401（refresh 失效）回到未登录', () async {
     final store = MemoryTokenStore(
       accessToken: 'expired',
@@ -132,10 +154,7 @@ void main() {
       }),
     );
 
-    final ok = await controller.login(
-      username: 'user',
-      password: 'wrong',
-    );
+    final ok = await controller.login(username: 'user', password: 'wrong');
     expect(ok, isFalse);
     expect(controller.status, AuthStatus.error);
     expect(controller.user, isNull);
@@ -152,10 +171,7 @@ void main() {
       client: MockClient((request) async {
         if (request.url.path == '/api/v1/auth/logout') {
           logoutCalled = true;
-          expect(
-            jsonDecode(request.body),
-            {'refresh_token': 'refresh-1'},
-          );
+          expect(jsonDecode(request.body), {'refresh_token': 'refresh-1'});
           return http.Response('', 204);
         }
         return http.Response('{}', 404);

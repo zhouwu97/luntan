@@ -117,12 +117,28 @@ func (s *Server) hasScopedPermission(r *http.Request, userID, permission, commun
 	return err == nil && allowed
 }
 
+func (s *Server) hasAnyPermission(r *http.Request, userID, permission string) bool {
+	var allowed bool
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1 FROM user_roles ur
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = $1 AND p.name = $2
+		)`, userID, permission).Scan(&allowed)
+	return err == nil && allowed
+}
+
 func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.hasAnyPermission(r, user.ID, "report.review") {
+		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))

@@ -307,22 +307,24 @@ class _SearchScreenState extends State<SearchScreen> {
                 )
                 .toList(),
           ),
-          const SizedBox(height: 24),
-          const _GroupTitle(title: '推荐板块'),
-          ...widget.store.communities.map(
-            (community) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const CircleAvatar(
-                backgroundColor: AppTheme.surfaceBlue,
-                child: Icon(Icons.forum_outlined, color: AppTheme.primary),
+          if (widget.platform == null) ...[
+            const SizedBox(height: 24),
+            const _GroupTitle(title: '推荐板块'),
+            ...widget.store.communities.map(
+              (community) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: AppTheme.surfaceBlue,
+                  child: Icon(Icons.forum_outlined, color: AppTheme.primary),
+                ),
+                title: Text(community.name),
+                subtitle: Text(community.description),
+                onTap: widget.onOpenCommunityId == null
+                    ? null
+                    : () => widget.onOpenCommunityId!(community.id),
               ),
-              title: Text(community.name),
-              subtitle: Text(community.description),
-              onTap: widget.onOpenCommunityId == null
-                  ? null
-                  : () => widget.onOpenCommunityId!(community.id),
             ),
-          ),
+          ],
         ],
       );
     }
@@ -454,7 +456,7 @@ class _SearchScreenState extends State<SearchScreen> {
               onLike: () => widget.interactionController.togglePostLike(post),
               onBookmark: () =>
                   widget.interactionController.toggleBookmark(post),
-              onMenu: () {},
+              onMenu: null,
               interactionListenable: widget.interactionController,
             ),
           ),

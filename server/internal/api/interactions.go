@@ -71,7 +71,7 @@ func (s *Server) toggleBookmark(w http.ResponseWriter, r *http.Request, postID s
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}

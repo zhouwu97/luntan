@@ -29,9 +29,10 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
     body: FutureBuilder<AccountStatusData>(
       future: future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
+        if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
+        }
+        if (snapshot.hasError) {
           return Center(
             child: TextButton(
               onPressed: () =>
@@ -39,6 +40,7 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
               child: const Text('加载失败，重试'),
             ),
           );
+        }
         final data = snapshot.data!;
         final active = data.status == 'active';
         return RefreshIndicator(
@@ -209,9 +211,10 @@ class _AdminListScreenState extends State<AdminListScreen> {
     body: FutureBuilder<List<AdminSummary>>(
       future: future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
+        if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
+        }
+        if (snapshot.hasError) {
           return Center(
             child: TextButton(
               onPressed: () =>
@@ -219,6 +222,7 @@ class _AdminListScreenState extends State<AdminListScreen> {
               child: const Text('加载失败，重试'),
             ),
           );
+        }
         final items = snapshot.data!;
         if (items.isEmpty) return const Center(child: Text('暂无管理员数据'));
         return RefreshIndicator(
@@ -285,9 +289,10 @@ class _AdminDetailScreenState extends State<AdminDetailScreen> {
     body: FutureBuilder<AdminDetail>(
       future: future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
+        if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
+        }
+        if (snapshot.hasError) {
           return Center(
             child: TextButton(
               onPressed: () => setState(
@@ -296,6 +301,7 @@ class _AdminDetailScreenState extends State<AdminDetailScreen> {
               child: const Text('加载失败，重试'),
             ),
           );
+        }
         final data = snapshot.data!;
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -436,9 +442,10 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
     body: FutureBuilder<RiskOverview>(
       future: future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
+        if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
+        }
+        if (snapshot.hasError) {
           return Center(
             child: TextButton(
               onPressed: () =>
@@ -446,6 +453,7 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
               child: const Text('加载失败，重试'),
             ),
           );
+        }
         final data = snapshot.data!;
         return RefreshIndicator(
           onRefresh: () async =>
@@ -565,9 +573,10 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
     body: FutureBuilder<List<AdminLogEntry>>(
       future: future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
+        if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
+        }
+        if (snapshot.hasError) {
           return Center(
             child: TextButton(
               onPressed: () =>
@@ -575,6 +584,7 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
               child: const Text('加载失败，重试'),
             ),
           );
+        }
         final items = snapshot.data!;
         if (items.isEmpty) return const Center(child: Text('暂无管理员操作'));
         return RefreshIndicator(

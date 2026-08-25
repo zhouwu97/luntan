@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-Android 模拟器不传 `API_BASE_URL` 时默认连接已部署的演示 API，直接点击运行即可看到服务器帖子和评论；Windows/Flutter Test 不传时仍使用本地 `ForumStore` mock 数据。传入 `API_BASE_URL` 后可覆盖默认地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。
+所有平台不传 `API_BASE_URL` 时统一使用本地 `ForumStore` mock 数据；只有显式传入 `API_BASE_URL` 才进入真实 API 模式，避免 Android、Web、桌面端行为不一致。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。
 
 已覆盖的主要功能：
 
@@ -44,7 +44,7 @@ flutter pub get
 flutter run
 ```
 
-Windows/Flutter Test 不传 `API_BASE_URL` 时，应用默认使用本地 mock 仓储，不要求启动 Go 服务或 PostgreSQL；Android 模拟器默认使用线上演示 API。
+不传 `API_BASE_URL` 时，应用默认使用本地 mock 仓储，不要求启动 Go 服务或 PostgreSQL。真实 API 必须显式传入 `--dart-define=API_BASE_URL=...`。
 
 ### 运行 Web
 
@@ -107,7 +107,7 @@ Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为�
 
 ### 远端占位展示数据
 
-服务器已通过 `http://101.42.27.44/api/v1` 提供客户端 API。远端导入了约 100 条帖子、随机化占位用户和帖子图片；图片通过 `/imported-media/` 公开读取。API 模式启动示例：
+服务器已通过 `http://101.42.27.44/api/v1` 提供客户端 API。远端导入了约 100 条帖子、随机化占位用户和帖子图片；图片通过 `/imported-media/` 公开读取。API 模式必须显式传入地址，启动示例：
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://101.42.27.44

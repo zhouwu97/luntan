@@ -60,7 +60,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}

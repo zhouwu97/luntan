@@ -92,7 +92,7 @@ func TestCreatePostRejectsRetiredMarketType(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 1))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("u1", "user", "active", "用户", 1, "email", "", false, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(`{"community_id":"c1","type":"market","title":"旧类型","content":"不应创建","market":{"price":1,"condition":"used"}}`))
 	req.Header.Set("Authorization", "Bearer access-token")
@@ -114,7 +114,7 @@ func TestCreatePostWritesRevisionAndIsIdempotentByUserKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 2))
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("u1", "user", "active", "用户", 2, "email", "", false, nil))
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`)).WithArgs("u1", "post-key-1").WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT post_id FROM post_idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`)).WithArgs("u1", "post-key-1").WillReturnError(sql.ErrNoRows)
@@ -170,7 +170,7 @@ func TestMediaUploadTokenCreatesPendingAssetWithSignedURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "User", 1))
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("u1", "user", "active", "User", 1, "email", "", false, nil))
 	checksum := strings.Repeat("a", 64)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO media_assets (id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $10)`)).WithArgs(sqlmock.AnyArg(), "u1", sqlmock.AnyArg(), "a.png", "image/png", 100, 80, int64(10), checksum, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 
@@ -237,7 +237,7 @@ func TestProfileCommentsReturnsPostsOrderedByLatestReceivedComment(t *testing.T)
 	created := time.Date(2026, 8, 24, 23, 20, 0, 0, time.UTC)
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 1))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("u1", "user", "active", "用户", 1, "email", "", false, nil))
 	mock.ExpectQuery(`(?s)SELECT p\.id, p\.title.*MAX\(c\.created_at\) AS latest_comment_at.*ORDER BY latest_comment_at DESC, p\.id DESC LIMIT \$2`).
 		WithArgs("u1", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
@@ -304,7 +304,7 @@ func TestPostLikeIsIdempotentAndUpdatesCountOnlyAfterNewRelation(t *testing.T) {
 	}
 	defer db.Close()
 	for index, inserted := range []int64{1, 0} {
-		mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "User", 1))
+		mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).WithArgs(sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("u1", "user", "active", "User", 1, "email", "", false, nil))
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_reactions (post_id, user_id, reaction_type) VALUES ($1, $2, $3) ON CONFLICT (post_id, user_id, reaction_type) DO NOTHING`)).WithArgs("p1", "u1", "like").WillReturnResult(sqlmock.NewResult(1, inserted))

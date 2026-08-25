@@ -4,10 +4,10 @@ import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 
 class ForumAuthorRow extends StatelessWidget {
-  const ForumAuthorRow({super.key, required this.post, required this.onMenu});
+  const ForumAuthorRow({super.key, required this.post, this.onMenu});
 
   final Post post;
-  final VoidCallback onMenu;
+  final VoidCallback? onMenu;
 
   Color get levelColor {
     if (post.level >= 8) return AppTheme.purple;
@@ -64,13 +64,14 @@ class ForumAuthorRow extends StatelessWidget {
             ],
           ),
         ),
-        IconButton(
-          onPressed: onMenu,
-          icon: const Icon(
-            Icons.more_horiz_rounded,
-            color: AppTheme.textSecondary,
+        if (onMenu != null)
+          IconButton(
+            onPressed: onMenu,
+            icon: const Icon(
+              Icons.more_horiz_rounded,
+              color: AppTheme.textSecondary,
+            ),
           ),
-        ),
       ],
     );
   }

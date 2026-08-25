@@ -48,6 +48,16 @@ class AuthController extends ChangeNotifier {
           : AuthStatus.unauthenticated;
       error = exception;
       if (status == AuthStatus.unauthenticated) user = null;
+    } catch (cause) {
+      // 浏览器安全存储、插件或运行时初始化失败不应让启动页永久停在
+      // unknown；公开内容仍可浏览，登录操作会在用户主动重试时反馈错误。
+      status = AuthStatus.unauthenticated;
+      user = null;
+      error = ApiException(
+        type: ApiErrorType.unknown,
+        message: '登录状态初始化失败，请稍后重试',
+        cause: cause,
+      );
     }
     notifyListeners();
   }
@@ -64,7 +74,7 @@ class AuthController extends ChangeNotifier {
         username: username,
         password: password,
       );
-      user = session.user;
+      await _adoptSession(session);
       status = AuthStatus.authenticated;
       return true;
     } on ApiException catch (exception) {
@@ -91,7 +101,7 @@ class AuthController extends ChangeNotifier {
         password: password,
         nickname: nickname,
       );
-      user = session.user;
+      await _adoptSession(session);
       status = AuthStatus.authenticated;
       return true;
     } on ApiException catch (exception) {
@@ -128,7 +138,7 @@ class AuthController extends ChangeNotifier {
         code: code,
         nickname: nickname,
       );
-      user = session.user;
+      await _adoptSession(session);
       status = AuthStatus.authenticated;
       return true;
     } on ApiException catch (exception) {
@@ -147,7 +157,7 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
     try {
       final session = await _repository.guest();
-      user = session.user;
+      await _adoptSession(session);
       status = AuthStatus.authenticated;
       return true;
     } on ApiException catch (exception) {
@@ -168,6 +178,17 @@ class AuthController extends ChangeNotifier {
       error = null;
       status = AuthStatus.unauthenticated;
       notifyListeners();
+    }
+  }
+
+  Future<void> _adoptSession(AuthSession session) async {
+    user = session.user;
+    // 登录响应负责立即进入主界面；/me 再补齐角色能力，失败时保留
+    // 登录响应中的基础账号信息，避免权限查询短暂失败把登录判成失败。
+    try {
+      user = await _repository.me();
+    } on ApiException {
+      // 能力缺失时客户端默认按最小权限处理，后端仍是最终权限边界。
     }
   }
 }

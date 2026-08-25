@@ -1,6 +1,3 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
-
 import 'api/api_client.dart';
 import 'api/appeal_repository.dart';
 import 'api/api_repositories.dart';
@@ -23,16 +20,8 @@ import '../domain/repositories.dart';
 String apiBaseUrlFromEnvironment() {
   const configured = String.fromEnvironment('API_BASE_URL');
   if (configured.trim().isNotEmpty) return configured;
-  if (WidgetsBinding.instance.runtimeType.toString().contains(
-    'TestWidgetsFlutterBinding',
-  )) {
-    return '';
-  }
-  // Android 模拟器直接运行项目时使用线上演示 API；桌面端和 Flutter Test
-  // 默认保留 Mock 数据，避免开发机网络状态影响本地测试。
-  if (defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://101.42.27.44';
-  }
+  // 所有平台在没有显式 API_BASE_URL 时统一使用 Mock，避免 Android、Web、
+  // 桌面端因为默认值不同而出现无法复现的真实 API / Mock 混用。
   return '';
 }
 

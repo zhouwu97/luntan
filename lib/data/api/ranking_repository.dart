@@ -148,8 +148,8 @@ class RankingRepository {
       headers: {'Idempotency-Key': _newIdempotencyKey('toy-comment')},
       body: {
         'content': content,
-        if (parentId != null) 'parent_id': parentId,
-        if (replyToUserId != null) 'reply_to_user_id': replyToUserId,
+        ...?parentId == null ? null : {'parent_id': parentId},
+        ...?replyToUserId == null ? null : {'reply_to_user_id': replyToUserId},
       },
     );
     return _commentFromJson(payload);

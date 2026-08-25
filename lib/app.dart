@@ -62,6 +62,13 @@ class _LuntanAppState extends State<LuntanApp> {
 
   bool get apiMode => repositories.isApiMode;
   AuthUser? get currentUser => authController?.user;
+  bool get isAuthenticated =>
+      !apiMode || authController?.status == AuthStatus.authenticated;
+  bool get canModerate => currentUser?.canModerate == true;
+  bool get canManageAdmins => currentUser?.canManageAdmins == true;
+
+  bool get canManageBookmarks =>
+      !apiMode || currentUser?.canManageBookmarks == true;
 
   @override
   void initState() {
@@ -163,8 +170,15 @@ class _LuntanAppState extends State<LuntanApp> {
     return false;
   }
 
+  bool _requireRegisteredAccount() {
+    if (!_requireAuth()) return false;
+    if (!apiMode || currentUser?.canPublish == true) return true;
+    _showQuickFeedback('游客可以参与评论，登录邮箱账号后即可发布帖子');
+    return false;
+  }
+
   void showComposer() {
-    if (!_requireAuth()) return;
+    if (!_requireRegisteredAccount()) return;
     showModalBottomSheet<void>(
       context: appContext,
       isScrollControlled: true,
@@ -337,6 +351,10 @@ class _LuntanAppState extends State<LuntanApp> {
 
   Future<void> toggleBookmark(Post post) async {
     if (!_requireAuth()) return;
+    if (!canManageBookmarks) {
+      _showQuickFeedback('游客模式只能浏览、评论和举报，登录邮箱账号后才能收藏');
+      return;
+    }
     try {
       final bookmarkRepository = repositories.bookmarks;
       if (bookmarkRepository == null) {
@@ -479,6 +497,10 @@ class _LuntanAppState extends State<LuntanApp> {
   }
 
   void openModeration() {
+    if (apiMode && !canModerate) {
+      _showQuickFeedback('你暂时没有访问审核中心的权限');
+      return;
+    }
     final platform = repositories.platform;
     if (platform == null) return;
     navigatorKey.currentState!.push(
@@ -556,6 +578,10 @@ class _LuntanAppState extends State<LuntanApp> {
   }
 
   void openAdmins() {
+    if (apiMode && !canManageAdmins) {
+      _showQuickFeedback('只有超级管理员可以管理管理员权限');
+      return;
+    }
     final platform = repositories.platform;
     if (platform == null) {
       _showQuickFeedback('当前模式暂不支持管理员治理');
@@ -754,10 +780,12 @@ class _LuntanAppState extends State<LuntanApp> {
             onOpenComposer: showComposer,
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
-            onOpenModeration: apiMode ? openModeration : null,
+            onOpenModeration: apiMode && canModerate ? openModeration : null,
             onOpenAppeals: openMyAppeals,
-            onOpenAccountStatus: apiMode ? openAccountStatus : null,
-            onOpenAdmins: apiMode ? openAdmins : null,
+            onOpenAccountStatus: apiMode && isAuthenticated
+                ? openAccountStatus
+                : null,
+            onOpenAdmins: apiMode && canManageAdmins ? openAdmins : null,
             onLogout: _logout,
             onDeleteAccount: apiMode ? _deleteAccount : null,
             onRequireAuth: _openLogin,

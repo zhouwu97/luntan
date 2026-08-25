@@ -276,11 +276,29 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
             child: Center(
               child: image.url == null
                   ? _fallback(image)
-                  : Image.network(
-                      image.url!,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
-                          _fallback(image),
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        final dpr = MediaQuery.devicePixelRatioOf(context);
+                        final cacheWidth =
+                            constraints.maxWidth.isFinite &&
+                                constraints.maxWidth > 0
+                            ? (constraints.maxWidth * dpr * 2).round()
+                            : null;
+                        final cacheHeight =
+                            constraints.maxHeight.isFinite &&
+                                constraints.maxHeight > 0
+                            ? (constraints.maxHeight * dpr * 2).round()
+                            : null;
+                        return Image.network(
+                          image.url!,
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.medium,
+                          cacheWidth: cacheWidth,
+                          cacheHeight: cacheHeight,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _fallback(image),
+                        );
+                      },
                     ),
             ),
           );

@@ -13,7 +13,7 @@ class ForumPostCard extends StatelessWidget {
     this.onOpenComments,
     required this.onLike,
     required this.onBookmark,
-    required this.onMenu,
+    this.onMenu,
     this.contextMeta,
     this.interactionListenable,
   });
@@ -23,7 +23,7 @@ class ForumPostCard extends StatelessWidget {
   final VoidCallback? onOpenComments;
   final VoidCallback onLike;
   final VoidCallback onBookmark;
-  final VoidCallback onMenu;
+  final VoidCallback? onMenu;
   final String? contextMeta;
   final Listenable? interactionListenable;
 

@@ -27,6 +27,20 @@ AuthController _controller({
   );
 }
 
+class _ThrowingTokenStore implements TokenStore {
+  @override
+  Future<String?> readAccessToken() => throw StateError('storage unavailable');
+
+  @override
+  Future<String?> readRefreshToken() => throw StateError('storage unavailable');
+
+  @override
+  Future<void> save(AuthTokens tokens) async {}
+
+  @override
+  Future<void> clear() async {}
+}
+
 void main() {
   test('initialize 恢复有效会话进入已登录', () async {
     final store = MemoryTokenStore(
@@ -118,6 +132,18 @@ void main() {
 
     await controller.initialize();
     expect(controller.status, AuthStatus.unauthenticated);
+  });
+
+  test('安全存储初始化异常不会卡死在 unknown', () async {
+    final store = _ThrowingTokenStore();
+    final controller = _controller(
+      store: store,
+      client: MockClient((request) async => http.Response('{}', 200)),
+    );
+
+    await controller.initialize();
+    expect(controller.status, AuthStatus.unauthenticated);
+    expect(controller.error?.message, '登录状态初始化失败，请稍后重试');
   });
 
   test('login 成功进入已登录并保存会话', () async {

@@ -41,13 +41,27 @@ class ApiException implements Exception {
 
 String userFacingApiMessage(Object error, {String fallback = '操作失败，请稍后重试'}) {
   if (error is! ApiException) return fallback;
+  switch (error.code) {
+    case 'INVALID_EMAIL':
+      return '请输入有效的邮箱地址';
+    case 'INVALID_EMAIL_CODE':
+      return '验证码错误，请检查后重试';
+    case 'EMAIL_CODE_EXPIRED':
+      return '验证码已过期，请重新获取';
+    case 'EMAIL_CODE_RATE_LIMITED':
+      return '验证码发送太频繁，请稍后再试';
+    case 'MAIL_UNAVAILABLE':
+      return '邮件服务暂时不可用，请稍后再试';
+    case 'REGISTERED_ACCOUNT_REQUIRED':
+      return '游客可以评论和举报，登录邮箱账号后才能发布内容';
+  }
   return switch (error.type) {
     ApiErrorType.unauthorized => '登录状态已失效，请重新登录',
     ApiErrorType.forbidden => '你暂时没有权限执行此操作',
     ApiErrorType.notFound => '内容不存在或已被删除',
     ApiErrorType.rateLimited => '操作太频繁，请稍后再试',
-    ApiErrorType.timeout => '网络有点慢，请重试',
-    ApiErrorType.networkUnavailable => '网络不可用，请检查网络后重试',
+    ApiErrorType.timeout => '暂时无法连接服务器，请稍后重试',
+    ApiErrorType.networkUnavailable => '暂时无法连接服务器，请稍后重试',
     ApiErrorType.serverError => '服务暂时不可用，请稍后重试',
     ApiErrorType.conflict =>
       error.message.isEmpty ? '操作冲突，请刷新后重试' : error.message,

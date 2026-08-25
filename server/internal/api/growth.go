@@ -25,7 +25,7 @@ func (s *Server) createPoll(w http.ResponseWriter, r *http.Request, postID strin
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}
@@ -456,7 +456,7 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}

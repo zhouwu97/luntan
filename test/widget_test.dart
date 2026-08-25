@@ -29,14 +29,30 @@ void main() {
     expect(find.byType(PostDetailScreen), findsOneWidget);
   });
 
-  testWidgets('首页胶囊直接打开收到回复的帖子列表', (tester) async {
+  testWidgets('首页评论胶囊切换到收到回复的帖子 Feed', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('我的评论').first);
+    await tester.tap(find.text('评论').first);
     await tester.pumpAndSettle();
 
     expect(find.text('新人手的机械键盘开箱！手感绝了'), findsOneWidget);
+    expect(find.textContaining('最近回复'), findsOneWidget);
+    expect(find.text('我的评论'), findsNothing);
+  });
+
+  testWidgets('首页帖子胶囊按发布时间展示我的帖子', (tester) async {
+    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('帖子').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('新人手的机械键盘开箱！手感绝了'), findsOneWidget);
+    expect(find.text('帖子模式：仅显示我发布的帖子，按发布时间排序'), findsOneWidget);
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -420));
+    await tester.pumpAndSettle();
+    expect(find.text('从零搭一个舒服的宿舍桌面：完整清单'), findsOneWidget);
   });
 
   testWidgets('帖子图片点击转发到卡片的详情回调', (tester) async {

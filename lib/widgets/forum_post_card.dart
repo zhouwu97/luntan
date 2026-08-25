@@ -14,6 +14,7 @@ class ForumPostCard extends StatelessWidget {
     required this.onLike,
     required this.onBookmark,
     required this.onMenu,
+    this.contextMeta,
     this.interactionListenable,
   });
 
@@ -23,6 +24,7 @@ class ForumPostCard extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onBookmark;
   final VoidCallback onMenu;
+  final String? contextMeta;
   final Listenable? interactionListenable;
 
   @override
@@ -63,6 +65,27 @@ class ForumPostCard extends StatelessWidget {
                   color: post.isPinned ? AppTheme.pink : AppTheme.orange,
                 ),
                 const SizedBox(height: 6),
+              ],
+              if (contextMeta != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.background,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    contextMeta!,
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 10.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
               ],
               Text(
                 post.title,

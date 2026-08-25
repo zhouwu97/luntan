@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'controllers/auth_controller.dart';
 import 'controllers/comments_controller.dart';
 import 'controllers/feed_controller.dart';
+import 'controllers/home_personal_feed_controller.dart';
 import 'controllers/interaction_controller.dart';
 import 'controllers/post_detail_controller.dart';
 import 'controllers/publish_controller.dart';
@@ -39,6 +40,7 @@ class _LuntanAppState extends State<LuntanApp> {
   late final ForumStore store;
   late final ForumRepositories repositories;
   late final FeedController feedController;
+  late final HomePersonalFeedController personalFeedController;
   late final InteractionController interactionController;
   late final PublishController publishController;
   AuthController? authController;
@@ -46,7 +48,6 @@ class _LuntanAppState extends State<LuntanApp> {
   int currentTab = 0;
   bool browseWithoutAuth = false;
   int unreadCount = 0;
-  String? pendingProfileList;
   int profileRefreshToken = 0;
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -69,6 +70,10 @@ class _LuntanAppState extends State<LuntanApp> {
           tokenStore: widget.tokenStore,
         );
     feedController = FeedController(repository: repositories.feed);
+    personalFeedController = HomePersonalFeedController(
+      repository: repositories.profile,
+      mockStore: store,
+    );
     interactionController = InteractionController(
       repository: repositories.interactions!,
     );
@@ -89,6 +94,7 @@ class _LuntanAppState extends State<LuntanApp> {
     authController?.invalidateSession();
     unreadCount = 0;
     feedController.reset();
+    personalFeedController.reset();
     interactionController.clearUserState();
     if (!mounted) return;
     setState(() {
@@ -104,6 +110,7 @@ class _LuntanAppState extends State<LuntanApp> {
     interactionController.dispose();
     publishController.dispose();
     feedController.dispose();
+    personalFeedController.dispose();
     store.dispose();
     repositories.close();
     super.dispose();
@@ -275,6 +282,7 @@ class _LuntanAppState extends State<LuntanApp> {
           commentsController.dispose();
           if (apiMode && detailPost != null) {
             feedController.applyDetailResult(detailPost);
+            personalFeedController.applyDetailResult(detailPost);
           }
         });
   }
@@ -333,7 +341,7 @@ class _LuntanAppState extends State<LuntanApp> {
       );
     }
     final mutationRepository = repository as PostMutationRepository;
-    await mutationRepository.updatePost(
+    final updatedPost = await mutationRepository.updatePost(
       postId: post.id,
       communityId: post.communityId,
       type: _wirePostType(post.type),
@@ -341,6 +349,7 @@ class _LuntanAppState extends State<LuntanApp> {
       content: content,
       mediaIds: post.media.map((item) => item.id).toList(),
     );
+    personalFeedController.applyDetailResult(updatedPost);
     await feedController.refresh();
   }
 
@@ -354,6 +363,7 @@ class _LuntanAppState extends State<LuntanApp> {
     }
     final mutationRepository = repository as PostMutationRepository;
     await mutationRepository.deletePost(post.id);
+    personalFeedController.removePost(post.id);
     await feedController.refresh();
   }
 
@@ -434,15 +444,6 @@ class _LuntanAppState extends State<LuntanApp> {
     );
   }
 
-  void openProfileList(String label) {
-    if (!_requireAuth()) return;
-    setState(() {
-      currentTab = 2;
-      pendingProfileList = label;
-      profileRefreshToken++;
-    });
-  }
-
   void openMyProfile() {
     if (!mounted) return;
     setState(() {
@@ -521,6 +522,7 @@ class _LuntanAppState extends State<LuntanApp> {
     await authController?.logout();
     unreadCount = 0;
     feedController.reset();
+    personalFeedController.reset();
     interactionController.clearUserState();
     if (mounted) setState(() => currentTab = 0);
   }
@@ -529,6 +531,7 @@ class _LuntanAppState extends State<LuntanApp> {
     await repositories.auth?.deleteAccount();
     unreadCount = 0;
     feedController.reset();
+    personalFeedController.reset();
     interactionController.clearUserState();
     if (mounted) {
       setState(() {
@@ -570,14 +573,14 @@ class _LuntanAppState extends State<LuntanApp> {
             onOpenCommunityId: openCommunity,
             onOpenComments: (post) => openPost(post, focusComments: true),
             onOpenProfile: openMyProfile,
-            onOpenMyComments: () => openProfileList('我的评论'),
-            onOpenMyPosts: () => openProfileList('我的发布'),
-            onOpenComposer: showComposer,
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
             onToggleLike: (post) => togglePostLike(post),
             onToggleBookmark: (post) => toggleBookmark(post),
             onRequireAuth: _openLogin,
+            isAuthenticated:
+                !apiMode || authController?.status == AuthStatus.authenticated,
+            personalFeedController: personalFeedController,
             platform: repositories.platform,
             unread: apiMode ? unreadCount : null,
             interactionController: interactionController,
@@ -595,10 +598,6 @@ class _LuntanAppState extends State<LuntanApp> {
             currentUserId: currentUser?.id,
             isApiMode: apiMode,
             onOpenPost: openPost,
-            openList: pendingProfileList,
-            onListOpened: () {
-              if (mounted) setState(() => pendingProfileList = null);
-            },
             onOpenHome: () => setState(() => currentTab = 0),
             onOpenComposer: showComposer,
             onOpenMessages: showMessages,

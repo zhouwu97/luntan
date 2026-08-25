@@ -225,6 +225,10 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 }
 
 func TestProfileCommentsReturnsPostsOrderedByLatestReceivedComment(t *testing.T) {
+	query, _, err := profileCommentListQuery("u1", "", 1)
+	if err != nil || !strings.Contains(query, "c.author_id <> p.author_id") {
+		t.Fatalf("profile comments query must exclude self comments: %s", query)
+	}
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)

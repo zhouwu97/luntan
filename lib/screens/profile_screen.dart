@@ -18,8 +18,6 @@ class ProfileScreen extends StatelessWidget {
     super.key,
     required this.store,
     required this.onOpenPost,
-    this.openList,
-    this.onListOpened,
     required this.onOpenHome,
     required this.onOpenComposer,
     required this.onOpenMessages,
@@ -42,8 +40,6 @@ class ProfileScreen extends StatelessWidget {
 
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
-  final String? openList;
-  final VoidCallback? onListOpened;
   final VoidCallback onOpenHome;
   final VoidCallback onOpenComposer;
   final VoidCallback onOpenMessages;
@@ -65,29 +61,6 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final requestedList = openList;
-    if (requestedList != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
-        if (isApiMode && profileRepository != null) {
-          showModalBottomSheet<void>(
-            context: context,
-            showDragHandle: true,
-            isScrollControlled: true,
-            builder: (_) => _ProfileListSheet(
-              label: requestedList,
-              kind: requestedList == '我的评论' ? 'comments' : 'posts',
-              repository: profileRepository!,
-              onOpenPost: onOpenPost,
-              onOpenPostById: onOpenPostById,
-            ),
-          );
-        } else if (!isApiMode) {
-          _showList(context, requestedList);
-        }
-        onListOpened?.call();
-      });
-    }
     if (isApiMode && currentUser == null) {
       return _GuestProfileScreen(onRequireAuth: onRequireAuth);
     }

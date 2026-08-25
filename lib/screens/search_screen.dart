@@ -37,13 +37,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final queryController = TextEditingController();
-  final List<String> recentSearches = <String>[
-    '新生攻略',
-    '键盘推荐',
-    '食堂',
-    '社团',
-    '考研',
-  ];
+  final List<String> recentSearches = <String>[];
   SearchKind kind = SearchKind.all;
   Timer? debounce;
   SearchResult result = const SearchResult();
@@ -58,6 +52,7 @@ class _SearchScreenState extends State<SearchScreen> {
   SharedPreferences? preferences;
 
   static const recentSearchesKey = 'search.recent.v1';
+  static const suggestedSearches = <String>['食堂', '新生', '社团', '考研'];
 
   @override
   void dispose() {
@@ -228,7 +223,7 @@ class _SearchScreenState extends State<SearchScreen> {
           autofocus: true,
           textInputAction: TextInputAction.search,
           onChanged: (_) => search(),
-          onSubmitted: (_) => search(),
+          onSubmitted: (value) => search(value),
           decoration: const InputDecoration(
             hintText: '搜索帖子 / 用户 / 板块',
             prefixIcon: Icon(Icons.search_rounded),
@@ -267,10 +262,10 @@ class _SearchScreenState extends State<SearchScreen> {
       return ListView(
         padding: const EdgeInsets.all(AppTheme.pagePadding),
         children: [
-          Row(
-            children: [
-              const Expanded(child: _GroupTitle(title: '最近搜索')),
-              if (recentSearches.isNotEmpty)
+          if (recentSearches.isNotEmpty) ...[
+            Row(
+              children: [
+                const Expanded(child: _GroupTitle(title: '最近搜索')),
                 TextButton(
                   onPressed: _clearRecent,
                   child: const Text(
@@ -281,12 +276,29 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 ),
-            ],
-          ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: recentSearches
+                  .map(
+                    (item) => ActionChip(
+                      label: Text(item),
+                      onPressed: () => search(item),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+          const SizedBox(height: 24),
+          const _GroupTitle(title: '猜你想搜'),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: recentSearches
+            children: suggestedSearches
                 .map(
                   (item) => ActionChip(
                     label: Text(item),
@@ -443,6 +455,7 @@ class _SearchScreenState extends State<SearchScreen> {
               onBookmark: () =>
                   widget.interactionController.toggleBookmark(post),
               onMenu: () {},
+              interactionListenable: widget.interactionController,
             ),
           ),
         ],

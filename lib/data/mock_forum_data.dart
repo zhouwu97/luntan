@@ -205,21 +205,6 @@ class ForumStore extends ChangeNotifier {
     return List.unmodifiable(result);
   }
 
-  List<Comment> commentsByAuthor(String authorId) {
-    final result =
-        commentsByPost.values
-            .expand((items) => items)
-            .where(
-              (comment) =>
-                  comment.authorId == authorId &&
-                  comment.publicationStatus ==
-                      CommentPublicationStatus.published,
-            )
-            .toList()
-          ..sort((a, b) => _compareCommentsByTime(b, a));
-    return result;
-  }
-
   List<Post> get bookmarkedPosts =>
       posts.where((post) => post.isBookmarked).toList();
 

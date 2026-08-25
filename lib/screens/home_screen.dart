@@ -24,6 +24,8 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenPost,
     required this.onOpenComments,
     required this.onOpenProfile,
+    required this.onOpenMyComments,
+    required this.onOpenMyPosts,
     required this.onOpenComposer,
     required this.onOpenMessages,
     required this.onFeedback,
@@ -47,6 +49,8 @@ class HomeScreen extends StatefulWidget {
   final ValueChanged<Post> onOpenPost;
   final ValueChanged<Post> onOpenComments;
   final VoidCallback onOpenProfile;
+  final VoidCallback onOpenMyComments;
+  final VoidCallback onOpenMyPosts;
   final VoidCallback onOpenComposer;
   final VoidCallback onOpenMessages;
   final ValueChanged<String> onFeedback;
@@ -90,10 +94,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widget.communityRepository != null) {
       _loadCommunities();
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _loadFeed();
-    });
+    // 有板块仓储时，首个 feed 查询要等板块选择完成，避免先发一次空条件请求。
+    if (widget.communityRepository == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _loadFeed();
+      });
+    }
   }
 
   @override
@@ -148,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
         communities = visibleCommunities;
         selectedCommunityId = nextSelectedCommunityId;
       });
-      if (shouldReload) _loadFeed();
+      if (shouldReload || visibleCommunities.isEmpty) _loadFeed();
     } catch (_) {
       if (!mounted) return;
       widget.onFeedback('板块加载失败，稍后可重试');
@@ -233,6 +240,7 @@ class _HomeScreenState extends State<HomeScreen> {
           type: type,
           store: widget.store,
           onOpenPost: widget.onOpenPost,
+          interactionController: widget.interactionController,
           onLike: widget.onToggleLike,
           onBookmark: widget.onToggleBookmark,
           feedRepository: widget.feedRepository,
@@ -247,11 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        widget.store,
-        widget.feedController,
-        widget.interactionController,
-      ]),
+      animation: Listenable.merge([widget.store, widget.feedController]),
       builder: (context, _) {
         final posts = _visiblePosts;
         final feedState = widget.feedController.state;
@@ -308,7 +312,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: _QuickActions(
                             unread:
                                 widget.unread ?? widget.store.unreadMessages,
-                            onOpenProfile: widget.onOpenProfile,
+                            onOpenMyComments: widget.onOpenMyComments,
+                            onOpenMyPosts: widget.onOpenMyPosts,
                             onOpenMessages: widget.onOpenMessages,
                             onOpenComposer: widget.onOpenComposer,
                           ),
@@ -352,6 +357,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       onBookmark: () =>
                                           widget.onToggleBookmark(post),
                                       onMenu: () => _showPostMenu(post),
+                                      interactionListenable:
+                                          widget.interactionController,
                                     );
                                   },
                                 ),
@@ -403,7 +410,16 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('分享帖子'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                Clipboard.setData(ClipboardData(text: '/posts/${post.id}'));
+                final baseUrl = Uri.parse(
+                  const String.fromEnvironment(
+                    'WEB_BASE_URL',
+                    defaultValue: 'https://luntan.app',
+                  ),
+                );
+                final shareUrl = baseUrl
+                    .resolve('/posts/${Uri.encodeComponent(post.id)}')
+                    .toString();
+                Clipboard.setData(ClipboardData(text: shareUrl));
                 widget.onFeedback('帖子链接已复制');
               },
             ),
@@ -608,6 +624,7 @@ class _CommunityTab extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: AppTheme.tabMotion,
+        curve: AppTheme.stateCurve,
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
@@ -718,43 +735,54 @@ class _FeedToolbar extends StatelessWidget {
 class _QuickActions extends StatelessWidget {
   const _QuickActions({
     required this.unread,
-    required this.onOpenProfile,
+    required this.onOpenMyComments,
+    required this.onOpenMyPosts,
     required this.onOpenMessages,
     required this.onOpenComposer,
   });
 
   final int unread;
-  final VoidCallback onOpenProfile;
+  final VoidCallback onOpenMyComments;
+  final VoidCallback onOpenMyPosts;
   final VoidCallback onOpenMessages;
   final VoidCallback onOpenComposer;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-    child: Row(
-      children: [
-        _QuickAction(
-          icon: Icons.chat_bubble_outline_rounded,
-          label: '我的评论',
-          onTap: onOpenProfile,
-        ),
-        _QuickAction(
-          icon: Icons.article_outlined,
-          label: '我的发布',
-          onTap: onOpenProfile,
-        ),
-        _QuickAction(
-          icon: Icons.notifications_none_rounded,
-          label: '消息',
-          badge: unread,
-          onTap: onOpenMessages,
-        ),
-        _QuickAction(
-          icon: Icons.add_circle_outline_rounded,
-          label: '发帖',
-          onTap: onOpenComposer,
-        ),
-      ],
+    padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+    child: Container(
+      height: 66,
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        children: [
+          _QuickAction(
+            icon: Icons.chat_bubble_outline_rounded,
+            label: '我的评论',
+            onTap: onOpenMyComments,
+          ),
+          _QuickAction(
+            icon: Icons.article_outlined,
+            label: '我的发布',
+            onTap: onOpenMyPosts,
+          ),
+          _QuickAction(
+            icon: Icons.notifications_none_rounded,
+            label: '消息',
+            badge: unread,
+            onTap: onOpenMessages,
+          ),
+          _QuickAction(
+            icon: Icons.add_circle_outline_rounded,
+            label: '发帖',
+            onTap: onOpenComposer,
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -879,7 +907,8 @@ class _SortItem extends StatelessWidget {
         ),
         const SizedBox(height: 5),
         AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: AppTheme.tabMotion,
+          curve: AppTheme.contentCurve,
           width: active ? 20 : 0,
           height: 3,
           decoration: BoxDecoration(

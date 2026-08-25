@@ -18,6 +18,8 @@ class ProfileScreen extends StatelessWidget {
     super.key,
     required this.store,
     required this.onOpenPost,
+    this.openList,
+    this.onListOpened,
     required this.onOpenHome,
     required this.onOpenComposer,
     required this.onOpenMessages,
@@ -35,10 +37,13 @@ class ProfileScreen extends StatelessWidget {
     this.onRequireAuth,
     this.onOpenModeration,
     this.onOpenRelations,
+    this.refreshToken = 0,
   });
 
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
+  final String? openList;
+  final VoidCallback? onListOpened;
   final VoidCallback onOpenHome;
   final VoidCallback onOpenComposer;
   final VoidCallback onOpenMessages;
@@ -56,9 +61,33 @@ class ProfileScreen extends StatelessWidget {
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenModeration;
   final void Function(String userId, bool followers)? onOpenRelations;
+  final int refreshToken;
 
   @override
   Widget build(BuildContext context) {
+    final requestedList = openList;
+    if (requestedList != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        if (isApiMode && profileRepository != null) {
+          showModalBottomSheet<void>(
+            context: context,
+            showDragHandle: true,
+            isScrollControlled: true,
+            builder: (_) => _ProfileListSheet(
+              label: requestedList,
+              kind: requestedList == '我的评论' ? 'comments' : 'posts',
+              repository: profileRepository!,
+              onOpenPost: onOpenPost,
+              onOpenPostById: onOpenPostById,
+            ),
+          );
+        } else if (!isApiMode) {
+          _showList(context, requestedList);
+        }
+        onListOpened?.call();
+      });
+    }
     if (isApiMode && currentUser == null) {
       return _GuestProfileScreen(onRequireAuth: onRequireAuth);
     }
@@ -76,6 +105,7 @@ class ProfileScreen extends StatelessWidget {
         onOpenPostById: onOpenPostById,
         onOpenModeration: onOpenModeration,
         onOpenRelations: onOpenRelations,
+        refreshToken: refreshToken,
       );
     }
     return AnimatedBuilder(
@@ -244,11 +274,21 @@ class ProfileScreen extends StatelessWidget {
       '我的发布' || '我的发帖' =>
         store.posts.where((post) => post.authorId == userId).toList()
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+      '我的评论' || '我的回帖' =>
+        store.posts
+            .where((post) => post.authorId == userId)
+            .where((post) => store.commentsFor(post).isNotEmpty)
+            .toList()
+          ..sort((a, b) {
+            final aComments = store.commentsFor(a);
+            final bComments = store.commentsFor(b);
+            final byTime = bComments.last.createdAt.compareTo(
+              aComments.last.createdAt,
+            );
+            return byTime == 0 ? b.id.compareTo(a.id) : byTime;
+          }),
       _ => <Post>[],
     };
-    final comments = label == '我的评论'
-        ? store.commentsByAuthor(userId)
-        : <Comment>[];
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -267,7 +307,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: posts.isEmpty && comments.isEmpty
+                child: posts.isEmpty
                     ? Center(
                         child: Text(
                           label == '我的发布' ||
@@ -307,37 +347,6 @@ class ProfileScreen extends StatelessWidget {
                               },
                             ),
                           ),
-                          ...comments.map((comment) {
-                            final post = store.posts.firstWhere(
-                              (item) => item.id == comment.postId,
-                              orElse: () => store.posts.first,
-                            );
-                            return ListTile(
-                              leading: const Icon(
-                                Icons.mode_comment_outlined,
-                                color: AppTheme.mint,
-                              ),
-                              title: Text(
-                                comment.content,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '来自 ${post.title}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onTap: () {
-                                Navigator.pop(context);
-                                final openById = onOpenPostById;
-                                if (openById != null) {
-                                  openById(post.id, focusCommentId: comment.id);
-                                } else {
-                                  onOpenPost(post);
-                                }
-                              },
-                            );
-                          }),
                         ],
                       ),
               ),
@@ -490,6 +499,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onDeleteAccount,
     this.onOpenModeration,
     this.onOpenRelations,
+    required this.refreshToken,
   });
 
   final ProfileRepository repository;
@@ -500,6 +510,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onOpenModeration;
   final void Function(String userId, bool followers)? onOpenRelations;
+  final int refreshToken;
   final StoreRepository? storeRepository;
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
@@ -520,8 +531,32 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     pointsFuture = widget.storeRepository?.overview();
   }
 
-  void retry() =>
-      setState(() => profileFuture = widget.repository.getProfile());
+  @override
+  void didUpdateWidget(covariant _ApiProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _refresh();
+    }
+  }
+
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    final profile = widget.repository.getProfile();
+    final points = widget.storeRepository?.overview();
+    setState(() {
+      profileFuture = profile;
+      pointsFuture = points;
+    });
+    try {
+      await profile;
+    } catch (_) {
+      // FutureBuilder 保留错误态；下拉刷新本身不再向上抛异常。
+    }
+  }
+
+  void retry() {
+    _refresh();
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<ProfileSummary>(
@@ -553,195 +588,198 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   Widget _content(ProfileSummary profile) => Scaffold(
     body: SafeArea(
       bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-        children: [
-          _ProfileTopbar(
-            onMessages: widget.onOpenMessages,
-            onSettings: () => _showSettings(context),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const CircleAvatar(
-                radius: 32,
-                backgroundColor: AppTheme.surfaceBlue,
-                child: Icon(
-                  Icons.person_rounded,
-                  color: AppTheme.primary,
-                  size: 32,
+      child: RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          children: [
+            _ProfileTopbar(
+              onMessages: widget.onOpenMessages,
+              onSettings: () => _showSettings(context),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const CircleAvatar(
+                  radius: 32,
+                  backgroundColor: AppTheme.surfaceBlue,
+                  child: Icon(
+                    Icons.person_rounded,
+                    color: AppTheme.primary,
+                    size: 32,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      profile.nickname,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        profile.nickname,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '@${profile.username} · Lv.${profile.level} · 信任${profile.trustLevel}',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                    if (profile.signature.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
-                        profile.signature,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        '@${profile.username} · Lv.${profile.level} · 信任${profile.trustLevel}',
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: 12,
                         ),
                       ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (widget.storeRepository != null) ...[
-            const SizedBox(height: 14),
-            FutureBuilder<PointsOverview>(
-              future: pointsFuture,
-              builder: (context, snapshot) => _PointsBalanceCard(
-                balance: snapshot.data?.balance,
-                onOpenPoints: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => PointsCenterScreen(
-                      apiRepository: widget.storeRepository!,
-                    ),
-                  ),
-                ),
-                onOpenStore: () => Navigator.of(context)
-                    .push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ExchangeStoreScreen(
-                          apiRepository: widget.storeRepository!,
+                      if (profile.signature.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          profile.signature,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
-                    )
-                    .then((_) {
-                      if (mounted) {
-                        setState(
-                          () =>
-                              pointsFuture = widget.storeRepository!.overview(),
-                        );
-                      }
-                    }),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 15),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Row(
-              children: [
-                _ApiStat(
-                  value: profile.postCount,
-                  label: '我的发布',
-                  onTap: () => _showList('我的发布'),
-                ),
-                _ApiStat(
-                  value: profile.commentCount,
-                  label: '我的评论',
-                  onTap: () => _showList('我的评论'),
-                ),
-                _ApiStat(
-                  value: profile.followerCount,
-                  label: '粉丝',
-                  onTap: widget.onOpenRelations == null
-                      ? null
-                      : () => widget.onOpenRelations!(profile.id, true),
-                ),
-                _ApiStat(
-                  value: profile.followingCount,
-                  label: '关注',
-                  onTap: widget.onOpenRelations == null
-                      ? null
-                      : () => widget.onOpenRelations!(profile.id, false),
+                      ],
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 22),
-          const Text(
-            '常用功能',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _ProfileTool(
-                icon: Icons.star_rounded,
-                label: '我的收藏',
-                color: AppTheme.orange,
-                onTap: () => _openBookmarks(),
-              ),
-              _ProfileTool(
-                icon: Icons.thumb_up_rounded,
-                label: '我的点赞',
-                color: AppTheme.pink,
-                onTap: () => _showList('我的点赞'),
-              ),
-              _ProfileTool(
-                icon: Icons.history_rounded,
-                label: '浏览历史',
-                color: AppTheme.primary,
-                onTap: () => _showList('浏览历史'),
-              ),
-              _ProfileTool(
-                icon: Icons.mode_comment_outlined,
-                label: '我的评论',
-                color: AppTheme.mint,
-                onTap: () => _showList('我的评论'),
+            if (widget.storeRepository != null) ...[
+              const SizedBox(height: 14),
+              FutureBuilder<PointsOverview>(
+                future: pointsFuture,
+                builder: (context, snapshot) => _PointsBalanceCard(
+                  balance: snapshot.data?.balance,
+                  onOpenPoints: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => PointsCenterScreen(
+                        apiRepository: widget.storeRepository!,
+                      ),
+                    ),
+                  ),
+                  onOpenStore: () => Navigator.of(context)
+                      .push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ExchangeStoreScreen(
+                            apiRepository: widget.storeRepository!,
+                          ),
+                        ),
+                      )
+                      .then((_) {
+                        if (mounted) {
+                          setState(
+                            () => pointsFuture = widget.storeRepository!
+                                .overview(),
+                          );
+                        }
+                      }),
+                ),
               ),
             ],
-          ),
-          const SizedBox(height: 22),
-          const Text(
-            '最近发布',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Row(
+                children: [
+                  _ApiStat(
+                    value: profile.postCount,
+                    label: '我的发布',
+                    onTap: () => _showList('我的发布'),
+                  ),
+                  _ApiStat(
+                    value: profile.commentCount,
+                    label: '我的评论',
+                    onTap: () => _showList('我的评论'),
+                  ),
+                  _ApiStat(
+                    value: profile.followerCount,
+                    label: '粉丝',
+                    onTap: widget.onOpenRelations == null
+                        ? null
+                        : () => widget.onOpenRelations!(profile.id, true),
+                  ),
+                  _ApiStat(
+                    value: profile.followingCount,
+                    label: '关注',
+                    onTap: widget.onOpenRelations == null
+                        ? null
+                        : () => widget.onOpenRelations!(profile.id, false),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: () => _showList('我的发布'),
-            icon: const Icon(Icons.article_outlined),
-            label: const Text('查看我的全部帖子'),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            '浅蓝论坛 · 把真实的校园生活留在这里',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.textSecondary.withValues(alpha: .7),
-              fontSize: 12,
+            const SizedBox(height: 22),
+            const Text(
+              '常用功能',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _ProfileTool(
+                  icon: Icons.star_rounded,
+                  label: '我的收藏',
+                  color: AppTheme.orange,
+                  onTap: () => _openBookmarks(),
+                ),
+                _ProfileTool(
+                  icon: Icons.thumb_up_rounded,
+                  label: '我的点赞',
+                  color: AppTheme.pink,
+                  onTap: () => _showList('我的点赞'),
+                ),
+                _ProfileTool(
+                  icon: Icons.history_rounded,
+                  label: '浏览历史',
+                  color: AppTheme.primary,
+                  onTap: () => _showList('浏览历史'),
+                ),
+                _ProfileTool(
+                  icon: Icons.mode_comment_outlined,
+                  label: '我的评论',
+                  color: AppTheme.mint,
+                  onTap: () => _showList('我的评论'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            const Text(
+              '最近发布',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => _showList('我的发布'),
+              icon: const Icon(Icons.article_outlined),
+              label: const Text('查看我的全部帖子'),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '浅蓝论坛 · 把真实的校园生活留在这里',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textSecondary.withValues(alpha: .7),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -877,7 +915,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   }
 }
 
-/// 个人中心列表 sheet：帖子和评论使用不同的数据结构与游标。
+/// 个人中心列表 sheet：所有入口都展示帖子，区别只在服务端排序字段。
 class _ProfileListSheet extends StatefulWidget {
   const _ProfileListSheet({
     required this.label,
@@ -898,7 +936,7 @@ class _ProfileListSheet extends StatefulWidget {
 }
 
 class _ProfileListSheetState extends State<_ProfileListSheet> {
-  final List<ProfileListItem> items = [];
+  final List<ProfilePostItem> items = [];
   final ScrollController scrollController = ScrollController();
   String? nextCursor;
   bool hasMore = true;
@@ -1056,30 +1094,22 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
               : const SizedBox(height: 6);
         }
         final item = items[index];
-        final String title;
-        final String subtitle;
-        final bool isComment;
-        if (item is ProfileCommentItem) {
-          isComment = true;
-          title = item.content;
-          subtitle =
-              '${item.postTitle} · ${item.communityName} · '
-              '${relativeTimeLabel(item.createdAt)}';
-        } else {
-          final post = item as ProfilePostItem;
-          isComment = false;
-          title = post.title;
-          subtitle =
-              '${post.communityName} · ${post.commentCount} 回复 · '
-              '发布于${relativeTimeLabel(post.publishedAt)}';
-        }
+        final post = item;
+        final isCommentList = widget.kind == 'comments';
+        final activityAt = post.activityAt ?? post.publishedAt;
+        final title = post.title;
+        final subtitle = isCommentList
+            ? '${post.communityName} · ${post.commentCount} 回复 · '
+                  '最近回复于${relativeTimeLabel(activityAt)}'
+            : '${post.communityName} · ${post.commentCount} 回复 · '
+                  '发布于${relativeTimeLabel(post.publishedAt)}';
         return ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(
-            isComment
+            isCommentList
                 ? Icons.mode_comment_outlined
                 : (_isHistory ? Icons.history_rounded : Icons.article_outlined),
-            color: isComment ? AppTheme.mint : AppTheme.primary,
+            color: isCommentList ? AppTheme.mint : AppTheme.primary,
           ),
           title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text(
@@ -1089,16 +1119,6 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
           ),
           onTap: () {
             Navigator.pop(context);
-            if (item is ProfileCommentItem) {
-              final onOpenPostById = widget.onOpenPostById;
-              if (onOpenPostById != null) {
-                onOpenPostById(item.postId, focusCommentId: item.id);
-                return;
-              }
-              widget.onOpenPost(_postFromComment(item));
-              return;
-            }
-            final post = item as ProfilePostItem;
             final onOpenPostById = widget.onOpenPostById;
             if (onOpenPostById != null) {
               onOpenPostById(post.id);
@@ -1123,17 +1143,6 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
     createdAt: item.publishedAt,
     updatedAt: item.publishedAt,
     publishedAt: item.publishedAt,
-  );
-
-  Post _postFromComment(ProfileCommentItem item) => Post(
-    id: item.postId,
-    authorId: '',
-    communityId: item.communityId,
-    title: item.postTitle,
-    content: '',
-    createdAt: item.createdAt,
-    updatedAt: item.createdAt,
-    publishedAt: item.createdAt,
   );
 }
 

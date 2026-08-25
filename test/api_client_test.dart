@@ -107,4 +107,24 @@ void main() {
       ),
     );
   });
+
+  test('ApiClient 上传使用独立的长超时，不受普通请求超时影响', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      timeout: const Duration(milliseconds: 1),
+      uploadTimeout: const Duration(milliseconds: 100),
+      client: MockClient(
+        (_) async => Future<http.Response>.delayed(
+          const Duration(milliseconds: 20),
+          () => http.Response('', 200),
+        ),
+      ),
+    );
+
+    await client.uploadBytes(Uri.parse('https://upload.example/media'), <int>[
+      1,
+      2,
+      3,
+    ], contentType: 'image/png');
+  });
 }

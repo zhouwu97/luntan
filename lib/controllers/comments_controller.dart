@@ -24,53 +24,81 @@ class CommentsController extends ChangeNotifier {
   String? _pendingCommentIdempotencyKey;
   final Map<String, Future<Comment>> _replyInFlight = {};
   final Map<String, String> _pendingReplyIdempotencyKeys = {};
+  int _generation = 0;
 
-  Future<void> load() async {
-    if (isLoading) return;
+  Future<void> load({bool force = false}) async {
+    if (isLoading && !force) return;
+    final requestGeneration = ++_generation;
     isLoading = true;
+    isLoadingMore = false;
     errorMessage = null;
     notifyListeners();
     try {
       final page = await _repository.listComments(postId: postId);
-      items
-        ..clear()
-        ..addAll(page.items)
-        ..sort(_compareByCreatedAt);
+      if (requestGeneration != _generation) return;
+      _replaceItems(page.items);
       nextCursor = page.nextCursor;
-      hasMore = page.hasMore;
+      hasMore = page.hasMore && page.nextCursor != null;
     } catch (error) {
+      if (requestGeneration != _generation) return;
       errorMessage = '评论加载失败，请重试';
       rethrow;
     } finally {
-      isLoading = false;
-      notifyListeners();
+      if (requestGeneration == _generation) {
+        isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
-  Future<void> refresh() => load();
+  Future<void> refresh() => load(force: true);
 
   Future<void> loadMore() async {
-    if (isLoading || isLoadingMore || !hasMore) return;
+    if (isLoading || isLoadingMore || !hasMore || nextCursor == null) return;
+    final requestGeneration = _generation;
+    final cursor = nextCursor!;
     isLoadingMore = true;
     errorMessage = null;
     notifyListeners();
     try {
       final page = await _repository.listComments(
         postId: postId,
-        cursor: nextCursor,
+        cursor: cursor,
       );
-      items
-        ..addAll(page.items)
-        ..sort(_compareByCreatedAt);
+      if (requestGeneration != _generation || cursor != nextCursor) return;
+      _mergeItems(page.items);
       nextCursor = page.nextCursor;
-      hasMore = page.hasMore;
+      hasMore = page.hasMore && page.nextCursor != cursor;
     } catch (error) {
+      if (requestGeneration != _generation) return;
       errorMessage = '更多评论加载失败，请重试';
       rethrow;
     } finally {
-      isLoadingMore = false;
-      notifyListeners();
+      if (requestGeneration == _generation) {
+        isLoadingMore = false;
+        notifyListeners();
+      }
     }
+  }
+
+  void _replaceItems(Iterable<Comment> next) {
+    items
+      ..clear()
+      ..addAll(next);
+    _sortAndDedupe();
+  }
+
+  void _mergeItems(Iterable<Comment> next) {
+    items.addAll(next);
+    _sortAndDedupe();
+  }
+
+  void _sortAndDedupe() {
+    final byId = <String, Comment>{for (final item in items) item.id: item};
+    items
+      ..clear()
+      ..addAll(byId.values)
+      ..sort(_compareByCreatedAt);
   }
 
   Future<Comment> addComment(String content) {
@@ -89,9 +117,7 @@ class CommentsController extends ChangeNotifier {
     future = create
         .then((comment) {
           _pendingCommentIdempotencyKey = null;
-          items
-            ..add(comment)
-            ..sort(_compareByCreatedAt);
+          _mergeItems([comment]);
           notifyListeners();
           return comment;
         })
@@ -129,9 +155,7 @@ class CommentsController extends ChangeNotifier {
     future = create
         .then((comment) {
           _pendingReplyIdempotencyKeys.remove(parent.id);
-          items
-            ..add(comment)
-            ..sort(_compareByCreatedAt);
+          _mergeItems([comment]);
           notifyListeners();
           return comment;
         })

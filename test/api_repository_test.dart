@@ -82,7 +82,7 @@ void main() {
     client.close();
   });
 
-  test('ProfileRepository 将我的评论解析为独立评论记录', () async {
+  test('ProfileRepository 将我的评论解析为收到回复的帖子记录', () async {
     Uri? requestedUri;
     final client = ApiClient(
       baseUri: Uri.parse('https://example.com'),
@@ -90,7 +90,7 @@ void main() {
         requestedUri = request.url;
         return http.Response.bytes(
           utf8.encode(
-            '{"items":[{"id":"comment-1","post_id":"post-1","post_title":"帖子标题","content":"我的评论内容","community_id":"c1","community_name":"大型拆箱","created_at":"2026-08-24T23:20:00Z"}],"next_cursor":"cursor-1","has_more":true}',
+            '{"items":[{"id":"post-1","title":"帖子标题","content_preview":"正文预览","community_id":"c1","community_name":"大型拆箱","comment_count":3,"like_count":2,"bookmark_count":1,"published_at":"2026-08-24T20:00:00Z","activity_at":"2026-08-24T23:20:00Z"}],"next_cursor":"cursor-1","has_more":true}',
           ),
           200,
           headers: const {'content-type': 'application/json; charset=utf-8'},
@@ -99,11 +99,11 @@ void main() {
     );
     final page = await ProfileRepository(client).list('comments');
 
-    final item = page.items.single as ProfileCommentItem;
-    expect(item.id, 'comment-1');
-    expect(item.postId, 'post-1');
-    expect(item.postTitle, '帖子标题');
-    expect(item.content, '我的评论内容');
+    final item = page.items.single;
+    expect(item.id, 'post-1');
+    expect(item.title, '帖子标题');
+    expect(item.commentCount, 3);
+    expect(item.activityAt, DateTime.parse('2026-08-24T23:20:00Z'));
     expect(requestedUri?.path, '/api/v1/me/comments');
     client.close();
   });

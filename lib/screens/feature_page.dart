@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controllers/interaction_controller.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
@@ -27,6 +28,7 @@ class FeaturePage extends StatefulWidget {
     required this.type,
     required this.store,
     required this.onOpenPost,
+    required this.interactionController,
     this.onOpenPostId,
     this.onLike,
     this.onBookmark,
@@ -39,6 +41,7 @@ class FeaturePage extends StatefulWidget {
   final FeatureType type;
   final ForumStore store;
   final ValueChanged<Post> onOpenPost;
+  final InteractionController interactionController;
   final ValueChanged<String>? onOpenPostId;
   final ValueChanged<Post>? onLike;
   final ValueChanged<Post>? onBookmark;
@@ -290,7 +293,7 @@ class _FeaturePageState extends State<FeaturePage> {
                 ),
               );
             }
-            return _body(context, snapshot.data ?? const <Post>[]);
+            return _body(snapshot.data ?? const <Post>[]);
           },
         ),
       );
@@ -298,60 +301,7 @@ class _FeaturePageState extends State<FeaturePage> {
     final posts = _posts();
     return Scaffold(
       appBar: AppBar(title: Text(title)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.auto_awesome_rounded,
-                  color: Colors.white,
-                  size: 30,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _description(type),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      height: 1.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (posts.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 80),
-              child: Center(
-                child: Text(
-                  '这里还没有内容',
-                  style: TextStyle(color: AppTheme.textSecondary),
-                ),
-              ),
-            )
-          else
-            ...posts.map(
-              (post) => ForumPostCard(
-                post: post,
-                onOpen: () => _openPost(post),
-                onLike: () => onLike?.call(post),
-                onBookmark: () => onBookmark?.call(post),
-                onMenu: () {},
-              ),
-            ),
-        ],
-      ),
+      body: _body(posts),
     );
   }
 
@@ -385,41 +335,15 @@ class _FeaturePageState extends State<FeaturePage> {
     return const <Post>[];
   }
 
-  Widget _body(BuildContext context, List<Post> posts) => ListView(
-    padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
-    children: [
-      Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          gradient: AppTheme.primaryGradient,
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.auto_awesome_rounded,
-              color: Colors.white,
-              size: 30,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _description(type),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  height: 1.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
+  Widget _body(List<Post> posts) => CustomScrollView(
+    slivers: [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+        sliver: SliverToBoxAdapter(child: _postIntro()),
       ),
-      const SizedBox(height: 16),
       if (posts.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 80),
+        const SliverFillRemaining(
+          hasScrollBody: false,
           child: Center(
             child: Text(
               '这里还没有内容',
@@ -428,45 +352,102 @@ class _FeaturePageState extends State<FeaturePage> {
           ),
         )
       else
-        ...posts.map(
-          (post) => ForumPostCard(
-            post: post,
-            onOpen: () => _openPost(post),
-            onLike: () => onLike?.call(post),
-            onBookmark: () => onBookmark?.call(post),
-            onMenu: () {},
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _postCard(posts[index]),
+              childCount: posts.length,
+            ),
           ),
         ),
+      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
     ],
   );
 
-  Widget _productBody(List<ApiStoreProduct> products) => ListView(
-    padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
-    children: [
-      _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
-      const SizedBox(height: 16),
+  Widget _postIntro() => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      gradient: AppTheme.primaryGradient,
+      borderRadius: BorderRadius.circular(22),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 30),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            _description(type),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              height: 1.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _postCard(Post post) => ForumPostCard(
+    post: post,
+    onOpen: () => _openPost(post),
+    onLike: () => onLike?.call(post),
+    onBookmark: () => onBookmark?.call(post),
+    onMenu: () {},
+    interactionListenable: widget.interactionController,
+  );
+
+  Widget _productBody(List<ApiStoreProduct> products) => CustomScrollView(
+    slivers: [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+        sliver: SliverToBoxAdapter(
+          child: _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
+        ),
+      ),
       if (products.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 80),
+        const SliverFillRemaining(
+          hasScrollBody: false,
           child: Center(child: Text('暂时还没有商品')),
         )
       else
-        ...products.asMap().entries.map(
-          (entry) =>
-              _ApiRankingProduct(rank: entry.key + 1, product: entry.value),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) =>
+                  _ApiRankingProduct(rank: index + 1, product: products[index]),
+              childCount: products.length,
+            ),
+          ),
         ),
+      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
     ],
   );
 
-  Widget _mockProductBody() => ListView(
-    padding: const EdgeInsets.fromLTRB(14, 8, 14, 24),
-    children: [
-      _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
-      const SizedBox(height: 16),
-      ...storeProducts.asMap().entries.map(
-        (entry) =>
-            _MockRankingProduct(rank: entry.key + 1, product: entry.value),
+  Widget _mockProductBody() => CustomScrollView(
+    slivers: [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+        sliver: SliverToBoxAdapter(
+          child: _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
+        ),
       ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => _MockRankingProduct(
+              rank: index + 1,
+              product: storeProducts[index],
+            ),
+            childCount: storeProducts.length,
+          ),
+        ),
+      ),
+      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
     ],
   );
 

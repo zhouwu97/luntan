@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/data/mock_forum_data.dart';
+import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/domain/repositories.dart';
 import 'package:luntan/screens/feature_page.dart';
+import 'package:luntan/controllers/interaction_controller.dart';
 
 class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
   int calls = 0;
@@ -30,6 +32,9 @@ class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
 void main() {
   testWidgets('功能页加载失败后重试会重新发起请求', (tester) async {
     final repository = _RetryFeatureFeed();
+    final interactionController = InteractionController(
+      repository: MockInteractionRepository(),
+    );
 
     await tester.pumpWidget(
       MaterialApp(
@@ -37,6 +42,7 @@ void main() {
           type: FeatureType.gameShare,
           store: ForumStore.seeded(),
           onOpenPost: (_) {},
+          interactionController: interactionController,
           feedRepository: repository,
         ),
       ),

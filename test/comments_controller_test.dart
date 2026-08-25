@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/controllers/comments_controller.dart';
@@ -53,10 +55,51 @@ void main() {
       expect(repository.replyCalls, 1);
     },
   );
+
+  test(
+    'CommentsController deduplicates repeated cursor pages and stops',
+    () async {
+      final repository = _FakeCommentRepository()..repeatCursorPage = true;
+      final controller = CommentsController(
+        repository: repository,
+        postId: 'p1',
+      );
+
+      await controller.load();
+      await controller.loadMore();
+
+      expect(controller.items, hasLength(1));
+      expect(controller.items.single.id, 'c1');
+      expect(controller.hasMore, isFalse);
+    },
+  );
+
+  test('CommentsController ignores a stale load after refresh', () async {
+    final pending = Completer<CommentPage>();
+    final repository = _FakeCommentRepository()
+      ..delayedInitialLoad = pending
+      ..returnFreshOnNextLoad = true;
+    final controller = CommentsController(repository: repository, postId: 'p1');
+
+    final staleLoad = controller.load();
+    await Future<void>.delayed(Duration.zero);
+    final freshLoad = controller.refresh();
+    await freshLoad;
+    pending.complete(
+      CommentPage(items: [repository._comment('stale', 'stale')]),
+    );
+    await staleLoad;
+
+    expect(controller.items, hasLength(1));
+    expect(controller.items.single.id, 'fresh');
+  });
 }
 
 class _FakeCommentRepository implements CommentRepository {
   bool failFirstLoad = false;
+  bool repeatCursorPage = false;
+  Completer<CommentPage>? delayedInitialLoad;
+  bool returnFreshOnNextLoad = false;
   int page = 0;
   int replyCalls = 0;
 
@@ -75,6 +118,15 @@ class _FakeCommentRepository implements CommentRepository {
     String? cursor,
     int limit = 20,
   }) async {
+    if (cursor == null && delayedInitialLoad != null) {
+      final pending = delayedInitialLoad!;
+      delayedInitialLoad = null;
+      return pending.future;
+    }
+    if (cursor == null && returnFreshOnNextLoad) {
+      returnFreshOnNextLoad = false;
+      return CommentPage(items: [_comment('fresh', 'fresh')], hasMore: false);
+    }
     if (failFirstLoad) {
       failFirstLoad = false;
       throw StateError('network');
@@ -83,6 +135,13 @@ class _FakeCommentRepository implements CommentRepository {
     if (page == 1) {
       return CommentPage(
         items: [_comment('c1', 'first')],
+        nextCursor: 'c1',
+        hasMore: true,
+      );
+    }
+    if (repeatCursorPage) {
+      return CommentPage(
+        items: [_comment('c1', 'duplicate')],
         nextCursor: 'c1',
         hasMore: true,
       );

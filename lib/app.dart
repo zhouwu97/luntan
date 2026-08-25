@@ -46,6 +46,8 @@ class _LuntanAppState extends State<LuntanApp> {
   int currentTab = 0;
   bool browseWithoutAuth = false;
   int unreadCount = 0;
+  String? pendingProfileList;
+  int profileRefreshToken = 0;
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
@@ -426,9 +428,27 @@ class _LuntanAppState extends State<LuntanApp> {
           onOpenComments: (post) => openPost(post, focusComments: true),
           onToggleLike: togglePostLike,
           onToggleBookmark: toggleBookmark,
+          interactionController: interactionController,
         ),
       ),
     );
+  }
+
+  void openProfileList(String label) {
+    if (!_requireAuth()) return;
+    setState(() {
+      currentTab = 2;
+      pendingProfileList = label;
+      profileRefreshToken++;
+    });
+  }
+
+  void openMyProfile() {
+    if (!mounted) return;
+    setState(() {
+      currentTab = 2;
+      profileRefreshToken++;
+    });
   }
 
   void openModeration() {
@@ -549,7 +569,9 @@ class _LuntanAppState extends State<LuntanApp> {
             onOpenUserId: openUserProfile,
             onOpenCommunityId: openCommunity,
             onOpenComments: (post) => openPost(post, focusComments: true),
-            onOpenProfile: () => setState(() => currentTab = 2),
+            onOpenProfile: openMyProfile,
+            onOpenMyComments: () => openProfileList('我的评论'),
+            onOpenMyPosts: () => openProfileList('我的发布'),
             onOpenComposer: showComposer,
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
@@ -573,6 +595,10 @@ class _LuntanAppState extends State<LuntanApp> {
             currentUserId: currentUser?.id,
             isApiMode: apiMode,
             onOpenPost: openPost,
+            openList: pendingProfileList,
+            onListOpened: () {
+              if (mounted) setState(() => pendingProfileList = null);
+            },
             onOpenHome: () => setState(() => currentTab = 0),
             onOpenComposer: showComposer,
             onOpenMessages: showMessages,
@@ -582,6 +608,7 @@ class _LuntanAppState extends State<LuntanApp> {
             onDeleteAccount: apiMode ? _deleteAccount : null,
             onRequireAuth: _openLogin,
             onOpenRelations: openUserRelations,
+            refreshToken: profileRefreshToken,
             profileRepository: repositories.profile,
             storeRepository: repositories.store,
             bookmarkRepository: repositories.bookmarks,
@@ -593,7 +620,7 @@ class _LuntanAppState extends State<LuntanApp> {
       bottomNavigationBar: _BottomBar(
         currentTab: currentTab,
         onHome: () => setState(() => currentTab = 0),
-        onProfile: () => setState(() => currentTab = 2),
+        onProfile: openMyProfile,
         onCreate: showComposer,
       ),
     );

@@ -112,6 +112,7 @@ class ApiClient {
     required Uri baseUri,
     http.Client? client,
     this.timeout = const Duration(seconds: 10),
+    this.uploadTimeout = const Duration(seconds: 120),
     TokenStore? tokenStore,
     this.onSessionInvalidated,
   }) : _baseUri = baseUri,
@@ -121,6 +122,9 @@ class ApiClient {
   final Uri _baseUri;
   final http.Client _client;
   final Duration timeout;
+
+  /// 直传媒体不复用普通 API 的短超时；上传凭证和完成确认仍走 [timeout]。
+  final Duration uploadTimeout;
   final TokenStore? _tokenStore;
   void Function()? onSessionInvalidated;
   Future<void>? _refreshInFlight;
@@ -141,8 +145,15 @@ class ApiClient {
     String path, {
     Object? body,
     Map<String, String>? headers,
+    Duration? requestTimeout,
   }) async {
-    return _request(method: 'POST', path: path, body: body, headers: headers);
+    return _request(
+      method: 'POST',
+      path: path,
+      body: body,
+      headers: headers,
+      requestTimeout: requestTimeout,
+    );
   }
 
   Future<Map<String, dynamic>> patchJson(
@@ -176,6 +187,7 @@ class ApiClient {
       rawBody: bytes,
       headers: {'Content-Type': contentType},
       includeAuthToken: false,
+      requestTimeout: uploadTimeout,
     );
     _decodeResponse(response);
   }
@@ -189,6 +201,7 @@ class ApiClient {
     Map<String, String>? queryParameters,
     Map<String, String>? headers,
     bool allowRefresh = true,
+    Duration? requestTimeout,
   }) async {
     var response = await _send(
       method: method,
@@ -196,6 +209,7 @@ class ApiClient {
       body: body,
       queryParameters: queryParameters,
       headers: headers,
+      requestTimeout: requestTimeout,
     );
     if (response.statusCode == 401 &&
         allowRefresh &&
@@ -215,6 +229,7 @@ class ApiClient {
         body: body,
         queryParameters: queryParameters,
         headers: headers,
+        requestTimeout: requestTimeout,
       );
       if (response.statusCode == 401) {
         await _tokenStore.clear();
@@ -232,6 +247,7 @@ class ApiClient {
     Map<String, String>? queryParameters,
     Map<String, String>? headers,
     bool includeAuthToken = true,
+    Duration? requestTimeout,
   }) async {
     final uri = _baseUri
         .resolve(path)
@@ -249,22 +265,26 @@ class ApiClient {
     }
     final encodedBody = rawBody ?? (body == null ? null : jsonEncode(body));
     try {
+      final effectiveTimeout = requestTimeout ?? timeout;
       return await switch (method) {
-        'GET' => _client.get(uri, headers: requestHeaders).timeout(timeout),
+        'GET' =>
+          _client.get(uri, headers: requestHeaders).timeout(effectiveTimeout),
         'POST' =>
           _client
               .post(uri, headers: requestHeaders, body: encodedBody)
-              .timeout(timeout),
+              .timeout(effectiveTimeout),
         'PATCH' =>
           _client
               .patch(uri, headers: requestHeaders, body: encodedBody)
-              .timeout(timeout),
+              .timeout(effectiveTimeout),
         'PUT' =>
           _client
               .put(uri, headers: requestHeaders, body: encodedBody)
-              .timeout(timeout),
+              .timeout(effectiveTimeout),
         'DELETE' =>
-          _client.delete(uri, headers: requestHeaders).timeout(timeout),
+          _client
+              .delete(uri, headers: requestHeaders)
+              .timeout(effectiveTimeout),
         _ => throw StateError('unsupported HTTP method: $method'),
       };
     } on TimeoutException catch (error) {

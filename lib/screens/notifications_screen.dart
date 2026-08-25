@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/api/api_client.dart';
@@ -292,16 +294,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           onTap: () async {
             if (!item.isRead) {
               setState(() => item.isRead = true);
-              try {
-                await widget.repository.markNotificationRead(item.id);
-              } catch (error) {
-                if (!context.mounted) return;
-                setState(() => item.isRead = false);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(userFacingApiMessage(error))),
-                );
-                return;
-              }
+              // 先打开目标页面，已读回写不应阻塞用户查看通知内容。
+              unawaited(_markNotificationRead(item));
             }
             if (!context.mounted) return;
             NotificationTargetRouter.open(
@@ -321,6 +315,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _markNotificationRead(ForumNotification item) async {
+    try {
+      await widget.repository.markNotificationRead(item.id);
+    } catch (_) {
+      if (!mounted || !items.contains(item)) return;
+      setState(() => item.isRead = false);
+    }
   }
 
   IconData _icon(String type) => type.contains('like')

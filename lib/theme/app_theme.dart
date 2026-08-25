@@ -32,6 +32,8 @@ class AppTheme {
   static const fastMotion = Duration(milliseconds: 100);
   static const tabMotion = Duration(milliseconds: 200);
   static const sheetMotion = Duration(milliseconds: 250);
+  static const Curve contentCurve = Curves.easeOutCubic;
+  static const Curve stateCurve = Curves.easeInOutCubic;
 
   static const primaryGradient = LinearGradient(
     colors: [primary, sky],
@@ -47,7 +49,12 @@ class AppTheme {
       brightness: Brightness.light,
       surface: Colors.white,
     ),
-    fontFamily: 'Microsoft YaHei',
+    fontFamilyFallback: const [
+      'Microsoft YaHei',
+      'Noto Sans CJK SC',
+      'PingFang SC',
+      'sans-serif',
+    ],
     textTheme: const TextTheme(
       headlineSmall: TextStyle(color: textPrimary, fontWeight: FontWeight.w800),
       titleLarge: TextStyle(color: textPrimary, fontWeight: FontWeight.w800),

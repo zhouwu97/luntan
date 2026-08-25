@@ -36,10 +36,19 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
     return page;
   }
 
-  void _reload() => setState(() {
-    _loadingMore = false;
-    _future = _loadPage();
-  });
+  Future<void> _reload() async {
+    if (!mounted) return;
+    late final Future<BookmarkFolderPage> future;
+    setState(() {
+      _loadingMore = false;
+      future = _future = _loadPage();
+    });
+    try {
+      await future;
+    } catch (_) {
+      // FutureBuilder 展示错误态；RefreshIndicator 不再把异常抛给手势层。
+    }
+  }
 
   void _loadMoreFolders() {
     if (_loadingMore || !_page.hasMore || _page.nextCursor == null) return;
@@ -107,7 +116,7 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
             );
           }
           return RefreshIndicator(
-            onRefresh: () async => _reload(),
+            onRefresh: _reload,
             child: NotificationListener<ScrollNotification>(
               onNotification: (notification) {
                 if (notification.metrics.extentAfter < 240) {
@@ -216,15 +225,34 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
     final ordered = [...folders];
     final moved = ordered.removeAt(oldIndex);
     ordered.insert(newIndex, moved);
+    final rollback = BookmarkFolderPage(
+      items: [...folders],
+      nextCursor: _page.nextCursor,
+      hasMore: _page.hasMore,
+    );
+    final optimistic = BookmarkFolderPage(
+      items: ordered,
+      nextCursor: _page.nextCursor,
+      hasMore: _page.hasMore,
+    );
+    setState(() {
+      _page = optimistic;
+      _future = Future.value(optimistic);
+    });
     try {
-      await Future.wait([
-        for (var index = 0; index < ordered.length; index++)
-          if (!ordered[index].isDefault)
-            widget.repository.reorderFolder(ordered[index].id, index),
-      ]);
-      if (mounted) _reload();
+      // 排序接口按 sort_order 逐项落库，串行提交可避免并发写入互相覆盖。
+      for (var index = 0; index < ordered.length; index++) {
+        if (ordered[index].isDefault) continue;
+        await widget.repository.reorderFolder(ordered[index].id, index);
+      }
+      if (mounted) await _reload();
     } catch (error) {
-      if (mounted) _showError(error, '收藏夹排序失败');
+      if (!mounted) return;
+      setState(() {
+        _page = rollback;
+        _future = Future.value(rollback);
+      });
+      _showError(error, '收藏夹排序失败，已恢复原顺序');
     }
   }
 

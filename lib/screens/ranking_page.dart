@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
+import '../domain/models.dart' show relativeTimeLabel;
 
 /// `rankingList` 网页上的一条玩具排行数据。
 class RankingItem {
@@ -877,6 +878,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   bool _wanted = false;
   bool _owned = false;
   bool _sortByWeight = true;
+  RankingToyComment? _replyTarget;
   RankingToyDetail? _remoteDetail;
 
   RankingItem get item => widget.item;
@@ -1111,6 +1113,8 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       final comment = await widget.repository!.createComment(
         toyId: item.id,
         content: value.trim(),
+        parentId: _replyTarget?.id,
+        replyToUserId: _replyTarget?.authorId,
       );
       if (!mounted) return;
       final detail = _remoteDetail;
@@ -1124,6 +1128,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         });
       }
       _commentController.clear();
+      setState(() => _replyTarget = null);
       FocusScope.of(context).unfocus();
       ScaffoldMessenger.of(
         context,
@@ -1167,6 +1172,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                     likeCount: nextCount,
                     isLiked: nextLiked,
                     createdAt: item.createdAt,
+                    rootId: item.rootId,
+                    parentId: item.parentId,
+                    replyToUserId: item.replyToUserId,
+                    replyCount: item.replyCount,
                   )
                 : item,
           )
@@ -1247,6 +1256,8 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                           comments: _serverComments,
                           onToggleSort: _toggleSort,
                           onLike: _toggleServerCommentLike,
+                          onReply: (comment) =>
+                              setState(() => _replyTarget = comment),
                         ),
                       ],
                     ),
@@ -1263,6 +1274,8 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
               controller: _commentController,
               reviewCount: _reviewCount,
               wantCount: _wantCount,
+              replyTarget: _replyTarget,
+              onCancelReply: () => setState(() => _replyTarget = null),
               onSubmitted: _submitComment,
             ),
           ),
@@ -1664,12 +1677,14 @@ class _ReviewSection extends StatelessWidget {
     required this.onToggleSort,
     this.comments,
     this.onLike,
+    this.onReply,
   });
 
   final bool sortByWeight;
   final VoidCallback onToggleSort;
   final List<RankingToyComment>? comments;
   final ValueChanged<RankingToyComment>? onLike;
+  final ValueChanged<RankingToyComment>? onReply;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1728,15 +1743,32 @@ class _ReviewSection extends StatelessWidget {
             ),
           )
         else
-          ...comments!.map(
-            (comment) => _ReviewCard.server(
-              comment: comment,
-              onLike: onLike == null ? null : () => onLike!(comment),
-            ),
-          ),
+          ..._buildServerCards(comments!),
       ],
     ),
   );
+
+  List<Widget> _buildServerCards(List<RankingToyComment> items) {
+    final childrenByParent = <String, List<RankingToyComment>>{};
+    for (final item in items) {
+      final parentId = item.parentId;
+      if (parentId != null) {
+        childrenByParent.putIfAbsent(parentId, () => []).add(item);
+      }
+    }
+    final roots = items.where((item) => item.parentId == null).toList();
+    return roots
+        .map(
+          (comment) => _ReviewCard.server(
+            comment: comment,
+            replies: childrenByParent[comment.id] ?? const [],
+            onLike: onLike == null ? null : () => onLike!(comment),
+            onReply: onReply == null ? null : () => onReply!(comment),
+            onReplyTo: onReply,
+          ),
+        )
+        .toList();
+  }
 }
 
 class _ReviewCard extends StatelessWidget {
@@ -1747,17 +1779,25 @@ class _ReviewCard extends StatelessWidget {
     required this.reply,
     required this.replyDate,
     required this.avatarColor,
+    this.replies = const [],
+    this.onReply,
+    this.onReplyTo,
   }) : liked = false,
        onLike = null;
 
-  _ReviewCard.server({required RankingToyComment comment, required this.onLike})
-    : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
-      likes = '${comment.likeCount}',
-      content = comment.content,
-      reply = null,
-      replyDate = null,
-      avatarColor = const Color(0xFFE3EEFF),
-      liked = comment.isLiked;
+  _ReviewCard.server({
+    required RankingToyComment comment,
+    required this.onLike,
+    this.replies = const [],
+    this.onReply,
+    this.onReplyTo,
+  }) : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
+       likes = '${comment.likeCount}',
+       content = comment.content,
+       reply = null,
+       replyDate = null,
+       avatarColor = const Color(0xFFE3EEFF),
+       liked = comment.isLiked;
 
   final String user;
   final String likes;
@@ -1767,6 +1807,9 @@ class _ReviewCard extends StatelessWidget {
   final Color avatarColor;
   final bool liked;
   final VoidCallback? onLike;
+  final List<RankingToyComment> replies;
+  final VoidCallback? onReply;
+  final ValueChanged<RankingToyComment>? onReplyTo;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1873,14 +1916,72 @@ class _ReviewCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 7),
-              Text(
-                content,
-                style: const TextStyle(
-                  color: Color(0xFF203C60),
-                  fontSize: 14,
-                  height: 1.6,
+              GestureDetector(
+                onTap: onReply,
+                child: Text(
+                  content,
+                  style: const TextStyle(
+                    color: Color(0xFF203C60),
+                    fontSize: 14,
+                    height: 1.6,
+                  ),
                 ),
               ),
+              if (onReply != null)
+                TextButton(
+                  onPressed: onReply,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(38, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('回复'),
+                ),
+              if (replies.isNotEmpty)
+                Theme(
+                  data: Theme.of(
+                    context,
+                  ).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(bottom: 4),
+                    title: Text(
+                      '查看 ${replies.length} 条回复',
+                      style: const TextStyle(
+                        color: Color(0xFF3C70B7),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    children: replies.map((replyItem) {
+                      final name = replyItem.nickname.isEmpty
+                          ? replyItem.username
+                          : replyItem.nickname;
+                      return ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.only(left: 10),
+                        title: Text(
+                          '$name：${replyItem.content}',
+                          style: const TextStyle(
+                            color: Color(0xFF3C70B7),
+                            fontSize: 12,
+                            height: 1.55,
+                          ),
+                        ),
+                        subtitle: Text(
+                          relativeTimeLabel(replyItem.createdAt),
+                          style: const TextStyle(
+                            color: Color(0xFF9AA5B7),
+                            fontSize: 10,
+                          ),
+                        ),
+                        onTap: onReplyTo == null
+                            ? null
+                            : () => onReplyTo!(replyItem),
+                      );
+                    }).toList(),
+                  ),
+                ),
               if (reply != null) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -1926,12 +2027,16 @@ class _DetailCommentBar extends StatelessWidget {
     required this.controller,
     required this.reviewCount,
     required this.wantCount,
+    this.replyTarget,
+    this.onCancelReply,
     required this.onSubmitted,
   });
 
   final TextEditingController controller;
   final String reviewCount;
   final String wantCount;
+  final RankingToyComment? replyTarget;
+  final VoidCallback? onCancelReply;
   final ValueChanged<String> onSubmitted;
 
   @override
@@ -1951,7 +2056,9 @@ class _DetailCommentBar extends StatelessWidget {
                 textInputAction: TextInputAction.send,
                 style: const TextStyle(color: Color(0xFF233B5B), fontSize: 13),
                 decoration: InputDecoration(
-                  hintText: '来，说点什么吧!',
+                  hintText: replyTarget == null
+                      ? '来，说点什么吧!'
+                      : '回复 ${replyTarget!.nickname.isEmpty ? replyTarget!.username : replyTarget!.nickname}…',
                   hintStyle: const TextStyle(
                     color: Color(0xFFAEB8C6),
                     fontSize: 13,
@@ -1970,6 +2077,13 @@ class _DetailCommentBar extends StatelessWidget {
                 ),
               ),
             ),
+            if (replyTarget != null && onCancelReply != null)
+              IconButton(
+                tooltip: '取消回复',
+                onPressed: onCancelReply,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                color: const Color(0xFF8A96A9),
+              ),
             const SizedBox(width: 10),
             Text(
               reviewCount,

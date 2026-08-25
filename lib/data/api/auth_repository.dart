@@ -7,6 +7,10 @@ class AuthUser {
     required this.nickname,
     required this.level,
     required this.status,
+    this.accountType = 'email',
+    this.email,
+    this.emailVerified = false,
+    this.emailVerifiedAt,
   });
 
   final String id;
@@ -14,6 +18,24 @@ class AuthUser {
   final String nickname;
   final int level;
   final String status;
+  final String accountType;
+  final String? email;
+  final bool emailVerified;
+  final DateTime? emailVerifiedAt;
+}
+
+class EmailCodeChallenge {
+  const EmailCodeChallenge({
+    required this.expiresIn,
+    required this.retryAfter,
+    required this.delivery,
+    this.devCode,
+  });
+
+  final int expiresIn;
+  final int retryAfter;
+  final String delivery;
+  final String? devCode;
 }
 
 class AuthSession {
@@ -34,7 +56,8 @@ class AuthRepository {
   Future<bool> hasStoredSession() async {
     final accessToken = await _tokenStore.readAccessToken();
     final refreshToken = await _tokenStore.readRefreshToken();
-    return (accessToken?.isNotEmpty ?? false) || (refreshToken?.isNotEmpty ?? false);
+    return (accessToken?.isNotEmpty ?? false) ||
+        (refreshToken?.isNotEmpty ?? false);
   }
 
   Future<AuthSession> register({
@@ -62,6 +85,43 @@ class AuthRepository {
       '/api/v1/auth/login',
       body: {'username': username, 'password': password},
     );
+    return _saveSession(payload);
+  }
+
+  Future<EmailCodeChallenge> requestEmailCode(String email) async {
+    final payload = await _client.postJson(
+      '/api/v1/auth/email/request',
+      body: {'email': email.trim()},
+    );
+    return EmailCodeChallenge(
+      expiresIn: _int(payload['expires_in'], fallback: 600),
+      retryAfter: _int(payload['retry_after'], fallback: 60),
+      delivery: _string(payload['delivery']),
+      devCode: payload['dev_code'] is String
+          ? payload['dev_code'] as String
+          : null,
+    );
+  }
+
+  Future<AuthSession> loginWithEmailCode({
+    required String email,
+    required String code,
+    String? nickname,
+  }) async {
+    final payload = await _client.postJson(
+      '/api/v1/auth/email/verify',
+      body: {
+        'email': email.trim(),
+        'code': code.trim(),
+        if (nickname != null && nickname.trim().isNotEmpty)
+          'nickname': nickname.trim(),
+      },
+    );
+    return _saveSession(payload);
+  }
+
+  Future<AuthSession> guest() async {
+    final payload = await _client.postJson('/api/v1/auth/guest');
     return _saveSession(payload);
   }
 
@@ -124,6 +184,14 @@ class AuthRepository {
       nickname: _string(json['nickname']),
       level: _int(json['level'], fallback: 1),
       status: _string(json['status']),
+      accountType: _string(json['account_type']).isEmpty
+          ? 'email'
+          : _string(json['account_type']),
+      email: json['email'] is String && (json['email'] as String).isNotEmpty
+          ? json['email'] as String
+          : null,
+      emailVerified: json['email_verified'] == true,
+      emailVerifiedAt: _date(json['email_verified_at']),
     );
   }
 
@@ -131,4 +199,7 @@ class AuthRepository {
 
   int _int(dynamic value, {required int fallback}) =>
       value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
+
+  DateTime? _date(dynamic value) =>
+      value is String ? DateTime.tryParse(value) : null;
 }

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/zhouwu97/luntan/server/internal/auth"
@@ -17,6 +19,12 @@ type Server struct {
 	authService  *auth.Service
 	mediaStorage mediaStorage
 	pointRewards PointRewardRules
+	mailSender   mailSender
+	appEnv       string
+}
+
+type mailSender interface {
+	Send(context.Context, string, string, string) error
 }
 
 func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
@@ -24,7 +32,19 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 	if len(authServices) > 0 && authServices[0] != nil {
 		authService = authServices[0]
 	}
-	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv()}
+	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
+}
+
+// NewHandlerWithMail 供正式服务注入 SMTP sender；保留 NewHandler 以兼容测试和本地无 SMTP 场景。
+func NewHandlerWithMail(db *sql.DB, sender mailSender, appEnvs ...string) http.Handler {
+	server := NewHandler(db).(*Server)
+	if sender != nil {
+		server.mailSender = sender
+	}
+	if len(appEnvs) > 0 && strings.TrimSpace(appEnvs[0]) != "" {
+		server.appEnv = strings.TrimSpace(appEnvs[0])
+	}
+	return server
 }
 
 func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaStorage) http.Handler {
@@ -34,7 +54,7 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 	if storage == nil {
 		storage = unavailableMediaStorage{}
 	}
-	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv()}
+	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
 }
 
 // NewHandlerWithPointRewards 供集成测试和灰度环境显式注入奖励配置。
@@ -53,6 +73,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/api/v1/auth/login":
 		s.login(w, r)
 		return
+	case r.Method == http.MethodPost && path == "/api/v1/auth/email/request":
+		s.requestEmailCode(w, r)
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/auth/email/verify":
+		s.verifyEmailCode(w, r)
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/auth/guest":
+		s.guest(w, r)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/auth/refresh":
 		s.refresh(w, r)
 		return
@@ -64,6 +93,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && path == "/api/v1/me/profile":
 		s.profile(w, r)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/me/account-status":
+		s.accountStatus(w, r)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/admins":
+		s.listAdmins(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admins/"):
+		s.getAdmin(w, r, strings.TrimPrefix(path, "/api/v1/admins/"))
 		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/posts"):
 		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/posts")
@@ -302,6 +340,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.listNotifications(w, r)
 	case path == "/api/v1/moderation/cases":
 		s.listModerationCases(w, r)
+	case path == "/api/v1/admin/risk":
+		s.riskOverview(w, r)
+	case path == "/api/v1/admin/logs":
+		s.adminLogs(w, r)
 	case path == "/api/v1/search":
 		s.search(w, r)
 	case path == "/api/v1/ranking/toys":
@@ -352,6 +394,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusCreated, response)
+}
+
+func appEnvironment() string {
+	value := strings.TrimSpace(os.Getenv("APP_ENV"))
+	if value == "" {
+		return "development"
+	}
+	return value
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -462,6 +512,16 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "USERNAME_TAKEN", Message: "用户名不可用"}
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		appErr = httpserver.AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "用户名或密码错误"}
+	case errors.Is(err, auth.ErrInvalidEmail):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_EMAIL", Message: "邮箱地址不合法"}
+	case errors.Is(err, ErrInvalidEmailCode):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_EMAIL_CODE", Message: "验证码错误或已失效"}
+	case errors.Is(err, ErrEmailCodeExpired):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "EMAIL_CODE_EXPIRED", Message: "验证码已过期，请重新获取"}
+	case errors.Is(err, ErrEmailCodeRateLimit):
+		appErr = httpserver.AppError{Status: http.StatusTooManyRequests, Code: "EMAIL_CODE_RATE_LIMITED", Message: "验证码发送太频繁，请稍后再试"}
+	case errors.Is(err, ErrMailUnavailable):
+		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "MAIL_UNAVAILABLE", Message: "邮件服务暂时不可用"}
 	case errors.Is(err, auth.ErrInvalidToken):
 		appErr = httpserver.AppError{Status: http.StatusUnauthorized, Code: "INVALID_TOKEN", Message: "登录状态已失效"}
 	case errors.Is(err, auth.ErrUserDisabled):

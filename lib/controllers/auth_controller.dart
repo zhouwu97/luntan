@@ -104,6 +104,62 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  Future<EmailCodeChallenge?> requestEmailCode(String email) async {
+    try {
+      error = null;
+      return await _repository.requestEmailCode(email);
+    } on ApiException catch (exception) {
+      error = exception;
+      rethrow;
+    }
+  }
+
+  Future<bool> loginWithEmailCode({
+    required String email,
+    required String code,
+    String? nickname,
+  }) async {
+    status = AuthStatus.authenticating;
+    error = null;
+    notifyListeners();
+    try {
+      final session = await _repository.loginWithEmailCode(
+        email: email,
+        code: code,
+        nickname: nickname,
+      );
+      user = session.user;
+      status = AuthStatus.authenticated;
+      return true;
+    } on ApiException catch (exception) {
+      status = AuthStatus.error;
+      error = exception;
+      user = null;
+      return false;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<bool> guest() async {
+    status = AuthStatus.authenticating;
+    error = null;
+    notifyListeners();
+    try {
+      final session = await _repository.guest();
+      user = session.user;
+      status = AuthStatus.authenticated;
+      return true;
+    } on ApiException catch (exception) {
+      status = AuthStatus.error;
+      error = exception;
+      user = null;
+      return false;
+    } finally {
+      notifyListeners();
+    }
+  }
+
   Future<void> logout() async {
     try {
       await _repository.logout();

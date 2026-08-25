@@ -35,6 +35,8 @@ class ProfileScreen extends StatelessWidget {
     this.onRequireAuth,
     this.onOpenModeration,
     this.onOpenAppeals,
+    this.onOpenAccountStatus,
+    this.onOpenAdmins,
     this.onOpenRelations,
     this.refreshToken = 0,
   });
@@ -58,6 +60,8 @@ class ProfileScreen extends StatelessWidget {
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenModeration;
   final VoidCallback? onOpenAppeals;
+  final VoidCallback? onOpenAccountStatus;
+  final VoidCallback? onOpenAdmins;
   final void Function(String userId, bool followers)? onOpenRelations;
   final int refreshToken;
 
@@ -80,6 +84,8 @@ class ProfileScreen extends StatelessWidget {
         onOpenPostById: onOpenPostById,
         onOpenModeration: onOpenModeration,
         onOpenAppeals: onOpenAppeals,
+        onOpenAccountStatus: onOpenAccountStatus,
+        onOpenAdmins: onOpenAdmins,
         onOpenRelations: onOpenRelations,
         refreshToken: refreshToken,
       );
@@ -475,6 +481,8 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onDeleteAccount,
     this.onOpenModeration,
     this.onOpenAppeals,
+    this.onOpenAccountStatus,
+    this.onOpenAdmins,
     this.onOpenRelations,
     required this.refreshToken,
   });
@@ -487,6 +495,8 @@ class _ApiProfileScreen extends StatefulWidget {
   final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onOpenModeration;
   final VoidCallback? onOpenAppeals;
+  final VoidCallback? onOpenAccountStatus;
+  final VoidCallback? onOpenAdmins;
   final void Function(String userId, bool followers)? onOpenRelations;
   final int refreshToken;
   final StoreRepository? storeRepository;
@@ -878,6 +888,30 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                 onTap: () {
                   Navigator.pop(sheetContext);
                   widget.onOpenModeration!();
+                },
+              ),
+            if (widget.onOpenAccountStatus != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.account_balance_outlined,
+                  color: AppTheme.primary,
+                ),
+                title: const Text('账号处罚详情'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  widget.onOpenAccountStatus!();
+                },
+              ),
+            if (widget.onOpenAdmins != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.admin_panel_settings_outlined,
+                  color: AppTheme.primary,
+                ),
+                title: const Text('管理员详情'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  widget.onOpenAdmins!();
                 },
               ),
             ListTile(

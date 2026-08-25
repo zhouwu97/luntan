@@ -35,7 +35,7 @@ class RankingToy {
 }
 
 class RankingToyComment {
-  const RankingToyComment({
+  RankingToyComment({
     required this.id,
     required this.authorId,
     required this.username,
@@ -45,6 +45,10 @@ class RankingToyComment {
     required this.likeCount,
     required this.isLiked,
     required this.createdAt,
+    this.rootId,
+    this.parentId,
+    this.replyToUserId,
+    this.replyCount = 0,
   });
 
   final String id;
@@ -56,6 +60,10 @@ class RankingToyComment {
   final int likeCount;
   final bool isLiked;
   final DateTime createdAt;
+  final String? rootId;
+  final String? parentId;
+  final String? replyToUserId;
+  int replyCount;
 }
 
 class RankingToyDetail {
@@ -132,11 +140,17 @@ class RankingRepository {
   Future<RankingToyComment> createComment({
     required String toyId,
     required String content,
+    String? parentId,
+    String? replyToUserId,
   }) async {
     final payload = await _client.postJson(
       '/api/v1/ranking/toys/$toyId/comments',
       headers: {'Idempotency-Key': _newIdempotencyKey('toy-comment')},
-      body: {'content': content},
+      body: {
+        'content': content,
+        if (parentId != null) 'parent_id': parentId,
+        if (replyToUserId != null) 'reply_to_user_id': replyToUserId,
+      },
     );
     return _commentFromJson(payload);
   }
@@ -201,6 +215,10 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
         json['viewer_state'] is Map &&
         (json['viewer_state'] as Map)['has_liked'] == true,
     createdAt: _date(json['created_at']),
+    rootId: _nullableString(json['root_id']),
+    parentId: _nullableString(json['parent_id']),
+    replyToUserId: _nullableString(json['reply_to_user_id']),
+    replyCount: _int(json['reply_count']),
   );
 }
 
@@ -211,6 +229,9 @@ int _int(dynamic value, {int fallback = 0}) =>
     value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
 
 int? _nullableInt(dynamic value) => value is num ? value.toInt() : null;
+
+String? _nullableString(dynamic value) =>
+    value is String && value.isNotEmpty ? value : null;
 
 double _double(dynamic value) =>
     value is num ? value.toDouble() : double.tryParse('$value') ?? 0;

@@ -261,7 +261,7 @@ class Comment {
   final String content;
   int likeCount;
   bool isLiked;
-  final int replyCount;
+  int replyCount;
   final CommentPublicationStatus publicationStatus;
   final ModerationStatus moderationStatus;
   final DateTime createdAt;

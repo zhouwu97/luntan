@@ -156,6 +156,13 @@ class CommentsController extends ChangeNotifier {
         .then((comment) {
           _pendingReplyIdempotencyKeys.remove(parent.id);
           _mergeItems([comment]);
+          // 服务端返回新回复，不会重复返回父评论；本地同步楼中楼入口数量。
+          parent.replyCount += 1;
+          for (final item in items) {
+            if (item.id == parent.id && !identical(item, parent)) {
+              item.replyCount += 1;
+            }
+          }
           notifyListeners();
           return comment;
         })

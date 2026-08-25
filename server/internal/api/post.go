@@ -40,6 +40,7 @@ type postMutationResponse struct {
 	Content           string     `json:"content"`
 	PublicationStatus string     `json:"publication_status"`
 	ModerationStatus  string     `json:"moderation_status"`
+	PostStatus        string     `json:"post_status"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	PublishedAt       *time.Time `json:"published_at,omitempty"`
@@ -156,7 +157,11 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	response := postMutationResponse{ID: postID, AuthorID: user.ID, CommunityID: input.CommunityID, Type: input.Type, Title: input.Title, Content: input.Content, PublicationStatus: "published", ModerationStatus: "normal", CreatedAt: now, UpdatedAt: now, PublishedAt: &now}
+	postStatus, moderationStatus := "published", "normal"
+	if contentNeedsReview(input.Title, input.Content) {
+		postStatus, moderationStatus = "pending", "pending"
+	}
+	response := postMutationResponse{ID: postID, AuthorID: user.ID, CommunityID: input.CommunityID, Type: input.Type, Title: input.Title, Content: input.Content, PublicationStatus: "published", ModerationStatus: moderationStatus, PostStatus: postStatus, CreatedAt: now, UpdatedAt: now, PublishedAt: &now}
 	response.MediaIDs = append([]string(nil), input.MediaIDs...)
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }

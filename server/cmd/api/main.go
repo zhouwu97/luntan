@@ -61,7 +61,12 @@ func main() {
 			rateLimitStore = redisStore
 		}
 	}
-	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, api.NewHandler(db), httpserver.Options{
+	sender, senderErr := mail.NewSender(mail.ConfigFromEnv(cfg.AppEnv))
+	if senderErr != nil {
+		logger.Error("mail_sender_failed", "error", senderErr.Error())
+		os.Exit(1)
+	}
+	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, api.NewHandlerWithMail(db, sender, cfg.AppEnv), httpserver.Options{
 		RateLimitEnabled:  cfg.RateLimitEnabled,
 		RateLimitStore:    rateLimitStore,
 		TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,

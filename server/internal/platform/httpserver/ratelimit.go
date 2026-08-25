@@ -99,6 +99,8 @@ func newRateLimiter(stores ...RateLimitStore) *rateLimiter {
 		rules: map[string]rateLimitRule{
 			"register":     {Limit: 5, Window: time.Minute},
 			"login":        {Limit: 10, Window: time.Minute},
+			"email_code":   {Limit: 5, Window: time.Minute},
+			"guest":        {Limit: 20, Window: time.Hour},
 			"refresh":      {Limit: 20, Window: time.Minute},
 			"publish":      {Limit: 20, Window: time.Minute},
 			"comment":      {Limit: 30, Window: time.Minute},
@@ -139,6 +141,10 @@ func classifyRateLimitRoute(r *http.Request) string {
 		return "register"
 	case path == "/api/v1/auth/login":
 		return "login"
+	case path == "/api/v1/auth/email/request":
+		return "email_code"
+	case path == "/api/v1/auth/guest":
+		return "guest"
 	case path == "/api/v1/auth/refresh":
 		return "refresh"
 	case path == "/api/v1/posts" && r.Method == http.MethodPost:

@@ -20,8 +20,9 @@ var (
 )
 
 type moderationActionInput struct {
-	Action string `json:"action"`
-	Reason string `json:"reason"`
+	Action       string `json:"action"`
+	Reason       string `json:"reason"`
+	DurationDays int    `json:"duration_days"`
 }
 
 type moderationCursor struct {
@@ -88,7 +89,15 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 	actionID := newPostID()
 	now := time.Now().UTC()
 	appealable := input.Action == "hide" || input.Action == "delete" || input.Action == "mute" || input.Action == "ban"
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO moderation_actions (id, case_id, operator_id, action, reason, appealable, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, actionID, caseID, user.ID, input.Action, strings.TrimSpace(input.Reason), appealable, now); err != nil {
+	durationDays := input.DurationDays
+	if durationDays == 0 && input.Action == "mute" {
+		durationDays = 7
+	}
+	var endsAt any
+	if durationDays > 0 {
+		endsAt = now.Add(time.Duration(durationDays) * 24 * time.Hour)
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO moderation_actions (id, case_id, operator_id, action, reason, appealable, duration_days, starts_at, ends_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $8)`, actionID, caseID, user.ID, input.Action, strings.TrimSpace(input.Reason), appealable, durationDays, now, endsAt); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -293,11 +302,11 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 	case "post":
 		switch input.Action {
 		case "hide":
-			query = `UPDATE posts SET moderation_status = 'hidden', moderation_case_id = $1, visibility_reason = $2, updated_at = now() WHERE id = $3`
+			query = `UPDATE posts SET post_status = 'hidden', moderation_status = 'hidden', moderation_case_id = $1, visibility_reason = $2, updated_at = now() WHERE id = $3`
 		case "restore":
-			query = `UPDATE posts SET moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`
+			query = `UPDATE posts SET post_status = 'published', moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`
 		case "delete":
-			query = `UPDATE posts SET publication_status = 'deleted', deleted_at = COALESCE(deleted_at, now()), deleted_by = $1, delete_reason = $2, moderation_case_id = $3, updated_at = now() WHERE id = $4`
+			query = `UPDATE posts SET post_status = 'deleted', publication_status = 'deleted', deleted_at = COALESCE(deleted_at, now()), deleted_by = $1, delete_reason = $2, moderation_case_id = $3, updated_at = now() WHERE id = $4`
 		}
 	case "comment":
 		switch input.Action {
@@ -354,6 +363,33 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 			return err
 		}
 	}
+	if targetType == "user" {
+		durationDays := input.DurationDays
+		if durationDays == 0 && input.Action == "mute" {
+			durationDays = 7
+		}
+		var endsAt any
+		if durationDays > 0 {
+			endsAt = time.Now().UTC().Add(time.Duration(durationDays) * 24 * time.Hour)
+		}
+		switch input.Action {
+		case "mute":
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO restrictions (id, user_id, restriction_type, limit_value, window_seconds, reason, starts_at, ends_at, operator_id) VALUES ($1, $2, 'mute', 0, 0, $3, now(), $4, $5)`, newPostID(), targetID, strings.TrimSpace(input.Reason), endsAt, operatorID); err != nil {
+				return err
+			}
+		case "ban":
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO bans (id, user_id, operator_id, scope, reason, starts_at, ends_at) VALUES ($1, $2, $3, 'platform', $4, now(), $5)`, newPostID(), targetID, operatorID, strings.TrimSpace(input.Reason), endsAt); err != nil {
+				return err
+			}
+		case "restore":
+			if _, err := tx.ExecContext(r.Context(), `UPDATE bans SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND revoked_at IS NULL`, targetID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(r.Context(), `UPDATE restrictions SET ends_at = COALESCE(ends_at, now()) WHERE user_id = $1 AND restriction_type = 'mute' AND (ends_at IS NULL OR ends_at > now())`, targetID); err != nil {
+				return err
+			}
+		}
+	}
 	if affected != 1 {
 		return ErrModerationCaseNotFound
 	}
@@ -362,11 +398,14 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 	afterJSON, _ := json.Marshal(after)
 	var err error
 	_, err = tx.ExecContext(r.Context(), `INSERT INTO audit_logs (id, operator_id, action, target_type, target_id, reason, before_data, after_data, request_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10)`, newPostID(), operatorID, "moderation."+input.Action, targetType, targetID, strings.TrimSpace(input.Reason), beforeJSON, afterJSON, r.Header.Get("X-Request-ID"), time.Now().UTC())
-	return err
+	if err != nil {
+		return err
+	}
+	return appendAdminLogTx(r.Context(), tx, operatorID, "moderation."+input.Action, targetType, targetID, strings.TrimSpace(input.Reason), r.Header.Get("X-Request-ID"), after, time.Now().UTC())
 }
 
 func validModerationAction(input moderationActionInput) bool {
-	if strings.TrimSpace(input.Reason) == "" || len([]rune(input.Reason)) > 1000 {
+	if strings.TrimSpace(input.Reason) == "" || len([]rune(input.Reason)) > 1000 || input.DurationDays < 0 || input.DurationDays > 365 {
 		return false
 	}
 	switch input.Action {

@@ -51,6 +51,10 @@ type rankingToyComment struct {
 	LikeCount      int64
 	ViewerHasLiked bool
 	CreatedAt      time.Time
+	RootID         sql.NullString
+	ParentID       sql.NullString
+	ReplyToUserID  sql.NullString
+	ReplyCount     int64
 }
 
 func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +219,7 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 	query := `SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
-	                 c.created_at
+	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
@@ -239,6 +243,10 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 			&item.LikeCount,
 			&item.ViewerHasLiked,
 			&item.CreatedAt,
+			&item.RootID,
+			&item.ParentID,
+			&item.ReplyToUserID,
+			&item.ReplyCount,
 		); err != nil {
 			return nil, err
 		}
@@ -249,10 +257,14 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 
 func (item rankingToyComment) response() map[string]any {
 	return map[string]any{
-		"id":         item.ID,
-		"content":    item.Content,
-		"like_count": item.LikeCount,
-		"created_at": item.CreatedAt,
+		"id":               item.ID,
+		"content":          item.Content,
+		"like_count":       item.LikeCount,
+		"root_id":          rankingNullableString(item.RootID),
+		"parent_id":        rankingNullableString(item.ParentID),
+		"reply_to_user_id": rankingNullableString(item.ReplyToUserID),
+		"reply_count":      item.ReplyCount,
+		"created_at":       item.CreatedAt,
 		"author": map[string]any{
 			"id":       item.AuthorID,
 			"username": item.Username,
@@ -261,6 +273,13 @@ func (item rankingToyComment) response() map[string]any {
 		},
 		"viewer_state": map[string]any{"has_liked": item.ViewerHasLiked},
 	}
+}
+
+func rankingNullableString(value sql.NullString) any {
+	if !value.Valid || value.String == "" {
+		return nil
+	}
+	return value.String
 }
 
 func (s *Server) setRankingToyFlag(w http.ResponseWriter, r *http.Request, toyID, field string, active bool) {
@@ -417,7 +436,9 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var input struct {
-		Content string `json:"content"`
+		Content       string `json:"content"`
+		ParentID      string `json:"parent_id"`
+		ReplyToUserID string `json:"reply_to_user_id"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, ErrInvalidRankingComment)
@@ -438,14 +459,46 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 		writeAuthError(w, r, err)
 		return
 	}
+	parentID := strings.TrimSpace(input.ParentID)
+	replyToUserID := strings.TrimSpace(input.ReplyToUserID)
+	rootID := ""
+	if parentID != "" {
+		var parentToyID string
+		var parentRootID sql.NullString
+		err := tx.QueryRowContext(r.Context(), `
+			SELECT toy_id, root_id FROM ranking_toy_comments
+			WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, parentID).Scan(&parentToyID, &parentRootID)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeAuthError(w, r, ErrRankingCommentNotFound)
+			return
+		}
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if parentToyID != toyID {
+			writeAuthError(w, r, ErrInvalidRankingComment)
+			return
+		}
+		if parentRootID.Valid && parentRootID.String != "" {
+			rootID = parentRootID.String
+		} else {
+			rootID = parentID
+		}
+	}
 	commentID := newPostID()
+	if rootID == "" {
+		rootID = commentID
+	}
 	var insertedID string
+	created := true
 	err = tx.QueryRowContext(r.Context(), `
-		INSERT INTO ranking_toy_comments (id, toy_id, author_id, content, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO ranking_toy_comments (id, toy_id, author_id, content, idempotency_key, root_id, parent_id, reply_to_user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''))
 		ON CONFLICT (author_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-		RETURNING id`, commentID, toyID, user.ID, input.Content, idempotencyKey).Scan(&insertedID)
+		RETURNING id`, commentID, toyID, user.ID, input.Content, idempotencyKey, rootID, parentID, replyToUserID).Scan(&insertedID)
 	if errors.Is(err, sql.ErrNoRows) {
+		created = false
 		if err := tx.QueryRowContext(r.Context(), `SELECT id FROM ranking_toy_comments WHERE author_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&insertedID); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -453,6 +506,12 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 	} else if err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	if created && parentID != "" {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE ranking_toy_comments SET reply_count = reply_count + 1, updated_at = now() WHERE id = $1`, parentID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
@@ -476,13 +535,14 @@ func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID stri
 		SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), c.content, c.like_count,
 		       EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
-		       c.created_at
+		       c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count
 		FROM ranking_toy_comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = c.author_id
 		WHERE c.id = $1 AND c.deleted_at IS NULL`, commentID, viewerID).Scan(
 		&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 		&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
+		&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
 	)
 	return item, err
 }

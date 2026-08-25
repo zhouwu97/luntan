@@ -103,6 +103,17 @@ flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:8080
 
 Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为电脑在局域网中的 IP，并确认服务监听和防火墙规则允许访问。
 
+### 远端占位展示数据
+
+服务器已通过 `http://101.42.27.44/api/v1` 提供客户端 API。远端导入了约 100 条帖子、随机化占位用户和帖子图片；图片通过 `/imported-media/` 公开读取。API 模式启动示例：
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://101.42.27.44
+flutter build apk --debug --dart-define=API_BASE_URL=http://101.42.27.44
+```
+
+如需重新生成占位数据，使用 `scripts/import_placeholder_content.py`。脚本只写入占位用户名，不会保存源站作者用户名；数据库连接应通过远端进程环境中的 `DATABASE_URL` 提供，不要把连接凭据写入仓库。
+
 ## 常用验证命令
 
 Flutter：
@@ -148,13 +159,17 @@ lib/
 │   ├── post_detail_screen.dart
 │   ├── profile_screen.dart
 │   ├── feature_page.dart
-│   └── exchange_store_screen.dart
+│   ├── exchange_store_screen.dart
+│   ├── notifications_screen.dart
+│   ├── moderation_notice_detail_screen.dart
+│   ├── appeal_form_screen.dart
+│   ├── appeal_detail_screen.dart
+│   └── my_appeals_screen.dart
 └── widgets/
     ├── forum_post_card.dart
     ├── forum_author_row.dart
     ├── post_media_preview.dart
-    ├── composer_sheet.dart
-    └── messages_sheet.dart
+    └── composer_sheet.dart
 
 server/
 ├── cmd/api/main.go                     # Go 服务入口

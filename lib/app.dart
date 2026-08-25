@@ -15,16 +15,19 @@ import 'data/repository_provider.dart';
 import 'domain/models.dart';
 import 'domain/repositories.dart';
 import 'screens/auth_screen.dart';
+import 'screens/appeal_detail_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/entity_screens.dart';
 import 'screens/moderation_console_screen.dart';
+import 'screens/moderation_notice_detail_screen.dart';
+import 'screens/moderation_appeals_screen.dart';
+import 'screens/my_appeals_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
-import 'widgets/messages_sheet.dart';
 
 class LuntanApp extends StatefulWidget {
   const LuntanApp({super.key, this.tokenStore, this.repositories});
@@ -460,7 +463,55 @@ class _LuntanAppState extends State<LuntanApp> {
         builder: (_) => ModerationConsoleScreen(
           repository: platform,
           onFeedback: _showQuickFeedback,
+          onOpenAppeals: repositories.appeals == null
+              ? null
+              : () => navigatorKey.currentState!.push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ModerationAppealsScreen(
+                      repository: repositories.appeals!,
+                      onFeedback: _showQuickFeedback,
+                    ),
+                  ),
+                ),
         ),
+      ),
+    );
+  }
+
+  void openModerationAction(String actionId) {
+    final repository = repositories.appeals;
+    if (repository == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ModerationNoticeDetailScreen(
+          repository: repository,
+          actionId: actionId,
+          publishRepository: repositories.publish,
+        ),
+      ),
+    );
+  }
+
+  void openAppeal(String appealId) {
+    final repository = repositories.appeals;
+    if (repository == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            AppealDetailScreen(repository: repository, appealId: appealId),
+      ),
+    );
+  }
+
+  void openMyAppeals() {
+    final repository = repositories.appeals;
+    if (repository == null) {
+      _showQuickFeedback('当前模式暂不支持申诉');
+      return;
+    }
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => MyAppealsScreen(repository: repository),
       ),
     );
   }
@@ -493,17 +544,26 @@ class _LuntanAppState extends State<LuntanApp> {
                 onOpenUserId: openUserProfile,
                 onOpenCommunityId: openCommunity,
                 onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
+                onOpenModerationActionId: openModerationAction,
+                onOpenAppealId: openAppeal,
               ),
             ),
           )
           .then((_) => _refreshUnreadCount());
       return;
     }
-    store.markMessagesRead();
-    showModalBottomSheet<void>(
-      context: appContext,
-      showDragHandle: true,
-      builder: (_) => const MessagesSheet(),
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationsScreen(
+          repository: repositories.platform!,
+          onOpenPostId: openPostById,
+          onOpenPost: (postId, commentId) =>
+              openPostById(postId, focusCommentId: commentId),
+          onOpenModerationActionId: openModerationAction,
+          onOpenAppealId: openAppeal,
+          onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
+        ),
+      ),
     );
   }
 
@@ -581,7 +641,7 @@ class _LuntanAppState extends State<LuntanApp> {
             isAuthenticated:
                 !apiMode || authController?.status == AuthStatus.authenticated,
             personalFeedController: personalFeedController,
-            platform: repositories.platform,
+            platform: repositories.isApiMode ? repositories.platform : null,
             unread: apiMode ? unreadCount : null,
             interactionController: interactionController,
             feedRepository: repositories.isApiMode ? repositories.feed : null,
@@ -603,6 +663,7 @@ class _LuntanAppState extends State<LuntanApp> {
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
             onOpenModeration: apiMode ? openModeration : null,
+            onOpenAppeals: openMyAppeals,
             onLogout: _logout,
             onDeleteAccount: apiMode ? _deleteAccount : null,
             onRequireAuth: _openLogin,

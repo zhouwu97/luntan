@@ -64,6 +64,8 @@ class NotificationsScreen extends StatefulWidget {
     this.onOpenUserId,
     this.onOpenCommunityId,
     this.onOpenSystem,
+    this.onOpenModerationActionId,
+    this.onOpenAppealId,
   });
 
   final PlatformRepository repository;
@@ -72,6 +74,8 @@ class NotificationsScreen extends StatefulWidget {
   final ValueChanged<String>? onOpenUserId;
   final ValueChanged<String>? onOpenCommunityId;
   final VoidCallback? onOpenSystem;
+  final ValueChanged<String>? onOpenModerationActionId;
+  final ValueChanged<String>? onOpenAppealId;
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -179,7 +183,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('消息', style: TextStyle(fontWeight: FontWeight.w800)),
+      title: const Text('通知', style: TextStyle(fontWeight: FontWeight.w800)),
       actions: [
         if (items.isNotEmpty)
           TextButton(
@@ -209,21 +213,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
           child: Row(
-            children: NotificationCategory.values.map((value) {
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(switch (value) {
-                    NotificationCategory.all => '全部',
-                    NotificationCategory.reply => '回复',
-                    NotificationCategory.like => '赞与收藏',
-                    NotificationCategory.system => '系统',
-                  }),
-                  selected: value == filter,
-                  onSelected: (_) => _selectFilter(value),
-                ),
-              );
-            }).toList(),
+            children:
+                const [
+                  NotificationCategory.all,
+                  NotificationCategory.interaction,
+                  NotificationCategory.community,
+                  NotificationCategory.moderation,
+                ].map((value) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(switch (value) {
+                        NotificationCategory.all => '全部',
+                        NotificationCategory.interaction => '互动',
+                        NotificationCategory.community => '社区',
+                        NotificationCategory.moderation => '处理',
+                        NotificationCategory.reply => '回复',
+                        NotificationCategory.like => '赞与收藏',
+                        NotificationCategory.system => '系统',
+                      }),
+                      selected: value == filter,
+                      onSelected: (_) => _selectFilter(value),
+                    ),
+                  );
+                }).toList(),
           ),
         ),
         Expanded(child: _body()),
@@ -252,7 +265,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (items.isEmpty) {
       return Center(
         child: Text(
-          filter == NotificationCategory.all ? '暂时没有新消息' : '该分类暂无消息',
+          filter == NotificationCategory.all ? '暂时没有新通知' : '该分类暂无通知',
           style: const TextStyle(color: AppTheme.textSecondary),
         ),
       );
@@ -298,6 +311,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               unawaited(_markNotificationRead(item));
             }
             if (!context.mounted) return;
+            if (item.isModeration && item.type == 'moderation.action') {
+              final actionId = item.moderationActionId ?? item.targetId;
+              if (widget.onOpenModerationActionId != null &&
+                  actionId.isNotEmpty) {
+                widget.onOpenModerationActionId!(actionId);
+                return;
+              }
+            }
+            if (item.type == 'appeal.result') {
+              final appealId = item.targetData['appeal_id'];
+              if (widget.onOpenAppealId != null &&
+                  appealId is String &&
+                  appealId.isNotEmpty) {
+                widget.onOpenAppealId!(appealId);
+                return;
+              }
+            }
             NotificationTargetRouter.open(
               notification: item,
               onOpenPost: (postId, commentId) {
@@ -332,6 +362,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ? Icons.person_add_alt_1_rounded
       : type.contains('comment') || type.contains('reply')
       ? Icons.chat_bubble_rounded
+      : type.startsWith('appeal.') || type.startsWith('moderation.')
+      ? Icons.gavel_rounded
       : Icons.campaign_rounded;
 
   String _title(ForumNotification item) => switch (item.type) {
@@ -341,6 +373,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     'comment.replied' ||
     'reply' => '${item.actorName} 回复了你',
     'follow' || 'user.followed' => '${item.actorName} 关注了你',
+    'moderation.action' => _moderationTitle(item),
+    'appeal.result' => '申诉结果通知',
+    'announcement' || 'community.announcement' => '社区公告',
+    'event' || 'community.event' => '活动通知',
     _ => '你有一条新通知',
   };
+
+  String _moderationTitle(ForumNotification item) =>
+      switch (item.targetData['action']) {
+        'mute' => '账号禁言通知',
+        'ban' => '账号封禁通知',
+        'delete' => '帖子处理通知',
+        'hide' => '内容处理通知',
+        _ => '处理通知',
+      };
 }

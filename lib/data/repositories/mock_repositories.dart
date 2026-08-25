@@ -1,11 +1,69 @@
 import '../../domain/models.dart';
 import '../../domain/repositories.dart';
 import '../api/api_client.dart';
+import '../api/appeal_repository.dart';
 import '../api/comment_repository.dart';
 import '../api/bookmark_repository.dart';
 import '../api/interaction_repository.dart';
 import '../api/publish_repository.dart';
+import '../api/platform_repository.dart';
 import '../mock_forum_data.dart';
+
+/// 离线预览也使用正式通知页，不再回退到旧消息抽屉。
+class MockPlatformRepository extends PlatformRepository {
+  MockPlatformRepository()
+    : super(ApiClient(baseUri: Uri.parse('https://mock.invalid')));
+
+  final List<ForumNotification> _notifications = <ForumNotification>[];
+
+  @override
+  Future<NotificationPage> listNotifications({
+    String? cursor,
+    int limit = 20,
+    NotificationCategory category = NotificationCategory.all,
+  }) async {
+    final start = int.tryParse(cursor ?? '') ?? 0;
+    final end = (start + limit).clamp(0, _notifications.length).toInt();
+    return NotificationPage(
+      items: _notifications.sublist(start, end),
+      nextCursor: end < _notifications.length ? '$end' : null,
+      hasMore: end < _notifications.length,
+    );
+  }
+
+  @override
+  Future<void> markNotificationRead(String notificationId) async {
+    for (final item in _notifications) {
+      if (item.id == notificationId) item.isRead = true;
+    }
+  }
+
+  @override
+  Future<void> markAllNotificationsRead() async {
+    for (final item in _notifications) {
+      item.isRead = true;
+    }
+  }
+
+  @override
+  Future<int> unreadNotificationCount() async =>
+      _notifications.where((item) => !item.isRead).length;
+}
+
+class MockAppealRepository extends AppealRepository {
+  MockAppealRepository()
+    : super(ApiClient(baseUri: Uri.parse('https://mock.invalid')));
+
+  @override
+  Future<AppealPage> listAppeals({String? status, int limit = 20}) async =>
+      const AppealPage(items: []);
+
+  @override
+  Future<ModerationAppealPage> listModerationAppeals({
+    String? status,
+    int limit = 20,
+  }) async => const ModerationAppealPage(items: []);
+}
 
 class MockCommunityRepository implements CommunityRepository {
   MockCommunityRepository({ForumStore? store})

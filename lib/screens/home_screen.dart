@@ -630,7 +630,7 @@ class _Header extends StatelessWidget {
                   color: AppTheme.textPrimary,
                   size: 25,
                 ),
-                tooltip: '消息',
+                tooltip: '系统通知',
               ),
               if (unread > 0)
                 Positioned(

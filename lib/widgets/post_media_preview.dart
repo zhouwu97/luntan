@@ -125,10 +125,12 @@ class PostMediaPreview extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final dpr = MediaQuery.devicePixelRatioOf(context);
-        final cacheWidth = constraints.maxWidth.isFinite
+        final cacheWidth =
+            constraints.maxWidth.isFinite && constraints.maxWidth > 0
             ? (constraints.maxWidth * dpr).round()
             : null;
-        final cacheHeight = constraints.maxHeight.isFinite
+        final cacheHeight =
+            constraints.maxHeight.isFinite && constraints.maxHeight > 0
             ? (constraints.maxHeight * dpr).round()
             : null;
         return ClipRRect(

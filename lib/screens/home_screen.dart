@@ -8,6 +8,7 @@ import '../controllers/home_personal_feed_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
+import '../data/api/ranking_repository.dart';
 import '../data/api/store_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
@@ -16,6 +17,25 @@ import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 import 'feature_page.dart';
 import 'search_screen.dart';
+
+/// 首页公开内容只展示正式社区，避免把验收用的 QA 板块作为默认入口。
+List<Community> selectHomeCommunities(Iterable<Community> source) {
+  final ids = <String>{};
+  final names = <String>{};
+  return source
+      .where(
+        (community) => community.id != 'community_qa' && community.slug != 'qa',
+      )
+      .where((community) {
+        final name = community.name.trim();
+        if (!ids.add(community.id) || (name.isNotEmpty && !names.add(name))) {
+          return false;
+        }
+        return true;
+      })
+      .take(3)
+      .toList();
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -41,6 +61,7 @@ class HomeScreen extends StatefulWidget {
     this.feedRepository,
     this.communityRepository,
     this.postRepository,
+    this.rankingRepository,
     this.storeRepository,
   });
 
@@ -65,6 +86,7 @@ class HomeScreen extends StatefulWidget {
   final FeedRepository? feedRepository;
   final CommunityRepository? communityRepository;
   final PostRepository? postRepository;
+  final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
 
   @override
@@ -170,7 +192,7 @@ class _HomeScreenState extends State<HomeScreen> {
         status: CommunityStatus.active,
       );
       if (!mounted) return;
-      final visibleCommunities = _uniqueCommunities(result).take(3).toList();
+      final visibleCommunities = selectHomeCommunities(result);
       final nextSelectedCommunityId =
           visibleCommunities.any((item) => item.id == selectedCommunityId)
           ? selectedCommunityId
@@ -187,18 +209,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       widget.onFeedback('板块加载失败，稍后可重试');
     }
-  }
-
-  List<Community> _uniqueCommunities(Iterable<Community> source) {
-    final ids = <String>{};
-    final names = <String>{};
-    return source.where((community) {
-      final name = community.name.trim();
-      if (!ids.add(community.id) || (name.isNotEmpty && !names.add(name))) {
-        return false;
-      }
-      return true;
-    }).toList();
   }
 
   ForumSection _sectionForCommunity(String communityId) =>
@@ -317,7 +327,10 @@ class _HomeScreenState extends State<HomeScreen> {
           feedRepository: widget.feedRepository,
           platformRepository: widget.platform,
           postRepository: widget.postRepository,
+          rankingRepository: widget.rankingRepository,
           storeRepository: widget.storeRepository,
+          isAuthenticated: widget.isAuthenticated,
+          onRequireAuth: widget.onRequireAuth,
         ),
       ),
     );

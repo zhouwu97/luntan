@@ -49,7 +49,9 @@ class _LuntanAppState extends State<LuntanApp> {
   AuthController? authController;
   Future<void>? authInitialization;
   int currentTab = 0;
-  bool browseWithoutAuth = false;
+  // 公开帖子是首页主内容，未登录时直接进入浏览态；发布、点赞等操作仍会
+  // 通过 _requireAuth 引导登录，避免占位展示先被登录页挡住。
+  bool browseWithoutAuth = true;
   int unreadCount = 0;
   int profileRefreshToken = 0;
   final navigatorKey = GlobalKey<NavigatorState>();
@@ -649,6 +651,9 @@ class _LuntanAppState extends State<LuntanApp> {
                 ? repositories.community
                 : null,
             postRepository: repositories.isApiMode ? repositories.post : null,
+            rankingRepository: repositories.isApiMode
+                ? repositories.ranking
+                : null,
             storeRepository: repositories.isApiMode ? repositories.store : null,
           ),
           const SizedBox.shrink(),
@@ -689,7 +694,7 @@ class _LuntanAppState extends State<LuntanApp> {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: '浅蓝论坛',
+    title: '杯友酱',
     theme: AppTheme.light,
     navigatorKey: navigatorKey,
     scaffoldMessengerKey: scaffoldMessengerKey,

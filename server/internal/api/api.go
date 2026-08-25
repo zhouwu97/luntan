@@ -248,6 +248,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/media/"):
 		s.deleteMedia(w, r, strings.TrimPrefix(path, "/api/v1/media/"))
 		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/want"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/want")
+		s.setRankingToyFlag(w, r, toyID, "wanted", true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/want"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/want")
+		s.setRankingToyFlag(w, r, toyID, "wanted", false)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/owned"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/owned")
+		s.setRankingToyFlag(w, r, toyID, "owned", true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/owned"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/owned")
+		s.setRankingToyFlag(w, r, toyID, "owned", false)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/rating"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/rating")
+		s.rateRankingToy(w, r, toyID)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/comments"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/comments")
+		s.createRankingToyComment(w, r, toyID)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/ranking/toy-comments/") && strings.HasSuffix(path, "/like"):
+		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/"), "/like")
+		s.toggleRankingToyCommentLike(w, r, commentID, true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/ranking/toy-comments/") && strings.HasSuffix(path, "/like"):
+		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/"), "/like")
+		s.toggleRankingToyCommentLike(w, r, commentID, false)
+		return
 	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || strings.HasPrefix(path, "/api/v1/users/") || strings.HasPrefix(path, "/api/v1/notifications/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return
@@ -272,6 +304,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.listModerationCases(w, r)
 	case path == "/api/v1/search":
 		s.search(w, r)
+	case path == "/api/v1/ranking/toys":
+		s.listRankingToys(w, r)
+	case strings.HasPrefix(path, "/api/v1/ranking/toys/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/"):
+		s.getRankingToy(w, r, strings.TrimPrefix(path, "/api/v1/ranking/toys/"))
 	case path == "/api/v1/ranking":
 		s.ranking(w, r)
 	case path == "/api/v1/me/points":
@@ -468,6 +504,14 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "COMMENT_PARENT_NOT_FOUND", Message: "回复目标不存在"}
 	case errors.Is(err, ErrInvalidComment):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_COMMENT", Message: "评论内容不合法"}
+	case errors.Is(err, ErrRankingToyNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "RANKING_TOY_NOT_FOUND", Message: "榜单商品不存在或已下架"}
+	case errors.Is(err, ErrInvalidRankingRating):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_RANKING_RATING", Message: "评分必须是 1 到 10 的整数"}
+	case errors.Is(err, ErrInvalidRankingComment):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_RANKING_COMMENT", Message: "评论内容不合法"}
+	case errors.Is(err, ErrRankingCommentNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "RANKING_COMMENT_NOT_FOUND", Message: "榜单评论不存在"}
 	case errors.Is(err, ErrInteractionTargetNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "TARGET_NOT_FOUND", Message: "目标不存在或不可用"}
 	case errors.Is(err, ErrSelfFollow):

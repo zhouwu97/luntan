@@ -16,11 +16,16 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/platform/database"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 	"github.com/zhouwu97/luntan/server/internal/platform/logging"
+	"github.com/zhouwu97/luntan/server/internal/platform/mail"
 )
 
 func main() {
 	cfg := config.Load()
 	logger := logging.New(cfg.LogLevel)
+	if _, err := mail.NewSender(mail.ConfigFromEnv(cfg.AppEnv)); err != nil {
+		logger.Error("mail_configuration_failed", "error", err.Error())
+		os.Exit(1)
+	}
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("database_open_failed", "error", err.Error())

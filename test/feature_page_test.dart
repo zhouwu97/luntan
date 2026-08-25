@@ -87,9 +87,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(RankingItemDetailPage), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('榜单详情'), 240);
-    await tester.pumpAndSettle();
-    expect(find.text('榜单详情'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
     expect(find.byTooltip('返回'), findsOneWidget);
     await tester.tap(find.byTooltip('返回'));
     await tester.pumpAndSettle();

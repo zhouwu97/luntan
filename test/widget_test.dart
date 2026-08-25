@@ -23,7 +23,7 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('刚拿到手的 2K 显示器，先发个开箱首图'));
+    await tester.tap(find.text('开箱记录：第一次买大尺寸倒模'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);
@@ -36,7 +36,7 @@ void main() {
     await tester.tap(find.text('评论').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('新人手的机械键盘开箱！手感绝了'), findsOneWidget);
+    expect(find.text('为啥很少朋友推荐星野爱丽丝2代？'), findsOneWidget);
     expect(find.textContaining('最近回复'), findsOneWidget);
     expect(find.text('我的评论'), findsNothing);
   });
@@ -48,11 +48,11 @@ void main() {
     await tester.tap(find.text('帖子').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('新人手的机械键盘开箱！手感绝了'), findsOneWidget);
+    expect(find.text('为啥很少朋友推荐星野爱丽丝2代？'), findsOneWidget);
     expect(find.text('帖子模式：仅显示我发布的帖子，按发布时间排序'), findsOneWidget);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -420));
     await tester.pumpAndSettle();
-    expect(find.text('从零搭一个舒服的宿舍桌面：完整清单'), findsOneWidget);
+    expect(find.text('新手入门：预算 300-400 怎么选屯磨？'), findsOneWidget);
   });
 
   testWidgets('帖子图片点击转发到卡片的详情回调', (tester) async {
@@ -84,9 +84,9 @@ void main() {
 
     await tester.tap(find.text('搜索帖子 / 用户 / 板块').first);
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), '2K 显示器');
+    await tester.enterText(find.byType(TextField), '大尺寸倒模');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('刚拿到手的 2K 显示器，先发个开箱首图'));
+    await tester.tap(find.text('开箱记录：第一次买大尺寸倒模'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);
@@ -100,7 +100,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('我的发布').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('新人手的机械键盘开箱！手感绝了'));
+    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);
@@ -114,7 +114,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('我的评论').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('新人手的机械键盘开箱！手感绝了').last);
+    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？').last);
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);

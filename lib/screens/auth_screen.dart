@@ -59,8 +59,9 @@ class _AuthScreenState extends State<AuthScreen> {
       });
       _startCountdown();
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         _feedback(userFacingApiMessage(error, fallback: '验证码发送失败，请稍后重试'));
+      }
     }
   }
 
@@ -100,8 +101,9 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
     final success = await widget.controller.guest();
-    if (success && mounted && Navigator.of(context).canPop())
+    if (success && mounted && Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
+    }
   }
 
   void _startCountdown() {
@@ -127,7 +129,11 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     final busy = widget.controller.status == AuthStatus.authenticating;
-    final offline = widget.controller.status == AuthStatus.error;
+    final authError = widget.controller.error;
+    final canBrowseAsGuest =
+        authError is ApiException &&
+        (authError.type == ApiErrorType.networkUnavailable ||
+            authError.type == ApiErrorType.timeout);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -162,7 +168,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    offline ? '暂时无法连接服务器，可以进入游客模式浏览' : '不设密码，使用邮箱验证码进入校园论坛',
+                    canBrowseAsGuest
+                        ? '暂时无法连接服务器，请稍后重试；也可以进入游客模式浏览'
+                        : '不设密码，使用邮箱验证码进入校园论坛',
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
                       height: 1.5,

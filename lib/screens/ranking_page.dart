@@ -1779,11 +1779,11 @@ class _ReviewCard extends StatelessWidget {
     required this.reply,
     required this.replyDate,
     required this.avatarColor,
-    this.replies = const [],
-    this.onReply,
-    this.onReplyTo,
   }) : liked = false,
-       onLike = null;
+       onLike = null,
+       replies = const [],
+       onReply = null,
+       onReplyTo = null;
 
   _ReviewCard.server({
     required RankingToyComment comment,

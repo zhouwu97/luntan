@@ -466,6 +466,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := s.populateUserCapabilities(r.Context(), &user); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	httpserver.WriteJSON(w, http.StatusOK, user)
 }
 
@@ -526,6 +530,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusUnauthorized, Code: "INVALID_TOKEN", Message: "登录状态已失效"}
 	case errors.Is(err, auth.ErrUserDisabled):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "USER_DISABLED", Message: "账户当前不可用"}
+	case errors.Is(err, ErrRegisteredAccountRequired):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "REGISTERED_ACCOUNT_REQUIRED", Message: "游客可以评论和举报，登录邮箱账号后才能发布内容"}
 	case errors.Is(err, ErrCommunityNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "COMMUNITY_NOT_FOUND", Message: "社区不存在或不可用"}
 	case errors.Is(err, ErrPostNotFound):

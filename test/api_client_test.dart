@@ -7,6 +7,39 @@ import 'package:http/testing.dart';
 import 'package:luntan/data/api/api_client.dart';
 
 void main() {
+  test('服务端认证错误码映射为可操作的中文提示', () {
+    expect(
+      userFacingApiMessage(
+        const ApiException(
+          type: ApiErrorType.unknown,
+          code: 'INVALID_EMAIL_CODE',
+          message: '验证码错误或已失效',
+        ),
+      ),
+      '验证码错误，请检查后重试',
+    );
+    expect(
+      userFacingApiMessage(
+        const ApiException(
+          type: ApiErrorType.serverError,
+          code: 'MAIL_UNAVAILABLE',
+          message: '邮件服务暂时不可用',
+        ),
+      ),
+      '邮件服务暂时不可用，请稍后再试',
+    );
+    expect(
+      userFacingApiMessage(
+        const ApiException(
+          type: ApiErrorType.forbidden,
+          code: 'REGISTERED_ACCOUNT_REQUIRED',
+          message: '游客不能发布',
+        ),
+      ),
+      '游客可以评论和举报，登录邮箱账号后才能发布内容',
+    );
+  });
+
   test('ApiClient 解码 JSON 并保留查询参数', () async {
     Uri? requested;
     final client = ApiClient(

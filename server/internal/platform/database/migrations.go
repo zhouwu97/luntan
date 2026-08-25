@@ -39,11 +39,26 @@ func Migrate(ctx context.Context, db *sql.DB, directory string) error {
 	if db == nil {
 		return fmt.Errorf("migrate database: database is not configured")
 	}
+	// 迁移必须绑定在同一条连接上持有 advisory lock。仅执行一次
+	// pg_advisory_lock 后再把连接交还连接池并不能形成进程间互斥，多个
+	// API 实例或集成测试仍可能同时执行同一份 DDL。
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("open migration connection: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext('luntan:migrations'))`); err != nil {
+		return fmt.Errorf("lock migrations: %w", err)
+	}
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext('luntan:migrations'))`)
+	}()
+
 	files, err := ListUpMigrations(directory)
 	if err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version text PRIMARY KEY,
 		applied_at timestamptz NOT NULL DEFAULT now()
 	)`); err != nil {
@@ -52,7 +67,7 @@ func Migrate(ctx context.Context, db *sql.DB, directory string) error {
 
 	for _, migration := range files {
 		var applied bool
-		if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, migration.Version).Scan(&applied); err != nil {
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)`, migration.Version).Scan(&applied); err != nil {
 			return fmt.Errorf("check migration %s: %w", migration.Version, err)
 		}
 		if applied {
@@ -62,7 +77,7 @@ func Migrate(ctx context.Context, db *sql.DB, directory string) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", migration.Version, err)
 		}
-		tx, err := db.BeginTx(ctx, nil)
+		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %s: %w", migration.Version, err)
 		}

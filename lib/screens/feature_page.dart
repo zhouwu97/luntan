@@ -411,7 +411,8 @@ class _FeaturePageState extends State<FeaturePage> {
     onOpen: () => _openPost(post),
     onLike: () => onLike?.call(post),
     onBookmark: () => onBookmark?.call(post),
-    onMenu: () {},
+    // 专题页暂不提供帖子菜单，不渲染一个没有行为的省略号入口。
+    onMenu: null,
     interactionListenable: widget.interactionController,
   );
 

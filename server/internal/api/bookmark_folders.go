@@ -109,7 +109,7 @@ func (s *Server) createBookmarkFolder(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}
@@ -240,7 +240,7 @@ func (s *Server) updateBookmarkFolder(w http.ResponseWriter, r *http.Request, fo
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}
@@ -307,7 +307,7 @@ func (s *Server) deleteBookmarkFolder(w http.ResponseWriter, r *http.Request, fo
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}
@@ -485,7 +485,7 @@ func (s *Server) setPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}

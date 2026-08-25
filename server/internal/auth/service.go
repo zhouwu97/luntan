@@ -27,15 +27,16 @@ const (
 )
 
 type User struct {
-	ID              string     `json:"id"`
-	Username        string     `json:"username"`
-	Nickname        string     `json:"nickname"`
-	Level           int        `json:"level"`
-	Status          string     `json:"status"`
-	AccountType     string     `json:"account_type"`
-	Email           string     `json:"email,omitempty"`
-	EmailVerified   bool       `json:"email_verified"`
-	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+	ID              string          `json:"id"`
+	Username        string          `json:"username"`
+	Nickname        string          `json:"nickname"`
+	Level           int             `json:"level"`
+	Status          string          `json:"status"`
+	AccountType     string          `json:"account_type"`
+	Email           string          `json:"email,omitempty"`
+	EmailVerified   bool            `json:"email_verified"`
+	EmailVerifiedAt *time.Time      `json:"email_verified_at,omitempty"`
+	Capabilities    map[string]bool `json:"capabilities,omitempty"`
 }
 
 type RegisterInput struct {
@@ -374,12 +375,24 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 		return User{}, sql.ErrConnDone
 	}
 	var user User
+	var verifiedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1)
+		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE s.access_token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`, tokenHash(accessToken)).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level)
+		WHERE s.access_token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`, tokenHash(accessToken)).Scan(
+		&user.ID,
+		&user.Username,
+		&user.Status,
+		&user.Nickname,
+		&user.Level,
+		&user.AccountType,
+		&user.Email,
+		&user.EmailVerified,
+		&verifiedAt,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInvalidToken
 	}
@@ -389,7 +402,12 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 	if user.Status != "active" {
 		return User{}, ErrUserDisabled
 	}
-	user.AccountType = "email"
+	if user.AccountType == "" {
+		user.AccountType = "email"
+	}
+	if verifiedAt.Valid {
+		user.EmailVerifiedAt = &verifiedAt.Time
+	}
 	return user, nil
 }
 

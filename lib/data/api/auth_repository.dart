@@ -11,6 +11,7 @@ class AuthUser {
     this.email,
     this.emailVerified = false,
     this.emailVerifiedAt,
+    this.capabilities = const {},
   });
 
   final String id;
@@ -22,6 +23,27 @@ class AuthUser {
   final String? email;
   final bool emailVerified;
   final DateTime? emailVerifiedAt;
+  final Map<String, bool> capabilities;
+
+  bool capability(String name, {bool fallback = false}) =>
+      capabilities[name] ?? fallback;
+
+  bool get canPublish =>
+      capability('can_publish', fallback: accountType != 'guest');
+
+  bool get canCreatePoll =>
+      capability('can_create_poll', fallback: accountType != 'guest');
+
+  bool get canManageBookmarks =>
+      capability('can_manage_bookmarks', fallback: accountType != 'guest');
+
+  bool get canModerate => capability('can_moderate');
+
+  bool get canManageAdmins => capability('can_manage_admins');
+
+  bool get canViewAdminLogs => capability('can_view_admin_logs');
+
+  bool get canBanIP => capability('can_ban_ip');
 }
 
 class EmailCodeChallenge {
@@ -192,6 +214,7 @@ class AuthRepository {
           : null,
       emailVerified: json['email_verified'] == true,
       emailVerifiedAt: _date(json['email_verified_at']),
+      capabilities: _capabilities(json['capabilities']),
     );
   }
 
@@ -202,4 +225,11 @@ class AuthRepository {
 
   DateTime? _date(dynamic value) =>
       value is String ? DateTime.tryParse(value) : null;
+
+  Map<String, bool> _capabilities(dynamic value) {
+    if (value is! Map) return const {};
+    return Map.unmodifiable(
+      value.map<String, bool>((key, item) => MapEntry('$key', item == true)),
+    );
+  }
 }

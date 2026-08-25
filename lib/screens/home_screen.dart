@@ -1433,7 +1433,7 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
                       },
                       onLike: () => store.toggleLike(post),
                       onBookmark: () => store.toggleBookmark(post),
-                      onMenu: () {},
+                      onMenu: null,
                     ),
                   ),
                 ],

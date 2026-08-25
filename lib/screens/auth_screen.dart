@@ -62,7 +62,7 @@ class _AuthScreenState extends State<AuthScreen> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Container(width: 62, height: 62, decoration: BoxDecoration(gradient: AppTheme.primaryGradient, borderRadius: BorderRadius.circular(20)), child: const Icon(Icons.forum_rounded, color: Colors.white, size: 32)),
                 const SizedBox(height: 22),
-                Text(registerMode ? '加入浅蓝论坛' : '欢迎回到浅蓝论坛', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AppTheme.textPrimary)),
+                Text(registerMode ? '加入杯友酱' : '欢迎回到杯友酱', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AppTheme.textPrimary)),
                 const SizedBox(height: 8),
                 Text(offline ? '暂时无法连接服务器，可以先浏览公开内容' : '登录后发布、回复、点赞和收藏', style: const TextStyle(color: AppTheme.textSecondary, height: 1.5)),
                 const SizedBox(height: 26),

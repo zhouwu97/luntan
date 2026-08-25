@@ -31,6 +31,33 @@ SOURCE_IMAGE_BASE = "https://beiyoujiang.com/PostImg/"
 # 当前部署通过服务器 IP 暴露媒体目录；可用 --public-media-base 覆盖。
 PUBLIC_MEDIA_BASE = "http://101.42.27.44/imported-media"
 
+# 用稳定哈希生成看起来像真实社区昵称的展示名。哈希只用于保持重复导入时
+# 的用户名稳定，不会把源站昵称、头像或用户 ID 写入展示数据。
+DISPLAY_NAME_PREFIXES = (
+    "慢玩",
+    "软萌",
+    "夜猫",
+    "温水",
+    "清洗",
+    "收纳",
+    "开箱",
+    "杯友",
+    "橘子",
+    "白桃",
+)
+DISPLAY_NAME_SUFFIXES = (
+    "观察员",
+    "研究员",
+    "试用员",
+    "记录本",
+    "小分队",
+    "后勤组",
+    "玩家",
+    "测评君",
+    "汽水",
+    "拿铁",
+)
+
 COMMUNITIES = {
     1: {
         "category_id": "category-import-digital",
@@ -39,7 +66,7 @@ COMMUNITIES = {
         "community_id": "community-import-unboxing",
         "community_slug": "import-unboxing",
         "community_name": "大型拆箱",
-        "description": "源站帖子占位展示：玩具、设备和真实使用体验。",
+        "description": "玩具开箱、结构拆解和真实使用体验。",
         "sort_order": 10,
     },
     2: {
@@ -49,7 +76,7 @@ COMMUNITIES = {
         "community_id": "community-import-forum",
         "community_slug": "import-forum",
         "community_name": "酱紫社区",
-        "description": "源站帖子占位展示：经验交流、求助和讨论。",
+        "description": "真实测评、避坑求助和同好交流。",
         "sort_order": 11,
     },
     3: {
@@ -59,7 +86,7 @@ COMMUNITIES = {
         "community_id": "community-import-daily",
         "community_slug": "import-daily",
         "community_name": "杂鱼日常",
-        "description": "源站帖子占位展示：日常记录和轻松分享。",
+        "description": "润滑、保养和日常使用记录。",
         "sort_order": 12,
     },
 }
@@ -126,9 +153,13 @@ def iso_time(value: Any) -> str:
 
 
 def placeholder_username(author_id: Any) -> str:
-    # 用源作者 ID 做种子，只为保证重复导入稳定；用户名本身不包含源站用户名。
+    # 用源作者 ID 做种子，只为保证重复导入稳定；用户名本身不包含源站用户名，
+    # 也不再使用“占位用户”前缀，避免首页看起来像测试数据。
     digest = hashlib.sha256(f"placeholder-user:{author_id}".encode("utf-8")).hexdigest()
-    return f"占位用户_{digest[:8]}"
+    prefix = DISPLAY_NAME_PREFIXES[int(digest[:2], 16) % len(DISPLAY_NAME_PREFIXES)]
+    suffix = DISPLAY_NAME_SUFFIXES[int(digest[2:4], 16) % len(DISPLAY_NAME_SUFFIXES)]
+    serial = int(digest[4:10], 16) % 10000
+    return f"{prefix}{suffix}_{serial:04d}"
 
 
 def safe_source_id(value: Any) -> str:
@@ -209,7 +240,7 @@ def build_bundle(args: argparse.Namespace) -> tuple[Path, dict[str, int]]:
                 user_id,
                 username,
                 "",
-                "源站帖子占位用户",
+                "社区随机展示账号",
                 1,
                 0,
                 timestamp,

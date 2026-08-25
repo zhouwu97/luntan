@@ -46,7 +46,7 @@ class ExchangeStoreScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          '校园周边兑换',
+                          '论坛周边兑换',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 18,
@@ -176,7 +176,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: Text(
-                    '校园周边兑换    ${balance.data ?? '…'} 积分',
+                    '论坛周边兑换    ${balance.data ?? '…'} 积分',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../data/api/api_client.dart';
+import '../data/api/ranking_repository.dart';
+
 /// `rankingList` 网页上的一条玩具排行数据。
 class RankingItem {
   const RankingItem({
@@ -10,6 +13,10 @@ class RankingItem {
     required this.ratings,
     required this.score,
     required this.asset,
+    this.id = '',
+    this.merchant = 'TMT',
+    this.releaseYear = 2026,
+    this.description = '',
   });
 
   final int rank;
@@ -19,6 +26,10 @@ class RankingItem {
   final String ratings;
   final String score;
   final String asset;
+  final String id;
+  final String merchant;
+  final int releaseYear;
+  final String description;
 }
 
 const _mainRankingItems = <RankingItem>[
@@ -30,6 +41,10 @@ const _mainRankingItems = <RankingItem>[
     ratings: '17人评分',
     score: '9.9',
     asset: 'assets/ranking/thumb_02.webp',
+    merchant: 'TMT',
+    releaseYear: 2026,
+    description:
+        '樱2软版本基本延续了前作的慢玩设定。设计结构网状结构+细密绒粒,完全属于纯新手属性的舒适按摩区，末尾方块状奇袭冲刺区也几乎拒绝一切强硬度挑战。相比琉璃子,此作才更能定义A酱最适合新手的杯子！',
   ),
   RankingItem(
     rank: 3,
@@ -253,6 +268,7 @@ const _slowRankingItems = <RankingItem>[
 ];
 
 const _topRankingItem = RankingItem(
+  id: 'toy-butter-2',
   rank: 1,
   name: '黄油小姐 二代',
   hot: '本周热门',
@@ -260,12 +276,24 @@ const _topRankingItem = RankingItem(
   ratings: '热门榜首',
   score: '8.7',
   asset: 'assets/ranking/hero.webp',
+  merchant: 'COC',
+  releaseYear: 2025,
+  description: '相较前作，黄油小姐2完成了一次华丽的材质蜕变。奶香味提升，肉质的软糯度提升极佳。大结构轨道带来的异物包裹感实战体验飙升。',
 );
 
 const _rankingTabs = ['综合热榜', '慢玩入门', '进阶训练', '超高刺激', '榨汁玩具'];
 
 class RankingPage extends StatefulWidget {
-  const RankingPage({super.key});
+  const RankingPage({
+    super.key,
+    this.repository,
+    this.isAuthenticated = false,
+    this.onRequireAuth,
+  });
+
+  final RankingRepository? repository;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
 
   @override
   State<RankingPage> createState() => _RankingPageState();
@@ -274,14 +302,84 @@ class RankingPage extends StatefulWidget {
 class _RankingPageState extends State<RankingPage> {
   int _selectedTab = 0;
   int _selectedCategory = 0;
+  List<RankingItem>? _remoteItems;
 
-  List<RankingItem> get _items =>
-      _selectedTab == 1 ? _slowRankingItems : _mainRankingItems;
+  static const _slowNames = <String>{
+    '樱川爱 二代',
+    '双穴爱莉',
+    '宫濑 Soft',
+    '水着琉璃子',
+    '巴布密着 Big',
+    '红绳姐姐',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.repository != null) _loadRemoteRanking();
+  }
+
+  Future<void> _loadRemoteRanking() async {
+    try {
+      final products = await widget.repository!.list();
+      if (!mounted || products.isEmpty) return;
+      setState(() {
+        _remoteItems = products.map(_itemFromRemote).toList();
+      });
+    } catch (_) {
+      // 服务端暂时不可用时保留已缓存的视觉结构，进入详情仍会提示重试。
+    }
+  }
+
+  RankingItem _itemFromRemote(RankingToy toy) {
+    final score = toy.score == toy.score.roundToDouble()
+        ? toy.score.toStringAsFixed(0)
+        : toy.score.toStringAsFixed(1);
+    final asset = toy.rank == 1
+        ? 'assets/ranking/hero.webp'
+        : 'assets/ranking/${toy.assetKey}';
+    return RankingItem(
+      id: toy.id,
+      rank: toy.rank,
+      name: toy.name,
+      hot: '${toy.wantCount}人想冲',
+      tags: toy.tags,
+      ratings: '${toy.ratingCount}人评分',
+      score: score,
+      asset: asset,
+      merchant: toy.merchant,
+      releaseYear: toy.releaseYear,
+      description: toy.description,
+    );
+  }
+
+  List<RankingItem> get _items => _selectedTab == 1
+      ? (_remoteItems == null
+            ? _slowRankingItems
+            : _remoteItems!
+                  .where((item) => _slowNames.contains(item.name))
+                  .toList())
+      : (_remoteItems == null
+            ? _mainRankingItems
+            : _remoteItems!.where((item) => item.rank != 1).toList());
+
+  RankingItem get _topItem {
+    if (_remoteItems == null) return _topRankingItem;
+    return _remoteItems!.firstWhere(
+      (item) => item.rank == 1,
+      orElse: () => _topRankingItem,
+    );
+  }
 
   void _openRankingItem(RankingItem item) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => RankingItemDetailPage(item: item),
+        builder: (_) => RankingItemDetailPage(
+          item: item,
+          repository: widget.repository,
+          isAuthenticated: widget.isAuthenticated,
+          onRequireAuth: widget.onRequireAuth,
+        ),
       ),
     );
   }
@@ -316,7 +414,8 @@ class _RankingPageState extends State<RankingPage> {
             ? Column(
                 children: [
                   _TopRankingCard(
-                    onTap: () => _openRankingItem(_topRankingItem),
+                    item: _topItem,
+                    onTap: () => _openRankingItem(_topItem),
                   ),
                   const SizedBox(height: 10),
                   ..._items.map(
@@ -622,8 +721,9 @@ class _CategoryButton extends StatelessWidget {
 }
 
 class _TopRankingCard extends StatelessWidget {
-  const _TopRankingCard({required this.onTap});
+  const _TopRankingCard({required this.item, required this.onTap});
 
+  final RankingItem item;
   final VoidCallback onTap;
 
   @override
@@ -631,7 +731,7 @@ class _TopRankingCard extends StatelessWidget {
     container: true,
     button: true,
     onTap: onTap,
-    label: '第1名 黄油小姐 二代，8.7 分',
+    label: '第1名 ${item.name}，${item.score} 分',
     child: InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -695,8 +795,8 @@ class _TopRankingCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            '黄油小姐 二代',
+                          Text(
+                            item.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -709,24 +809,20 @@ class _TopRankingCard extends StatelessWidget {
                           Wrap(
                             spacing: 4,
                             runSpacing: 3,
-                            children: [
-                              '奶香体质',
-                              '软糯入门',
-                              '果冻包裹',
-                            ].map(_TagChip.new).toList(),
+                            children: item.tags.map(_TagChip.new).toList(),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 1),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.baseline,
                         textBaseline: TextBaseline.alphabetic,
                         children: [
                           Text(
-                            '8.7',
+                            item.score,
                             style: TextStyle(
                               color: Color(0xFFEA6D93),
                               fontSize: 19,
@@ -755,108 +851,1150 @@ class _TopRankingCard extends StatelessWidget {
   );
 }
 
-/// 榜单条目详情；静态榜单也要有可用的二级页面，避免卡片只是图片。
-class RankingItemDetailPage extends StatelessWidget {
-  const RankingItemDetailPage({super.key, required this.item});
+/// 榜单商品详情页；布局对齐源站的商品介绍、评分和评价流。
+class RankingItemDetailPage extends StatefulWidget {
+  const RankingItemDetailPage({
+    super.key,
+    required this.item,
+    this.repository,
+    this.isAuthenticated = false,
+    this.onRequireAuth,
+  });
+
+  final RankingItem item;
+  final RankingRepository? repository;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
+
+  @override
+  State<RankingItemDetailPage> createState() => _RankingItemDetailPageState();
+}
+
+class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
+  static const _ink = Color(0xFF182C49);
+
+  final _commentController = TextEditingController();
+  bool _wanted = false;
+  bool _owned = false;
+  bool _sortByWeight = true;
+  RankingToyDetail? _remoteDetail;
+
+  RankingItem get item => widget.item;
+
+  RankingItem get displayItem {
+    final toy = _remoteDetail?.toy;
+    if (toy == null) return item;
+    return RankingItem(
+      id: toy.id,
+      rank: toy.rank,
+      name: toy.name,
+      hot: '${toy.wantCount}人想冲',
+      tags: toy.tags,
+      ratings: '${toy.ratingCount}人评分',
+      score: _scoreText(toy.score),
+      asset: item.asset,
+      merchant: toy.merchant,
+      releaseYear: toy.releaseYear,
+      description: toy.description,
+    );
+  }
+
+  String get _description => _remoteDetail?.toy.description.isNotEmpty == true
+      ? _remoteDetail!.toy.description
+      : item.description.isNotEmpty
+      ? item.description
+      : '这款玩具延续了舒适慢玩的设计，适合在熟悉自己的节奏后逐步体验。';
+
+  String get _wantCount =>
+      _remoteDetail?.toy.wantCount.toString() ?? item.hot.replaceAll('人想冲', '');
+
+  String get _reviewCount =>
+      _remoteDetail?.toy.ratingCount.toString() ??
+      item.ratings.replaceAll('人评分', '');
+
+  String get _score =>
+      _remoteDetail == null ? item.score : _scoreText(_remoteDetail!.toy.score);
+
+  List<RankingToyComment>? get _serverComments => _remoteDetail?.comments;
+
+  bool get _hasServer => widget.repository != null && item.id.trim().isNotEmpty;
+
+  static String _scoreText(double score) => score == score.roundToDouble()
+      ? score.toStringAsFixed(0)
+      : score.toStringAsFixed(1);
+
+  @override
+  void initState() {
+    super.initState();
+    if (_hasServer) _loadRemoteDetail();
+  }
+
+  Future<void> _loadRemoteDetail() async {
+    try {
+      final detail = await widget.repository!.detail(
+        item.id,
+        commentSort: _sortByWeight ? 'weight' : 'latest',
+      );
+      if (!mounted) return;
+      setState(() {
+        _remoteDetail = detail;
+        _wanted = detail.toy.wanted;
+        _owned = detail.toy.owned;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(userFacingApiMessage(error, fallback: '详情加载失败，请重试')),
+        ),
+      );
+    }
+  }
+
+  bool _requireInteractionAuth() {
+    if (!_hasServer || widget.isAuthenticated) return true;
+    widget.onRequireAuth?.call();
+    return false;
+  }
+
+  void _replaceToy(RankingToy toy) {
+    final detail = _remoteDetail;
+    if (detail == null) return;
+    setState(() {
+      _remoteDetail = RankingToyDetail(
+        toy: toy,
+        comments: detail.comments,
+        commentSort: detail.commentSort,
+      );
+      _wanted = toy.wanted;
+      _owned = toy.owned;
+    });
+  }
+
+  Future<void> _setWanted() async {
+    if (!_requireInteractionAuth()) return;
+    if (!_hasServer) {
+      setState(() => _wanted = !_wanted);
+      return;
+    }
+    try {
+      final toy = await widget.repository!.setWanted(
+        toyId: item.id,
+        active: !_wanted,
+      );
+      _replaceToy(toy);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+      }
+    }
+  }
+
+  Future<void> _setOwned() async {
+    if (!_requireInteractionAuth()) return;
+    if (!_hasServer) {
+      setState(() => _owned = !_owned);
+      return;
+    }
+    try {
+      final toy = await widget.repository!.setOwned(
+        toyId: item.id,
+        active: !_owned,
+      );
+      _replaceToy(toy);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+      }
+    }
+  }
+
+  Future<void> _toggleSort() async {
+    if (!_hasServer) {
+      setState(() => _sortByWeight = !_sortByWeight);
+      return;
+    }
+    setState(() => _sortByWeight = !_sortByWeight);
+    await _loadRemoteDetail();
+  }
+
+  Future<void> _openRatingDialog() async {
+    if (!_requireInteractionAuth()) return;
+    if (!_hasServer) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请连接服务器后评分')));
+      return;
+    }
+    var selected = _remoteDetail?.toy.rating ?? 10;
+    final score = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('给这款玩具评分'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$selected 分',
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Slider(
+                min: 1,
+                max: 10,
+                divisions: 9,
+                value: selected.toDouble(),
+                label: '$selected',
+                onChanged: (value) =>
+                    setDialogState(() => selected = value.round()),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, selected),
+              child: const Text('提交评分'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (score == null) return;
+    try {
+      final toy = await widget.repository!.rate(toyId: item.id, score: score);
+      _replaceToy(toy);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('评分已保存')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(userFacingApiMessage(error, fallback: '评分保存失败')),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitComment(String value) async {
+    if (value.trim().isEmpty) return;
+    if (!_requireInteractionAuth()) return;
+    if (!_hasServer) {
+      _commentController.clear();
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请连接服务器后发表评论')));
+      return;
+    }
+    try {
+      final comment = await widget.repository!.createComment(
+        toyId: item.id,
+        content: value.trim(),
+      );
+      if (!mounted) return;
+      final detail = _remoteDetail;
+      if (detail != null) {
+        setState(() {
+          _remoteDetail = RankingToyDetail(
+            toy: detail.toy,
+            comments: [comment, ...detail.comments],
+            commentSort: detail.commentSort,
+          );
+        });
+      }
+      _commentController.clear();
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('评论已提交')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(userFacingApiMessage(error, fallback: '评论提交失败')),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleServerCommentLike(RankingToyComment comment) async {
+    if (!_requireInteractionAuth()) return;
+    if (!_hasServer) return;
+    try {
+      final count = await widget.repository!.setCommentLike(
+        commentId: comment.id,
+        active: !comment.isLiked,
+      );
+      if (!mounted || _remoteDetail == null) return;
+      final nextLiked = !comment.isLiked;
+      final nextCount = count > 0
+          ? count
+          : (nextLiked
+                ? comment.likeCount + 1
+                : (comment.likeCount - 1).clamp(0, 1 << 30).toInt());
+      final comments = _remoteDetail!.comments
+          .map(
+            (item) => item.id == comment.id
+                ? RankingToyComment(
+                    id: item.id,
+                    authorId: item.authorId,
+                    username: item.username,
+                    nickname: item.nickname,
+                    level: item.level,
+                    content: item.content,
+                    likeCount: nextCount,
+                    isLiked: nextLiked,
+                    createdAt: item.createdAt,
+                  )
+                : item,
+          )
+          .toList();
+      setState(() {
+        _remoteDetail = RankingToyDetail(
+          toy: _remoteDetail!.toy,
+          comments: comments,
+          commentSort: _remoteDetail!.commentSort,
+        );
+      });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.white,
+    resizeToAvoidBottomInset: true,
+    body: SafeArea(
+      bottom: false,
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              _DetailTopBar(
+                onBack: () => Navigator.of(context).maybePop(),
+                onShare: () => ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('分享链接已复制'))),
+              ),
+              Expanded(
+                child: Scrollbar(
+                  thumbVisibility: true,
+                  thickness: 3,
+                  radius: const Radius.circular(3),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 78),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _DetailProductIntro(item: displayItem),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+                          child: Text(
+                            _description,
+                            style: const TextStyle(
+                              color: _ink,
+                              fontSize: 15,
+                              height: 1.55,
+                            ),
+                          ),
+                        ),
+                        Semantics(
+                          button: _hasServer,
+                          label: '点击评分，当前 $_score 分',
+                          child: InkWell(
+                            onTap: _hasServer ? _openRatingDialog : null,
+                            borderRadius: BorderRadius.circular(16),
+                            child: _DetailRatingCard(item: displayItem),
+                          ),
+                        ),
+                        _DetailActions(
+                          wanted: _wanted,
+                          owned: _owned,
+                          wantCount: _wantCount,
+                          reviewCount: _reviewCount,
+                          onWant: _setWanted,
+                          onOwn: _setOwned,
+                        ),
+                        _ReviewSection(
+                          sortByWeight: _sortByWeight,
+                          comments: _serverComments,
+                          onToggleSort: _toggleSort,
+                          onLike: _toggleServerCommentLike,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _DetailCommentBar(
+              controller: _commentController,
+              reviewCount: _reviewCount,
+              wantCount: _wantCount,
+              onSubmitted: _submitComment,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _DetailTopBar extends StatelessWidget {
+  const _DetailTopBar({required this.onBack, required this.onShare});
+
+  final VoidCallback onBack;
+  final VoidCallback onShare;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 54,
+    child: Row(
+      children: [
+        SizedBox(
+          width: 54,
+          height: 54,
+          child: Tooltip(
+            message: '返回',
+            child: IconButton(
+              onPressed: onBack,
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                size: 20,
+                color: Color(0xFF2D3441),
+              ),
+            ),
+          ),
+        ),
+        const Expanded(
+          child: Center(
+            child: Icon(Icons.toys, size: 23, color: Color(0xFF1D2A42)),
+          ),
+        ),
+        SizedBox(
+          width: 54,
+          height: 54,
+          child: Tooltip(
+            message: '分享',
+            child: IconButton(
+              onPressed: onShare,
+              icon: const Icon(
+                Icons.ios_share_outlined,
+                size: 19,
+                color: Color(0xFF556176),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DetailProductIntro extends StatelessWidget {
+  const _DetailProductIntro({required this.item});
 
   final RankingItem item;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFFF2F1F6),
-    appBar: AppBar(
-      title: Text(item.name),
-      backgroundColor: const Color(0xFFF2F1F6),
-      surfaceTintColor: Colors.transparent,
-      elevation: 0,
-      leading: Tooltip(
-        message: '返回',
-        child: IconButton(
-          onPressed: () => Navigator.of(context).maybePop(),
-          icon: const Icon(Icons.arrow_back_rounded),
-        ),
-      ),
-    ),
-    body: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: AspectRatio(
-            aspectRatio: 1.45,
-            child: Image.asset(item.asset, fit: BoxFit.cover),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 9, 24, 14),
+    child: SizedBox(
+      height: 142,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 112,
+            child: Image.asset(item.asset, fit: BoxFit.contain),
           ),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFF3F4F6)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          const SizedBox(width: 18),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      item.name,
-                      style: const TextStyle(
-                        color: Color(0xFF222222),
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   Text(
-                    '${item.score} 分',
+                    item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: Color(0xFFEA6D93),
-                      fontSize: 18,
+                      color: Color(0xFF12243E),
+                      fontSize: 21,
+                      height: 1.15,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '${item.merchant} · ${item.releaseYear}',
+                    style: const TextStyle(
+                      color: Color(0xFF60708A),
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  Wrap(
+                    spacing: 5,
+                    runSpacing: 5,
+                    children: item.tags.map(_DetailTag.new).toList(),
+                  ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: item.tags.map(_TagChip.new).toList(),
-              ),
-              const SizedBox(height: 16),
-              const Divider(height: 1),
-              const SizedBox(height: 14),
-              Text(
-                '${item.hot} · ${item.ratings}',
-                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '榜单详情',
-                style: TextStyle(
-                  color: Color(0xFF222222),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _DetailTag extends StatelessWidget {
+  const _DetailTag(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF0F5),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      child: Text(
+        '#$label',
+        style: const TextStyle(
+          color: Color(0xFFF26791),
+          fontSize: 10,
+          height: 1.05,
+        ),
+      ),
+    ),
+  );
+}
+
+class _DetailRatingCard extends StatelessWidget {
+  const _DetailRatingCard({required this.item});
+
+  final RankingItem item;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 156,
+    margin: const EdgeInsets.fromLTRB(24, 0, 24, 0),
+    padding: const EdgeInsets.fromLTRB(18, 8, 14, 8),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF0F5),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 116,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(left: 26),
+                child: Text(
+                  '酱友评分',
+                  style: TextStyle(
+                    color: Color(0xFF66738A),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
-              const Text(
-                '这是榜单展示占位内容，后续可以在这里补充产品介绍、用户评价和相关帖子。',
-                style: TextStyle(
-                  color: Color(0xFF6B7280),
-                  fontSize: 13,
-                  height: 1.6,
+              Text(
+                item.score,
+                style: const TextStyle(
+                  color: Color(0xFFF7618E),
+                  fontSize: 48,
+                  height: 1.0,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Row(
+                children: List.generate(
+                  5,
+                  (index) => const Padding(
+                    padding: EdgeInsets.only(right: 2),
+                    child: Icon(
+                      Icons.favorite,
+                      size: 14,
+                      color: Color(0xFFF7618E),
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
         ),
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Text(
+                    'LV2以上权重加成',
+                    style: TextStyle(color: Color(0xFFAAB4C3), fontSize: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              for (final entry in const [
+                (5, 1.0),
+                (4, 0.0),
+                (3, 0.18),
+                (2, 0.0),
+                (1, 0.0),
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: _RatingBar(level: entry.$1, value: entry.$2),
+                ),
+            ],
+          ),
+        ),
       ],
+    ),
+  );
+}
+
+class _RatingBar extends StatelessWidget {
+  const _RatingBar({required this.level, required this.value});
+
+  final int level;
+  final double value;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      SizedBox(
+        width: 18,
+        child: Text(
+          '$level',
+          style: const TextStyle(color: Color(0xFF7E8AA0), fontSize: 12),
+        ),
+      ),
+      Expanded(
+        child: SizedBox(
+          height: 6,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const ColoredBox(color: Colors.white),
+                FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: value,
+                  child: const ColoredBox(color: Color(0xFFF7618E)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+class _DetailActions extends StatelessWidget {
+  const _DetailActions({
+    required this.wanted,
+    required this.owned,
+    required this.wantCount,
+    required this.reviewCount,
+    required this.onWant,
+    required this.onOwn,
+  });
+
+  final bool wanted;
+  final bool owned;
+  final String wantCount;
+  final String reviewCount;
+  final VoidCallback onWant;
+  final VoidCallback onOwn;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+    child: Row(
+      children: [
+        Expanded(
+          child: _DetailActionButton(
+            label: wanted ? '已想冲' : '想冲',
+            count: '$wantCount人想冲',
+            icon: wanted ? Icons.favorite : Icons.favorite_border_rounded,
+            filled: wanted,
+            onTap: onWant,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _DetailActionButton(
+            label: owned ? '已买过' : '买过',
+            count: '$reviewCount人评分',
+            icon: Icons.edit_outlined,
+            filled: true,
+            onTap: onOwn,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DetailActionButton extends StatelessWidget {
+  const _DetailActionButton({
+    required this.label,
+    required this.count,
+    required this.icon,
+    required this.filled,
+    required this.onTap,
+  });
+
+  final String label;
+  final String count;
+  final IconData icon;
+  final bool filled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: filled ? const Color(0xFFF76591) : const Color(0xFFFFF0F5),
+    borderRadius: BorderRadius.circular(13),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(13),
+      child: SizedBox(
+        height: 45,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: filled ? Colors.white : const Color(0xFFF76591),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: filled ? Colors.white : const Color(0xFFF76591),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            Positioned(
+              right: 10,
+              bottom: 5,
+              child: Text(
+                count,
+                style: TextStyle(
+                  color: filled
+                      ? Colors.white.withValues(alpha: 0.9)
+                      : const Color(0xFFF76591),
+                  fontSize: 8,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _ReviewSection extends StatelessWidget {
+  const _ReviewSection({
+    required this.sortByWeight,
+    required this.onToggleSort,
+    this.comments,
+    this.onLike,
+  });
+
+  final bool sortByWeight;
+  final VoidCallback onToggleSort;
+  final List<RankingToyComment>? comments;
+  final ValueChanged<RankingToyComment>? onLike;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 37, 24, 12),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Text(
+              '评价',
+              style: TextStyle(
+                color: Color(0xFF142A48),
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: onToggleSort,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF8A96A9),
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(sortByWeight ? '按权重排序' : '按时间排序'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (comments == null) ...[
+          const _ReviewCard(
+            user: '菜菜M',
+            likes: '8',
+            content: 'A酱的慢玩断折作，比琉璃子好比琉璃子贵就是没有琉璃子陪伴的回忆而已（悲…）',
+            reply:
+                '杂鱼萌萌(538793014)：大佬你好，这张图在店铺里对应的是二代款［普通版］，还有另一张是二代［经典版］，但是是另一张图，应该是哪个大佬',
+            replyDate: '07-29',
+            avatarColor: Color(0xFFFFE7B6),
+          ),
+          const _ReviewCard(
+            user: '杂鱼萌萌',
+            likes: '3',
+            content: '这个盒子的好用一点，比较软，锻炼和练射时长选这个版本就行了。礼盒版是周边多，配送点东西，但是胶体是一样的。',
+            reply: null,
+            replyDate: null,
+            avatarColor: Color(0xFFE3EEFF),
+          ),
+        ] else if (comments!.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 22),
+            child: Text(
+              '还没有评价，来留下第一条吧',
+              style: TextStyle(color: Color(0xFF8A96A9)),
+            ),
+          )
+        else
+          ...comments!.map(
+            (comment) => _ReviewCard.server(
+              comment: comment,
+              onLike: onLike == null ? null : () => onLike!(comment),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _ReviewCard extends StatelessWidget {
+  const _ReviewCard({
+    required this.user,
+    required this.likes,
+    required this.content,
+    required this.reply,
+    required this.replyDate,
+    required this.avatarColor,
+  }) : liked = false,
+       onLike = null;
+
+  _ReviewCard.server({required RankingToyComment comment, required this.onLike})
+    : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
+      likes = '${comment.likeCount}',
+      content = comment.content,
+      reply = null,
+      replyDate = null,
+      avatarColor = const Color(0xFFE3EEFF),
+      liked = comment.isLiked;
+
+  final String user;
+  final String likes;
+  final String content;
+  final String? reply;
+  final String? replyDate;
+  final Color avatarColor;
+  final bool liked;
+  final VoidCallback? onLike;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 22),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: avatarColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFE8ECF2)),
+          ),
+          child: const Icon(
+            Icons.person_outline_rounded,
+            size: 22,
+            color: Color(0xFF7D8BA3),
+          ),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    user,
+                    style: const TextStyle(
+                      color: Color(0xFF102844),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE4F8F1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'LV3',
+                      style: TextStyle(
+                        color: Color(0xFF38AD8B),
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (onLike == null)
+                    Icon(
+                      Icons.thumb_up_alt_outlined,
+                      size: 18,
+                      color: liked
+                          ? const Color(0xFFF76591)
+                          : const Color(0xFFAAB2C0),
+                    )
+                  else
+                    InkWell(
+                      onTap: onLike,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Icon(
+                          liked
+                              ? Icons.thumb_up_alt_rounded
+                              : Icons.thumb_up_alt_outlined,
+                          size: 18,
+                          color: liked
+                              ? const Color(0xFFF76591)
+                              : const Color(0xFFAAB2C0),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 5),
+                  Text(
+                    likes,
+                    style: const TextStyle(
+                      color: Color(0xFF7D899D),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: List.generate(
+                  5,
+                  (index) => const Padding(
+                    padding: EdgeInsets.only(right: 2),
+                    child: Icon(
+                      Icons.favorite,
+                      size: 13,
+                      color: Color(0xFFF76591),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                content,
+                style: const TextStyle(
+                  color: Color(0xFF203C60),
+                  fontSize: 14,
+                  height: 1.6,
+                ),
+              ),
+              if (reply != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F7FB),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: reply,
+                          style: const TextStyle(
+                            color: Color(0xFF3C70B7),
+                            fontSize: 12,
+                            height: 1.65,
+                          ),
+                        ),
+                        TextSpan(
+                          text: '  $replyDate',
+                          style: const TextStyle(
+                            color: Color(0xFF9AA5B7),
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DetailCommentBar extends StatelessWidget {
+  const _DetailCommentBar({
+    required this.controller,
+    required this.reviewCount,
+    required this.wantCount,
+    required this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final String reviewCount;
+  final String wantCount;
+  final ValueChanged<String> onSubmitted;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.white,
+    elevation: 8,
+    child: SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                onSubmitted: onSubmitted,
+                textInputAction: TextInputAction.send,
+                style: const TextStyle(color: Color(0xFF233B5B), fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '来，说点什么吧!',
+                  hintStyle: const TextStyle(
+                    color: Color(0xFFAEB8C6),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFFF4F5F8),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 9,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              reviewCount,
+              style: const TextStyle(color: Color(0xFF78869A), fontSize: 12),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.chat_bubble_outline_rounded,
+              size: 17,
+              color: Color(0xFF6F7B8E),
+            ),
+            const SizedBox(width: 9),
+            Text(
+              wantCount,
+              style: const TextStyle(color: Color(0xFF78869A), fontSize: 12),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.favorite_border_rounded,
+              size: 20,
+              color: Color(0xFF59667A),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 }

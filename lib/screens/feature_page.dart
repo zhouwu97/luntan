@@ -5,6 +5,7 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
 import '../data/api/platform_repository.dart';
+import '../data/api/ranking_repository.dart';
 import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
@@ -36,7 +37,10 @@ class FeaturePage extends StatefulWidget {
     this.feedRepository,
     this.platformRepository,
     this.postRepository,
+    this.rankingRepository,
     this.storeRepository,
+    this.isAuthenticated = false,
+    this.onRequireAuth,
   });
 
   final FeatureType type;
@@ -49,7 +53,10 @@ class FeaturePage extends StatefulWidget {
   final FeedRepository? feedRepository;
   final PlatformRepository? platformRepository;
   final PostRepository? postRepository;
+  final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
 
   @override
   State<FeaturePage> createState() => _FeaturePageState();
@@ -173,7 +180,10 @@ class _FeaturePageState extends State<FeaturePage> {
   FeedRepository? get feedRepository => widget.feedRepository;
   PlatformRepository? get platformRepository => widget.platformRepository;
   PostRepository? get postRepository => widget.postRepository;
+  RankingRepository? get rankingRepository => widget.rankingRepository;
   StoreRepository? get storeRepository => widget.storeRepository;
+  bool get isAuthenticated => widget.isAuthenticated;
+  VoidCallback? get onRequireAuth => widget.onRequireAuth;
 
   @override
   void initState() {
@@ -234,7 +244,11 @@ class _FeaturePageState extends State<FeaturePage> {
   @override
   Widget build(BuildContext context) {
     if (type == FeatureType.ranking) {
-      return const RankingPage();
+      return RankingPage(
+        repository: rankingRepository,
+        isAuthenticated: isAuthenticated,
+        onRequireAuth: onRequireAuth,
+      );
     }
     if (type == FeatureType.ranking && storeRepository != null) {
       return Scaffold(
@@ -406,7 +420,7 @@ class _FeaturePageState extends State<FeaturePage> {
       SliverPadding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
         sliver: SliverToBoxAdapter(
-          child: _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
+          child: _featureIntro('本周热门内容\n用社区积分兑换喜欢的论坛周边。'),
         ),
       ),
       if (products.isEmpty)
@@ -434,7 +448,7 @@ class _FeaturePageState extends State<FeaturePage> {
       SliverPadding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
         sliver: SliverToBoxAdapter(
-          child: _featureIntro('本周热门兑换\n用社区积分兑换喜欢的校园好物。'),
+          child: _featureIntro('本周热门内容\n用社区积分兑换喜欢的论坛周边。'),
         ),
       ),
       SliverPadding(
@@ -471,11 +485,11 @@ class _FeaturePageState extends State<FeaturePage> {
   );
 
   String _description(FeatureType type) => switch (type) {
-    FeatureType.ranking => '本周热门兑换，用社区积分兑换喜欢的校园好物。',
+    FeatureType.ranking => '社区用户真实评分的玩具榜单，按综合口碑和体验反馈展示。',
     FeatureType.hot => '社区里正在被大家讨论的内容，今天也来逛逛吧。',
-    FeatureType.outfit => '桌搭、宿舍布置和校园生活灵感，都可以在这里找到。',
-    FeatureType.activity => '校园活动内容集中展示，打开帖子查看时间、地点和参与方式。',
-    FeatureType.gameShare => '分享游戏、桌游、社团活动和校园玩法，找到一起玩的同学。',
+    FeatureType.outfit => '开箱图、结构展示和穿搭分享，都可以在这里找到。',
+    FeatureType.activity => '社区活动和公告集中展示，打开帖子查看参与方式。',
+    FeatureType.gameShare => '分享慢玩、清洗、收纳和配菜玩法，找到一起交流的同好。',
     FeatureType.myReplies => '这里会展示你参与过的回复，先去帖子里聊两句吧。',
   };
 }

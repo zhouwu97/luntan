@@ -185,7 +185,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                '浅蓝论坛 · 把真实的校园生活留在这里',
+                '杯友酱 · 把真实的玩具体验留在这里',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: AppTheme.textSecondary.withValues(alpha: .7),
@@ -208,7 +208,7 @@ class ProfileScreen extends StatelessWidget {
           children: [
             const ListTile(
               leading: Icon(Icons.palette_outlined),
-              title: Text('浅蓝主题'),
+              title: Text('杯友主题'),
               trailing: Icon(Icons.check_rounded, color: AppTheme.primary),
             ),
             ListTile(
@@ -230,7 +230,7 @@ class ProfileScreen extends StatelessWidget {
               ),
             ListTile(
               leading: const Icon(Icons.info_outline_rounded),
-              title: const Text('关于浅蓝论坛'),
+              title: const Text('关于杯友酱'),
               onTap: () {
                 Navigator.pop(context);
                 onFeedback('当前版本 v1.0.0');
@@ -751,7 +751,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              '浅蓝论坛 · 把真实的校园生活留在这里',
+              '杯友酱 · 把真实的玩具体验留在这里',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textSecondary.withValues(alpha: .7),
@@ -814,7 +814,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
           children: [
             const ListTile(
               leading: Icon(Icons.palette_outlined),
-              title: Text('浅蓝主题'),
+              title: Text('杯友主题'),
               trailing: Icon(Icons.check_rounded, color: AppTheme.primary),
             ),
             if (widget.onLogout != null)
@@ -882,7 +882,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
               ),
             ListTile(
               leading: const Icon(Icons.info_outline_rounded),
-              title: const Text('关于浅蓝论坛'),
+              title: const Text('关于杯友酱'),
               onTap: () {
                 Navigator.pop(sheetContext);
                 widget.onFeedback('当前版本 v1.0.0');
@@ -1546,7 +1546,7 @@ class _ExchangePreview extends StatelessWidget {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      '用积分换论坛和校园周边',
+                      '用积分换论坛周边和实用好物',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 11,

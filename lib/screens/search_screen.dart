@@ -52,7 +52,7 @@ class _SearchScreenState extends State<SearchScreen> {
   SharedPreferences? preferences;
 
   static const recentSearchesKey = 'search.recent.v1';
-  static const suggestedSearches = <String>['食堂', '新生', '社团', '考研'];
+  static const suggestedSearches = <String>['黄油小姐', '润滑', '保养', '慢玩'];
 
   @override
   void dispose() {

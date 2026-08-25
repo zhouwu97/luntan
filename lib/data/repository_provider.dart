@@ -9,6 +9,7 @@ import 'api/platform_repository.dart';
 import 'api/publish_repository.dart';
 import 'api/profile_repository.dart';
 import 'api/poll_repository.dart';
+import 'api/ranking_repository.dart';
 import 'api/store_repository.dart';
 import 'api/user_repository.dart';
 import 'api/secure_token_store.dart';
@@ -30,6 +31,7 @@ class ForumRepositories {
     this.publish,
     this.profile,
     this.poll,
+    this.ranking,
     this.store,
     this.bookmarks,
     this.users,
@@ -48,6 +50,7 @@ class ForumRepositories {
   final PublishRepository? publish;
   final ProfileRepository? profile;
   final PollRepository? poll;
+  final RankingRepository? ranking;
   final StoreRepository? store;
   final BookmarkRepository? bookmarks;
   final UserRepository? users;
@@ -97,6 +100,7 @@ class ForumRepositories {
       publish: ApiPublishRepository(authenticatedClient),
       profile: ProfileRepository(authenticatedClient),
       poll: PollRepository(authenticatedClient),
+      ranking: RankingRepository(authenticatedClient),
       store: StoreRepository(authenticatedClient),
       users: ApiUserRepository(authenticatedClient),
       isApiMode: true,

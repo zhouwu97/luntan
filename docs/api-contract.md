@@ -208,6 +208,24 @@ pending，服务端有清理接口。
 | GET | `/notifications/unread-count` | 是 | 未读数 |
 | GET | `/search?q=&type=&cursor=` | 是 | 搜索；选择帖子/用户/社区分类后使用 cursor 分页，综合搜索不接受 cursor |
 
+通知分类使用 `all`、`interaction`、`community`、`moderation`；处罚通知的
+`target_data` 带有 `moderation_action_id` 和 `appealable`，客户端据此进入正式处理详情。
+
+### 处罚与申诉 Moderation Appeals
+
+| 方法 | 路径 | 登录 | 说明 |
+|---|---|---|---|
+| GET | `/moderation-actions/{id}` | 是 | 当前用户查看自己的可申诉处理详情 |
+| POST | `/moderation-actions/{id}/appeals` | 是 | 针对一个处罚动作提交一次申诉，最多 3 个 `media_ids` |
+| GET | `/appeals` | 是 | 查看自己的申诉记录，可按 `status` 过滤 |
+| GET | `/appeals/{id}` | 是 | 查看自己的申诉详情和复核状态 |
+| GET | `/moderation/appeals` | 管理员 | 管理员查看申诉案件 |
+| GET | `/moderation/appeals/{id}` | 管理员 | 查看原内容、处罚和证据 |
+| POST | `/moderation/appeals/{id}/review` | 管理员 | 提交 `{ "result": "approved|rejected", "note": "..." }` |
+
+申诉动作、内容恢复、申诉结果通知和 outbox 事件在同一事务中提交；同一
+`moderation_action_id` 只能存在一条申诉，已完成的申诉不允许重复提交。
+
 ## 已知错误码
 
 错误统一由 `writeAuthError` / `httpserver.WriteAppError` 输出，代码表如下
@@ -235,6 +253,9 @@ pending，服务端有清理接口。
 | `INVALID_BOOKMARK_FOLDER_NAME` | 400 | 收藏夹名称不合法 |
 | `STORAGE_UNAVAILABLE` / `DATABASE_UNAVAILABLE` | 503 | 依赖服务不可用 |
 | `BLOCKED` | 403 | 该互动已被阻止 |
+| `APPEAL_NOT_FOUND` | 404 | 申诉或处罚动作不存在 |
+| `APPEAL_NOT_ALLOWED` | 403 | 该处理不可申诉或不属于当前用户 |
+| `APPEAL_ALREADY_EXISTS` / `APPEAL_ALREADY_REVIEWED` | 409 | 申诉重复或已完成复核 |
 
 > 客户端统一经 `ApiClient` 将 `code` 映射为 `ApiErrorType`，不直接依赖
 > `message` 文案。

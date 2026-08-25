@@ -211,6 +211,29 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/api/v1/reports":
 		s.createReport(w, r)
 		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/moderation-actions/") && strings.HasSuffix(path, "/appeals"):
+		actionID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/moderation-actions/"), "/appeals")
+		s.createAppeal(w, r, actionID)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/moderation-actions/"):
+		s.getModerationAction(w, r, strings.TrimPrefix(path, "/api/v1/moderation-actions/"))
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/appeals":
+		s.listAppeals(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/appeals/"):
+		s.getAppeal(w, r, strings.TrimPrefix(path, "/api/v1/appeals/"))
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/moderation/appeals":
+		s.listModerationAppeals(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/moderation/appeals/"):
+		s.getModerationAppeal(w, r, strings.TrimPrefix(path, "/api/v1/moderation/appeals/"))
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/moderation/appeals/") && strings.HasSuffix(path, "/review"):
+		appealID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/moderation/appeals/"), "/review")
+		s.reviewAppeal(w, r, appealID)
+		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/moderation/cases/") && strings.HasSuffix(path, "/actions"):
 		caseID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/moderation/cases/"), "/actions")
 		s.createModerationAction(w, r, caseID)
@@ -467,6 +490,16 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MODERATION_ACTION", Message: "审核动作不合法"}
 	case errors.Is(err, ErrModerationCaseNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "MODERATION_CASE_NOT_FOUND", Message: "审核案件不存在"}
+	case errors.Is(err, ErrAppealNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "APPEAL_NOT_FOUND", Message: "申诉不存在或已被删除"}
+	case errors.Is(err, ErrAppealNotAllowed):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "APPEAL_NOT_ALLOWED", Message: "该处理不支持申诉或不属于当前账号"}
+	case errors.Is(err, ErrAppealAlreadyExists):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "APPEAL_ALREADY_EXISTS", Message: "该处理已经提交过申诉"}
+	case errors.Is(err, ErrAppealAlreadyReviewed):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "APPEAL_ALREADY_REVIEWED", Message: "该申诉已经完成复核"}
+	case errors.Is(err, ErrInvalidAppeal):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_APPEAL", Message: "申诉参数不合法"}
 	case errors.Is(err, sql.ErrConnDone):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"}
 	}

@@ -59,7 +59,7 @@ void main() {
     expect(opened, ['user:u2']);
   });
 
-  testWidgets('打开消息页不自动全部已读，切换分类改为服务端查询', (tester) async {
+  testWidgets('打开通知页不自动全部已读，切换分类改为服务端查询', (tester) async {
     final repository = _RecordingPlatformRepository();
 
     await tester.pumpWidget(
@@ -72,12 +72,12 @@ void main() {
     expect(repository.markAllCalls, 0);
     expect(repository.categories, [NotificationCategory.all]);
 
-    await tester.tap(find.text('回复'));
+    await tester.tap(find.text('互动'));
     await tester.pump();
 
     expect(repository.categories, [
       NotificationCategory.all,
-      NotificationCategory.reply,
+      NotificationCategory.interaction,
     ]);
   });
 }

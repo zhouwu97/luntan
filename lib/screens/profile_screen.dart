@@ -34,6 +34,7 @@ class ProfileScreen extends StatelessWidget {
     this.onDeleteAccount,
     this.onRequireAuth,
     this.onOpenModeration,
+    this.onOpenAppeals,
     this.onOpenRelations,
     this.refreshToken = 0,
   });
@@ -56,6 +57,7 @@ class ProfileScreen extends StatelessWidget {
   final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenModeration;
+  final VoidCallback? onOpenAppeals;
   final void Function(String userId, bool followers)? onOpenRelations;
   final int refreshToken;
 
@@ -77,6 +79,7 @@ class ProfileScreen extends StatelessWidget {
         onOpenPostId: onOpenPostId,
         onOpenPostById: onOpenPostById,
         onOpenModeration: onOpenModeration,
+        onOpenAppeals: onOpenAppeals,
         onOpenRelations: onOpenRelations,
         refreshToken: refreshToken,
       );
@@ -146,10 +149,10 @@ class ProfileScreen extends StatelessWidget {
                     onTap: () => _showHistory(context),
                   ),
                   _ProfileTool(
-                    icon: Icons.mode_comment_outlined,
-                    label: '我的评论',
+                    icon: Icons.rate_review_outlined,
+                    label: '我的申诉',
                     color: AppTheme.mint,
-                    onTap: () => _showList(context, '我的评论'),
+                    onTap: onOpenAppeals ?? () => onFeedback('当前模式暂不支持申诉'),
                   ),
                 ],
               ),
@@ -471,6 +474,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onLogout,
     this.onDeleteAccount,
     this.onOpenModeration,
+    this.onOpenAppeals,
     this.onOpenRelations,
     required this.refreshToken,
   });
@@ -482,6 +486,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final Future<void> Function()? onLogout;
   final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onOpenModeration;
+  final VoidCallback? onOpenAppeals;
   final void Function(String userId, bool followers)? onOpenRelations;
   final int refreshToken;
   final StoreRepository? storeRepository;
@@ -720,10 +725,12 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                   onTap: () => _showList('浏览历史'),
                 ),
                 _ProfileTool(
-                  icon: Icons.mode_comment_outlined,
-                  label: '我的评论',
+                  icon: Icons.rate_review_outlined,
+                  label: '我的申诉',
                   color: AppTheme.mint,
-                  onTap: () => _showList('我的评论'),
+                  onTap:
+                      widget.onOpenAppeals ??
+                      () => widget.onFeedback('当前模式暂不支持申诉'),
                 ),
               ],
             ),

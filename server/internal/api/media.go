@@ -410,7 +410,8 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID str
 		UPDATE media_assets ma
 		SET deleted_at = now(), updated_at = now(), status = 'deleted'
 		WHERE ma.id = $1 AND ma.owner_id = $2 AND ma.deleted_at IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = ma.id)`, mediaID, user.ID)
+		  AND NOT EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = ma.id)
+		  AND NOT EXISTS (SELECT 1 FROM moderation_appeal_media mam WHERE mam.media_id = ma.id)`, mediaID, user.ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

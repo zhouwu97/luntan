@@ -8,6 +8,7 @@ import '../data/api/platform_repository.dart';
 import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
+import 'ranking_page.dart';
 
 enum FeatureType { ranking, hot, outfit, activity, gameShare, myReplies }
 
@@ -177,9 +178,7 @@ class _FeaturePageState extends State<FeaturePage> {
   @override
   void initState() {
     super.initState();
-    if (type == FeatureType.ranking && storeRepository != null) {
-      productsFuture = storeRepository!.products();
-    } else if (feedRepository != null) {
+    if (type != FeatureType.ranking && feedRepository != null) {
       remoteFuture = _remotePosts();
     }
   }
@@ -234,6 +233,9 @@ class _FeaturePageState extends State<FeaturePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (type == FeatureType.ranking) {
+      return const RankingPage();
+    }
     if (type == FeatureType.ranking && storeRepository != null) {
       return Scaffold(
         appBar: AppBar(title: Text(title)),

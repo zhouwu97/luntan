@@ -9,10 +9,12 @@ class ModerationConsoleScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.onFeedback,
+    this.onOpenAppeals,
   });
 
   final PlatformRepository repository;
   final ValueChanged<String> onFeedback;
+  final VoidCallback? onOpenAppeals;
 
   @override
   State<ModerationConsoleScreen> createState() =>
@@ -96,16 +98,25 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       builder: (context) => SafeArea(
         child: Wrap(
           children: [
-            for (final value in const ['hide', 'restore', 'delete'])
+            for (final value
+                in item.targetType == 'user'
+                    ? const ['mute', 'ban', 'restore']
+                    : const ['hide', 'restore', 'delete'])
               ListTile(
                 leading: Icon(
                   value == 'delete'
                       ? Icons.delete_outline
+                      : value == 'ban'
+                      ? Icons.block_outlined
+                      : value == 'mute'
+                      ? Icons.volume_off_outlined
                       : Icons.visibility_outlined,
                 ),
                 title: Text(switch (value) {
                   'hide' => '隐藏内容',
                   'restore' => '恢复内容',
+                  'mute' => '禁言账号',
+                  'ban' => '封禁账号',
                   _ => '删除内容',
                 }),
                 onTap: () => Navigator.pop(context, value),
@@ -230,6 +241,12 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
     appBar: AppBar(
       title: const Text('审核中心'),
       actions: [
+        if (widget.onOpenAppeals != null)
+          TextButton.icon(
+            onPressed: widget.onOpenAppeals,
+            icon: const Icon(Icons.rate_review_outlined, size: 18),
+            label: const Text('申诉'),
+          ),
         DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: status,

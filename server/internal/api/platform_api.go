@@ -55,7 +55,7 @@ func parseNotificationCategory(value string) (string, error) {
 		return "all", nil
 	}
 	switch value {
-	case "all", "reply", "like", "system":
+	case "all", "interaction", "community", "moderation", "reply", "like", "system":
 		return value, nil
 	default:
 		return "", errors.New("invalid notification category")
@@ -103,14 +103,22 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		  ))`
 	args := []any{user.ID}
 	const replyTypes = "'reply', 'comment.created', 'comment.replied'"
-	const likeTypes = "'like', 'bookmark', 'follow', 'post.liked', 'post.bookmarked', 'user.followed'"
+	const interactionTypes = "'like', 'bookmark', 'follow', 'post.liked', 'post.bookmarked', 'user.followed'"
+	const communityTypes = "'announcement', 'event', 'maintenance', 'community.announcement', 'community.event', 'community.maintenance', 'rules.updated'"
+	const moderationTypes = "'moderation.action', 'appeal.result'"
 	switch category {
+	case "interaction":
+		query += " AND n.type IN (" + replyTypes + ", " + interactionTypes + ")"
+	case "community":
+		query += " AND n.type IN (" + communityTypes + ")"
+	case "moderation":
+		query += " AND n.type IN (" + moderationTypes + ")"
 	case "reply":
 		query += " AND n.type IN (" + replyTypes + ")"
 	case "like":
-		query += " AND n.type IN (" + likeTypes + ")"
+		query += " AND n.type IN (" + interactionTypes + ")"
 	case "system":
-		query += " AND n.type NOT IN (" + replyTypes + ", " + likeTypes + ")"
+		query += " AND n.type NOT IN (" + replyTypes + ", " + interactionTypes + ")"
 	}
 	if cursor != nil {
 		query += " AND (n.created_at, n.id) < ($2, $3)"

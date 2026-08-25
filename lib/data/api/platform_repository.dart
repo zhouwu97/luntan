@@ -2,6 +2,10 @@ import 'api_client.dart';
 
 enum NotificationCategory {
   all('all'),
+  interaction('interaction'),
+  community('community'),
+  moderation('moderation'),
+  // 兼容已有调用方；新界面使用 interaction/community/moderation 三类。
   reply('reply'),
   like('like'),
   system('system');
@@ -45,6 +49,14 @@ class ForumNotification {
   final Map<String, dynamic> targetData;
   bool isRead;
   final DateTime createdAt;
+
+  bool get isModeration =>
+      type.startsWith('moderation.') || type.startsWith('appeal.');
+
+  String? get moderationActionId {
+    final value = targetData['moderation_action_id'];
+    return value is String && value.isNotEmpty ? value : null;
+  }
 }
 
 class SearchPost {

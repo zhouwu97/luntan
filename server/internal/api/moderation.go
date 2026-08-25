@@ -62,11 +62,33 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 		writeInternalError(w, r, err)
 		return
 	}
+	var ownerID, targetTitle, targetContent string
+	switch targetType {
+	case "post":
+		err = tx.QueryRowContext(r.Context(), `SELECT author_id, title, content FROM posts WHERE id = $1`, targetID).Scan(&ownerID, &targetTitle, &targetContent)
+	case "comment":
+		err = tx.QueryRowContext(r.Context(), `SELECT author_id, '评论', content FROM comments WHERE id = $1`, targetID).Scan(&ownerID, &targetTitle, &targetContent)
+	case "user":
+		err = tx.QueryRowContext(r.Context(), `SELECT id, '账号处理', username FROM users WHERE id = $1 AND deleted_at IS NULL`, targetID).Scan(&ownerID, &targetTitle, &targetContent)
+	default:
+		err = ErrInvalidModerationAction
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrModerationCaseNotFound)
+		return
+	}
+	if err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
 	if err := applyModerationAction(r, tx, user.ID, caseID, targetType, targetID, input); err != nil {
 		writeAuthError(w, r, err)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO moderation_actions (id, case_id, operator_id, action, reason, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, newPostID(), caseID, user.ID, input.Action, strings.TrimSpace(input.Reason), time.Now().UTC()); err != nil {
+	actionID := newPostID()
+	now := time.Now().UTC()
+	appealable := input.Action == "hide" || input.Action == "delete" || input.Action == "mute" || input.Action == "ban"
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO moderation_actions (id, case_id, operator_id, action, reason, appealable, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, actionID, caseID, user.ID, input.Action, strings.TrimSpace(input.Reason), appealable, now); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -78,11 +100,26 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 		writeInternalError(w, r, err)
 		return
 	}
+	if appealable {
+		if err := enqueueNotificationWithDataTx(tx, ownerID, user.ID, "moderation.action", "moderation_action", actionID, map[string]any{
+			"moderation_action_id": actionID,
+			"target_type":          targetType,
+			"target_id":            targetID,
+			"action":               input.Action,
+			"reason":               strings.TrimSpace(input.Reason),
+			"target_title":         targetTitle,
+			"target_content":       targetContent,
+			"appealable":           true,
+		}, now); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"case_id": caseID, "action": input.Action, "status": "resolved"})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"case_id": caseID, "action_id": actionID, "action": input.Action, "status": "resolved"})
 }
 
 func (s *Server) hasPermission(r *http.Request, userID, caseID, permission string) bool {
@@ -278,6 +315,11 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 			}
 			affected = 1
 		}
+	case "user":
+		if input.Action != "mute" && input.Action != "ban" && input.Action != "restore" {
+			return ErrInvalidModerationAction
+		}
+		query = `UPDATE users SET status = CASE WHEN $1 = 'restore' THEN 'active' ELSE 'suspended' END, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`
 	default:
 		return ErrInvalidModerationAction
 	}
@@ -285,16 +327,22 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 		return ErrInvalidModerationAction
 	}
 	var args []any
-	switch input.Action {
-	case "hide":
-		args = []any{caseID, strings.TrimSpace(input.Reason), targetID}
-	case "restore":
-		args = []any{targetID}
-	case "delete":
-		if targetType == "comment" {
-			break
+	if targetType == "user" {
+		args = []any{input.Action, targetID}
+	} else {
+		switch input.Action {
+		case "hide":
+			args = []any{caseID, strings.TrimSpace(input.Reason), targetID}
+		case "restore":
+			args = []any{targetID}
+		case "delete":
+			if targetType == "comment" {
+				break
+			}
+			args = []any{operatorID, strings.TrimSpace(input.Reason), caseID, targetID}
+		case "mute", "ban":
+			args = []any{targetID}
 		}
-		args = []any{operatorID, strings.TrimSpace(input.Reason), caseID, targetID}
 	}
 	if query != "" {
 		result, err := tx.ExecContext(r.Context(), query, args...)
@@ -322,7 +370,7 @@ func validModerationAction(input moderationActionInput) bool {
 		return false
 	}
 	switch input.Action {
-	case "hide", "restore", "delete":
+	case "hide", "restore", "delete", "mute", "ban":
 		return true
 	default:
 		return false

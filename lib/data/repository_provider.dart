@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+
 import 'api/api_client.dart';
 import 'api/appeal_repository.dart';
 import 'api/api_repositories.dart';
@@ -16,6 +19,22 @@ import 'api/secure_token_store.dart';
 import 'mock_forum_data.dart';
 import 'repositories/mock_repositories.dart';
 import '../domain/repositories.dart';
+
+String apiBaseUrlFromEnvironment() {
+  const configured = String.fromEnvironment('API_BASE_URL');
+  if (configured.trim().isNotEmpty) return configured;
+  if (WidgetsBinding.instance.runtimeType.toString().contains(
+    'TestWidgetsFlutterBinding',
+  )) {
+    return '';
+  }
+  // Android 模拟器直接运行项目时使用线上演示 API；桌面端和 Flutter Test
+  // 默认保留 Mock 数据，避免开发机网络状态影响本地测试。
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    return 'http://101.42.27.44';
+  }
+  return '';
+}
 
 class ForumRepositories {
   const ForumRepositories({
@@ -74,7 +93,7 @@ class ForumRepositories {
     ForumStore? store,
     TokenStore? tokenStore,
   }) {
-    const baseUrl = String.fromEnvironment('API_BASE_URL');
+    final baseUrl = apiBaseUrlFromEnvironment();
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
     // API 模式下未显式注入令牌存储时默认使用平台安全存储，避免进程重启后
     // 会话丢失；MemoryTokenStore 只应出现在测试注入路径。
@@ -116,7 +135,7 @@ class ForumRepositories {
     ForumStore? store,
     TokenStore? tokenStore,
   }) async {
-    const baseUrl = String.fromEnvironment('API_BASE_URL');
+    final baseUrl = apiBaseUrlFromEnvironment();
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
     final actualTokenStore = tokenStore ?? await SecureTokenStore.create();
     return ForumRepositories.fromEnvironment(

@@ -29,6 +29,17 @@ void main() {
     expect(find.byType(PostDetailScreen), findsOneWidget);
   });
 
+  testWidgets('开箱帖子详情显示评论并保留楼中楼入口', (tester) async {
+    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('开箱记录：第一次买大尺寸倒模'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('包装比我想象中扎实'), findsOneWidget);
+    expect(find.text('还没有回复，来抢沙发吧'), findsNothing);
+  });
+
   testWidgets('首页评论胶囊切换到收到回复的帖子 Feed', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();

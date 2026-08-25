@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 )
 
 // deleteAccount 执行可追溯的账号注销：保留公开内容的作者关系，清理账号身份与私密状态，
@@ -72,6 +73,10 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO audit_logs (id, operator_id, action, target_type, target_id, reason, request_id, created_at)
 		VALUES ($1, $2, 'account.delete', 'user', $2, 'user_requested', $3, now())`, newPostID(), user.ID, requestIDFromRequest(r)); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := appendAdminLogTx(r.Context(), tx, user.ID, "account.delete", "user", user.ID, "user_requested", requestIDFromRequest(r), map[string]any{"status": "deleted"}, time.Now().UTC()); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

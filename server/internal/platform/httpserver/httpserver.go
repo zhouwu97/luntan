@@ -90,7 +90,25 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 		root = newRateLimiter(options.RateLimitStore).middleware(root)
 	}
 	root = clientIPMiddleware(root, resolver)
+	root = corsMiddleware(root)
 	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger)), nil
+}
+
+// corsMiddleware 让公开 Feed、榜单和媒体元数据可以被 Flutter Web 跨域读取。
+// 互动请求仍由 API 自身的认证与权限逻辑保护；这里仅处理浏览器预检和响应头。
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization, Idempotency-Key, X-Request-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
+		w.Header().Set("Vary", "Origin")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func buildInfoPayload(status string) map[string]string {

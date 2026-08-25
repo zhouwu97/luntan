@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-客户端不传 `API_BASE_URL` 时使用本地 `ForumStore` mock 数据，适合 UI、交互和 Widget Test 验证；传入 `API_BASE_URL` 后，正式运行时切换到 REST 仓储实现。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。
+Android 模拟器不传 `API_BASE_URL` 时默认连接已部署的演示 API，直接点击运行即可看到服务器帖子和评论；Windows/Flutter Test 不传时仍使用本地 `ForumStore` mock 数据。传入 `API_BASE_URL` 后可覆盖默认地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。
 
 已覆盖的主要功能：
 
@@ -21,6 +21,8 @@
 - 发布：普通帖子、投票、玩法分享
 - 我的：真实用户信息与统计、我的发帖 / 回帖 / 收藏 / 点赞 / 浏览历史
 - 消息：通知列表、已读和未读数
+- 认证：邮箱验证码登录、游客模式（后台统一创建 guest user），不在客户端展示密码入口
+- 治理：账号处罚详情、申诉、管理员列表 / 详情、风控中心、不可篡改审计日志
 - 兑换商店：商品、积分余额、事务兑换单
 - 投票：选项、服务端投票和票数
 - 导航：`首页` / `+` / `我的`
@@ -42,7 +44,7 @@ flutter pub get
 flutter run
 ```
 
-不传 `API_BASE_URL` 时，应用默认使用本地 mock 仓储，不要求启动 Go 服务或 PostgreSQL。
+Windows/Flutter Test 不传 `API_BASE_URL` 时，应用默认使用本地 mock 仓储，不要求启动 Go 服务或 PostgreSQL；Android 模拟器默认使用线上演示 API。
 
 ### 运行 Web
 
@@ -78,7 +80,7 @@ export HTTP_PORT=8080
 go run ./server/cmd/api
 ```
 
-服务启动时会自动执行 `server/migrations/` 下的数据库迁移（当前包含历史记录、投票、市场和积分商店表）。默认地址为 `http://localhost:8080`。
+服务启动时会自动执行 `server/migrations/` 下的数据库迁移（包含邮箱验证状态、游客会话、处罚限制、自动审核、风控和管理员哈希链日志）。生产环境还必须配置 SMTP；开发环境未配置 SMTP 时，验证码接口会返回 `dev_code` 便于联调，生产环境不会返回验证码。默认地址为 `http://localhost:8080`。
 
 ## 连接 Flutter 客户端与 API
 
@@ -161,6 +163,7 @@ lib/
 │   ├── feature_page.dart
 │   ├── exchange_store_screen.dart
 │   ├── notifications_screen.dart
+│   ├── governance_screens.dart          # 账号处罚、管理员详情、风控、审计日志
 │   ├── moderation_notice_detail_screen.dart
 │   ├── appeal_form_screen.dart
 │   ├── appeal_detail_screen.dart
@@ -186,7 +189,7 @@ test/                                   # Flutter 单元测试和 Widget Test
 
 服务端 API 前缀为 `/api/v1`，当前包含：
 
-- 认证：注册、登录、刷新令牌、退出登录、当前用户
+- 认证：邮箱验证码请求 / 校验、游客会话、刷新令牌、退出登录、当前用户；旧密码接口仅作存量兼容
 - 社区：分类、社区列表、社区详情、关注、加入 / 退出
 - 信息流：最新 Feed、帖子详情
 - 帖子：创建、更新、删除、点赞、收藏
@@ -196,6 +199,7 @@ test/                                   # Flutter 单元测试和 Widget Test
 - 通知：列表、未读数、标记已读、全部已读
 - 个人中心：资料聚合、发帖 / 回帖 / 点赞 / 收藏 / 历史列表
 - 举报：帖子和评论举报落库
+- 治理：`/me/account-status`、`/admins`、`/admin/risk`、`/admin/logs`；自动规则识别微信群 / QQ 群 / 手机号 / 淘宝链接 / 外链并进入待审核
 - 增长功能：投票、排行榜、积分商品和事务兑换；历史市场表仅保留用于数据兼容，不再创建或展示市场帖子
 
 客户端 API 仓储位于 `lib/data/api/`，默认 mock / API 切换逻辑位于 `lib/data/repository_provider.dart`。

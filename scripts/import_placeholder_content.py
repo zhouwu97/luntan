@@ -19,6 +19,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -27,6 +29,7 @@ from typing import Any
 
 
 SOURCE_API = "https://beiyoujiang.com/api/post/getAllPost"
+SOURCE_COMMENTS_API = "https://beiyoujiang.com/api/comment/getPostComment"
 SOURCE_IMAGE_BASE = "https://beiyoujiang.com/PostImg/"
 # 当前部署通过服务器 IP 暴露媒体目录；可用 --public-media-base 覆盖。
 PUBLIC_MEDIA_BASE = "http://101.42.27.44/imported-media"
@@ -106,21 +109,40 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def fetch_posts(api_url: str, page_size: int) -> list[dict[str, Any]]:
-    payload = json.dumps(
-        {"plate": None, "most": None, "userId": None, "page": 1, "pageSize": page_size}
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        api_url,
-        data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "luntan-placeholder-import/1.0"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        value: Any = json.loads(response.read().decode("utf-8"))
+def post_json(api_url: str, body: dict[str, Any]) -> Any:
+    payload = json.dumps(body).encode("utf-8")
+    for attempt in range(6):
+        request = urllib.request.Request(
+            api_url,
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "luntan-placeholder-import/1.0"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                value: Any = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as error:
+            if error.code != 429 or attempt == 5:
+                raise
+            retry_after = error.headers.get("Retry-After")
+            try:
+                delay = max(2.0, float(retry_after or 0))
+            except ValueError:
+                delay = 5.0
+            print(f"源站接口限流，{delay:g} 秒后重试（第 {attempt + 1} 次）", file=sys.stderr)
+            time.sleep(delay)
     # 该接口在部分环境会把 JSON 再包成字符串。
     if isinstance(value, str):
         value = json.loads(value)
+    return value
+
+
+def fetch_posts(api_url: str, page_size: int) -> list[dict[str, Any]]:
+    value = post_json(
+        api_url,
+        {"plate": None, "most": None, "userId": None, "page": 1, "pageSize": page_size},
+    )
     items = value.get("data", []) if isinstance(value, dict) else []
     if not isinstance(items, list):
         raise RuntimeError("源站帖子接口返回格式异常")
@@ -160,6 +182,83 @@ def placeholder_username(author_id: Any) -> str:
     suffix = DISPLAY_NAME_SUFFIXES[int(digest[2:4], 16) % len(DISPLAY_NAME_SUFFIXES)]
     serial = int(digest[4:10], 16) % 10000
     return f"{prefix}{suffix}_{serial:04d}"
+
+
+def fetch_post_comments(source_post_id: Any) -> list[dict[str, Any]]:
+    """读取帖子评论树，只提取公开评论字段，不落源站账号资料。"""
+    value = post_json(
+        SOURCE_COMMENTS_API,
+        {
+            "postId": int(source_post_id) if str(source_post_id).isdigit() else source_post_id,
+            "userId": None,
+            "reply": False,
+            "order": None,
+            "orderType": "time",
+        },
+    )
+    items = value.get("data", []) if isinstance(value, dict) else []
+    if not isinstance(items, list):
+        raise RuntimeError(f"源站评论接口返回格式异常: post={source_post_id}")
+    return [item for item in items if isinstance(item, dict)]
+
+
+def flatten_comment_tree(
+    source_post_id: Any,
+    raw: dict[str, Any],
+    *,
+    parent_source_id: str | None = None,
+    root_source_id: str | None = None,
+    parent_author_id: str | None = None,
+    depth: int = 0,
+    seen: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """把源站的 replies 数组摊平成数据库需要的 parent/root 关系。"""
+    seen = seen if seen is not None else set()
+    source_id = safe_source_id(raw.get("id"))
+    if source_id in seen:
+        return []
+    seen.add(source_id)
+    author = raw.get("author") if isinstance(raw.get("author"), dict) else {}
+    source_author_id = safe_source_id(raw.get("authorId") or author.get("id"))
+    explicit_parent = raw.get("parentId")
+    parent_id = safe_source_id(explicit_parent) if explicit_parent else parent_source_id
+    explicit_root = raw.get("rootId")
+    root_id = safe_source_id(explicit_root) if explicit_root else root_source_id or source_id
+    reply_to = raw.get("replyToUserId")
+    if not reply_to and isinstance(raw.get("parentComment"), dict):
+        parent_author = raw["parentComment"].get("author")
+        if isinstance(parent_author, dict):
+            reply_to = parent_author.get("id")
+    if not reply_to:
+        reply_to = parent_author_id
+    current = {
+        "source_id": source_id,
+        "source_author_id": source_author_id,
+        "parent_source_id": parent_id,
+        "root_source_id": root_id,
+        "reply_to_source_author_id": safe_source_id(reply_to) if reply_to else None,
+        "content": clean_content(raw.get("content")),
+        "like_count": int(raw.get("likeCount") or raw.get("likeNumber") or 0),
+        "created_at": iso_time(raw.get("createdAt")),
+        "depth": depth,
+    }
+    rows = [current]
+    replies = raw.get("replies")
+    if isinstance(replies, list):
+        for child in replies:
+            if isinstance(child, dict):
+                rows.extend(
+                    flatten_comment_tree(
+                        source_post_id,
+                        child,
+                        parent_source_id=source_id,
+                        root_source_id=root_id,
+                        parent_author_id=source_author_id,
+                        depth=depth + 1,
+                        seen=seen,
+                    )
+                )
+    return rows
 
 
 def safe_source_id(value: Any) -> str:
@@ -225,6 +324,7 @@ def build_bundle(args: argparse.Namespace) -> tuple[Path, dict[str, int]]:
     revision_rows: list[list[Any]] = []
     media_rows: list[list[Any]] = []
     post_media_rows: list[list[Any]] = []
+    comment_rows: list[list[Any]] = []
     downloaded = 0
 
     for item in posts:
@@ -274,6 +374,64 @@ def build_bundle(args: argparse.Namespace) -> tuple[Path, dict[str, int]]:
                 timestamp,
             ]
         )
+        comment_items = fetch_post_comments(item.get("id"))
+        # 源站评论接口有访问频控，导入时留出间隔，避免半批失败。
+        time.sleep(0.75)
+        seen_comments: set[str] = set()
+        for raw_comment in comment_items:
+            for comment in flatten_comment_tree(item.get("id"), raw_comment, seen=seen_comments):
+                comment_author_id = safe_source_id(comment["source_author_id"])
+                comment_user_id = f"user-import-{comment_author_id}"
+                comment_time = comment["created_at"]
+                if comment_user_id not in users:
+                    users[comment_user_id] = [
+                        comment_user_id,
+                        placeholder_username(comment_author_id),
+                        "active",
+                        comment_time,
+                        comment_time,
+                    ]
+                    profiles[comment_user_id] = [
+                        comment_user_id,
+                        placeholder_username(comment_author_id),
+                        "",
+                        "社区随机展示账号",
+                        1,
+                        0,
+                        comment_time,
+                        comment_time,
+                        "new",
+                    ]
+                comment_id = f"comment-import-{source_post_id}-{comment['source_id']}"
+                parent_id = comment.get("parent_source_id")
+                root_id = comment.get("root_source_id") or comment["source_id"]
+                parent_import_id = (
+                    f"comment-import-{source_post_id}-{parent_id}" if parent_id else ""
+                )
+                root_import_id = f"comment-import-{source_post_id}-{root_id}"
+                reply_to_author_id = comment.get("reply_to_source_author_id")
+                reply_to_user_id = (
+                    f"user-import-{reply_to_author_id}" if reply_to_author_id else ""
+                )
+                comment_rows.append(
+                    [
+                        comment_id,
+                        post_id,
+                        comment_user_id,
+                        root_import_id,
+                        parent_import_id,
+                        reply_to_user_id,
+                        comment["content"],
+                        comment["like_count"],
+                        0,
+                        "published",
+                        "normal",
+                        comment_time,
+                        comment_time,
+                        comment_time,
+                        comment["depth"],
+                    ]
+                )
         revision_rows.append(
             [
                 f"revision-import-{source_post_id}",
@@ -364,6 +522,15 @@ def build_bundle(args: argparse.Namespace) -> tuple[Path, dict[str, int]]:
         media_rows,
     )
     write_csv(args.output_dir / "post_media.csv", ["post_id", "media_id", "sort_order", "created_at"], post_media_rows)
+    write_csv(
+        args.output_dir / "comments.csv",
+        [
+            "id", "post_id", "author_id", "root_id", "parent_id", "reply_to_user_id",
+            "content", "like_count", "reply_count", "publication_status", "moderation_status",
+            "created_at", "updated_at", "published_at", "depth",
+        ],
+        comment_rows,
+    )
     (args.output_dir / "manifest.json").write_text(
         json.dumps(
             {
@@ -371,6 +538,8 @@ def build_bundle(args: argparse.Namespace) -> tuple[Path, dict[str, int]]:
                 "posts": len(post_rows),
                 "users": len(users),
                 "media": downloaded,
+                "comments": len(comment_rows),
+                "replies": sum(1 for row in comment_rows if row[4]),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             },
             ensure_ascii=False,
@@ -378,7 +547,13 @@ def build_bundle(args: argparse.Namespace) -> tuple[Path, dict[str, int]]:
         ),
         encoding="utf-8",
     )
-    return args.output_dir, {"posts": len(post_rows), "users": len(users), "media": downloaded}
+    return args.output_dir, {
+        "posts": len(post_rows),
+        "users": len(users),
+        "media": downloaded,
+        "comments": len(comment_rows),
+        "replies": sum(1 for row in comment_rows if row[4]),
+    }
 
 
 def psql_import(bundle_dir: Path, db_url: str) -> None:
@@ -415,6 +590,42 @@ CREATE TEMP TABLE import_posts (id text, author_id text, community_id text, type
 INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, comment_count, like_count, bookmark_count, share_count, view_count, created_at, updated_at, published_at)
 SELECT id, author_id, community_id, type, publication_status, moderation_status, title, content, comment_count, like_count, bookmark_count, share_count, view_count, created_at, updated_at, published_at FROM import_posts
 ON CONFLICT (id) DO UPDATE SET author_id = EXCLUDED.author_id, community_id = EXCLUDED.community_id, type = EXCLUDED.type, publication_status = EXCLUDED.publication_status, moderation_status = EXCLUDED.moderation_status, title = EXCLUDED.title, content = EXCLUDED.content, comment_count = EXCLUDED.comment_count, like_count = EXCLUDED.like_count, view_count = EXCLUDED.view_count, updated_at = EXCLUDED.updated_at, published_at = EXCLUDED.published_at, deleted_at = NULL;
+
+CREATE TEMP TABLE import_comments (id text, post_id text, author_id text, root_id text, parent_id text, reply_to_user_id text, content text, like_count bigint, reply_count bigint, publication_status text, moderation_status text, created_at timestamptz, updated_at timestamptz, published_at timestamptz, depth integer) ON COMMIT DROP;
+\\copy import_comments FROM '{(bundle_dir / 'comments.csv').as_posix()}' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8');
+-- 重导入同一批帖子时先清理旧评论及互动，避免源站评论减少后留下脏数据。
+DELETE FROM comment_reactions WHERE comment_id IN (SELECT c.id FROM comments c JOIN import_posts p ON p.id = c.post_id);
+DELETE FROM comment_idempotency_keys WHERE comment_id IN (SELECT c.id FROM comments c JOIN import_posts p ON p.id = c.post_id);
+DELETE FROM comments WHERE post_id IN (SELECT id FROM import_posts) AND parent_id IS NOT NULL;
+DELETE FROM comments WHERE post_id IN (SELECT id FROM import_posts);
+-- 先写入一级评论，再按深度写入楼中楼，满足自引用外键约束。
+DO $$
+DECLARE
+    current_depth integer := 0;
+    max_depth integer := 0;
+BEGIN
+    SELECT COALESCE(MAX(depth), 0) INTO max_depth FROM import_comments;
+    WHILE current_depth <= max_depth LOOP
+        INSERT INTO comments (id, post_id, author_id, root_id, parent_id, reply_to_user_id, content, like_count, reply_count, publication_status, moderation_status, created_at, updated_at, published_at)
+        SELECT id, post_id, author_id, root_id, NULLIF(parent_id, ''), NULLIF(reply_to_user_id, ''), content, like_count, reply_count, publication_status, moderation_status, created_at, updated_at, published_at
+        FROM import_comments
+        WHERE depth = current_depth;
+        current_depth := current_depth + 1;
+    END LOOP;
+END $$;
+UPDATE comments c
+SET reply_count = (
+    SELECT count(*) FROM comments child
+    WHERE child.parent_id = c.id AND child.deleted_at IS NULL
+), updated_at = now()
+WHERE c.post_id IN (SELECT id FROM import_posts);
+UPDATE posts p
+SET comment_count = (
+    SELECT count(*) FROM comments c
+    WHERE c.post_id = p.id AND c.deleted_at IS NULL
+      AND c.publication_status = 'published' AND c.moderation_status = 'normal'
+), updated_at = now()
+WHERE p.id IN (SELECT id FROM import_posts);
 
 CREATE TEMP TABLE import_revisions (id text, post_id text, editor_id text, community_id text, type text, title text, content text, created_at timestamptz) ON COMMIT DROP;
 \\copy import_revisions FROM '{(bundle_dir / 'revisions.csv').as_posix()}' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8');

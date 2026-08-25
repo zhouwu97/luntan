@@ -450,9 +450,9 @@ func restoreModerationTargetTx(ctx context.Context, tx *sql.Tx, targetType, targ
 	case "post":
 		var query string
 		if action == "delete" {
-			query = `UPDATE posts SET deleted_at = NULL, publication_status = 'published', deleted_by = NULL, delete_reason = '', moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', published_at = COALESCE(published_at, now()), updated_at = now() WHERE id = $1`
+			query = `UPDATE posts SET post_status = 'published', deleted_at = NULL, publication_status = 'published', deleted_by = NULL, delete_reason = '', moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', published_at = COALESCE(published_at, now()), updated_at = now() WHERE id = $1`
 		} else {
-			query = `UPDATE posts SET moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`
+			query = `UPDATE posts SET post_status = 'published', moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`
 		}
 		result, err := tx.ExecContext(ctx, query, targetID)
 		if err != nil {

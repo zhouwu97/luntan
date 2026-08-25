@@ -21,6 +21,24 @@ func TestHealth(t *testing.T) {
 	if !strings.Contains(res.Body.String(), `"status":"ok"`) || !strings.Contains(res.Body.String(), `"version":"dev"`) || !strings.Contains(res.Body.String(), `"commit":"unknown"`) {
 		t.Fatalf("health body = %s", res.Body.String())
 	}
+	if res.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("cors header = %q, want wildcard", res.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestCORSPreflight(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/feed/latest", nil)
+	req.Header.Set("Origin", "http://localhost:4173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	res := httptest.NewRecorder()
+	NewHandler(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want 204", res.Code)
+	}
+	if res.Header().Get("Access-Control-Allow-Headers") == "" {
+		t.Fatal("preflight allow headers are empty")
+	}
 }
 
 func TestVersion(t *testing.T) {

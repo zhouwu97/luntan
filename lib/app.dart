@@ -25,6 +25,7 @@ import 'screens/moderation_console_screen.dart';
 import 'screens/moderation_notice_detail_screen.dart';
 import 'screens/moderation_appeals_screen.dart';
 import 'screens/my_appeals_screen.dart';
+import 'screens/governance_screens.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
@@ -66,7 +67,7 @@ class _LuntanAppState extends State<LuntanApp> {
   void initState() {
     super.initState();
     // API 模式只创建空的 UI 状态容器；业务数据全部来自 Repository。
-    const baseUrl = String.fromEnvironment('API_BASE_URL');
+    final baseUrl = apiBaseUrlFromEnvironment();
     store = baseUrl.trim().isEmpty ? ForumStore.seeded() : ForumStore.uiOnly();
     repositories =
         widget.repositories ??
@@ -129,9 +130,29 @@ class _LuntanAppState extends State<LuntanApp> {
         builder: (_) => AuthScreen(
           controller: auth,
           onBrowse: () => navigatorKey.currentState!.pop(),
+          onGuest: _enterGuest,
         ),
       ),
     );
+  }
+
+  Future<void> _enterGuest() async {
+    final auth = authController;
+    if (auth == null) return;
+    final success = await auth.guest();
+    if (!mounted || !success) {
+      if (mounted && auth.error != null) {
+        _showQuickFeedback(
+          userFacingApiMessage(auth.error!, fallback: '游客模式暂时不可用'),
+        );
+      }
+      return;
+    }
+    browseWithoutAuth = false;
+    if (navigatorKey.currentState?.canPop() ?? false) {
+      navigatorKey.currentState!.pop();
+    }
+    if (mounted) setState(() {});
   }
 
   bool _requireAuth() {
@@ -518,6 +539,71 @@ class _LuntanAppState extends State<LuntanApp> {
     );
   }
 
+  void openAccountStatus() {
+    final platform = repositories.platform;
+    if (platform == null) {
+      _showQuickFeedback('当前模式暂不支持账号状态');
+      return;
+    }
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => AccountStatusScreen(
+          repository: platform,
+          onOpenAction: openModerationAction,
+        ),
+      ),
+    );
+  }
+
+  void openAdmins() {
+    final platform = repositories.platform;
+    if (platform == null) {
+      _showQuickFeedback('当前模式暂不支持管理员治理');
+      return;
+    }
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => AdminListScreen(
+          repository: platform,
+          onOpenAdmin: openAdminDetail,
+          onOpenRisk: openRiskCenter,
+        ),
+      ),
+    );
+  }
+
+  void openAdminDetail(String adminId) {
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            AdminDetailScreen(repository: platform, adminId: adminId),
+      ),
+    );
+  }
+
+  void openRiskCenter() {
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            RiskCenterScreen(repository: platform, onOpenLogs: openAdminLogs),
+      ),
+    );
+  }
+
+  void openAdminLogs() {
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => AdminLogsScreen(repository: platform),
+      ),
+    );
+  }
+
   String _wirePostType(PostType type) => switch (type) {
     PostType.gameShare => 'game_share',
     PostType.poll => 'poll',
@@ -616,6 +702,7 @@ class _LuntanAppState extends State<LuntanApp> {
         return AuthScreen(
           controller: auth,
           onBrowse: () => setState(() => browseWithoutAuth = true),
+          onGuest: _enterGuest,
         );
       },
     );
@@ -669,6 +756,8 @@ class _LuntanAppState extends State<LuntanApp> {
             onFeedback: _showQuickFeedback,
             onOpenModeration: apiMode ? openModeration : null,
             onOpenAppeals: openMyAppeals,
+            onOpenAccountStatus: apiMode ? openAccountStatus : null,
+            onOpenAdmins: apiMode ? openAdmins : null,
             onLogout: _logout,
             onDeleteAccount: apiMode ? _deleteAccount : null,
             onRequireAuth: _openLogin,

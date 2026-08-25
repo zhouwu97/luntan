@@ -436,6 +436,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               liked: comment.isLiked,
                               onReply: () =>
                                   setState(() => replyTarget = comment),
+                              onReplyTo: (target) =>
+                                  setState(() => replyTarget = target),
                               onLike: () => _likeComment(comment),
                               onMore: () => _showCommentMenu(comment),
                               onViewAllReplies: () => _openReplyThread(comment),
@@ -513,6 +515,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       builder: (_) => _CommentThreadSheet(
         rootComment: comment,
         repository: widget.commentsController.repository,
+        isAuthenticated: widget.isAuthenticated,
+        onRequireAuth: widget.onRequireAuth,
+        onReply: (target, content) => widget.commentsController.replyTo(
+          target,
+          content,
+          replyToUserId: target.authorId,
+        ),
       ),
     );
   }
@@ -1098,6 +1107,7 @@ class _CommentTile extends StatelessWidget {
     required this.children,
     required this.liked,
     required this.onReply,
+    required this.onReplyTo,
     required this.onLike,
     required this.onMore,
     required this.onViewAllReplies,
@@ -1107,6 +1117,7 @@ class _CommentTile extends StatelessWidget {
   final List<Comment> children;
   final bool liked;
   final VoidCallback onReply;
+  final ValueChanged<Comment> onReplyTo;
   final VoidCallback onLike;
   final VoidCallback onMore;
   final VoidCallback onViewAllReplies;
@@ -1189,12 +1200,15 @@ class _CommentTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      comment.content,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13,
-                        height: 1.55,
+                    GestureDetector(
+                      onTap: onReply,
+                      child: Text(
+                        comment.content,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 13,
+                          height: 1.55,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1259,14 +1273,17 @@ class _CommentTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: children.take(3).map((child) {
                   final childAuthor = child.author;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '${childAuthor?.nickname ?? '匿名用户'}：${child.content}',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                        height: 1.5,
+                  return GestureDetector(
+                    onTap: () => onReplyTo(child),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '${childAuthor?.nickname ?? '匿名用户'}：${child.content}',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                          height: 1.5,
+                        ),
                       ),
                     ),
                   );
@@ -1317,22 +1334,31 @@ class _CommentThreadSheet extends StatefulWidget {
   const _CommentThreadSheet({
     required this.rootComment,
     required this.repository,
+    required this.isAuthenticated,
+    this.onRequireAuth,
+    required this.onReply,
   });
 
   final Comment rootComment;
   final CommentRepository repository;
+  final bool isAuthenticated;
+  final VoidCallback? onRequireAuth;
+  final Future<Comment> Function(Comment target, String content) onReply;
 
   @override
   State<_CommentThreadSheet> createState() => _CommentThreadSheetState();
 }
 
 class _CommentThreadSheetState extends State<_CommentThreadSheet> {
+  final TextEditingController inputController = TextEditingController();
   final List<Comment> replies = [];
   final ScrollController scrollController = ScrollController();
   String? nextCursor;
   bool hasMore = true;
   bool loading = false;
   bool loadingMore = false;
+  bool sending = false;
+  Comment? replyTarget;
   String? errorMessage;
 
   @override
@@ -1344,10 +1370,40 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
 
   @override
   void dispose() {
+    inputController.dispose();
     scrollController
       ..removeListener(_maybeLoadMore)
       ..dispose();
     super.dispose();
+  }
+
+  Future<void> _submitReply() async {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
+    final content = inputController.text.trim();
+    if (content.isEmpty || sending) return;
+    final target = replyTarget ?? widget.rootComment;
+    setState(() => sending = true);
+    try {
+      final comment = await widget.onReply(target, content);
+      if (!mounted) return;
+      setState(() {
+        replies.add(comment);
+        replies.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        inputController.clear();
+        replyTarget = null;
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('回复发送失败，请重试')));
+      }
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
   }
 
   Future<void> _load() async {
@@ -1462,76 +1518,123 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
                         }
                         final reply = replies[index];
                         final author = reply.author;
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              CircleAvatar(
-                                radius: 15,
-                                backgroundColor: AppTheme.surfaceBlue,
-                                child: Text(
-                                  (author?.nickname ?? '匿').characters.first,
-                                  style: const TextStyle(
-                                    color: AppTheme.primary,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
+                        return GestureDetector(
+                          onTap: () => setState(() => replyTarget = reply),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CircleAvatar(
+                                  radius: 15,
+                                  backgroundColor: AppTheme.surfaceBlue,
+                                  child: Text(
+                                    (author?.nickname ?? '匿').characters.first,
+                                    style: const TextStyle(
+                                      color: AppTheme.primary,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 9),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            author?.nickname ?? '匿名用户',
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: AppTheme.textPrimary,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
+                                const SizedBox(width: 9),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              author?.nickname ?? '匿名用户',
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: AppTheme.textPrimary,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          relativeTimeLabel(reply.createdAt),
-                                          style: const TextStyle(
-                                            color: AppTheme.textSecondary,
-                                            fontSize: 10,
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            relativeTimeLabel(reply.createdAt),
+                                            style: const TextStyle(
+                                              color: AppTheme.textSecondary,
+                                              fontSize: 10,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      reply.content,
-                                      style: const TextStyle(
-                                        color: AppTheme.textPrimary,
-                                        fontSize: 13,
-                                        height: 1.5,
+                                        ],
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (reply.likeCount > 0)
-                                Text(
-                                  '♥ ${reply.likeCount}',
-                                  style: const TextStyle(
-                                    color: AppTheme.textSecondary,
-                                    fontSize: 11,
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        reply.content,
+                                        style: const TextStyle(
+                                          color: AppTheme.textPrimary,
+                                          fontSize: 13,
+                                          height: 1.5,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                            ],
+                                if (reply.likeCount > 0)
+                                  Text(
+                                    '♥ ${reply.likeCount}',
+                                    style: const TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         );
                       },
                     ),
+            ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: AppTheme.border)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: inputController,
+                        readOnly: !widget.isAuthenticated,
+                        onTap: !widget.isAuthenticated
+                            ? widget.onRequireAuth
+                            : null,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _submitReply(),
+                        decoration: InputDecoration(
+                          hintText: replyTarget == null
+                              ? '回复这条评论…'
+                              : '回复 ${replyTarget!.author?.nickname ?? '这位用户'}…',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    FilledButton(
+                      onPressed: sending ? null : _submitReply,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                      child: Text(sending ? '…' : '发送'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

@@ -214,6 +214,7 @@ class ApiClient {
     if (response.statusCode == 401 &&
         allowRefresh &&
         _tokenStore != null &&
+        await _hasStoredSession() &&
         _canRefreshForPath(path)) {
       try {
         await _refreshSingleFlight();
@@ -325,6 +326,16 @@ class ApiClient {
     } finally {
       if (identical(_refreshInFlight, future)) _refreshInFlight = null;
     }
+  }
+
+  Future<bool> _hasStoredSession() async {
+    final store = _tokenStore;
+    if (store == null) return false;
+    final accessToken = await store.readAccessToken();
+    final refreshToken = await store.readRefreshToken();
+    // 未登录访问公开接口时，401 只交给调用方处理，不应触发全局“登录过期”。
+    return (accessToken?.isNotEmpty ?? false) ||
+        (refreshToken?.isNotEmpty ?? false);
   }
 
   Future<void> _refreshAccessToken() async {

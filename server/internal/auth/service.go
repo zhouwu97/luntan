@@ -18,6 +18,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrUserDisabled       = errors.New("user is disabled")
+	ErrInvalidEmail       = errors.New("invalid email")
 )
 
 const (
@@ -26,11 +27,15 @@ const (
 )
 
 type User struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Nickname string `json:"nickname"`
-	Level    int    `json:"level"`
-	Status   string `json:"status"`
+	ID              string     `json:"id"`
+	Username        string     `json:"username"`
+	Nickname        string     `json:"nickname"`
+	Level           int        `json:"level"`
+	Status          string     `json:"status"`
+	AccountType     string     `json:"account_type"`
+	Email           string     `json:"email,omitempty"`
+	EmailVerified   bool       `json:"email_verified"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
 }
 
 type RegisterInput struct {
@@ -100,7 +105,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput, metadata Se
 	}
 
 	now := s.clock().UTC()
-	user := User{ID: newID("usr"), Username: username, Nickname: nickname, Level: 1, Status: "active"}
+	user := User{ID: newID("usr"), Username: username, Nickname: nickname, Level: 1, Status: "active", AccountType: "email"}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)`, user.ID, user.Username, user.Status, now); err != nil {
 		return AuthResponse{}, err
 	}
@@ -112,6 +117,102 @@ func (s *Service) Register(ctx context.Context, input RegisterInput, metadata Se
 	}
 	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
 	if err != nil {
+		return AuthResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthResponse{}, err
+	}
+	return AuthResponse{TokenPair: pair, User: user}, nil
+}
+
+// LoginByEmail 为邮箱验证码登录完成会话创建。验证码的校验由 API 层完成，
+// 这里只负责查找或创建正式邮箱账号并签发会话，避免认证与邮件投递耦合。
+func (s *Service) LoginByEmail(ctx context.Context, email, nickname string, metadata SessionMetadata) (AuthResponse, error) {
+	email = normalizeEmail(email)
+	if !validEmail(email) {
+		return AuthResponse{}, ErrInvalidEmail
+	}
+	if s == nil || s.db == nil {
+		return AuthResponse{}, sql.ErrConnDone
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	defer tx.Rollback()
+	var user User
+	var verifiedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+		       COALESCE(u.account_type, 'email'), u.email, u.email_verified, u.email_verified_at
+		FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE lower(u.email) = $1 AND u.deleted_at IS NULL
+		FOR UPDATE OF u`, email).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		now := s.clock().UTC()
+		user = User{ID: newID("usr"), Username: "email_" + newID("acct")[5:17], Nickname: strings.TrimSpace(nickname), Level: 1, Status: "active", AccountType: "email", Email: email, EmailVerified: true, EmailVerifiedAt: &now}
+		if user.Nickname == "" {
+			user.Nickname = email
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
+			return AuthResponse{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, created_at, updated_at) VALUES ($1, $2, 1, $3, $3)`, user.ID, user.Nickname, now); err != nil {
+			return AuthResponse{}, err
+		}
+	} else if err != nil {
+		return AuthResponse{}, err
+	} else {
+		if verifiedAt.Valid {
+			user.EmailVerifiedAt = &verifiedAt.Time
+		}
+		if user.AccountType == "" {
+			user.AccountType = "email"
+		}
+		if user.Status != "active" {
+			return AuthResponse{}, ErrUserDisabled
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET email_verified = true, email_verified_at = COALESCE(email_verified_at, $1), updated_at = $1 WHERE id = $2`, s.clock().UTC(), user.ID); err != nil {
+			return AuthResponse{}, err
+		}
+		user.EmailVerified = true
+		user.Email = email
+	}
+	now := s.clock().UTC()
+	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthResponse{}, err
+	}
+	return AuthResponse{TokenPair: pair, User: user}, nil
+}
+
+// CreateGuest 为游客模式创建可追踪的后台身份。游客仍然使用统一 users/sessions
+// 体系，只是 account_type=guest 且不绑定邮箱。
+func (s *Service) CreateGuest(ctx context.Context, metadata SessionMetadata) (AuthResponse, error) {
+	if s == nil || s.db == nil {
+		return AuthResponse{}, sql.ErrConnDone
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	defer tx.Rollback()
+	now := s.clock().UTC()
+	user := User{ID: newID("usr"), Username: "guest_" + newID("acct")[5:17], Nickname: "游客", Level: 1, Status: "active", AccountType: "guest"}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, account_type, created_at, updated_at) VALUES ($1, $2, 'active', 'guest', $3, $3)`, user.ID, user.Username, now); err != nil {
+		return AuthResponse{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, created_at, updated_at) VALUES ($1, '游客', 1, $2, $2)`, user.ID, now); err != nil {
+		return AuthResponse{}, err
+	}
+	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO guest_sessions (id, user_id, session_id, ip_address, user_agent, expires_at, created_at) SELECT $1, $2, id, $3, $4, expires_at, $5 FROM sessions WHERE user_id = $2 ORDER BY created_at DESC LIMIT 1`, newID("gst"), user.ID, metadata.IPAddress, metadata.UserAgent, now); err != nil {
 		return AuthResponse{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -151,6 +252,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput, metadata SessionM
 	if user.Status != "active" {
 		return AuthResponse{}, ErrUserDisabled
 	}
+	user.AccountType = "email"
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -188,14 +290,16 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 		sessionID    string
 		user         User
 		expiresAt    time.Time
+		verifiedAt   sql.NullTime
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1), rt.expires_at
+		SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at, rt.expires_at
 		FROM refresh_tokens rt
 		JOIN users u ON u.id = rt.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND u.deleted_at IS NULL
-		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &expiresAt)
+		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidToken
 	}
@@ -207,6 +311,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 	}
 	if user.Status != "active" {
 		return AuthResponse{}, ErrUserDisabled
+	}
+	if verifiedAt.Valid {
+		user.EmailVerifiedAt = &verifiedAt.Time
 	}
 	now := s.clock().UTC()
 	accessToken, err := newOpaqueToken()
@@ -282,6 +389,7 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 	if user.Status != "active" {
 		return User{}, ErrUserDisabled
 	}
+	user.AccountType = "email"
 	return user, nil
 }
 
@@ -326,6 +434,18 @@ func validateRegistration(input RegisterInput) (string, string, error) {
 
 func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func validEmail(email string) bool {
+	if len(email) < 5 || len(email) > 320 || strings.ContainsAny(email, "\r\n") {
+		return false
+	}
+	at := strings.LastIndex(email, "@")
+	return at > 0 && at < len(email)-1 && strings.Contains(email[at+1:], ".")
 }
 
 func newOpaqueToken() (string, error) {

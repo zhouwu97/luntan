@@ -18,9 +18,12 @@ class PostMediaPreview extends StatelessWidget {
     if (images.isEmpty) return const SizedBox.shrink();
     final shown = images.length > 4 ? images.take(4).toList() : images;
     final more = images.length > 4 ? images.length - 4 : 0;
+    final layout = _layout(shown, more);
     return Padding(
       padding: const EdgeInsets.only(top: 11),
-      child: GestureDetector(onTap: onTap, child: _layout(shown, more)),
+      child: onTap == null
+          ? layout
+          : GestureDetector(onTap: onTap, child: layout),
     );
   }
 
@@ -80,18 +83,33 @@ class PostMediaPreview extends StatelessWidget {
       default:
         return AspectRatio(
           aspectRatio: 1,
-          child: GridView.builder(
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 5,
-              mainAxisSpacing: 5,
-            ),
-            itemCount: shown.length,
-            itemBuilder: (_, index) => _tile(
-              shown[index],
-              overlay: index == shown.length - 1 && more > 0 ? '+$more' : null,
-            ),
+          child: Column(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(child: _tile(shown[0])),
+                    const SizedBox(width: 5),
+                    Expanded(child: _tile(shown[1])),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 5),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(child: _tile(shown[2])),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: _tile(
+                        shown[3],
+                        overlay: more > 0 ? '+$more' : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         );
     }
@@ -104,51 +122,69 @@ class PostMediaPreview extends StatelessWidget {
   }
 
   Widget _tile(PostMedia media, {String? overlay}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (media.url != null)
-            Image.network(
-              media.url!,
-              fit: BoxFit.cover,
-              filterQuality: FilterQuality.low,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) =>
-                  frame == null && !wasSynchronouslyLoaded
-                  ? const ColoredBox(
-                      color: AppTheme.surfaceBlue,
-                      child: Center(
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                    )
-                  : child,
-              errorBuilder: (context, error, stackTrace) => _fallback(media),
-            )
-          else
-            _fallback(media),
-          if (overlay != null)
-            const DecoratedBox(
-              decoration: BoxDecoration(color: Color(0x990E2037)),
-              child: Center(),
-            ),
-          if (overlay != null)
-            Center(
-              child: Text(
-                overlay,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final cacheWidth = constraints.maxWidth.isFinite
+            ? (constraints.maxWidth * dpr).round()
+            : null;
+        final cacheHeight = constraints.maxHeight.isFinite
+            ? (constraints.maxHeight * dpr).round()
+            : null;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (media.url != null)
+                Image.network(
+                  media.url!,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.low,
+                  cacheWidth: cacheWidth,
+                  cacheHeight: cacheHeight,
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) {
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            const ColoredBox(color: AppTheme.surfaceBlue),
+                            AnimatedOpacity(
+                              opacity: frame == null && !wasSynchronouslyLoaded
+                                  ? 0
+                                  : 1,
+                              duration: AppTheme.fastMotion,
+                              curve: AppTheme.contentCurve,
+                              child: child,
+                            ),
+                          ],
+                        );
+                      },
+                  errorBuilder: (context, error, stackTrace) =>
+                      _fallback(media),
+                )
+              else
+                _fallback(media),
+              if (overlay != null)
+                const DecoratedBox(
+                  decoration: BoxDecoration(color: Color(0x990E2037)),
+                  child: Center(),
                 ),
-              ),
-            ),
-        ],
-      ),
+              if (overlay != null)
+                Center(
+                  child: Text(
+                    overlay,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 

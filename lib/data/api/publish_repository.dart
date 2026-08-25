@@ -174,6 +174,7 @@ class ApiPublishRepository
         'width': width,
         'height': height,
       },
+      requestTimeout: _client.uploadTimeout,
     );
     final mediaId = payload['media_id'];
     final uploadUrl = payload['upload_url'];
@@ -215,6 +216,7 @@ class ApiPublishRepository
       return await _client.postJson(
         '/api/v1/media/${ticket.mediaId}/complete',
         body: {'size': size, 'sha256': sha256},
+        requestTimeout: _client.uploadTimeout,
       );
     } on ApiException {
       await _deleteMediaSilently(ticket.mediaId);

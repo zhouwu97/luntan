@@ -224,7 +224,7 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	}
 }
 
-func TestProfileCommentsReturnsRealCommentRowsAndStableCursor(t *testing.T) {
+func TestProfileCommentsReturnsPostsOrderedByLatestReceivedComment(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -234,18 +234,18 @@ func TestProfileCommentsReturnsRealCommentRowsAndStableCursor(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level"}).AddRow("u1", "user", "active", "用户", 1))
-	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id, c\.content, c\.created_at.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
+	mock.ExpectQuery(`(?s)SELECT p\.id, p\.title.*MAX\(c\.created_at\) AS latest_comment_at.*ORDER BY latest_comment_at DESC, p\.id DESC LIMIT \$2`).
 		WithArgs("u1", 2).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "content", "created_at", "title", "community_id", "name"}).
-			AddRow("comment-1", "post-1", "评论一", created, "帖子一", "c1", "大型拆箱").
-			AddRow("comment-2", "post-2", "评论二", created.Add(-time.Minute), "帖子二", "c1", "大型拆箱"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
+			AddRow("post-1", "帖子一", "正文一", "c1", "大型拆箱", int64(3), int64(2), int64(1), created.Add(-time.Hour), created).
+			AddRow("post-2", "帖子二", "正文二", "c1", "大型拆箱", int64(1), int64(0), int64(0), created.Add(-2*time.Hour), created.Add(-time.Minute)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/comments?limit=1", nil)
 	req.Header.Set("Authorization", "Bearer access-token")
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
 
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"post_id":"post-1"`) || !strings.Contains(res.Body.String(), `"content":"评论一"`) || !strings.Contains(res.Body.String(), `"has_more":true`) {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"post-1"`) || !strings.Contains(res.Body.String(), `"activity_at":"2026-08-24T23:20:00Z"`) || !strings.Contains(res.Body.String(), `"has_more":true`) {
 		t.Fatalf("profile comments response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

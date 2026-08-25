@@ -1,7 +1,6 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
@@ -159,6 +158,7 @@ class _DraftImage {
   _DraftImage({required this.file});
   final XFile file;
   Uint8List? bytes;
+  int sizeBytes = 0;
   String? mimeType;
   int? width;
   int? height;
@@ -177,11 +177,14 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   ForumSection section = ForumSection.unboxing;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
+  final List<_DraftImage> _uploadQueue = <_DraftImage>[];
+  int _activeUploads = 0;
   String? errorText;
   bool submitting = false;
   bool _submitted = false;
 
   static const int maxImages = 9;
+  static const int maxConcurrentUploads = 3;
   static const int maxFileBytes = 10 * 1024 * 1024;
   static const int maxTotalBytes = 30 * 1024 * 1024;
 
@@ -279,7 +282,30 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
       }
     });
     for (final image in additions) {
-      _upload(image);
+      _enqueueUpload(image);
+    }
+  }
+
+  void _enqueueUpload(_DraftImage image) {
+    if (!_uploadQueue.contains(image)) _uploadQueue.add(image);
+    _pumpUploads();
+  }
+
+  void _pumpUploads() {
+    while (mounted &&
+        _activeUploads < maxConcurrentUploads &&
+        _uploadQueue.isNotEmpty) {
+      final image = _uploadQueue.removeAt(0);
+      if (!images.contains(image) ||
+          image.status == _DraftImageStatus.done ||
+          image.status == _DraftImageStatus.uploading) {
+        continue;
+      }
+      _activeUploads++;
+      _upload(image).whenComplete(() {
+        _activeUploads--;
+        _pumpUploads();
+      });
     }
   }
 
@@ -297,13 +323,16 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     try {
       final bytes = image.bytes = await image.file.readAsBytes();
       _assertValidImage(image.file.name, bytes);
-      final totalBytes = images
-          .map((item) => item.bytes?.length ?? 0)
-          .fold<int>(0, (sum, item) => sum + item);
+      image.sizeBytes = bytes.length;
+      final totalBytes = images.fold<int>(
+        0,
+        (sum, item) => sum + item.sizeBytes,
+      );
       if (totalBytes > maxTotalBytes) {
         throw const PublishException('图片总量不能超过 30 MB');
       }
-      final digest = sha256.convert(bytes).toString();
+      // 摘要计算放到 isolate，避免大图在编辑器 UI isolate 中阻塞掉帧。
+      final digest = await compute(_sha256Hex, bytes);
       final mediaId = await publisher.uploadMedia(
         fileName: image.file.name,
         mimeType: image.mimeType ??= _mimeType(image.file.name),
@@ -328,12 +357,16 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         image.status = _DraftImageStatus.failed;
         image.error = error is PublishException ? error.message : '图片上传失败，请重试';
       });
+    } finally {
+      // 图片预览会按需从 XFile 重新读取；上传完成后不把原始字节长期挂在状态树上。
+      image.bytes = null;
     }
   }
 
   void _deleteImage(_DraftImage image) {
     if (!_usesRealUpload) return;
     if (image.status == _DraftImageStatus.uploading) return;
+    _uploadQueue.remove(image);
     setState(() {
       images.remove(image);
       errorText = null;
@@ -521,7 +554,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                       final image = images[index];
                       return _DraftImageThumb(
                         image: image,
-                        onRetry: () => _upload(image),
+                        onRetry: () => _enqueueUpload(image),
                         onDelete: () => _deleteImage(image),
                       );
                     },
@@ -600,14 +633,24 @@ class _DraftImageThumb extends StatelessWidget {
     final bytes = image.bytes;
     final status = image.status;
     final Widget preview = bytes == null
-        ? Container(
-            color: AppTheme.surfaceBlue,
-            alignment: Alignment.center,
-            child: const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
+        ? FutureBuilder<Uint8List>(
+            future: image.file.readAsBytes(),
+            builder: (context, snapshot) {
+              if (snapshot.hasData) {
+                return Image.memory(snapshot.data!, fit: BoxFit.cover);
+              }
+              return Container(
+                color: AppTheme.surfaceBlue,
+                alignment: Alignment.center,
+                child: snapshot.hasError
+                    ? const Icon(Icons.broken_image_outlined, size: 20)
+                    : const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+              );
+            },
           )
         : Image.memory(bytes, fit: BoxFit.cover);
     return Column(
@@ -693,3 +736,5 @@ String _statusLabel(_DraftImageStatus status) => switch (status) {
   _DraftImageStatus.done => '上传成功',
   _DraftImageStatus.failed => '上传失败',
 };
+
+String _sha256Hex(Uint8List bytes) => sha256.convert(bytes).toString();

@@ -14,6 +14,7 @@ class ForumPostCard extends StatelessWidget {
     required this.onLike,
     required this.onBookmark,
     required this.onMenu,
+    this.interactionListenable,
   });
 
   final Post post;
@@ -22,9 +23,20 @@ class ForumPostCard extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onBookmark;
   final VoidCallback onMenu;
+  final Listenable? interactionListenable;
 
   @override
   Widget build(BuildContext context) {
+    final card = _buildCard(context);
+    final listenable = interactionListenable;
+    if (listenable == null) return card;
+    return AnimatedBuilder(
+      animation: listenable,
+      builder: (context, _) => _buildCard(context),
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
@@ -187,7 +199,10 @@ class _ActionStat extends StatelessWidget {
     onTap: onTap,
     borderRadius: BorderRadius.circular(8),
     child: ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 40, minWidth: 40),
+      constraints: const BoxConstraints(
+        minHeight: AppTheme.minTapTarget,
+        minWidth: AppTheme.minTapTarget,
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
         child: Row(

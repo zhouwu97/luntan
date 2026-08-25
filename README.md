@@ -88,6 +88,13 @@ go run ./server/cmd/api
 flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
 
+分享链接使用 `WEB_BASE_URL` 生成真实 Web/Universal Link；未配置时默认使用
+`https://luntan.app`。发布环境请替换为已配置域名：
+
+```bash
+flutter build apk --release --dart-define=WEB_BASE_URL=https://forum.example.com
+```
+
 构建时同样传入：
 
 ```bash

@@ -192,6 +192,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         final post = state.detail!.post;
         final commentsController = widget.commentsController;
         final allComments = commentsController.items;
+        final childrenByParent = <String, List<Comment>>{};
+        for (final comment in allComments) {
+          final parentId = comment.parentId;
+          if (parentId == null) continue;
+          childrenByParent
+              .putIfAbsent(parentId, () => <Comment>[])
+              .add(comment);
+        }
         final roots = allComments
             .where((comment) => comment.parentId == null)
             .toList();
@@ -232,196 +240,229 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           body: Column(
             children: [
               Expanded(
-                child: ListView(
+                child: CustomScrollView(
                   controller: commentsScrollController,
-                  padding: const EdgeInsets.fromLTRB(
-                    AppTheme.pagePadding,
-                    8,
-                    AppTheme.pagePadding,
-                    24,
-                  ),
-                  children: [
-                    ForumAuthorRow(
-                      post: post,
-                      onMenu: () => _showPostMenu(post),
-                    ),
-                    const SizedBox(height: 15),
-                    if (post.isPinned ||
-                        post.isFeatured ||
-                        post.extraTag == '精华')
-                      _Tag(
-                        text: post.isPinned ? '置顶' : '精华',
-                        color: post.isPinned ? AppTheme.pink : AppTheme.orange,
-                      ),
-                    if (post.isPinned ||
-                        post.isFeatured ||
-                        post.extraTag == '精华')
-                      const SizedBox(height: 8),
-                    Text(
-                      post.title,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        height: 1.35,
-                        color: AppTheme.textPrimary,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 11),
-                    Text(
-                      post.body,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 15,
-                        height: 1.75,
-                      ),
-                    ),
-                    if (post.type == PostType.poll &&
-                        widget.pollRepository != null)
-                      _PollPanel(
-                        repository: widget.pollRepository!,
-                        postId: post.id,
-                        isAuthenticated: widget.isAuthenticated,
-                        onRequireAuth: widget.onRequireAuth,
-                      ),
-                    if (post.images.isNotEmpty)
-                      PostMediaPreview(
-                        images: post.images,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                MediaGalleryScreen(images: post.images),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 15),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.visibility_outlined,
-                          color: AppTheme.textSecondary,
-                          size: 17,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          '${post.views} 浏览',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        const Icon(
-                          Icons.chat_bubble_outline_rounded,
-                          color: AppTheme.textSecondary,
-                          size: 17,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          '${post.comments} 回复',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Icon(
-                          post.isLiked
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          color: post.isLiked
-                              ? AppTheme.pink
-                              : AppTheme.textSecondary,
-                          size: 17,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          '${post.likeCount} 赞',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 35, color: AppTheme.border),
-                    Container(
-                      key: commentsKey,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '全部回复 ${post.comments}',
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ForumAuthorRow(
+                              post: post,
+                              onMenu: () => _showPostMenu(post),
+                            ),
+                            const SizedBox(height: 15),
+                            if (post.isPinned ||
+                                post.isFeatured ||
+                                post.extraTag == '精华')
+                              _Tag(
+                                text: post.isPinned ? '置顶' : '精华',
+                                color: post.isPinned
+                                    ? AppTheme.pink
+                                    : AppTheme.orange,
+                              ),
+                            if (post.isPinned ||
+                                post.isFeatured ||
+                                post.extraTag == '精华')
+                              const SizedBox(height: 8),
+                            Text(
+                              post.title,
                               style: const TextStyle(
+                                fontSize: 22,
+                                height: 1.35,
                                 color: AppTheme.textPrimary,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
-                          ),
-                          Text(
-                            '${roots.length} 条可见',
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 11,
+                            const SizedBox(height: 11),
+                            Text(
+                              post.body,
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 15,
+                                height: 1.75,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 13),
-                    if (commentsController.isLoading == true &&
-                        allComments.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 36),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                    if (commentsController.errorMessage != null &&
-                        allComments.isEmpty)
-                      _CommentError(onRetry: commentsController.load),
-                    if (allComments.isEmpty &&
-                        commentsController.isLoading != true)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 45),
-                        child: Center(
-                          child: Text(
-                            '还没有回复，来抢沙发吧',
-                            style: TextStyle(color: AppTheme.textSecondary),
-                          ),
+                            if (post.type == PostType.poll &&
+                                widget.pollRepository != null)
+                              _PollPanel(
+                                repository: widget.pollRepository!,
+                                postId: post.id,
+                                isAuthenticated: widget.isAuthenticated,
+                                onRequireAuth: widget.onRequireAuth,
+                              ),
+                            if (post.images.isNotEmpty)
+                              PostMediaPreview(
+                                images: post.images,
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        MediaGalleryScreen(images: post.images),
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(height: 15),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.visibility_outlined,
+                                  color: AppTheme.textSecondary,
+                                  size: 17,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  '${post.views} 浏览',
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                const Icon(
+                                  Icons.chat_bubble_outline_rounded,
+                                  color: AppTheme.textSecondary,
+                                  size: 17,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  '${post.comments} 回复',
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Icon(
+                                  post.isLiked
+                                      ? Icons.favorite_rounded
+                                      : Icons.favorite_border_rounded,
+                                  color: post.isLiked
+                                      ? AppTheme.pink
+                                      : AppTheme.textSecondary,
+                                  size: 17,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  '${post.likeCount} 赞',
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 35, color: AppTheme.border),
+                          ],
                         ),
                       ),
-                    ...roots.asMap().entries.map((entry) {
-                      final comment = entry.value;
-                      final children = allComments
-                          .where((item) => item.parentId == comment.id)
-                          .toList();
-                      return _CommentTile(
-                        key: GlobalObjectKey('comment:${comment.id}'),
-                        comment: comment,
-                        floor: entry.key + 2,
-                        children: children,
-                        liked: comment.isLiked,
-                        onReply: () => setState(() => replyTarget = comment),
-                        onLike: () => _likeComment(comment),
-                        onMore: () => _showCommentMenu(comment),
-                        onViewAllReplies: () => _openReplyThread(comment),
-                      );
-                    }),
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              key: commentsKey,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '全部回复 ${post.comments}',
+                                      style: const TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    '${roots.length} 条可见',
+                                    style: const TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 13),
+                            if (commentsController.isLoading == true &&
+                                allComments.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 36),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              ),
+                            if (commentsController.errorMessage != null &&
+                                allComments.isEmpty)
+                              _CommentError(onRetry: commentsController.load),
+                            if (allComments.isEmpty &&
+                                commentsController.isLoading != true)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 45),
+                                child: Center(
+                                  child: Text(
+                                    '还没有回复，来抢沙发吧',
+                                    style: TextStyle(
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (roots.isNotEmpty)
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        sliver: SliverList(
+                          delegate: SliverChildBuilderDelegate((
+                            context,
+                            index,
+                          ) {
+                            final comment = roots[index];
+                            final children =
+                                childrenByParent[comment.id] ?? const [];
+                            return _CommentTile(
+                              key: GlobalObjectKey('comment:${comment.id}'),
+                              comment: comment,
+                              floor: index + 2,
+                              children: children,
+                              liked: comment.isLiked,
+                              onReply: () =>
+                                  setState(() => replyTarget = comment),
+                              onLike: () => _likeComment(comment),
+                              onMore: () => _showCommentMenu(comment),
+                              onViewAllReplies: () => _openReplyThread(comment),
+                            );
+                          }, childCount: roots.length),
+                        ),
+                      ),
                     if (commentsController.isLoadingMore == true)
-                      const Padding(
-                        padding: EdgeInsets.all(14),
-                        child: Center(
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.all(14),
+                          child: Center(
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
                         ),
                       ),
                     if (!commentsController.hasMore && allComments.isNotEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Center(
-                          child: Text(
-                            '没有更多回复了',
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 11,
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: 8),
+                          child: Center(
+                            child: Text(
+                              '没有更多回复了',
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 11,
+                              ),
                             ),
                           ),
                         ),
@@ -505,7 +546,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               title: const Text('分享帖子'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                Clipboard.setData(ClipboardData(text: '/posts/${post.id}'));
+                final baseUrl = Uri.parse(
+                  const String.fromEnvironment(
+                    'WEB_BASE_URL',
+                    defaultValue: 'https://luntan.app',
+                  ),
+                );
+                final shareUrl = baseUrl
+                    .resolve('/posts/${Uri.encodeComponent(post.id)}')
+                    .toString();
+                Clipboard.setData(ClipboardData(text: shareUrl));
                 widget.onFeedback('帖子链接已复制');
               },
             ),
@@ -1064,7 +1114,7 @@ class _CommentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final author = comment.author;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 17),
+      padding: const EdgeInsets.only(bottom: 15),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1072,12 +1122,13 @@ class _CommentTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
-                radius: 17,
+                radius: 15,
                 backgroundColor: AppTheme.surfaceBlue,
                 child: Text(
                   (author?.nickname ?? '匿').characters.first,
                   style: const TextStyle(
                     color: AppTheme.primary,
+                    fontSize: 11,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -1101,11 +1152,22 @@ class _CommentTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          'Lv.${author?.level ?? 1}',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 10,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.mint.withValues(alpha: .16),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Lv.${author?.level ?? 1}',
+                            style: const TextStyle(
+                              color: AppTheme.mint,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                         const Spacer(),
@@ -1152,8 +1214,21 @@ class _CommentTile extends StatelessWidget {
                             padding: EdgeInsets.zero,
                             minimumSize: const Size(48, 28),
                           ),
-                          child: Text(
-                            '${liked ? '♥' : '♡'} ${comment.likeCount}',
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                liked
+                                    ? Icons.favorite_rounded
+                                    : Icons.favorite_border_rounded,
+                                size: 14,
+                                color: liked
+                                    ? AppTheme.pink
+                                    : AppTheme.textSecondary,
+                              ),
+                              const SizedBox(width: 3),
+                              Text('${comment.likeCount}'),
+                            ],
                           ),
                         ),
                         IconButton(
@@ -1174,7 +1249,7 @@ class _CommentTile extends StatelessWidget {
           ),
           if (children.isNotEmpty)
             Container(
-              margin: const EdgeInsets.only(left: 43, top: 2),
+              margin: const EdgeInsets.only(left: 39, top: 2),
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: AppTheme.background,
@@ -1200,7 +1275,7 @@ class _CommentTile extends StatelessWidget {
             ),
           if (comment.replyCount > 0)
             Padding(
-              padding: const EdgeInsets.only(left: 43, top: 5),
+              padding: const EdgeInsets.only(left: 39, top: 5),
               child: GestureDetector(
                 onTap: onViewAllReplies,
                 child: const Text(

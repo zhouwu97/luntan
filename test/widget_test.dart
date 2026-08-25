@@ -29,6 +29,16 @@ void main() {
     expect(find.byType(PostDetailScreen), findsOneWidget);
   });
 
+  testWidgets('首页胶囊直接打开收到回复的帖子列表', (tester) async {
+    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('我的评论').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('新人手的机械键盘开箱！手感绝了'), findsOneWidget);
+  });
+
   testWidgets('帖子图片点击转发到卡片的详情回调', (tester) async {
     var opened = false;
     final post = ForumStore.seeded().posts.first;
@@ -80,7 +90,7 @@ void main() {
     expect(find.byType(PostDetailScreen), findsOneWidget);
   });
 
-  testWidgets('我的评论点击打开详情并保留评论定位参数', (tester) async {
+  testWidgets('我的评论按收到回复的帖子打开详情', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
@@ -88,7 +98,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('我的评论').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('我这把是偏轻的线性轴').first);
+    await tester.tap(find.text('新人手的机械键盘开箱！手感绝了').last);
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/feed_controller.dart';
+import '../controllers/interaction_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/user_repository.dart';
 import '../domain/models.dart';
@@ -581,6 +582,7 @@ class CommunityDetailScreen extends StatefulWidget {
     required this.onOpenComments,
     required this.onToggleLike,
     required this.onToggleBookmark,
+    required this.interactionController,
   });
 
   final CommunityRepository repository;
@@ -593,6 +595,7 @@ class CommunityDetailScreen extends StatefulWidget {
   final ValueChanged<Post> onOpenComments;
   final ValueChanged<Post> onToggleLike;
   final ValueChanged<Post> onToggleBookmark;
+  final InteractionController interactionController;
 
   @override
   State<CommunityDetailScreen> createState() => _CommunityDetailScreenState();
@@ -677,125 +680,148 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               }
               return false;
             },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-              children: [
-                const CircleAvatar(
-                  radius: 34,
-                  backgroundColor: AppTheme.surfaceBlue,
-                  child: Icon(
-                    Icons.forum_outlined,
-                    color: AppTheme.primary,
-                    size: 34,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  community.name,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  '@${community.slug}',
-                  style: const TextStyle(color: AppTheme.textSecondary),
-                ),
-                const SizedBox(height: 12),
-                Text(community.description),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _Stat(label: '帖子', value: community.postCount),
-                    _Stat(label: '成员', value: community.memberCount),
-                    _Stat(label: '关注', value: community.followerCount),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _busy
-                            ? null
-                            : () => _mutate(membership: false),
-                        child: Text(community.isFollowing ? '已关注' : '关注板块'),
+            child: AnimatedBuilder(
+              animation: _feedController,
+              builder: (context, _) {
+                final feed = _feedController.state;
+                return CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+                      sliver: SliverToBoxAdapter(
+                        child: _communityHeader(community),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _busy
-                            ? null
-                            : () => _mutate(membership: true),
-                        child: Text(community.isMember ? '已加入' : '加入板块'),
-                      ),
-                    ),
+                    ..._feedSlivers(feed),
+                    const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
                   ],
-                ),
-                const SizedBox(height: 28),
-                const Text(
-                  '板块帖子',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 10),
-                AnimatedBuilder(
-                  animation: _feedController,
-                  builder: (context, _) {
-                    final feed = _feedController.state;
-                    if (feed.status == FeedStatus.error && feed.items.isEmpty) {
-                      return _CommunityFeedMessage(text: '帖子加载失败，向下拉可重试');
-                    }
-                    if ((feed.status == FeedStatus.initial ||
-                            (feed.status == FeedStatus.loading &&
-                                feed.items.isEmpty)) &&
-                        feed.items.isEmpty) {
-                      return const Padding(
-                        padding: EdgeInsets.all(18),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    if (feed.items.isEmpty) {
-                      return const _CommunityFeedMessage(text: '这个板块还没有帖子');
-                    }
-                    return Column(
-                      children: [
-                        ...feed.items.map(
-                          (post) => ForumPostCard(
-                            post: post,
-                            onOpen: () => widget.onOpenPost(post),
-                            onOpenComments: () => widget.onOpenComments(post),
-                            onLike: () => widget.onToggleLike(post),
-                            onBookmark: () => widget.onToggleBookmark(post),
-                            onMenu: () => widget.onFeedback('更多操作请在帖子详情中进行'),
-                          ),
-                        ),
-                        if (feed.status == FeedStatus.loadingMore)
-                          const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Center(child: CircularProgressIndicator()),
-                          )
-                        else if (!feed.hasMore)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 4),
-                            child: Text(
-                              '没有更多帖子了',
-                              style: TextStyle(color: AppTheme.textSecondary),
-                            ),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-              ],
+                );
+              },
             ),
           ),
         );
       },
     ),
   );
+
+  Widget _communityHeader(Community community) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const CircleAvatar(
+        radius: 34,
+        backgroundColor: AppTheme.surfaceBlue,
+        child: Icon(Icons.forum_outlined, color: AppTheme.primary, size: 34),
+      ),
+      const SizedBox(height: 14),
+      Text(
+        community.name,
+        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+      ),
+      Text(
+        '@${community.slug}',
+        style: const TextStyle(color: AppTheme.textSecondary),
+      ),
+      const SizedBox(height: 12),
+      Text(community.description),
+      const SizedBox(height: 20),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _Stat(label: '帖子', value: community.postCount),
+          _Stat(label: '成员', value: community.memberCount),
+          _Stat(label: '关注', value: community.followerCount),
+        ],
+      ),
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _busy ? null : () => _mutate(membership: false),
+              child: Text(community.isFollowing ? '已关注' : '关注板块'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: FilledButton(
+              onPressed: _busy ? null : () => _mutate(membership: true),
+              child: Text(community.isMember ? '已加入' : '加入板块'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 28),
+      const Text(
+        '板块帖子',
+        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 10),
+    ],
+  );
+
+  List<Widget> _feedSlivers(FeedState feed) {
+    if (feed.status == FeedStatus.error && feed.items.isEmpty) {
+      return const [
+        SliverToBoxAdapter(child: _CommunityFeedMessage(text: '帖子加载失败，向下拉可重试')),
+      ];
+    }
+    if ((feed.status == FeedStatus.initial ||
+            (feed.status == FeedStatus.loading && feed.items.isEmpty)) &&
+        feed.items.isEmpty) {
+      return const [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(18),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ),
+      ];
+    }
+    if (feed.items.isEmpty) {
+      return const [
+        SliverToBoxAdapter(child: _CommunityFeedMessage(text: '这个板块还没有帖子')),
+      ];
+    }
+    return [
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final post = feed.items[index];
+            return ForumPostCard(
+              post: post,
+              onOpen: () => widget.onOpenPost(post),
+              onOpenComments: () => widget.onOpenComments(post),
+              onLike: () => widget.onToggleLike(post),
+              onBookmark: () => widget.onToggleBookmark(post),
+              onMenu: () => widget.onFeedback('更多操作请在帖子详情中进行'),
+              interactionListenable: widget.interactionController,
+            );
+          }, childCount: feed.items.length),
+        ),
+      ),
+      if (feed.status == FeedStatus.loadingMore)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(12),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        )
+      else if (!feed.hasMore)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Center(
+              child: Text(
+                '没有更多帖子了',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+            ),
+          ),
+        ),
+    ];
+  }
 }
 
 class _CommunityFeedMessage extends StatelessWidget {

@@ -107,4 +107,31 @@ void main() {
     expect(requestedUri?.path, '/api/v1/me/comments');
     client.close();
   });
+
+  test('ProfileRepository 为首页个人 Feed 请求完整帖子摘要', () async {
+    Uri? requestedUri;
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response.bytes(
+          utf8.encode(
+            '{"items":[{"id":"post-2","author":{"id":"u1","username":"user","nickname":"用户","level":6},"community":{"id":"c1","slug":"unboxing","name":"大型拆箱"},"type":"normal","title":"帖子标题","content":"完整正文","comment_count":4,"like_count":2,"bookmark_count":1,"view_count":99,"created_at":"2026-08-24T20:00:00Z","published_at":"2026-08-24T20:00:00Z","viewer_state":{"has_liked":true}}],"has_more":false}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    final page = await ProfileRepository(
+      client,
+    ).list('posts', includeDetails: true);
+
+    expect(requestedUri?.queryParameters['include_details'], '1');
+    expect(page.items.single.contentPreview, '完整正文');
+    expect(page.items.single.authorNickname, '用户');
+    expect(page.items.single.viewerState?.hasLiked, isTrue);
+    client.close();
+  });
 }

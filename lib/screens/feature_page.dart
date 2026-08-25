@@ -13,7 +13,7 @@ enum FeatureType { ranking, hot, outfit, activity, gameShare, myReplies }
 
 extension FeatureTypePresentation on FeatureType {
   String get label => switch (this) {
-    FeatureType.ranking => '商品榜',
+    FeatureType.ranking => '玩具排行榜',
     FeatureType.hot => '热门帖子',
     FeatureType.outfit => '穿搭分享',
     FeatureType.activity => '活动',
@@ -248,7 +248,7 @@ class _FeaturePageState extends State<FeaturePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('商品榜加载失败'),
+                    const Text('玩具排行榜加载失败'),
                     TextButton(
                       onPressed: () => setState(
                         () => productsFuture = storeRepository!.products(),

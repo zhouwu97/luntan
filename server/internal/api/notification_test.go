@@ -56,7 +56,7 @@ func TestUnreadNotificationCountUsesAuthenticatedUserID(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, "email", "", false, nil))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT count(*) FROM notifications WHERE user_id = $1 AND is_read = false`)).
+	mock.ExpectQuery(`(?s)SELECT count\(\*\) FROM notifications n WHERE n\.user_id = \$1 AND n\.is_read = false.*FROM blocks b`).
 		WithArgs("user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(3)))
 

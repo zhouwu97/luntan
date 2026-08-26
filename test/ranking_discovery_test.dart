@@ -154,15 +154,18 @@ void main() {
       expect(items[1].segments, ['beginner', 'advanced']);
     });
 
-    test('RankingRepository.detail parses ratingDistribution and authorRating', () async {
-      final detail = await rankingRepo.detail('toy-butter-2');
-      expect(detail.toy.category, 'cup');
-      expect(detail.ratingDistribution[10], 10);
-      expect(detail.ratingDistribution[9], 5);
-      expect(detail.comments.length, 1);
-      expect(detail.comments[0].authorRating, 9);
-      expect(detail.comments[0].level, 4);
-    });
+    test(
+      'RankingRepository.detail parses ratingDistribution and authorRating',
+      () async {
+        final detail = await rankingRepo.detail('toy-butter-2');
+        expect(detail.toy.category, 'cup');
+        expect(detail.ratingDistribution[10], 10);
+        expect(detail.ratingDistribution[9], 5);
+        expect(detail.comments.length, 1);
+        expect(detail.comments[0].authorRating, 9);
+        expect(detail.comments[0].level, 4);
+      },
+    );
 
     test('PlatformRepository.search parses toys in SearchResult', () async {
       final res = await platformRepo.search('黄油', type: 'all');
@@ -175,12 +178,12 @@ void main() {
   });
 
   group('RankingPage UI & Search Tests', () {
-    testWidgets('RankingPage performs local search and filters list', (tester) async {
+    testWidgets('RankingPage performs local search and filters list', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: RankingPage(
-            repository: RankingRepository(_FakeApiClient()),
-          ),
+          home: RankingPage(repository: RankingRepository(_FakeApiClient())),
         ),
       );
       await tester.pumpAndSettle();
@@ -204,45 +207,49 @@ void main() {
       expect(find.text('黄油小姐 二代'), findsWidgets);
     });
 
-    testWidgets('RankingItemDetailPage shows rating distribution and author comment info', (tester) async {
-      final rankingRepo = RankingRepository(_FakeApiClient());
-      const item = RankingItem(
-        id: 'toy-butter-2',
-        rank: 1,
-        name: '黄油小姐 二代',
-        hot: '401人想冲',
-        tags: ['奶香', '软糯'],
-        ratings: '17人评分',
-        score: '8.7',
-        asset: 'assets/ranking/hero.webp',
-      );
+    testWidgets(
+      'RankingItemDetailPage shows rating distribution and author comment info',
+      (tester) async {
+        final rankingRepo = RankingRepository(_FakeApiClient());
+        const item = RankingItem(
+          id: 'toy-butter-2',
+          rank: 1,
+          name: '黄油小姐 二代',
+          hot: '401人想冲',
+          tags: ['奶香', '软糯'],
+          ratings: '17人评分',
+          score: '8.7',
+          asset: 'assets/ranking/hero.webp',
+        );
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: RankingItemDetailPage(
-            item: item,
-            repository: rankingRepo,
+        await tester.pumpWidget(
+          MaterialApp(
+            home: RankingItemDetailPage(item: item, repository: rankingRepo),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      // Verify rating distribution card is rendered
-      expect(find.text('酱友评分'), findsOneWidget);
-      expect(find.text('8.7'), findsOneWidget);
-      // Verify level 4 is rendered on the comment
-      expect(find.text('LV4'), findsOneWidget);
-      expect(find.text('9分'), findsOneWidget);
-      expect(find.text('手感极佳，软糯适中'), findsOneWidget);
-    });
+        // Verify rating distribution card is rendered
+        expect(find.text('酱友评分'), findsOneWidget);
+        expect(find.text('8.7'), findsOneWidget);
+        // Verify level 4 is rendered on the comment
+        expect(find.text('LV4'), findsOneWidget);
+        expect(find.text('9分'), findsOneWidget);
+        expect(find.text('手感极佳，软糯适中'), findsOneWidget);
+      },
+    );
   });
 
   group('SearchScreen Toy Integration Tests', () {
-    testWidgets('SearchScreen displays toy results and switches tabs', (tester) async {
+    testWidgets('SearchScreen displays toy results and switches tabs', (
+      tester,
+    ) async {
       final fakeClient = _FakeApiClient();
       final platform = PlatformRepository(fakeClient);
       final store = ForumStore.seeded();
-      final interaction = InteractionController(repository: MockInteractionRepository());
+      final interaction = InteractionController(
+        repository: MockInteractionRepository(),
+      );
 
       await tester.pumpWidget(
         MaterialApp(
@@ -269,7 +276,7 @@ void main() {
       expect(find.byType(SearchPostRow), findsOneWidget);
 
       // Switch to Toy tab
-      await tester.tap(find.text('玩具'));
+      await tester.tap(find.text('榜单'));
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 

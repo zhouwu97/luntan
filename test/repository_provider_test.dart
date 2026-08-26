@@ -14,7 +14,11 @@ void main() {
     expect(resolveApiBaseUrl(configured: '  ', appEnv: 'development'), isEmpty);
   });
 
-  test('QA 允许使用 HTTP', () {
+  test('QA 必须显式配置 API 地址并允许使用 HTTP', () {
+    expect(
+      () => resolveApiBaseUrl(configured: '  ', appEnv: 'qa'),
+      throwsA(isA<StateError>()),
+    );
     expect(
       resolveApiBaseUrl(configured: 'http://101.42.27.44', appEnv: 'qa'),
       'http://101.42.27.44',

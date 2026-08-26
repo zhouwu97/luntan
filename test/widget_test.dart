@@ -26,6 +26,8 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('大型拆箱').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？'));
     await tester.pumpAndSettle();
 
@@ -36,6 +38,8 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('大型拆箱').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？'));
     await tester.pumpAndSettle();
 
@@ -104,9 +108,10 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('搜索帖子 / 用户 / 板块').first);
+    await tester.tap(find.text('搜索帖子、用户、板块、榜单').first);
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '大尺寸倒模');
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(SearchPostRow).first);
     await tester.pumpAndSettle();

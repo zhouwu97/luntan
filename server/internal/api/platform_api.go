@@ -24,6 +24,15 @@ var (
 	ErrInvalidSearchCursor  = errors.New("invalid search cursor")
 )
 
+// notificationVisibilityPredicate 是通知列表、未读角标和批量已读共用的可见性
+// 口径。双方任意一方屏蔽后，通知既不能展示，也不能贡献未读数。
+const notificationVisibilityPredicate = `
+  AND (n.actor_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM blocks b
+    WHERE (b.blocker_id = n.user_id AND b.blocked_id = n.actor_id)
+       OR (b.blocker_id = n.actor_id AND b.blocked_id = n.user_id)
+  ))`
+
 func usersBlockEachOther(ctx context.Context, db *sql.DB, firstUserID, secondUserID string) (bool, error) {
 	var blocked bool
 	err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1))`, firstUserID, secondUserID).Scan(&blocked)
@@ -96,11 +105,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN users u ON u.id = n.actor_id
 		LEFT JOIN user_profiles up ON up.user_id = n.actor_id
 		WHERE n.user_id = $1
-		  AND (n.actor_id IS NULL OR NOT EXISTS (
-			SELECT 1 FROM blocks b
-			WHERE (b.blocker_id = n.user_id AND b.blocked_id = n.actor_id)
-			   OR (b.blocker_id = n.actor_id AND b.blocked_id = n.user_id)
-		  ))`
+		` + notificationVisibilityPredicate
 	args := []any{user.ID}
 	const replyTypes = "'reply', 'comment.created', 'comment.replied'"
 	const interactionTypes = "'like', 'bookmark', 'follow', 'post.liked', 'post.bookmarked', 'user.followed'"
@@ -220,7 +225,7 @@ func (s *Server) markAllNotificationsRead(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if _, err := s.db.ExecContext(r.Context(), `UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE user_id = $1 AND is_read = false`, user.ID); err != nil {
+	if _, err := s.db.ExecContext(r.Context(), `UPDATE notifications n SET is_read = true, read_at = COALESCE(read_at, now()) WHERE n.user_id = $1 AND n.is_read = false`+notificationVisibilityPredicate, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -236,7 +241,7 @@ func (s *Server) unreadNotificationCount(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var count int64
-	if err := s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM notifications WHERE user_id = $1 AND is_read = false`, user.ID).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(r.Context(), `SELECT count(*) FROM notifications n WHERE n.user_id = $1 AND n.is_read = false`+notificationVisibilityPredicate, user.ID).Scan(&count); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -273,8 +278,16 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{}
 	var nextCursor any
 	var hasMore bool
+	toyLimit, postLimit, userLimit, communityLimit := limit, limit, limit, limit
+	if searchType == "all" {
+		// 综合页只承担摘要导航，独立分类再使用完整分页，避免一次返回四类各 20 条。
+		toyLimit = cappedSearchLimit(limit, 3)
+		postLimit = cappedSearchLimit(limit, 5)
+		userLimit = cappedSearchLimit(limit, 3)
+		communityLimit = cappedSearchLimit(limit, 3)
+	}
 	if searchType == "all" || searchType == "toys" {
-		page, queryErr := s.searchToys(r, query, limit, rawCursor)
+		page, queryErr := s.searchToys(r, query, toyLimit, rawCursor)
 		if queryErr != nil {
 			if errors.Is(queryErr, ErrInvalidSearchCursor) {
 				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
@@ -290,7 +303,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if searchType == "all" || searchType == "posts" {
-		page, queryErr := s.searchPosts(r, query, limit, rawCursor)
+		page, queryErr := s.searchPosts(r, query, postLimit, rawCursor)
 		if queryErr != nil {
 			if errors.Is(queryErr, ErrInvalidSearchCursor) {
 				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
@@ -306,7 +319,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if searchType == "all" || searchType == "users" {
-		page, queryErr := s.searchUsers(r, query, limit, rawCursor)
+		page, queryErr := s.searchUsers(r, query, userLimit, rawCursor)
 		if queryErr != nil {
 			if errors.Is(queryErr, ErrInvalidSearchCursor) {
 				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
@@ -322,7 +335,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if searchType == "all" || searchType == "communities" {
-		page, queryErr := s.searchCommunities(r, query, limit, rawCursor)
+		page, queryErr := s.searchCommunities(r, query, communityLimit, rawCursor)
 		if queryErr != nil {
 			if errors.Is(queryErr, ErrInvalidSearchCursor) {
 				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
@@ -340,6 +353,13 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	response["next_cursor"] = nextCursor
 	response["has_more"] = hasMore
 	httpserver.WriteJSON(w, http.StatusOK, response)
+}
+
+func cappedSearchLimit(limit, cap int) int {
+	if limit < cap {
+		return limit
+	}
+	return cap
 }
 
 func (s *Server) searchToys(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
@@ -476,9 +496,13 @@ func (s *Server) searchPosts(r *http.Request, query string, limit int, rawCursor
 	limitPosition := len(args) + 1
 	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT p.id, p.title, LEFT(p.content, 200), p.community_id, c.name, p.created_at,
+		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+		       p.title, LEFT(p.content, 200), p.community_id, c.name, p.created_at,
+		       p.comment_count, p.like_count, p.view_count,
 		       `+rankExpression+`
 		FROM posts p
+		JOIN users u ON u.id = p.author_id
+		LEFT JOIN user_profiles up ON up.user_id = p.author_id
 		JOIN communities c ON c.id = p.community_id
 		WHERE `+where+`
 		ORDER BY `+rankExpression+` DESC, p.created_at DESC, p.id DESC
@@ -489,13 +513,49 @@ func (s *Server) searchPosts(r *http.Request, query string, limit int, rawCursor
 	defer rows.Close()
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
-		var id, title, preview, communityID, communityName string
+		var id, authorID, username, authorName, title, preview, communityID, communityName string
+		var authorLevel, commentCount, likeCount, viewCount int64
 		var createdAt time.Time
 		var rank float64
-		if err := rows.Scan(&id, &title, &preview, &communityID, &communityName, &createdAt, &rank); err != nil {
+		if err := rows.Scan(
+			&id,
+			&authorID,
+			&username,
+			&authorName,
+			&authorLevel,
+			&title,
+			&preview,
+			&communityID,
+			&communityName,
+			&createdAt,
+			&commentCount,
+			&likeCount,
+			&viewCount,
+			&rank,
+		); err != nil {
 			return searchPage{}, err
 		}
-		items = append(items, map[string]any{"id": id, "title": title, "content_preview": preview, "community_id": communityID, "community_name": communityName, "created_at": createdAt, "rank": rank})
+		items = append(items, map[string]any{
+			"id":              id,
+			"title":           title,
+			"content_preview": preview,
+			"community_id":    communityID,
+			"community_name":  communityName,
+			"created_at":      createdAt,
+			"author": map[string]any{
+				"id":       authorID,
+				"username": username,
+				"nickname": authorName,
+				"level":    authorLevel,
+			},
+			"author_id":     authorID,
+			"author_name":   authorName,
+			"author_level":  authorLevel,
+			"comment_count": commentCount,
+			"like_count":    likeCount,
+			"view_count":    viewCount,
+			"rank":          rank,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return searchPage{}, err

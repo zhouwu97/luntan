@@ -8,6 +8,7 @@ import '../controllers/interaction_controller.dart';
 import '../controllers/post_detail_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/poll_repository.dart';
+import '../data/app_links.dart';
 import '../domain/models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
@@ -17,6 +18,7 @@ import '../widgets/comments/comment_skeleton.dart';
 import '../widgets/comments/comment_thread_sheet.dart';
 import '../widgets/forum_author_row.dart';
 import '../widgets/post_media_preview.dart';
+import 'package:share_plus/share_plus.dart';
 
 class PostDetailScreen extends StatefulWidget {
   const PostDetailScreen({
@@ -190,8 +192,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       );
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        final context =
-            GlobalObjectKey('comment:$rootCommentId').currentContext;
+        final context = GlobalObjectKey(
+          'comment:$rootCommentId',
+        ).currentContext;
         if (mounted && context != null) {
           Scrollable.ensureVisible(
             context,
@@ -530,10 +533,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               itemCount: roots.length,
                               separatorBuilder: (context, index) =>
                                   const Divider(
-                                height: 1,
-                                thickness: 1,
-                                color: Color(0xFFEDF2F6),
-                              ),
+                                    height: 1,
+                                    thickness: 1,
+                                    color: Color(0xFFEDF2F6),
+                                  ),
                               itemBuilder: (context, index) {
                                 final comment = roots[index];
                                 final children =
@@ -724,19 +727,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             ListTile(
               leading: const Icon(Icons.share_outlined),
               title: const Text('分享帖子'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(sheetContext);
-                final baseUrl = Uri.parse(
-                  const String.fromEnvironment(
-                    'WEB_BASE_URL',
-                    defaultValue: 'https://luntan.app',
-                  ),
-                );
-                final shareUrl = baseUrl
-                    .resolve('/posts/${Uri.encodeComponent(post.id)}')
-                    .toString();
-                Clipboard.setData(ClipboardData(text: shareUrl));
-                widget.onFeedback('帖子链接已复制');
+                final shareUrl = AppLinks.post(post.id);
+                try {
+                  await Share.share(shareUrl, subject: '分享帖子');
+                } catch (_) {
+                  await Clipboard.setData(ClipboardData(text: shareUrl));
+                  widget.onFeedback('系统分享不可用，帖子链接已复制');
+                }
               },
             ),
             if (widget.onReport != null)

@@ -67,10 +67,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: NotificationRow(
-            item: notice,
-            onTap: () => tapped = true,
-          ),
+          body: NotificationRow(item: notice, onTap: () => tapped = true),
         ),
       ),
     );
@@ -106,10 +103,7 @@ void main() {
         actorName: '拆箱小助手',
         targetType: 'community',
         targetId: 'community-unboxing',
-        targetData: const {
-          'title': '大型拆箱发布了新公告',
-          'content': '发帖前请补充版本与使用时间',
-        },
+        targetData: const {'title': '大型拆箱发布了新公告', 'content': '发帖前请补充版本与使用时间'},
         isRead: false,
         createdAt: DateTime.now().subtract(const Duration(days: 2)),
       ),
@@ -117,10 +111,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: NotificationsScreen(
-          repository: fakeRepo,
-          onOpenPostId: (_) {},
-        ),
+        home: NotificationsScreen(repository: fakeRepo, onOpenPostId: (_) {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -140,5 +131,6 @@ void main() {
     await tester.tap(find.text('处理'));
     await tester.pumpAndSettle();
     expect(find.byType(NotificationEmptyState), findsOneWidget);
+    expect(find.text('通知消息说明'), findsNothing);
   });
 }

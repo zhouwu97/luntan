@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
+import '../data/app_links.dart';
 import '../domain/models.dart' show relativeTimeLabel;
+import 'package:share_plus/share_plus.dart';
 
 /// `rankingList` 网页上的一条玩具排行数据。
 class RankingItem {
@@ -21,6 +23,7 @@ class RankingItem {
     this.description = '',
     this.category = 'cup',
     this.segments = const [],
+    this.ratingDistribution = const {},
   });
 
   final int rank;
@@ -36,6 +39,7 @@ class RankingItem {
   final String description;
   final String category;
   final List<String> segments;
+  final Map<int, int> ratingDistribution;
 }
 
 const _mainRankingItems = <RankingItem>[
@@ -277,15 +281,16 @@ const _topRankingItem = RankingItem(
   id: 'toy-butter-2',
   rank: 1,
   name: '黄油小姐 二代',
-  hot: '本周热门',
+  hot: '401人想冲',
   tags: ['奶香体质', '软糯入门', '果冻包裹'],
-  ratings: '热门榜首',
+  ratings: '17人评分',
   score: '8.7',
   asset: 'assets/ranking/hero.webp',
   merchant: 'COC',
   releaseYear: 2025,
   category: 'cup',
   segments: ['beginner'],
+  ratingDistribution: {8: 5, 9: 12},
   description: '相较前作，黄油小姐2完成了一次华丽的材质蜕变。奶香味提升，肉质的软糯度提升极佳。大结构轨道带来的异物包裹感实战体验飙升。',
 );
 
@@ -382,7 +387,9 @@ class _RankingPageState extends State<RankingPage> {
         final matchesName = item.name.toLowerCase().contains(query);
         final matchesMerchant = item.merchant.toLowerCase().contains(query);
         final matchesDesc = item.description.toLowerCase().contains(query);
-        final matchesTags = item.tags.any((t) => t.toLowerCase().contains(query));
+        final matchesTags = item.tags.any(
+          (t) => t.toLowerCase().contains(query),
+        );
         if (!matchesName && !matchesMerchant && !matchesDesc && !matchesTags) {
           return false;
         }
@@ -390,10 +397,18 @@ class _RankingPageState extends State<RankingPage> {
       }
 
       // 1. Tab filter (segments)
-      if (_selectedTab == 1 && !item.segments.contains('beginner')) return false;
-      if (_selectedTab == 2 && !item.segments.contains('advanced')) return false;
-      if (_selectedTab == 3 && !item.segments.contains('high_stim')) return false;
-      if (_selectedTab == 4 && !item.segments.contains('juice')) return false;
+      if (_selectedTab == 1 && !item.segments.contains('beginner')) {
+        return false;
+      }
+      if (_selectedTab == 2 && !item.segments.contains('advanced')) {
+        return false;
+      }
+      if (_selectedTab == 3 && !item.segments.contains('high_stim')) {
+        return false;
+      }
+      if (_selectedTab == 4 && !item.segments.contains('juice')) {
+        return false;
+      }
 
       // 2. Category filter
       final catKey = switch (_selectedCategory) {
@@ -602,24 +617,39 @@ class _RankingHeader extends StatelessWidget {
                 style: const TextStyle(fontSize: 13, color: Color(0xFF1F2937)),
                 decoration: InputDecoration(
                   isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   hintText: '搜索：魅魔、大魔王、慢玩...',
-                  hintStyle: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                  hintStyle: const TextStyle(
+                    color: Color(0xFF9CA3AF),
+                    fontSize: 12,
+                  ),
                   prefixIcon: const Icon(
                     Icons.search_rounded,
                     size: 16,
                     color: Color(0xFF9CA3AF),
                   ),
-                  prefixIconConstraints: const BoxConstraints.tightFor(width: 32, height: 38),
+                  prefixIconConstraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 38,
+                  ),
                   suffixIcon: searchController.text.isNotEmpty
                       ? IconButton(
                           padding: EdgeInsets.zero,
                           iconSize: 16,
-                          icon: const Icon(Icons.clear_rounded, color: Color(0xFF9CA3AF)),
+                          icon: const Icon(
+                            Icons.clear_rounded,
+                            color: Color(0xFF9CA3AF),
+                          ),
                           onPressed: onClearSearch,
                         )
                       : null,
-                  suffixIconConstraints: const BoxConstraints.tightFor(width: 32, height: 38),
+                  suffixIconConstraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 38,
+                  ),
                   border: InputBorder.none,
                 ),
               ),
@@ -1010,6 +1040,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       merchant: toy.merchant,
       releaseYear: toy.releaseYear,
       description: toy.description,
+      category: toy.category,
+      segments: toy.segments,
+      ratingDistribution:
+          _remoteDetail?.ratingDistribution ?? item.ratingDistribution,
     );
   }
 
@@ -1337,15 +1371,18 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
               _DetailTopBar(
                 onBack: () => Navigator.of(context).maybePop(),
                 onShare: () async {
-                  await Clipboard.setData(
-                    ClipboardData(
-                      text: 'https://luntan.community/ranking/${item.id.isNotEmpty ? item.id : item.rank}',
-                    ),
+                  final shareUrl = AppLinks.ranking(
+                    item.id.isNotEmpty ? item.id : '${item.rank}',
                   );
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('已复制商品链接到剪贴板')),
-                    );
+                  try {
+                    await Share.share(shareUrl, subject: '分享榜单商品');
+                  } catch (_) {
+                    await Clipboard.setData(ClipboardData(text: shareUrl));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('系统分享不可用，商品链接已复制')),
+                      );
+                    }
                   }
                 },
               ),
@@ -1379,7 +1416,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                             borderRadius: BorderRadius.circular(16),
                             child: _DetailRatingCard(
                               item: displayItem,
-                              ratingDistribution: _remoteDetail?.ratingDistribution ?? const {},
+                              ratingDistribution:
+                                  _remoteDetail?.ratingDistribution ??
+                                  item.ratingDistribution,
                             ),
                           ),
                         ),
@@ -1572,13 +1611,16 @@ class _DetailRatingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = ratingDistribution.values.fold<int>(0, (s, e) => s + e);
+    final distribution = ratingDistribution.isNotEmpty
+        ? ratingDistribution
+        : item.ratingDistribution;
+    final total = distribution.values.fold<int>(0, (s, e) => s + e);
     final levels = [
-      (5, ((ratingDistribution[10] ?? 0) + (ratingDistribution[9] ?? 0))),
-      (4, ((ratingDistribution[8] ?? 0) + (ratingDistribution[7] ?? 0))),
-      (3, ((ratingDistribution[6] ?? 0) + (ratingDistribution[5] ?? 0))),
-      (2, ((ratingDistribution[4] ?? 0) + (ratingDistribution[3] ?? 0))),
-      (1, ((ratingDistribution[2] ?? 0) + (ratingDistribution[1] ?? 0))),
+      (5, ((distribution[10] ?? 0) + (distribution[9] ?? 0))),
+      (4, ((distribution[8] ?? 0) + (distribution[7] ?? 0))),
+      (3, ((distribution[6] ?? 0) + (distribution[5] ?? 0))),
+      (2, ((distribution[4] ?? 0) + (distribution[3] ?? 0))),
+      (1, ((distribution[2] ?? 0) + (distribution[1] ?? 0))),
     ];
 
     return Container(
@@ -1634,19 +1676,26 @@ class _DetailRatingCard extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (final entry in levels)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: _RatingBar(
-                      level: entry.$1,
-                      value: total > 0 ? entry.$2 / total : 0.0,
+            child: total == 0
+                ? const Center(
+                    child: Text(
+                      '暂无评分分布',
+                      style: TextStyle(color: Color(0xFF7E8AA0), fontSize: 12),
                     ),
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (final entry in levels)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: _RatingBar(
+                            level: entry.$1,
+                            value: entry.$2 / total,
+                          ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           ),
         ],
       ),
@@ -2048,21 +2097,19 @@ class _ReviewCard extends StatelessWidget {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  ...List.generate(
-                    5,
-                    (index) {
-                      final filled =
-                          authorRating == null || index < ((authorRating! + 1) ~/ 2);
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 2),
-                        child: Icon(
-                          filled ? Icons.favorite : Icons.favorite_border_rounded,
-                          size: 13,
-                          color: const Color(0xFFF76591),
-                        ),
-                      );
-                    },
-                  ),
+                  ...List.generate(5, (index) {
+                    final filled =
+                        authorRating == null ||
+                        index < ((authorRating! + 1) ~/ 2);
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: Icon(
+                        filled ? Icons.favorite : Icons.favorite_border_rounded,
+                        size: 13,
+                        color: const Color(0xFFF76591),
+                      ),
+                    );
+                  }),
                   if (authorRating != null) ...[
                     const SizedBox(width: 4),
                     Text(

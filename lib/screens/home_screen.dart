@@ -9,32 +9,36 @@ import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/api/store_repository.dart';
+import '../data/app_links.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
+import 'package:share_plus/share_plus.dart';
 import 'feature_page.dart';
 import 'search_screen.dart';
 
-/// 首页公开内容只展示正式社区，避免把验收用的 QA 板块作为默认入口。
+/// 首页导航是产品级固定结构，不依赖服务端返回顺序，也不把 QA/导入板块
+/// 意外暴露给用户。
+const homeCommunityIds = <String>[
+  'community-unboxing',
+  'community-daily',
+  'community-campus',
+];
+
 List<Community> selectHomeCommunities(Iterable<Community> source) {
-  final ids = <String>{};
-  final names = <String>{};
-  return source
-      .where(
-        (community) => community.id != 'community_qa' && community.slug != 'qa',
-      )
-      .where((community) {
-        final name = community.name.trim();
-        if (!ids.add(community.id) || (name.isNotEmpty && !names.add(name))) {
-          return false;
-        }
-        return true;
-      })
-      .take(3)
-      .toList();
+  final byId = <String, Community>{};
+  for (final community in source) {
+    if (homeCommunityIds.contains(community.id)) {
+      byId.putIfAbsent(community.id, () => community);
+    }
+  }
+  return [
+    for (final id in homeCommunityIds)
+      if (byId[id] != null) byId[id]!,
+  ];
 }
 
 class HomeScreen extends StatefulWidget {
@@ -122,18 +126,18 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // 首页默认展示综合流；只有用户主动选择板块时才带 community_id。
-    selectedCommunityId = null;
+    // 首页默认展示杂鱼日常，浏览和发布的默认板块保持一致。
+    selectedCommunityId = 'community-daily';
     selectedSort = widget.store.selectedSort;
-    communities = widget.feedRepository == null
-        ? widget.store.communities
+    communities = widget.communityRepository == null
+        ? selectHomeCommunities(widget.store.communities)
         : const [];
     scrollController = ScrollController()..addListener(_onScroll);
     widget.feedController.addListener(_onFeedStateChanged);
     if (widget.communityRepository != null) {
       _loadCommunities();
     }
-    // 有板块仓储时，先加载标签再请求综合流，避免标签和列表状态短暂不同步。
+    // 有板块仓储时，先加载标签再请求默认的杂鱼日常流，避免标签和列表状态短暂不同步。
     if (widget.communityRepository == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -155,7 +159,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _resetViewportFillAttempts();
     await widget.feedController.refresh();
     if (!mounted) return;
-    final hasRefreshError = widget.feedController.state.status == FeedStatus.error &&
+    final hasRefreshError =
+        widget.feedController.state.status == FeedStatus.error &&
         widget.feedController.state.items.isEmpty;
     widget.onFeedback(hasRefreshError ? '刷新失败，请重试' : '已经是最新内容');
     await widget.onRefreshCompleted?.call();
@@ -176,6 +181,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onFeedStateChanged() {
+    final controllerCommunityId = widget.feedController.communityId;
+    if (mounted &&
+        controllerCommunityId != null &&
+        controllerCommunityId != selectedCommunityId) {
+      setState(() => selectedCommunityId = controllerCommunityId);
+    }
     _scheduleViewportFill();
   }
 
@@ -230,12 +241,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _selectCommunity(String? communityId) {
+  void _selectCommunity(String communityId) {
     _resetViewportFillAttempts();
     setState(() {
       selectedCommunityId = communityId;
     });
-    if (!isApiMode && communityId != null) {
+    if (!isApiMode) {
       widget.store.selectSection(_sectionForCommunity(communityId));
     }
     _loadFeed();
@@ -250,10 +261,14 @@ class _HomeScreenState extends State<HomeScreen> {
       final visibleCommunities = selectHomeCommunities(result);
       setState(() {
         communities = visibleCommunities;
-        // 不自动选择首个板块，否则首页会意外退化为某个小板块的列表。
-        if (!visibleCommunities.any((item) => item.id == selectedCommunityId)) {
-          selectedCommunityId = null;
-        }
+        selectedCommunityId = visibleCommunities
+            .map((item) => item.id)
+            .firstWhere(
+              (id) => id == 'community-daily',
+              orElse: () => visibleCommunities.isEmpty
+                  ? 'community-daily'
+                  : visibleCommunities.first.id,
+            );
       });
       _resetViewportFillAttempts();
       _loadFeed();
@@ -381,6 +396,8 @@ class _HomeScreenState extends State<HomeScreen> {
           store: widget.store,
           platform: widget.platform,
           rankingRepository: widget.rankingRepository,
+          communities: communities,
+          communityRepository: widget.communityRepository,
           onOpenPost: widget.onOpenPost,
           onOpenPostId: widget.onOpenPostId,
           interactionController: widget.interactionController,
@@ -424,10 +441,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        widget.store,
-        widget.feedController,
-      ]),
+      animation: Listenable.merge([widget.store, widget.feedController]),
       builder: (context, _) {
         final posts = _visiblePosts;
         final feedState = widget.feedController.state;
@@ -462,7 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           onProfile: widget.onOpenProfile,
                           onSearch: openSearch,
                           onMessages: widget.onOpenMessages,
-                          unread: widget.unread ?? widget.store.unreadMessages,
+                          unread: widget.unread ?? 0,
                         ),
                       ),
                       SliverToBoxAdapter(
@@ -509,9 +523,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? const SliverToBoxAdapter(child: _FeedSkeleton())
                             : posts.isEmpty
                             ? SliverToBoxAdapter(
-                                child: _EmptyFeed(
-                                  sort: selectedSort,
-                                ),
+                                child: _EmptyFeed(sort: selectedSort),
                               )
                             : SliverList.builder(
                                 itemCount: posts.length,
@@ -630,22 +642,18 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: const Icon(Icons.share_outlined),
               title: const Text('分享帖子'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(sheetContext);
-                final baseUrl = Uri.parse(
-                  const String.fromEnvironment(
-                    'WEB_BASE_URL',
-                    defaultValue: 'https://luntan.app',
-                  ),
-                );
-                final shareUrl = baseUrl
-                    .resolve('/posts/${Uri.encodeComponent(post.id)}')
-                    .toString();
-                Clipboard.setData(ClipboardData(text: shareUrl));
-                widget.onFeedback('帖子链接已复制');
+                final shareUrl = AppLinks.post(post.id);
+                try {
+                  await Share.share(shareUrl, subject: '分享帖子');
+                } catch (_) {
+                  await Clipboard.setData(ClipboardData(text: shareUrl));
+                  widget.onFeedback('系统分享不可用，帖子链接已复制');
+                }
               },
             ),
-            if (widget.platform != null)
+            if (isApiMode && widget.platform != null)
               ListTile(
                 leading: const Icon(
                   Icons.flag_outlined,
@@ -731,7 +739,7 @@ class _Header extends StatelessWidget {
                     ),
                     SizedBox(width: 8),
                     Text(
-                      '搜索帖子 / 用户 / 板块',
+                      '搜索帖子、用户、板块、榜单',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 13,
@@ -795,11 +803,11 @@ class _SectionTabs extends StatelessWidget {
 
   final List<Community> communities;
   final String? selectedCommunityId;
-  final ValueChanged<String?> onChanged;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final tabs = communities.take(3).toList();
+    final tabs = communities;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
       child: Container(
@@ -811,28 +819,17 @@ class _SectionTabs extends StatelessWidget {
           border: Border.all(color: AppTheme.border),
         ),
         child: Row(
-          children:
-              tabs
-                  .map(
-                    (community) => Expanded(
-                      child: _CommunityTab(
-                        label: community.name,
-                        active: selectedCommunityId == community.id,
-                        onTap: () => onChanged(community.id),
-                      ),
-                    ),
-                  )
-                  .toList()
-                ..insert(
-                  0,
-                  Expanded(
-                    child: _CommunityTab(
-                      label: '综合',
-                      active: selectedCommunityId == null,
-                      onTap: () => onChanged(null),
-                    ),
+          children: tabs
+              .map(
+                (community) => Expanded(
+                  child: _CommunityTab(
+                    label: community.name,
+                    active: selectedCommunityId == community.id,
+                    onTap: () => onChanged(community.id),
                   ),
                 ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -906,12 +903,6 @@ class _FeatureEntries extends StatelessWidget {
       FeatureType.activity,
       Color(0xFFD3F1EB),
       Color(0xFF2EAE98),
-    ),
-    (
-      Icons.sports_esports_outlined,
-      FeatureType.gameShare,
-      Color(0xFFE2E0FF),
-      Color(0xFF746CE5),
     ),
   ];
 
@@ -1484,9 +1475,7 @@ class _EmptyFeed extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            sort == FeedSort.recommended
-                ? '管理员推荐的精选帖子会出现在这里'
-                : '换一个筛选条件看看吧',
+            sort == FeedSort.recommended ? '管理员推荐的精选帖子会出现在这里' : '换一个筛选条件看看吧',
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
         ],
@@ -1510,7 +1499,7 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
   _SearchKind kind = _SearchKind.all;
 
   @override
-  String? get searchFieldLabel => '搜索帖子 / 用户 / 板块';
+  String? get searchFieldLabel => '搜索帖子、用户、板块、榜单';
 
   @override
   List<Widget>? buildActions(BuildContext context) => [

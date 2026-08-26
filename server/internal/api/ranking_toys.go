@@ -137,19 +137,27 @@ func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID str
 		"6": 0, "7": 0, "8": 0, "9": 0, "10": 0,
 	}
 	distRows, distErr := s.db.QueryContext(r.Context(), `
-		SELECT rating, COUNT(*)
-		FROM ranking_toy_user_states
-		WHERE toy_id = $1 AND rating IS NOT NULL AND rating >= 1 AND rating <= 10
-		GROUP BY rating`, toyID)
-	if distErr == nil {
-		defer distRows.Close()
-		for distRows.Next() {
-			var score int
-			var count int
-			if scanErr := distRows.Scan(&score, &count); scanErr == nil {
-				ratingDistribution[strconv.Itoa(score)] = count
-			}
+		SELECT score, rating_count
+		FROM ranking_toy_rating_distribution
+		WHERE toy_id = $1 AND score >= 1 AND score <= 10
+		ORDER BY score`, toyID)
+	if distErr != nil {
+		writeInternalError(w, r, distErr)
+		return
+	}
+	defer distRows.Close()
+	for distRows.Next() {
+		var score int
+		var count int
+		if scanErr := distRows.Scan(&score, &count); scanErr != nil {
+			writeInternalError(w, r, scanErr)
+			return
 		}
+		ratingDistribution[strconv.Itoa(score)] = count
+	}
+	if err := distRows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
 	}
 
 	response := item.response()
@@ -443,6 +451,10 @@ func (s *Server) rateRankingToy(w http.ResponseWriter, r *http.Request, toyID st
 			writeInternalError(w, r, err)
 			return
 		}
+		if err := adjustRankingToyRatingDistribution(r.Context(), tx, toyID, input.Score, 1); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	} else if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -457,9 +469,22 @@ func (s *Server) rateRankingToy(w http.ResponseWriter, r *http.Request, toyID st
 				writeInternalError(w, r, err)
 				return
 			}
+			if err := adjustRankingToyRatingDistribution(r.Context(), tx, toyID, input.Score, 1); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		} else if _, err := tx.ExecContext(r.Context(), `UPDATE ranking_toys SET rating_total_centi = GREATEST(rating_total_centi + $2, 0), updated_at = now() WHERE id = $1`, toyID, (input.Score-previousValue)*100); err != nil {
 			writeInternalError(w, r, err)
 			return
+		} else if previousValue != input.Score {
+			if err := adjustRankingToyRatingDistribution(r.Context(), tx, toyID, previousValue, -1); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if err := adjustRankingToyRatingDistribution(r.Context(), tx, toyID, input.Score, 1); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -472,6 +497,20 @@ func (s *Server) rateRankingToy(w http.ResponseWriter, r *http.Request, toyID st
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, item.response())
+}
+
+func adjustRankingToyRatingDistribution(ctx context.Context, tx *sql.Tx, toyID string, score int, delta int64) error {
+	if delta == 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO ranking_toy_rating_distribution (toy_id, score, rating_count)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (toy_id, score) DO UPDATE
+		SET rating_count = GREATEST(ranking_toy_rating_distribution.rating_count + EXCLUDED.rating_count, 0)`,
+		toyID, score, delta,
+	)
+	return err
 }
 
 func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request, toyID string) {

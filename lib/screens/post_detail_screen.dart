@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -5,13 +7,15 @@ import '../controllers/comments_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../controllers/post_detail_controller.dart';
 import '../data/api/api_client.dart';
-import '../data/api/comment_repository.dart';
 import '../data/api/poll_repository.dart';
 import '../domain/models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/comments/comment_item.dart';
+import '../widgets/comments/comment_reply_bar.dart';
+import '../widgets/comments/comment_skeleton.dart';
+import '../widgets/comments/comment_thread_sheet.dart';
 import '../widgets/forum_author_row.dart';
-import '../widgets/motion_tap_icon.dart';
 import '../widgets/post_media_preview.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -77,6 +81,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   bool isSending = false;
   bool hasFocusedComments = false;
   Comment? replyTarget;
+  String? highlightedCommentId;
+  Timer? _highlightTimer;
+  Timer? _threadOpenTimer;
 
   @override
   void initState() {
@@ -91,6 +98,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
+    _threadOpenTimer?.cancel();
     replyController.dispose();
     commentsScrollController
       ..removeListener(_loadMoreComments)
@@ -156,7 +165,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         hasFocusedComments) {
       return;
     }
-    String? rootCommentId;
     final targetId = widget.focusCommentId;
     if (targetId != null) {
       final target = allComments.cast<Comment?>().firstWhere(
@@ -171,21 +179,77 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
         return;
       }
-      rootCommentId = target?.rootId ?? target?.parentId ?? target?.id;
+      if (target == null) return;
+
+      hasFocusedComments = true;
+      final isNested = target.parentId != null;
+      final rootCommentId = target.rootId ?? target.parentId ?? target.id;
+      final rootComment = allComments.cast<Comment?>().firstWhere(
+        (comment) => comment?.id == rootCommentId,
+        orElse: () => null,
+      );
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final context =
+            GlobalObjectKey('comment:$rootCommentId').currentContext;
+        if (mounted && context != null) {
+          Scrollable.ensureVisible(
+            context,
+            duration: AppMotion.normal,
+            alignment: 0.1,
+          );
+        }
+        if (isNested && rootComment != null) {
+          _threadOpenTimer?.cancel();
+          _threadOpenTimer = Timer(const Duration(milliseconds: 350), () {
+            if (mounted) {
+              _openReplyThread(rootComment, focusReplyId: targetId);
+            }
+          });
+        } else if (!isNested) {
+          setState(() => highlightedCommentId = rootCommentId);
+          _highlightTimer?.cancel();
+          _highlightTimer = Timer(AppMotion.highlightFade, () {
+            if (mounted) setState(() => highlightedCommentId = null);
+          });
+        }
+      });
+    } else if (widget.focusComments) {
+      hasFocusedComments = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final context = commentsKey.currentContext;
+        if (mounted && context != null) {
+          Scrollable.ensureVisible(
+            context,
+            duration: AppMotion.normal,
+            alignment: 0.08,
+          );
+        }
+      });
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final context = rootCommentId == null
-          ? commentsKey.currentContext
-          : GlobalObjectKey('comment:$rootCommentId').currentContext;
-      if (mounted && context != null) {
-        hasFocusedComments = true;
-        Scrollable.ensureVisible(
-          context,
-          duration: AppMotion.duration(this.context, AppMotion.normal),
-          alignment: .08,
-        );
-      }
-    });
+  }
+
+  void _openReplyThread(Comment comment, {String? focusReplyId}) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CommentThreadSheet(
+        rootComment: comment,
+        repository: widget.commentsController.repository,
+        focusReplyId: focusReplyId,
+        isAuthenticated: widget.isAuthenticated,
+        onRequireAuth: widget.onRequireAuth,
+        canComment: widget.canComment ?? widget.isAuthenticated,
+        blockedMessage: _commentBlockedMessage,
+        onReply: (target, content) => widget.commentsController.replyTo(
+          target,
+          content,
+          replyToUserId: target.authorId,
+        ),
+        onToggleLike: (reply) => _likeComment(reply),
+      ),
+    );
   }
 
   @override
@@ -195,6 +259,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       widget.commentsController,
       widget.interactionController,
     ];
+
     return AnimatedBuilder(
       animation: Listenable.merge(listenables),
       builder: (context, _) {
@@ -235,34 +300,27 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             .where((comment) => comment.parentId == null)
             .toList();
         _focusCommentsIfNeeded(allComments);
+
         return Scaffold(
+          backgroundColor: AppTheme.background,
           appBar: AppBar(
+            titleSpacing: 0,
             title: Text(
               post.community?.name ?? post.tag,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+              style: const TextStyle(
+                fontSize: 15.5,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.textPrimary,
+              ),
             ),
             actions: [
               IconButton(
-                onPressed: () => _runInteraction(() => _toggleBookmark(post)),
-                tooltip: '收藏帖子',
-                icon: MotionTapIcon(
-                  active: post.isBookmarked,
-                  activeIcon: Icons.bookmark_rounded,
-                  inactiveIcon: Icons.bookmark_border_rounded,
-                  activeColor: AppTheme.primary,
-                  inactiveColor: AppTheme.textSecondary,
+                icon: const Icon(
+                  Icons.more_horiz_rounded,
+                  color: AppTheme.textPrimary,
+                  size: 22,
                 ),
-              ),
-              IconButton(
-                onPressed: () => _runInteraction(() => _toggleLike(post)),
-                tooltip: '点赞帖子',
-                icon: MotionTapIcon(
-                  active: post.isLiked,
-                  activeIcon: Icons.favorite_rounded,
-                  inactiveIcon: Icons.favorite_border_rounded,
-                  activeColor: AppTheme.pink,
-                  inactiveColor: AppTheme.textSecondary,
-                ),
+                onPressed: () => _showPostMenu(post),
               ),
             ],
           ),
@@ -272,8 +330,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 child: CustomScrollView(
                   controller: commentsScrollController,
                   slivers: [
+                    // 帖子主体
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                       sliver: SliverToBoxAdapter(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -282,35 +341,34 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               post: post,
                               onMenu: () => _showPostMenu(post),
                             ),
-                            const SizedBox(height: 15),
+                            const SizedBox(height: 12),
                             if (post.isPinned ||
                                 post.isFeatured ||
-                                post.extraTag == '精华')
+                                post.extraTag == '精华') ...[
                               _Tag(
                                 text: post.isPinned ? '置顶' : '精华',
                                 color: post.isPinned
                                     ? AppTheme.pink
                                     : AppTheme.orange,
                               ),
-                            if (post.isPinned ||
-                                post.isFeatured ||
-                                post.extraTag == '精华')
                               const SizedBox(height: 8),
+                            ],
                             Text(
                               post.title,
                               style: const TextStyle(
-                                fontSize: 22,
-                                height: 1.35,
+                                fontSize: 20,
+                                height: 1.38,
                                 color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.w900,
+                                letterSpacing: -0.3,
                               ),
                             ),
-                            const SizedBox(height: 11),
+                            const SizedBox(height: 10),
                             Text(
                               post.body,
                               style: const TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 15,
+                                color: Color(0xFF294158),
+                                fontSize: 14.5,
                                 height: 1.75,
                               ),
                             ),
@@ -323,7 +381,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 canVote: widget.canVote,
                                 onRequireAuth: widget.onRequireAuth,
                               ),
-                            if (post.images.isNotEmpty)
+                            if (post.images.isNotEmpty) ...[
+                              const SizedBox(height: 10),
                               PostMediaPreview(
                                 images: post.images,
                                 onTap: () => Navigator.of(context).push(
@@ -333,34 +392,37 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   ),
                                 ),
                               ),
-                            const SizedBox(height: 15),
+                            ],
+                            const SizedBox(height: 14),
+
+                            // 浏览与统计栏
                             Row(
                               children: [
                                 const Icon(
                                   Icons.visibility_outlined,
                                   color: AppTheme.textSecondary,
-                                  size: 17,
+                                  size: 15,
                                 ),
-                                const SizedBox(width: 5),
+                                const SizedBox(width: 4),
                                 Text(
                                   '${post.views} 浏览',
                                   style: const TextStyle(
                                     color: AppTheme.textSecondary,
-                                    fontSize: 12,
+                                    fontSize: 11.5,
                                   ),
                                 ),
                                 const SizedBox(width: 16),
                                 const Icon(
                                   Icons.chat_bubble_outline_rounded,
                                   color: AppTheme.textSecondary,
-                                  size: 17,
+                                  size: 15,
                                 ),
-                                const SizedBox(width: 5),
+                                const SizedBox(width: 4),
                                 Text(
                                   '${post.comments} 回复',
                                   style: const TextStyle(
                                     color: AppTheme.textSecondary,
-                                    fontSize: 12,
+                                    fontSize: 11.5,
                                   ),
                                 ),
                                 const SizedBox(width: 16),
@@ -371,46 +433,49 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   color: post.isLiked
                                       ? AppTheme.pink
                                       : AppTheme.textSecondary,
-                                  size: 17,
+                                  size: 15,
                                 ),
-                                const SizedBox(width: 5),
+                                const SizedBox(width: 4),
                                 Text(
                                   '${post.likeCount} 赞',
                                   style: const TextStyle(
                                     color: AppTheme.textSecondary,
-                                    fontSize: 12,
+                                    fontSize: 11.5,
                                   ),
                                 ),
                               ],
                             ),
-                            const Divider(height: 35, color: AppTheme.border),
+                            const Divider(height: 32, color: AppTheme.border),
                           ],
                         ),
                       ),
                     ),
+
+                    // 评论区标题
                     SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       sliver: SliverToBoxAdapter(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
                               key: commentsKey,
+                              padding: const EdgeInsets.only(bottom: 12),
                               child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Expanded(
-                                    child: Text(
-                                      '全部回复 ${post.comments}',
-                                      style: const TextStyle(
-                                        color: AppTheme.textPrimary,
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.w800,
-                                      ),
+                                  Text(
+                                    '评论 ${post.comments}',
+                                    style: const TextStyle(
+                                      color: AppTheme.textPrimary,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
                                     ),
                                   ),
-                                  Text(
-                                    '${roots.length} 条可见',
-                                    style: const TextStyle(
+                                  const Text(
+                                    '按发布时间',
+                                    style: TextStyle(
                                       color: AppTheme.textSecondary,
                                       fontSize: 11,
                                     ),
@@ -418,27 +483,25 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 13),
-                            if (commentsController.isLoading == true &&
+                            if (commentsController.isLoading &&
                                 allComments.isEmpty)
                               const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 36),
-                                child: Center(
-                                  child: CircularProgressIndicator(),
-                                ),
+                                padding: EdgeInsets.symmetric(vertical: 24),
+                                child: CommentSkeleton(itemCount: 3),
                               ),
                             if (commentsController.errorMessage != null &&
                                 allComments.isEmpty)
                               _CommentError(onRetry: commentsController.load),
                             if (allComments.isEmpty &&
-                                commentsController.isLoading != true)
+                                !commentsController.isLoading)
                               const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 45),
+                                padding: EdgeInsets.symmetric(vertical: 40),
                                 child: Center(
                                   child: Text(
                                     '还没有回复，来抢沙发吧',
                                     style: TextStyle(
                                       color: AppTheme.textSecondary,
+                                      fontSize: 13,
                                     ),
                                   ),
                                 ),
@@ -447,64 +510,99 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         ),
                       ),
                     ),
+
+                    // 一级评论列表
                     if (roots.isNotEmpty)
                       SliverPadding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
-                        sliver: SliverList(
-                          delegate: SliverChildBuilderDelegate((
-                            context,
-                            index,
-                          ) {
-                            final comment = roots[index];
-                            final children =
-                                childrenByParent[comment.id] ?? const [];
-                            return _CommentTile(
-                              key: GlobalObjectKey('comment:${comment.id}'),
-                              comment: comment,
-                              floor: index + 2,
-                              children: children,
-                              liked: comment.isLiked,
-                              onReply: () =>
-                                  setState(() => replyTarget = comment),
-                              onReplyTo: (target) =>
-                                  setState(() => replyTarget = target),
-                              onLike: () => _likeComment(comment),
-                              onMore: () => _showCommentMenu(comment),
-                              onViewAllReplies: () => _openReplyThread(comment),
-                            );
-                          }, childCount: roots.length),
+                        sliver: SliverToBoxAdapter(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(
+                                AppTheme.radiusMedium,
+                              ),
+                              border: Border.all(color: AppTheme.border),
+                            ),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: roots.length,
+                              separatorBuilder: (context, index) =>
+                                  const Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: Color(0xFFEDF2F6),
+                              ),
+                              itemBuilder: (context, index) {
+                                final comment = roots[index];
+                                final children =
+                                    childrenByParent[comment.id] ?? const [];
+                                final isHighlighted =
+                                    highlightedCommentId == comment.id;
+
+                                return CommentItem(
+                                  key: GlobalObjectKey('comment:${comment.id}'),
+                                  comment: comment,
+                                  floor: index + 2,
+                                  replies: children,
+                                  isHighlighted: isHighlighted,
+                                  onReply: () =>
+                                      setState(() => replyTarget = comment),
+                                  onReplyTo: (target) =>
+                                      setState(() => replyTarget = target),
+                                  onLike: () => _likeComment(comment),
+                                  onMore: () => _showCommentMenu(comment),
+                                  onViewAllReplies: () =>
+                                      _openReplyThread(comment),
+                                );
+                              },
+                            ),
+                          ),
                         ),
                       ),
-                    if (commentsController.isLoadingMore == true)
+
+                    // 评论分页状态
+                    if (commentsController.isLoadingMore)
                       const SliverToBoxAdapter(
                         child: Padding(
                           padding: EdgeInsets.all(14),
                           child: Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
                         ),
                       ),
                     if (commentsController.errorMessage != null &&
                         allComments.isNotEmpty &&
-                        commentsController.isLoadingMore != true)
+                        !commentsController.isLoadingMore)
                       SliverToBoxAdapter(
                         child: Center(
                           child: TextButton(
                             onPressed: commentsController.loadMore,
-                            child: const Text('加载失败 · 点击重试'),
+                            child: const Text(
+                              '加载更多失败，点击重试',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     if (!commentsController.hasMore && allComments.isNotEmpty)
                       const SliverToBoxAdapter(
                         child: Padding(
-                          padding: EdgeInsets.only(top: 8),
+                          padding: EdgeInsets.symmetric(vertical: 18),
                           child: Center(
                             child: Text(
-                              '没有更多回复了',
+                              '已经到底啦',
                               style: TextStyle(
                                 color: AppTheme.textSecondary,
-                                fontSize: 11,
+                                fontSize: 11.5,
                               ),
                             ),
                           ),
@@ -513,7 +611,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   ],
                 ),
               ),
-              _ReplyBar(
+
+              // 底部评论输入栏
+              CommentReplyBar(
                 controller: replyController,
                 target: replyTarget,
                 sending: isSending,
@@ -522,6 +622,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 onRequireAuth: widget.onRequireAuth,
                 blockedMessage: _commentBlockedMessage,
                 onFeedback: widget.onFeedback,
+                onCancelTarget: () => setState(() => replyTarget = null),
                 onSubmit: () => _submitReply(post),
               ),
             ],
@@ -579,44 +680,40 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
-  void _openReplyThread(Comment comment) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _CommentThreadSheet(
-        rootComment: comment,
-        repository: widget.commentsController.repository,
-        isAuthenticated: widget.isAuthenticated,
-        onRequireAuth: widget.onRequireAuth,
-        canComment: widget.canComment ?? widget.isAuthenticated,
-        blockedMessage: _commentBlockedMessage,
-        onReply: (target, content) => widget.commentsController.replyTo(
-          target,
-          content,
-          replyToUserId: target.authorId,
-        ),
-      ),
-    );
-  }
-
   void _showPostMenu(Post post) {
     final canEdit =
         post.viewerState.canEdit ||
         (widget.currentUserId != null && post.authorId == widget.currentUserId);
     final canDelete = post.viewerState.canDelete || canEdit;
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Colors.white,
       builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
               leading: Icon(
+                post.isLiked
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: post.isLiked ? AppTheme.pink : AppTheme.textSecondary,
+              ),
+              title: Text(post.isLiked ? '取消点赞' : '点赞帖子'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _runInteraction(() => _toggleLike(post));
+              },
+            ),
+            ListTile(
+              leading: Icon(
                 post.isBookmarked
                     ? Icons.bookmark_rounded
                     : Icons.bookmark_border_rounded,
-                color: AppTheme.primary,
+                color: post.isBookmarked
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
               ),
               title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
               onTap: () {
@@ -772,6 +869,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Colors.white,
       builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
@@ -896,11 +994,13 @@ class _PollPanel extends StatefulWidget {
     this.canVote,
     this.onRequireAuth,
   });
+
   final PollRepository repository;
   final String postId;
   final bool isAuthenticated;
   final bool? canVote;
   final VoidCallback? onRequireAuth;
+
   @override
   State<_PollPanel> createState() => _PollPanelState();
 }
@@ -934,7 +1034,6 @@ class _PollPanelState extends State<_PollPanel> {
           voted = true;
         });
       }
-      // 服务器重新计算票数，刷新后再展示权威结果。
       if (mounted) {
         setState(() => future = widget.repository.getPoll(widget.postId));
       }
@@ -987,6 +1086,7 @@ class _PollPanelState extends State<_PollPanel> {
       final viewerOptionIds = viewerState['option_ids'] is List
           ? (viewerState['option_ids'] as List).whereType<String>().toSet()
           : const <String>{};
+
       return Container(
         margin: const EdgeInsets.only(top: 14),
         padding: const EdgeInsets.all(14),
@@ -1094,8 +1194,10 @@ class _PollPanelState extends State<_PollPanel> {
 
 class _StateMessage extends StatelessWidget {
   const _StateMessage({required this.message, required this.onRetry});
+
   final String message;
   final VoidCallback onRetry;
+
   @override
   Widget build(BuildContext context) => Center(
     child: Column(
@@ -1111,7 +1213,9 @@ class _StateMessage extends StatelessWidget {
 
 class _CommentError extends StatelessWidget {
   const _CommentError({required this.onRetry});
+
   final VoidCallback onRetry;
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 30),
@@ -1124,309 +1228,12 @@ class _CommentError extends StatelessWidget {
   );
 }
 
-String _formatDateTime(DateTime value) {
-  final local = value.toLocal();
-  String two(int number) => number.toString().padLeft(2, '0');
-  return '${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
-}
-
-class _ReplyBar extends StatelessWidget {
-  const _ReplyBar({
-    required this.controller,
-    required this.target,
-    required this.sending,
-    required this.isAuthenticated,
-    required this.canComment,
-    required this.blockedMessage,
-    this.onRequireAuth,
-    this.onFeedback,
-    required this.onSubmit,
-  });
-  final TextEditingController controller;
-  final Comment? target;
-  final bool sending;
-  final bool isAuthenticated;
-  final bool canComment;
-  final String blockedMessage;
-  final VoidCallback? onRequireAuth;
-  final ValueChanged<String>? onFeedback;
-  final VoidCallback onSubmit;
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: AppTheme.border)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                readOnly: !isAuthenticated || !canComment,
-                onTap: !isAuthenticated || !canComment
-                    ? () {
-                        FocusScope.of(context).unfocus();
-                        if (!isAuthenticated) {
-                          onRequireAuth?.call();
-                        } else {
-                          onFeedback?.call(blockedMessage);
-                        }
-                      }
-                    : null,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSubmit(),
-                decoration: InputDecoration(
-                  hintText: !isAuthenticated || !canComment
-                      ? blockedMessage
-                      : target == null
-                      ? '友善地回复一句…'
-                      : '回复这位同学…',
-                  isDense: true,
-                ),
-              ),
-            ),
-            const SizedBox(width: 7),
-            FilledButton(
-              onPressed: sending ? null : onSubmit,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-              ),
-              child: AnimatedSwitcher(
-                duration: AppMotion.duration(context, AppMotion.fast),
-                child: Text(sending ? '…' : '发送', key: ValueKey(sending)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CommentTile extends StatelessWidget {
-  const _CommentTile({
-    super.key,
-    required this.comment,
-    required this.floor,
-    required this.children,
-    required this.liked,
-    required this.onReply,
-    required this.onReplyTo,
-    required this.onLike,
-    required this.onMore,
-    required this.onViewAllReplies,
-  });
-  final Comment comment;
-  final int floor;
-  final List<Comment> children;
-  final bool liked;
-  final VoidCallback onReply;
-  final ValueChanged<Comment> onReplyTo;
-  final VoidCallback onLike;
-  final VoidCallback onMore;
-  final VoidCallback onViewAllReplies;
-  @override
-  Widget build(BuildContext context) {
-    final author = comment.author;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 15),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 15,
-                backgroundColor: AppTheme.surfaceBlue,
-                child: Text(
-                  (author?.nickname ?? '匿').characters.first,
-                  style: const TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            author?.nickname ?? '匿名用户',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.mint.withValues(alpha: .16),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'Lv.${author?.level ?? 1}',
-                            style: const TextStyle(
-                              color: AppTheme.mint,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '$floor楼',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      relativeTimeLabel(comment.createdAt),
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 10,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    GestureDetector(
-                      onTap: onReply,
-                      child: Text(
-                        comment.content,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
-                          height: 1.55,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        TextButton(
-                          onPressed: onReply,
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(38, 28),
-                          ),
-                          child: const Text('回复'),
-                        ),
-                        TextButton(
-                          onPressed: onLike,
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: const Size(48, 28),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                liked
-                                    ? Icons.favorite_rounded
-                                    : Icons.favorite_border_rounded,
-                                size: 14,
-                                color: liked
-                                    ? AppTheme.pink
-                                    : AppTheme.textSecondary,
-                              ),
-                              const SizedBox(width: 3),
-                              Text('${comment.likeCount}'),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: onMore,
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(
-                            Icons.more_horiz_rounded,
-                            size: 17,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (children.isNotEmpty)
-            Container(
-              margin: const EdgeInsets.only(left: 39, top: 2),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppTheme.background,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: children.take(3).map((child) {
-                  final childAuthor = child.author;
-                  return GestureDetector(
-                    onTap: () => onReplyTo(child),
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '${childAuthor?.nickname ?? '匿名用户'}：${child.content}',
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
-                          height: 1.5,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          if (comment.replyCount > 0)
-            Padding(
-              padding: const EdgeInsets.only(left: 39, top: 5),
-              child: GestureDetector(
-                onTap: onViewAllReplies,
-                child: const Text(
-                  '查看全部回复 ›',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _Tag extends StatelessWidget {
   const _Tag({required this.text, required this.color});
+
   final String text;
   final Color color;
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1441,337 +1248,8 @@ class _Tag extends StatelessWidget {
   );
 }
 
-/// 楼中楼：从入口评论分页拉取整条回复线程。
-class _CommentThreadSheet extends StatefulWidget {
-  const _CommentThreadSheet({
-    required this.rootComment,
-    required this.repository,
-    required this.isAuthenticated,
-    required this.canComment,
-    required this.blockedMessage,
-    this.onRequireAuth,
-    required this.onReply,
-  });
-
-  final Comment rootComment;
-  final CommentRepository repository;
-  final bool isAuthenticated;
-  final bool canComment;
-  final String blockedMessage;
-  final VoidCallback? onRequireAuth;
-  final Future<Comment> Function(Comment target, String content) onReply;
-
-  @override
-  State<_CommentThreadSheet> createState() => _CommentThreadSheetState();
-}
-
-class _CommentThreadSheetState extends State<_CommentThreadSheet> {
-  final TextEditingController inputController = TextEditingController();
-  final List<Comment> replies = [];
-  final ScrollController scrollController = ScrollController();
-  String? nextCursor;
-  bool hasMore = true;
-  bool loading = false;
-  bool loadingMore = false;
-  bool sending = false;
-  Comment? replyTarget;
-  String? errorMessage;
-  String? loadMoreError;
-
-  @override
-  void initState() {
-    super.initState();
-    scrollController.addListener(_maybeLoadMore);
-    _load();
-  }
-
-  @override
-  void dispose() {
-    inputController.dispose();
-    scrollController
-      ..removeListener(_maybeLoadMore)
-      ..dispose();
-    super.dispose();
-  }
-
-  Future<void> _submitReply() async {
-    if (!widget.isAuthenticated) {
-      widget.onRequireAuth?.call();
-      return;
-    }
-    if (!widget.canComment) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(widget.blockedMessage)));
-      return;
-    }
-    final content = inputController.text.trim();
-    if (content.isEmpty || sending) return;
-    final target = replyTarget ?? widget.rootComment;
-    setState(() => sending = true);
-    try {
-      final comment = await widget.onReply(target, content);
-      if (!mounted) return;
-      setState(() {
-        replies.add(comment);
-        replies.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-        inputController.clear();
-        replyTarget = null;
-      });
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('回复发送失败，请重试')));
-      }
-    } finally {
-      if (mounted) setState(() => sending = false);
-    }
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      loading = true;
-      errorMessage = null;
-      loadMoreError = null;
-    });
-    try {
-      final page = await widget.repository.listReplies(
-        commentId: widget.rootComment.id,
-      );
-      if (!mounted) return;
-      setState(() {
-        replies
-          ..clear()
-          ..addAll(page.items);
-        nextCursor = page.nextCursor;
-        hasMore = page.hasMore;
-        loadMoreError = null;
-      });
-    } catch (_) {
-      if (mounted) setState(() => errorMessage = '回复加载失败，请重试');
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  void _maybeLoadMore() {
-    if (scrollController.position.extentAfter < 160) _loadMore();
-  }
-
-  Future<void> _loadMore() async {
-    if (loading || loadingMore || !hasMore || nextCursor == null) return;
-    setState(() => loadingMore = true);
-    try {
-      final page = await widget.repository.listReplies(
-        commentId: widget.rootComment.id,
-        cursor: nextCursor,
-      );
-      if (!mounted) return;
-      setState(() {
-        replies.addAll(page.items);
-        nextCursor = page.nextCursor;
-        hasMore = page.hasMore;
-        loadMoreError = null;
-      });
-    } catch (_) {
-      if (mounted) setState(() => loadMoreError = '加载失败 · 点击重试');
-    } finally {
-      if (mounted) setState(() => loadingMore = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final root = widget.rootComment;
-    final header = '回复 ${root.author?.nickname ?? '匿名用户'}：${root.content}';
-    return SafeArea(
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.72,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Text(
-                header,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-            const Divider(height: 1, color: AppTheme.border),
-            Expanded(
-              child: loading && replies.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : errorMessage != null && replies.isEmpty
-                  ? Center(
-                      child: TextButton(
-                        onPressed: _load,
-                        child: Text('$errorMessage，点此重试'),
-                      ),
-                    )
-                  : replies.isEmpty
-                  ? const Center(
-                      child: Text(
-                        '还没有更多回复',
-                        style: TextStyle(color: AppTheme.textSecondary),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: scrollController,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      itemCount: replies.length + 1,
-                      itemBuilder: (context, index) {
-                        if (index == replies.length) {
-                          return loadingMore
-                              ? const Padding(
-                                  padding: EdgeInsets.all(10),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                )
-                              : loadMoreError != null
-                              ? Center(
-                                  child: TextButton(
-                                    onPressed: _loadMore,
-                                    child: Text(loadMoreError!),
-                                  ),
-                                )
-                              : const SizedBox(height: 8);
-                        }
-                        final reply = replies[index];
-                        final author = reply.author;
-                        return GestureDetector(
-                          onTap: () => setState(() => replyTarget = reply),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                CircleAvatar(
-                                  radius: 15,
-                                  backgroundColor: AppTheme.surfaceBlue,
-                                  child: Text(
-                                    (author?.nickname ?? '匿').characters.first,
-                                    style: const TextStyle(
-                                      color: AppTheme.primary,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 9),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Flexible(
-                                            child: Text(
-                                              author?.nickname ?? '匿名用户',
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: AppTheme.textPrimary,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            relativeTimeLabel(reply.createdAt),
-                                            style: const TextStyle(
-                                              color: AppTheme.textSecondary,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        reply.content,
-                                        style: const TextStyle(
-                                          color: AppTheme.textPrimary,
-                                          fontSize: 13,
-                                          height: 1.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (reply.likeCount > 0)
-                                  Text(
-                                    '♥ ${reply.likeCount}',
-                                    style: const TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(11, 8, 11, 8),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: AppTheme.border)),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: inputController,
-                        readOnly: !widget.isAuthenticated,
-                        onTap: !widget.isAuthenticated
-                            ? widget.onRequireAuth
-                            : null,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _submitReply(),
-                        decoration: InputDecoration(
-                          hintText: replyTarget == null
-                              ? '回复这条评论…'
-                              : '回复 ${replyTarget!.author?.nickname ?? '这位用户'}…',
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    FilledButton(
-                      onPressed: sending ? null : _submitReply,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                      ),
-                      child: Text(sending ? '…' : '发送'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+String _formatDateTime(DateTime value) {
+  final local = value.toLocal();
+  String two(int number) => number.toString().padLeft(2, '0');
+  return '${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
 }

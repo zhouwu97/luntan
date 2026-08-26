@@ -31,7 +31,7 @@ class ForumNotification {
   ForumNotification({
     required this.id,
     required this.type,
-    required this.actorId,
+    this.actorId = '',
     required this.actorName,
     required this.targetType,
     required this.targetId,
@@ -72,7 +72,9 @@ class ForumNotification {
     final customTitle = targetData['title'];
     if (customTitle is String && customTitle.isNotEmpty) return customTitle;
     return switch (type) {
-      'like' || 'post.liked' => '$actorName 赞了你的帖子',
+      'like' || 'post.liked' => targetType == 'comment'
+          ? '$actorName 点赞了你的评论'
+          : '$actorName 赞了你的帖子',
       'bookmark' || 'post.bookmarked' => '$actorName 收藏了你的帖子',
       'comment.created' ||
       'comment.replied' ||
@@ -85,7 +87,11 @@ class ForumNotification {
         'hide' => '内容处理通知',
         _ => '处理通知',
       },
-      'appeal.result' => '申诉结果通知',
+      'appeal.result' => switch (targetData['status']) {
+        'approved' => '申诉已通过',
+        'rejected' => '申诉未通过',
+        _ => '申诉结果通知',
+      },
       'announcement' || 'community.announcement' => '社区公告',
       'event' || 'community.event' => '活动通知',
       _ => '你有一条新通知',
@@ -97,6 +103,7 @@ class ForumNotification {
         targetData['snippet'] ??
         targetData['message'] ??
         targetData['body'] ??
+        targetData['reason'] ??
         targetData['post_title'] ??
         targetData['description'];
     if (customContent is String && customContent.isNotEmpty) {

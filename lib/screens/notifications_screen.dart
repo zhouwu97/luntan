@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
-import '../domain/models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/notifications/notification_empty_state.dart';

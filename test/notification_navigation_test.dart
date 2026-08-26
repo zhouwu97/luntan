@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/platform_repository.dart';
-import 'package:luntan/domain/models.dart';
 import 'package:luntan/screens/notifications_screen.dart';
 
 class _FakePlatformRepository extends PlatformRepository {
@@ -41,12 +40,14 @@ void main() {
         type: 'comment.replied',
         actorId: 'u1',
         actorName: '杂鱼萌萌',
-        title: '杂鱼萌萌 回复了你的评论',
-        content: '“我也用普通版”',
         targetType: 'comment',
         targetId: 'reply-123',
-        targetData: const {'post_id': 'post-abc', 'comment_id': 'reply-123'},
-        category: NotificationCategory.interaction,
+        targetData: const {
+          'post_id': 'post-abc',
+          'comment_id': 'reply-123',
+          'title': '杂鱼萌萌 回复了你的评论',
+          'content': '“我也用普通版”',
+        },
         isRead: false,
         createdAt: DateTime.now(),
       ),
@@ -82,12 +83,12 @@ void main() {
         type: 'community.announcement',
         actorId: 'u2',
         actorName: '拆箱管理员',
-        title: '大型拆箱发布了新公告',
-        content: '公告内容',
         targetType: 'community',
         targetId: 'community-unboxing',
-        targetData: const {},
-        category: NotificationCategory.community,
+        targetData: const {
+          'title': '大型拆箱发布了新公告',
+          'content': '公告内容',
+        },
         isRead: false,
         createdAt: DateTime.now(),
       ),

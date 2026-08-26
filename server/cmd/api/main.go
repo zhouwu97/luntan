@@ -22,6 +22,10 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := logging.New(cfg.LogLevel)
+	if err := cfg.Validate(); err != nil {
+		logger.Error("configuration_validation_failed", "error", err.Error())
+		os.Exit(1)
+	}
 	if _, err := mail.NewSender(mail.ConfigFromEnv(cfg.AppEnv)); err != nil {
 		logger.Error("mail_configuration_failed", "error", err.Error())
 		os.Exit(1)
@@ -66,10 +70,12 @@ func main() {
 		logger.Error("mail_sender_failed", "error", senderErr.Error())
 		os.Exit(1)
 	}
-	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, api.NewHandlerWithMail(db, sender, cfg.AppEnv), httpserver.Options{
+	apiHandler := api.NewHandlerWithMail(db, sender, cfg.AppEnv)
+	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, apiHandler, httpserver.Options{
 		RateLimitEnabled:  cfg.RateLimitEnabled,
 		RateLimitStore:    rateLimitStore,
 		TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+		ReadinessCheck:    api.ReadinessCheck(apiHandler),
 	})
 	if err != nil {
 		logger.Error("http_server_configuration_failed", "error", err.Error())

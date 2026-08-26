@@ -11,6 +11,8 @@ class AuthUser {
     this.email,
     this.emailVerified = false,
     this.emailVerifiedAt,
+    this.commentRestricted = false,
+    this.commentRestrictedUntil,
     this.capabilities = const {},
   });
 
@@ -23,6 +25,8 @@ class AuthUser {
   final String? email;
   final bool emailVerified;
   final DateTime? emailVerifiedAt;
+  final bool commentRestricted;
+  final DateTime? commentRestrictedUntil;
   final Map<String, bool> capabilities;
 
   bool capability(String name, {bool fallback = false}) =>
@@ -34,8 +38,29 @@ class AuthUser {
   bool get canCreatePoll =>
       capability('can_create_poll', fallback: accountType != 'guest');
 
-  bool get canManageBookmarks =>
-      capability('can_manage_bookmarks', fallback: accountType != 'guest');
+  bool get canManageBookmarks => capability(
+    'can_bookmark',
+    fallback: capability(
+      'can_manage_bookmarks',
+      fallback: accountType != 'guest',
+    ),
+  );
+
+  bool get canComment => capability('can_comment', fallback: true);
+
+  bool get canReport => capability('can_report', fallback: true);
+
+  bool get canLike => capability('can_like', fallback: true);
+
+  bool get canFollow => capability('can_follow');
+
+  bool get canUploadMedia =>
+      capability('can_upload_media', fallback: canPublish);
+
+  bool get canVote => capability('can_vote', fallback: accountType != 'guest');
+
+  bool get canManageProfile =>
+      capability('can_manage_profile', fallback: accountType != 'guest');
 
   bool get canModerate => capability('can_moderate');
 
@@ -44,6 +69,25 @@ class AuthUser {
   bool get canViewAdminLogs => capability('can_view_admin_logs');
 
   bool get canBanIP => capability('can_ban_ip');
+
+  /// 统一读取业务能力，兼容旧服务端未返回完整 capabilities 的会话。
+  bool can(String name) => switch (name) {
+    'can_publish' => canPublish,
+    'can_create_poll' => canCreatePoll,
+    'can_bookmark' || 'can_manage_bookmarks' => canManageBookmarks,
+    'can_comment' => canComment,
+    'can_like' => canLike,
+    'can_report' => canReport,
+    'can_follow' => canFollow,
+    'can_upload_media' => canUploadMedia,
+    'can_vote' => canVote,
+    'can_manage_profile' => canManageProfile,
+    'can_moderate' => canModerate,
+    'can_manage_admins' => canManageAdmins,
+    'can_ban_ip' => canBanIP,
+    'can_view_admin_logs' => canViewAdminLogs,
+    _ => capability(name),
+  };
 }
 
 class EmailCodeChallenge {
@@ -214,6 +258,8 @@ class AuthRepository {
           : null,
       emailVerified: json['email_verified'] == true,
       emailVerifiedAt: _date(json['email_verified_at']),
+      commentRestricted: json['comment_restricted'] == true,
+      commentRestrictedUntil: _date(json['comment_restricted_until']),
       capabilities: _capabilities(json['capabilities']),
     );
   }

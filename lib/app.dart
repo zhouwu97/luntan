@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'controllers/auth_controller.dart';
@@ -10,6 +12,8 @@ import 'controllers/publish_controller.dart';
 import 'data/api/api_client.dart';
 import 'data/api/auth_repository.dart';
 import 'data/api/publish_repository.dart';
+import 'data/api/platform_repository.dart';
+import 'data/composer_draft_storage.dart';
 import 'data/mock_forum_data.dart';
 import 'data/repository_provider.dart';
 import 'domain/models.dart';
@@ -40,7 +44,7 @@ class LuntanApp extends StatefulWidget {
   State<LuntanApp> createState() => _LuntanAppState();
 }
 
-class _LuntanAppState extends State<LuntanApp> {
+class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   late final ForumStore store;
   late final ForumRepositories repositories;
   late final FeedController feedController;
@@ -50,8 +54,8 @@ class _LuntanAppState extends State<LuntanApp> {
   AuthController? authController;
   Future<void>? authInitialization;
   int currentTab = 0;
-  // 公开帖子是首页主内容，未登录时直接进入浏览态；发布、点赞等操作仍会
-  // 通过 _requireAuth 引导登录，避免占位展示先被登录页挡住。
+  // 公开帖子是首页主内容，未登录时直接进入浏览态；所有互动入口都通过
+  // _requireCapability 读取同一份 /me 能力集合。
   bool browseWithoutAuth = true;
   int unreadCount = 0;
   int profileRefreshToken = 0;
@@ -70,9 +74,21 @@ class _LuntanAppState extends State<LuntanApp> {
   bool get canManageBookmarks =>
       !apiMode || currentUser?.canManageBookmarks == true;
 
+  bool get canComment => !apiMode || currentUser?.canComment == true;
+  DateTime? get commentRestrictedUntil => currentUser?.commentRestrictedUntil;
+  bool get commentRestricted => currentUser?.commentRestricted == true;
+  bool get canReport => !apiMode || currentUser?.canReport == true;
+  bool get canLike => !apiMode || currentUser?.canLike == true;
+  bool get canFollow => !apiMode || currentUser?.canFollow == true;
+  bool get canVote => !apiMode || currentUser?.canVote == true;
+  bool get canUploadMedia => !apiMode || currentUser?.canUploadMedia == true;
+  bool get canManageProfile =>
+      !apiMode || currentUser?.canManageProfile == true;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // API 模式只创建空的 UI 状态容器；业务数据全部来自 Repository。
     final baseUrl = apiBaseUrlFromEnvironment();
     store = baseUrl.trim().isEmpty ? ForumStore.seeded() : ForumStore.uiOnly();
@@ -111,14 +127,17 @@ class _LuntanAppState extends State<LuntanApp> {
     interactionController.clearUserState();
     if (!mounted) return;
     setState(() {
-      browseWithoutAuth = false;
+      // 会话失效不应把用户踢到登录墙；公开内容继续可读，互动按钮按能力
+      // 重新收敛，并明确提示用户当前状态。
+      browseWithoutAuth = true;
       currentTab = 0;
     });
-    _showQuickFeedback('登录已过期，请重新登录');
+    _showQuickFeedback('登录状态已过期，互动功能暂不可用。');
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     authController?.dispose();
     interactionController.dispose();
     publishController.dispose();
@@ -127,6 +146,13 @@ class _LuntanAppState extends State<LuntanApp> {
     store.dispose();
     repositories.close();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshUnreadCount());
+    }
   }
 
   void _openLogin() {
@@ -170,6 +196,17 @@ class _LuntanAppState extends State<LuntanApp> {
     return false;
   }
 
+  bool _requireCapability(String capability, String message) {
+    if (!apiMode) return true;
+    if (authController?.status != AuthStatus.authenticated) {
+      _openLogin();
+      return false;
+    }
+    if (currentUser?.can(capability) == true) return true;
+    _showQuickFeedback(message);
+    return false;
+  }
+
   bool _requireRegisteredAccount() {
     if (!_requireAuth()) return false;
     if (!apiMode || currentUser?.canPublish == true) return true;
@@ -204,20 +241,82 @@ class _LuntanAppState extends State<LuntanApp> {
     bool isGameShare = false,
     bool isPoll = false,
   }) async {
+    final draftStorage = await ComposerDraftStorage.create();
+    final savedDraft = await draftStorage.load();
+    if (!mounted) return;
+    var editorIsGameShare = isGameShare;
+    var editorIsPoll = isPoll;
+    ComposerDraftSnapshot? initialDraft;
+    final draftToRestore = savedDraft;
+    if (draftToRestore != null && draftToRestore.hasContent) {
+      final shouldRestore = await showDialog<bool>(
+        context: appContext,
+        builder: (context) => AlertDialog(
+          title: const Text('检测到未发布草稿'),
+          content: Text(
+            '上次编辑于 ${_draftTimeLabel(draftToRestore.updatedAt)}，是否继续编辑？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('删除草稿'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('继续编辑'),
+            ),
+          ],
+        ),
+      );
+      if (shouldRestore == true) {
+        initialDraft = draftToRestore;
+        editorIsGameShare = draftToRestore.isGameShare;
+        editorIsPoll = draftToRestore.isPoll;
+      } else if (shouldRestore == false) {
+        await draftStorage.clear();
+      }
+    }
+    List<Community> communities = const [];
+    if (apiMode) {
+      try {
+        communities = await repositories.community.getCommunities(
+          status: CommunityStatus.active,
+          canPublish: true,
+        );
+      } catch (error) {
+        _showQuickFeedback(
+          userFacingApiMessage(error, fallback: '社区列表加载失败，请稍后重试'),
+        );
+        return;
+      }
+      if (!mounted) return;
+      if (communities.isEmpty) {
+        _showQuickFeedback('当前没有可发布的社区');
+        return;
+      }
+    }
+    if (!mounted) return;
     await showDialog<void>(
-      context: appContext,
+      context: context,
       builder: (_) => PostEditorDialog(
-        isGameShare: isGameShare,
-        isPoll: isPoll,
+        isGameShare: editorIsGameShare,
+        isPoll: editorIsPoll,
         onPublish: _publishDraft,
         publishController: apiMode ? publishController : null,
         enableSampleMedia: !apiMode,
+        availableCommunities: communities,
+        initialDraft: initialDraft,
+        draftStorage: draftStorage,
       ),
     );
   }
 
+  String _draftTimeLabel(DateTime value) =>
+      '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+
   Future<void> _publishDraft(PostDraft result) async {
     try {
+      final communityId = result.communityId ?? result.section.communityId;
       final type = result.isGameShare
           ? 'game_share'
           : result.isPoll
@@ -225,7 +324,7 @@ class _LuntanAppState extends State<LuntanApp> {
           : 'normal';
       await (result.isPoll
           ? publishController.publishPoll(
-              communityId: result.section.communityId,
+              communityId: communityId,
               title: result.title,
               content: result.body,
               options: result.pollOptions,
@@ -234,16 +333,13 @@ class _LuntanAppState extends State<LuntanApp> {
               mediaIds: result.mediaIds,
             )
           : publishController.publish(
-              communityId: result.section.communityId,
+              communityId: communityId,
               type: type,
               title: result.title,
               content: result.body,
               mediaIds: result.mediaIds,
             ));
-      await feedController.setQuery(
-        communityId: result.section.communityId,
-        sort: 'latest',
-      );
+      await feedController.setQuery(communityId: communityId, sort: 'latest');
       if (!mounted) return;
       setState(() => currentTab = 0);
       _showQuickFeedback('帖子已发布');
@@ -296,6 +392,13 @@ class _LuntanAppState extends State<LuntanApp> {
               isAuthenticated:
                   !apiMode ||
                   authController?.status == AuthStatus.authenticated,
+              canLike: canLike,
+              canComment: canComment,
+              canReport: canReport,
+              canBookmark: canManageBookmarks,
+              canVote: canVote,
+              commentRestricted: commentRestricted,
+              commentRestrictedUntil: commentRestrictedUntil,
               onRequireAuth: _openLogin,
               currentUserId: currentUser?.id,
               focusComments:
@@ -341,7 +444,9 @@ class _LuntanAppState extends State<LuntanApp> {
   }
 
   Future<void> togglePostLike(Post post) async {
-    if (!_requireAuth()) return;
+    if (!_requireCapability('can_like', '当前身份暂不能点赞，请登录邮箱账号后重试')) {
+      return;
+    }
     try {
       await interactionController.togglePostLike(post);
     } catch (error) {
@@ -350,9 +455,7 @@ class _LuntanAppState extends State<LuntanApp> {
   }
 
   Future<void> toggleBookmark(Post post) async {
-    if (!_requireAuth()) return;
-    if (!canManageBookmarks) {
-      _showQuickFeedback('游客模式只能浏览、评论和举报，登录邮箱账号后才能收藏');
+    if (!_requireCapability('can_bookmark', '游客模式只能浏览、评论和举报，登录邮箱账号后才能收藏')) {
       return;
     }
     try {
@@ -437,7 +540,8 @@ class _LuntanAppState extends State<LuntanApp> {
         builder: (_) => UserProfileScreen(
           repository: users,
           userId: userId,
-          isAuthenticated: authController?.status == AuthStatus.authenticated,
+          isAuthenticated: isAuthenticated,
+          canFollow: canFollow,
           onRequireAuth: _openLogin,
           onFeedback: _showQuickFeedback,
           onOpenPostId: openPostById,
@@ -459,7 +563,8 @@ class _LuntanAppState extends State<LuntanApp> {
           repository: users,
           userId: userId,
           followers: followers,
-          isAuthenticated: authController?.status == AuthStatus.authenticated,
+          isAuthenticated: isAuthenticated,
+          canFollow: canFollow,
           onRequireAuth: _openLogin,
           onOpenUserId: openUserProfile,
           onFeedback: _showQuickFeedback,
@@ -475,7 +580,8 @@ class _LuntanAppState extends State<LuntanApp> {
           repository: repositories.community,
           feedRepository: repositories.feed,
           communityId: communityId,
-          isAuthenticated: authController?.status == AuthStatus.authenticated,
+          isAuthenticated: isAuthenticated,
+          canFollow: canFollow,
           onRequireAuth: _openLogin,
           onFeedback: _showQuickFeedback,
           onOpenPost: openPost,
@@ -593,6 +699,7 @@ class _LuntanAppState extends State<LuntanApp> {
           repository: platform,
           onOpenAdmin: openAdminDetail,
           onOpenRisk: openRiskCenter,
+          communityRepository: repositories.community,
         ),
       ),
     );
@@ -603,8 +710,11 @@ class _LuntanAppState extends State<LuntanApp> {
     if (platform == null) return;
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            AdminDetailScreen(repository: platform, adminId: adminId),
+        builder: (_) => AdminDetailScreen(
+          repository: platform,
+          adminId: adminId,
+          communityRepository: repositories.community,
+        ),
       ),
     );
   }
@@ -658,6 +768,7 @@ class _LuntanAppState extends State<LuntanApp> {
                 onOpenUserId: openUserProfile,
                 onOpenCommunityId: openCommunity,
                 onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
+                onOpenNotification: _openNotificationDetail,
                 onOpenModerationActionId: openModerationAction,
                 onOpenAppealId: openAppeal,
               ),
@@ -676,6 +787,34 @@ class _LuntanAppState extends State<LuntanApp> {
           onOpenModerationActionId: openModerationAction,
           onOpenAppealId: openAppeal,
           onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
+          onOpenNotification: _openNotificationDetail,
+        ),
+      ),
+    );
+  }
+
+  void _openNotificationDetail(ForumNotification notification) {
+    final platform = repositories.platform;
+    if (platform == null) return;
+    final data = notification.targetData;
+    VoidCallback? openTarget;
+    final postId = data['post_id'];
+    if (postId is String && postId.isNotEmpty) {
+      final commentId = data['comment_id'];
+      openTarget = () {
+        Navigator.of(appContext).pop();
+        openPostById(
+          postId,
+          focusCommentId: commentId is String ? commentId : null,
+        );
+      };
+    }
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationDetailScreen(
+          repository: platform,
+          notification: notification,
+          onOpenTarget: openTarget,
         ),
       ),
     );
@@ -768,6 +907,10 @@ class _LuntanAppState extends State<LuntanApp> {
                 ? repositories.ranking
                 : null,
             storeRepository: repositories.isApiMode ? repositories.store : null,
+            canComment: canComment,
+            canLike: canLike,
+            canVote: canVote,
+            onRefreshCompleted: _refreshUnreadCount,
           ),
           const SizedBox.shrink(),
           ProfileScreen(
@@ -792,6 +935,8 @@ class _LuntanAppState extends State<LuntanApp> {
             onOpenRelations: openUserRelations,
             refreshToken: profileRefreshToken,
             profileRepository: repositories.profile,
+            publishRepository: repositories.publish,
+            canManageProfile: canManageProfile,
             storeRepository: repositories.store,
             bookmarkRepository: repositories.bookmarks,
             onOpenPostId: openPostById,

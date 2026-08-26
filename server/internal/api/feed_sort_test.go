@@ -14,7 +14,7 @@ func TestFeedSortColumns(t *testing.T) {
 	}{
 		{"latest", false, "ORDER BY p.published_at DESC, p.id DESC", ""},
 		{"featured", true, "ORDER BY", "bookmark_count"},
-		{"recommended", true, "ORDER BY", "POWER"},
+		{"recommended", false, "ORDER BY hr.position ASC, hr.recommended_at DESC, p.id DESC", ""},
 		{"hot", true, "ORDER BY", "POWER"},
 		{"unknown-sort", false, "ORDER BY p.published_at DESC, p.id DESC", ""},
 	}
@@ -37,16 +37,12 @@ func TestFeedSortColumns(t *testing.T) {
 }
 
 func TestFeedSortColumnsDistinct(t *testing.T) {
-	recommended, _ := feedSortColumns("recommended")
 	hot, _ := feedSortColumns("hot")
 	featured, _ := feedSortColumns("featured")
-	if recommended == "" || hot == "" || featured == "" {
+	if hot == "" || featured == "" {
 		t.Fatal("scored sorts must have a score expression")
 	}
-	if recommended == hot {
-		t.Errorf("recommended and hot must use different formulas")
-	}
-	if recommended == featured || hot == featured {
-		t.Errorf("featured must use a distinct formula")
+	if hot == featured {
+		t.Errorf("featured and hot must use distinct formulas")
 	}
 }

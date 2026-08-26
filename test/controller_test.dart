@@ -14,7 +14,14 @@ void main() {
       repository: MockFeedRepository(store: store),
     );
 
+    // 默认推荐流（人工精选）
     await controller.initialLoad();
+    expect(controller.state.status, FeedStatus.success);
+    expect(controller.state.items, hasLength(3));
+    expect(controller.state.hasMore, isFalse);
+
+    // 切换到最新流加载全量帖子
+    await controller.setQuery(sort: 'latest');
     expect(controller.state.status, FeedStatus.success);
     expect(controller.state.items, hasLength(12));
     expect(controller.state.hasMore, isFalse);

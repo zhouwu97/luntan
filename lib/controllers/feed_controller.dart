@@ -52,11 +52,13 @@ class FeedController extends ChangeNotifier {
   int? _loadingMoreGeneration;
   final Set<String> _knownIds = <String>{};
   String? _communityId;
-  // 保持控制器旧接口的默认值；首页会显式传入 FeedSort.latest，避免影响
-  // 其他调用方和已有的查询去重语义。
   String _sort = 'recommended';
+  LatestOrder _latestOrder = LatestOrder.comment;
 
   FeedState get state => _state;
+  LatestOrder get latestOrder => _latestOrder;
+  String get sort => _sort;
+  String? get communityId => _communityId;
 
   /// 账号切换时清理上一个用户的列表和游标，避免把旧会话的阅读态
   /// 短暂展示给新用户。
@@ -85,20 +87,37 @@ class FeedController extends ChangeNotifier {
   Future<void> setQuery({
     String? communityId,
     String sort = 'recommended',
+    LatestOrder? latestOrder,
   }) async {
+    final nextLatestOrder = latestOrder ?? _latestOrder;
     if (_communityId == communityId &&
         _sort == sort &&
+        _latestOrder == nextLatestOrder &&
         _state.status != FeedStatus.initial) {
       return;
     }
-    final queryChanged = _communityId != communityId || _sort != sort;
+    final queryChanged =
+        _communityId != communityId ||
+        _sort != sort ||
+        _latestOrder != nextLatestOrder;
     _communityId = communityId;
     _sort = sort;
+    _latestOrder = nextLatestOrder;
     if (queryChanged) {
       // 查询条件变化时清空当前列表，避免短暂展示上一个板块/排序的内容。
       _knownIds.clear();
       _state = const FeedState();
     }
+    await _startFirstPage();
+  }
+
+  Future<void> setLatestOrder(LatestOrder order) async {
+    if (_latestOrder == order && _state.status != FeedStatus.initial) {
+      return;
+    }
+    _latestOrder = order;
+    _knownIds.clear();
+    _state = const FeedState();
     await _startFirstPage();
   }
 
@@ -112,6 +131,7 @@ class FeedController extends ChangeNotifier {
     final cursor = _state.nextCursor;
     final communityId = _communityId;
     final sort = _sort;
+    final latestOrder = _latestOrder;
     _loadingMoreGeneration = generation;
     _state = _state.copyWith(status: FeedStatus.loadingMore, clearError: true);
     notifyListeners();
@@ -120,6 +140,7 @@ class FeedController extends ChangeNotifier {
         cursor: cursor,
         communityId: communityId,
         sort: sort,
+        latestOrder: latestOrder,
       );
       if (generation != _generation) return;
       final incoming = page.items
@@ -151,19 +172,29 @@ class FeedController extends ChangeNotifier {
   Future<void> _startFirstPage() {
     final generation = ++_generation;
     _loadingMoreGeneration = null;
-    return _loadFirstPage(generation, communityId: _communityId, sort: _sort);
+    return _loadFirstPage(
+      generation,
+      communityId: _communityId,
+      sort: _sort,
+      latestOrder: _latestOrder,
+    );
   }
 
   Future<void> _loadFirstPage(
     int generation, {
     required String? communityId,
     required String sort,
+    required LatestOrder latestOrder,
   }) async {
     final previousItems = _state.items;
     _state = FeedState(status: FeedStatus.loading, items: previousItems);
     notifyListeners();
     try {
-      final page = await _fetch(communityId: communityId, sort: sort);
+      final page = await _fetch(
+        communityId: communityId,
+        sort: sort,
+        latestOrder: latestOrder,
+      );
       if (generation != _generation) return;
       _knownIds
         ..clear()
@@ -189,6 +220,7 @@ class FeedController extends ChangeNotifier {
     String? cursor,
     required String? communityId,
     required String sort,
+    required LatestOrder latestOrder,
   }) {
     final repository = _repository;
     if (repository is QueryableFeedRepository) {
@@ -197,6 +229,7 @@ class FeedController extends ChangeNotifier {
         cursor: cursor,
         communityId: communityId,
         sort: sort,
+        latestOrder: latestOrder,
       );
     }
     return repository.getLatestFeed(cursor: cursor);

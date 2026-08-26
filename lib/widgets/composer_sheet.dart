@@ -1,11 +1,14 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../controllers/publish_controller.dart';
+import '../data/composer_draft_storage.dart';
 import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
@@ -139,6 +142,9 @@ class PostEditorDialog extends StatefulWidget {
     this.isPoll = false,
     this.publishController,
     this.enableSampleMedia = true,
+    this.availableCommunities = const [],
+    this.initialDraft,
+    this.draftStorage,
   });
 
   final bool isGameShare;
@@ -146,6 +152,9 @@ class PostEditorDialog extends StatefulWidget {
   final Future<void> Function(PostDraft draft) onPublish;
   final PublishController? publishController;
   final bool enableSampleMedia;
+  final List<Community> availableCommunities;
+  final ComposerDraftSnapshot? initialDraft;
+  final ComposerDraftStorage? draftStorage;
 
   @override
   State<PostEditorDialog> createState() => _PostEditorDialogState();
@@ -165,6 +174,7 @@ class _DraftImage {
   String? mediaId;
   _DraftImageStatus status = _DraftImageStatus.pending;
   String? error;
+  bool pendingDelete = false;
 }
 
 class _PostEditorDialogState extends State<PostEditorDialog> {
@@ -175,13 +185,18 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     TextEditingController(),
   ];
   ForumSection section = ForumSection.unboxing;
+  String? communityId;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
+  final List<String> _restoredMediaIds = <String>[];
   final List<_DraftImage> _uploadQueue = <_DraftImage>[];
   int _activeUploads = 0;
   String? errorText;
   bool submitting = false;
   bool _submitted = false;
+  bool _keepDraftMedia = false;
+  bool _closing = false;
+  Timer? _draftSaveTimer;
 
   static const int maxImages = 9;
   static const int maxConcurrentUploads = 3;
@@ -190,16 +205,91 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   bool get _usesRealUpload => widget.publishController != null;
 
+  Community? get _selectedCommunity {
+    final id = communityId;
+    if (id == null) return null;
+    for (final community in widget.availableCommunities) {
+      if (community.id == id) return community;
+    }
+    return null;
+  }
+
+  bool get _canUploadSelectedCommunity =>
+      _selectedCommunity?.canUploadMedia != false;
+
+  bool get _canCreatePollSelectedCommunity =>
+      _selectedCommunity?.canCreatePoll != false;
+
+  bool get _hasDraftContent =>
+      titleController.text.trim().isNotEmpty ||
+      bodyController.text.trim().isNotEmpty ||
+      pollOptionControllers.any(
+        (controller) => controller.text.trim().isNotEmpty,
+      ) ||
+      images.isNotEmpty ||
+      selectedMedia.isNotEmpty ||
+      _restoredMediaIds.isNotEmpty;
+
   List<MediaAsset> get sampleMedia =>
       ForumStore.seeded().posts.expand((post) => post.images).take(9).toList();
 
   @override
-  void dispose() {
-    if (!_submitted && _usesRealUpload) {
-      // 用户放弃发布时清理已经上传但仍未入帖的媒体，避免服务端堆积 pending。
+  void initState() {
+    super.initState();
+    final draft = widget.initialDraft;
+    if (draft == null) {
+      communityId = widget.availableCommunities.isEmpty
+          ? null
+          : widget.availableCommunities.first.id;
+      return;
+    }
+    titleController.text = draft.title;
+    bodyController.text = draft.body;
+    section = ForumSection.values.firstWhere(
+      (value) => value.name == draft.sectionName,
+      orElse: () => ForumSection.unboxing,
+    );
+    communityId =
+        widget.availableCommunities.any(
+          (community) => community.id == draft.communityId,
+        )
+        ? draft.communityId
+        : widget.availableCommunities.isEmpty
+        ? null
+        : widget.availableCommunities.first.id;
+    for (var index = 0; index < pollOptionControllers.length; index++) {
+      if (index < draft.pollOptions.length) {
+        pollOptionControllers[index].text = draft.pollOptions[index];
+      }
+    }
+    _restoredMediaIds.addAll(draft.uploadedMediaIds);
+    for (var index = 0; index < draft.localImagePaths.length; index++) {
+      final path = draft.localImagePaths[index].trim();
+      if (path.isEmpty) continue;
+      final image = _DraftImage(file: XFile(path));
+      if (index < draft.uploadedMediaIds.length) {
+        image.mediaId = draft.uploadedMediaIds[index];
+        image.status = _DraftImageStatus.done;
+      }
+      images.add(image);
+    }
+    if (_usesRealUpload) {
       for (final image in images) {
-        final mediaId = image.mediaId;
-        if (mediaId == null) continue;
+        if (image.status != _DraftImageStatus.done) _enqueueUpload(image);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _draftSaveTimer?.cancel();
+    if (!_submitted && !_keepDraftMedia && _usesRealUpload) {
+      // 用户放弃发布时清理已经上传但仍未入帖的媒体，避免服务端堆积 pending。
+      final mediaIds = <String>{
+        ..._restoredMediaIds,
+        ...images.map((image) => image.mediaId).whereType<String>(),
+      };
+      for (final mediaId in mediaIds) {
         widget.publishController!.deleteMedia(mediaId).catchError((_) {});
       }
     }
@@ -217,6 +307,12 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
     if (body.isEmpty) return setState(() => errorText = '正文不能为空');
+    if (widget.isPoll && !_canCreatePollSelectedCommunity) {
+      return setState(() => errorText = '当前社区暂不允许发起投票，请更换社区');
+    }
+    if (images.isNotEmpty && !_canUploadSelectedCommunity) {
+      return setState(() => errorText = '当前社区暂不允许上传图片，请更换社区');
+    }
     final pollOptions = pollOptionControllers
         .map((controller) => controller.text.trim())
         .where((value) => value.isNotEmpty)
@@ -237,6 +333,91 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     _finishSubmit(title: title, body: body, pollOptions: pollOptions);
   }
 
+  ComposerDraftSnapshot _snapshot() => ComposerDraftSnapshot(
+    isGameShare: widget.isGameShare,
+    isPoll: widget.isPoll,
+    title: titleController.text,
+    body: bodyController.text,
+    sectionName: section.name,
+    communityId: communityId,
+    pollOptions: pollOptionControllers.map((item) => item.text).toList(),
+    localImagePaths: images.map((item) => item.file.path).toList(),
+    uploadedMediaIds: <String>{
+      ..._restoredMediaIds,
+      ...images.map((item) => item.mediaId).whereType<String>(),
+    }.toList(),
+    updatedAt: DateTime.now().toUtc(),
+  );
+
+  void _scheduleDraftSave() {
+    if (widget.draftStorage == null || _submitted) return;
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(const Duration(milliseconds: 700), () {
+      unawaited(_saveDraftNow());
+    });
+  }
+
+  Future<void> _saveDraftNow() async {
+    final storage = widget.draftStorage;
+    if (storage == null) return;
+    if (!_hasDraftContent) {
+      await storage.clear();
+      return;
+    }
+    await storage.save(_snapshot());
+  }
+
+  Future<void> _clearDraft() async {
+    _draftSaveTimer?.cancel();
+    await widget.draftStorage?.clear();
+  }
+
+  Future<void> _closeEditor() async {
+    if (_closing || submitting) return;
+    if (!_hasDraftContent) {
+      _closing = true;
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('保存当前草稿？'),
+        content: const Text('离开编辑器后，已填写内容和已上传媒体可以在下次继续编辑。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'continue'),
+            child: const Text('继续编辑'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'discard'),
+            child: const Text('不保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'save'),
+            child: const Text('保存并退出'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || choice == 'continue') return;
+    _closing = true;
+    if (choice == 'save') {
+      _keepDraftMedia = true;
+      try {
+        await _saveDraftNow();
+      } catch (_) {
+        _keepDraftMedia = false;
+        _closing = false;
+        if (mounted) setState(() => errorText = '草稿保存失败，请检查设备存储后重试');
+        return;
+      }
+    } else {
+      await _clearDraft();
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
   Future<void> _finishSubmit({
     required String title,
     required String body,
@@ -244,12 +425,16 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   }) async {
     try {
       final mediaIds = _usesRealUpload
-          ? images.map((image) => image.mediaId!).toList()
+          ? <String>{
+              ..._restoredMediaIds,
+              ...images.map((image) => image.mediaId).whereType<String>(),
+            }.toList()
           : <String>[];
       final draft = PostDraft(
         title: title,
         body: body,
         section: section,
+        communityId: communityId,
         isGameShare: widget.isGameShare,
         isPoll: widget.isPoll,
         media: selectedMedia,
@@ -257,6 +442,12 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         pollOptions: pollOptions,
       );
       await widget.onPublish(draft);
+      if (!mounted) return;
+      try {
+        await _clearDraft();
+      } catch (_) {
+        // 帖子已经成功入库；本地草稿清理失败不会把成功结果伪装成发布失败。
+      }
       if (!mounted) return;
       _submitted = true;
       Navigator.of(context).pop();
@@ -281,6 +472,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         additions.add(image);
       }
     });
+    _scheduleDraftSave();
     for (final image in additions) {
       _enqueueUpload(image);
     }
@@ -347,16 +539,22 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         await publisher.deleteMedia(mediaId).catchError((_) {});
         return;
       }
+      if (image.pendingDelete || !images.contains(image)) {
+        await publisher.deleteMedia(mediaId).catchError((_) {});
+        return;
+      }
       setState(() {
         image.mediaId = mediaId;
         image.status = _DraftImageStatus.done;
       });
+      _scheduleDraftSave();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || image.pendingDelete || !images.contains(image)) return;
       setState(() {
         image.status = _DraftImageStatus.failed;
         image.error = error is PublishException ? error.message : '图片上传失败，请重试';
       });
+      _scheduleDraftSave();
     } finally {
       // 图片预览会按需从 XFile 重新读取；上传完成后不把原始字节长期挂在状态树上。
       image.bytes = null;
@@ -365,8 +563,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   void _deleteImage(_DraftImage image) {
     if (!_usesRealUpload) return;
-    if (image.status == _DraftImageStatus.uploading) return;
     _uploadQueue.remove(image);
+    image.pendingDelete = true;
+    if (image.mediaId != null) _restoredMediaIds.remove(image.mediaId);
     setState(() {
       images.remove(image);
       errorText = null;
@@ -374,6 +573,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     if (image.mediaId != null) {
       widget.publishController!.deleteMedia(image.mediaId!).catchError((_) {});
     }
+    _scheduleDraftSave();
   }
 
   void _assertValidImage(String fileName, List<int> bytes) {
@@ -392,6 +592,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   Future<void> _addSampleImage() async {
     final additions = [...sampleMedia.take(maxImages - selectedMedia.length)];
     setState(() => selectedMedia = [...selectedMedia, ...additions]);
+    _scheduleDraftSave();
   }
 
   String _mimeType(String fileName) {
@@ -409,75 +610,132 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         ? '发起投票'
         : '发布普通帖子';
     return Dialog.fullscreen(
-      child: Scaffold(
-        backgroundColor: AppTheme.background,
-        appBar: AppBar(
-          title: Text(
-            title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-          leading: TextButton(
-            onPressed: submitting ? null : () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: FilledButton(
-                onPressed: submitting ? null : submit,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                ),
-                child: Text(submitting ? '发布中…' : '发布'),
-              ),
+      child: PopScope<void>(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_closeEditor());
+        },
+        child: Scaffold(
+          backgroundColor: AppTheme.background,
+          appBar: AppBar(
+            title: Text(
+              title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
             ),
-          ],
-        ),
-        body: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
-            children: [
-              DropdownButtonFormField<ForumSection>(
-                initialValue: section,
-                decoration: const InputDecoration(labelText: '发布板块'),
-                items: ForumSection.values
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item,
-                        child: Text(item.label),
+            leading: TextButton(
+              onPressed: submitting ? null : () => unawaited(_closeEditor()),
+              child: const Text('取消'),
+            ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: FilledButton(
+                  onPressed: submitting ? null : submit,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                  ),
+                  child: Text(submitting ? '发布中…' : '发布'),
+                ),
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
+              children: [
+                if (widget.availableCommunities.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    initialValue: communityId,
+                    decoration: const InputDecoration(labelText: '发布社区'),
+                    items: widget.availableCommunities
+                        .map(
+                          (item) => DropdownMenuItem(
+                            value: item.id,
+                            child: Text(item.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: submitting
+                        ? null
+                        : (value) {
+                            setState(() => communityId = value);
+                            _scheduleDraftSave();
+                          },
+                  )
+                else
+                  DropdownButtonFormField<ForumSection>(
+                    initialValue: section,
+                    decoration: const InputDecoration(labelText: '发布板块'),
+                    items: ForumSection.values
+                        .map(
+                          (item) => DropdownMenuItem(
+                            value: item,
+                            child: Text(item.label),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: submitting
+                        ? null
+                        : (value) {
+                            setState(() => section = value ?? section);
+                            _scheduleDraftSave();
+                          },
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: titleController,
+                  enabled: !submitting,
+                  maxLength: 40,
+                  onChanged: (_) => _scheduleDraftSave(),
+                  decoration: const InputDecoration(
+                    labelText: '标题',
+                    hintText: '给帖子起一个清楚的标题',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: bodyController,
+                  enabled: !submitting,
+                  maxLength: 2000,
+                  minLines: 8,
+                  maxLines: 12,
+                  onChanged: (_) => _scheduleDraftSave(),
+                  decoration: const InputDecoration(
+                    labelText: '正文',
+                    hintText: '分享你的真实体验、问题或发现…',
+                  ),
+                ),
+                if (widget.isPoll) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    '投票选项',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...pollOptionControllers.asMap().entries.map(
+                    (entry) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: TextField(
+                        controller: entry.value,
+                        enabled: !submitting,
+                        onChanged: (_) => _scheduleDraftSave(),
+                        decoration: InputDecoration(
+                          labelText: '选项 ${entry.key + 1}',
+                          prefixIcon: const Icon(
+                            Icons.radio_button_unchecked_rounded,
+                          ),
+                        ),
                       ),
-                    )
-                    .toList(),
-                onChanged: submitting
-                    ? null
-                    : (value) => setState(() => section = value ?? section),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: titleController,
-                enabled: !submitting,
-                maxLength: 40,
-                decoration: const InputDecoration(
-                  labelText: '标题',
-                  hintText: '给帖子起一个清楚的标题',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bodyController,
-                enabled: !submitting,
-                maxLength: 2000,
-                minLines: 8,
-                maxLines: 12,
-                decoration: const InputDecoration(
-                  labelText: '正文',
-                  hintText: '分享你的真实体验、问题或发现…',
-                ),
-              ),
-              if (widget.isPoll) ...[
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 const Text(
-                  '投票选项',
+                  '图片',
                   style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 12,
@@ -485,131 +743,122 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                ...pollOptionControllers.asMap().entries.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: TextField(
-                      controller: entry.value,
-                      enabled: !submitting,
-                      decoration: InputDecoration(
-                        labelText: '选项 ${entry.key + 1}',
-                        prefixIcon: const Icon(
-                          Icons.radio_button_unchecked_rounded,
-                        ),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: submitting || !_canUploadSelectedCommunity
+                          ? null
+                          : (_usesRealUpload
+                                ? _pickImages
+                                : widget.enableSampleMedia
+                                ? _addSampleImage
+                                : _pickImages),
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: Text(
+                        _usesRealUpload
+                            ? '选择图片'
+                            : widget.enableSampleMedia
+                            ? '添加示例图'
+                            : '选择图片',
                       ),
                     ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              const Text(
-                '图片',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: submitting
-                        ? null
-                        : (_usesRealUpload
-                              ? _pickImages
-                              : widget.enableSampleMedia
-                              ? _addSampleImage
-                              : _pickImages),
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    label: Text(
+                    if (!_canUploadSelectedCommunity)
+                      const Expanded(
+                        child: Text(
+                          '当前社区不允许图片',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    Text(
                       _usesRealUpload
-                          ? '选择图片'
-                          : widget.enableSampleMedia
-                          ? '添加示例图'
-                          : '选择图片',
+                          ? '${images.length} / $maxImages'
+                          : '${selectedMedia.length} / $maxImages',
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _usesRealUpload
-                        ? '${images.length} / $maxImages'
-                        : '${selectedMedia.length} / $maxImages',
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
+                  ],
+                ),
+                if (_usesRealUpload && images.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 104,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: images.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 10),
+                      itemBuilder: (_, index) {
+                        final image = images[index];
+                        return _DraftImageThumb(
+                          image: image,
+                          onRetry: () => _enqueueUpload(image),
+                          onDelete: () => _deleteImage(image),
+                        );
+                      },
                     ),
                   ),
                 ],
-              ),
-              if (_usesRealUpload && images.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 104,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: images.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (_, index) {
-                      final image = images[index];
-                      return _DraftImageThumb(
-                        image: image,
-                        onRetry: () => _enqueueUpload(image),
-                        onDelete: () => _deleteImage(image),
-                      );
-                    },
-                  ),
-                ),
-              ],
-              if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 86,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: selectedMedia.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (_, index) => Stack(
-                      children: [
-                        SizedBox(
-                          width: 86,
-                          height: 86,
-                          child: PostMediaPreview(
-                            images: [selectedMedia[index]],
-                          ),
-                        ),
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: IconButton(
-                            onPressed: submitting
-                                ? null
-                                : () => setState(
-                                    () =>
-                                        selectedMedia = [...selectedMedia]
-                                          ..removeAt(index),
-                                  ),
-                            icon: const Icon(
-                              Icons.cancel,
-                              color: Colors.white,
-                              size: 20,
+                if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 86,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: selectedMedia.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 8),
+                      itemBuilder: (_, index) => Stack(
+                        children: [
+                          SizedBox(
+                            width: 86,
+                            height: 86,
+                            child: PostMediaPreview(
+                              images: [selectedMedia[index]],
                             ),
                           ),
-                        ),
-                      ],
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: IconButton(
+                              onPressed: submitting
+                                  ? null
+                                  : () {
+                                      setState(
+                                        () =>
+                                            selectedMedia = [...selectedMedia]
+                                              ..removeAt(index),
+                                      );
+                                      _scheduleDraftSave();
+                                    },
+                              icon: const Icon(
+                                Icons.cancel,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-              if (errorText != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    errorText!,
-                    style: const TextStyle(color: AppTheme.pink, fontSize: 12),
+                ],
+                if (errorText != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      errorText!,
+                      style: const TextStyle(
+                        color: AppTheme.pink,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-所有平台不传 `API_BASE_URL` 时统一使用本地 `ForumStore` mock 数据；只有显式传入 `API_BASE_URL` 才进入真实 API 模式，避免 Android、Web、桌面端行为不一致。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。
+所有平台不传 `API_BASE_URL` 时统一使用本地 `ForumStore` mock 数据；只有显式传入 `API_BASE_URL` 才进入真实 API 模式，避免 Android、Web、桌面端行为不一致。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建必须显式设置 `APP_ENV=production` 和 HTTPS API 地址；服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
 
 已覆盖的主要功能：
 
@@ -18,11 +18,11 @@
 - Feed：帖子卡片、作者等级、标签、摘要、图片 0 / 1 / 2 / 3 / 4+ 张布局
 - 帖子：详情、图片画廊、回复 / 楼中楼、点赞、收藏、编辑、删除、举报、浏览历史
 - 搜索：帖子、用户、板块
-- 发布：普通帖子、投票、玩法分享
+- 发布：普通帖子、投票、玩法分享；本地草稿持久化、退出前保存/放弃确认、上传中图片删除
 - 我的：真实用户信息与统计、我的发帖 / 回帖 / 收藏 / 点赞 / 浏览历史
-- 消息：通知列表、已读和未读数
-- 认证：邮箱验证码登录、游客模式（后台统一创建 guest user），不在客户端展示密码入口
-- 治理：账号处罚详情、申诉、管理员列表 / 详情、风控中心、不可篡改审计日志
+- 消息：通知列表、通知详情、已读和未读数、前台/下拉刷新
+- 认证：邮箱验证码登录、游客模式（后台统一创建 guest user），不在客户端展示密码入口；邮箱验证码发送后锁定邮箱，支持明确“修改邮箱”
+- 治理：账号处罚详情、申诉、管理员列表 / 详情 / 角色范围管理、风控中心、IP 限制、不可篡改审计日志
 - 兑换商店：商品、积分余额、事务兑换单
 - 投票：选项、服务端投票和票数
 - 导航：`首页` / `+` / `我的`
@@ -80,7 +80,7 @@ export HTTP_PORT=8080
 go run ./server/cmd/api
 ```
 
-服务启动时会自动执行 `server/migrations/` 下的数据库迁移（包含邮箱验证状态、游客会话、处罚限制、自动审核、风控和管理员哈希链日志）。生产环境还必须配置 SMTP；开发环境未配置 SMTP 时，验证码接口会返回 `dev_code` 便于联调，生产环境不会返回验证码。默认地址为 `http://localhost:8080`。
+服务启动时会自动执行 `server/migrations/` 下的数据库迁移（包含邮箱验证状态、游客会话、处罚限制、自动审核、风控、管理员角色范围、IP 限制和管理员哈希链日志）。生产环境必须同时配置 `APP_ENV=production`、`SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/SMTP_FROM` 以及 `OBJECT_STORAGE_UPLOAD_BASE_URL/OBJECT_STORAGE_SIGNING_SECRET`；可选配置 `PUSH_WEBHOOK_URL/PUSH_WEBHOOK_SECRET` 将通知投递到站外推送，未配置时仍会持久化站内通知。开发环境未配置 SMTP 时，验证码接口会返回 `dev_code` 便于联调，生产环境不会返回验证码。健康检查为 `/ready`，默认地址为 `http://localhost:8080`。
 
 ## 连接 Flutter 客户端与 API
 
@@ -176,7 +176,7 @@ lib/
 │   ├── feature_page.dart
 │   ├── exchange_store_screen.dart
 │   ├── notifications_screen.dart
-│   ├── governance_screens.dart          # 账号处罚、管理员详情、风控、审计日志
+│   ├── governance_screens.dart          # 账号处罚、管理员管理、风控、审计日志
 │   ├── moderation_notice_detail_screen.dart
 │   ├── appeal_form_screen.dart
 │   ├── appeal_detail_screen.dart
@@ -212,10 +212,17 @@ test/                                   # Flutter 单元测试和 Widget Test
 - 通知：列表、未读数、标记已读、全部已读
 - 个人中心：资料聚合、发帖 / 回帖 / 点赞 / 收藏 / 历史列表
 - 举报：帖子和评论举报落库
-- 治理：`/me/account-status`、`/admins`、`/admin/risk`、`/admin/logs`；自动规则识别微信群 / QQ 群 / 手机号 / 淘宝链接 / 外链并进入待审核
+- 治理：`/me/account-status`、`/admins`、`/admins/{id}/roles`、`/admin/risk`、`/admin/logs`、`/admin/ip-restrictions`；自动规则识别微信群 / QQ 群 / 手机号 / 淘宝链接 / 外链并进入待审核
 - 增长功能：投票、排行榜、积分商品和事务兑换；历史市场表仅保留用于数据兼容，不再创建或展示市场帖子
 
 客户端 API 仓储位于 `lib/data/api/`，默认 mock / API 切换逻辑位于 `lib/data/repository_provider.dart`。
+
+## 真实用户旅程与能力边界
+
+- 首次打开默认可浏览公开内容；游客会话仍使用统一会话体系，但评论、举报、点赞等低风险参与能力与发布、关注、收藏、投票、上传、资料管理严格分开。
+- 客户端入口和服务端接口共同读取 `can_comment`、`can_report`、`can_like`、`can_follow`、`can_bookmark`、`can_publish`、`can_upload_media`、`can_vote`、`can_create_poll`、`can_manage_profile` 等能力，服务端始终做最终校验。
+- 访问令牌过期或刷新失败不会阻断公开浏览；互动操作会提示重新登录。Feed、评论、搜索、通知、个人列表和审核案件的分页失败均保留可见重试入口。
+- 管理员角色支持平台/社区范围、增删和审计；IP 限制默认规范化为单 IP `/32` 或 `/128`，仅 super admin 可获得 IP 封禁能力；禁言支持 1/7/30 天、自定义和永久。
 
 权限回归固定矩阵见 [`docs/capability-regression-matrix.md`](docs/capability-regression-matrix.md)。涉及权限、认证或治理接口的改动必须覆盖五种身份和九类动作，服务端测试入口为 `TestCapabilityMatrix`。
 

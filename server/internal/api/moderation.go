@@ -23,6 +23,7 @@ type moderationActionInput struct {
 	Action       string `json:"action"`
 	Reason       string `json:"reason"`
 	DurationDays int    `json:"duration_days"`
+	Permanent    bool   `json:"permanent"`
 }
 
 type moderationCursor struct {
@@ -90,7 +91,7 @@ func (s *Server) createModerationAction(w http.ResponseWriter, r *http.Request, 
 	now := time.Now().UTC()
 	appealable := input.Action == "hide" || input.Action == "delete" || input.Action == "mute" || input.Action == "ban"
 	durationDays := input.DurationDays
-	if durationDays == 0 && input.Action == "mute" {
+	if durationDays == 0 && input.Action == "mute" && !input.Permanent {
 		durationDays = 7
 	}
 	var endsAt any
@@ -282,6 +283,151 @@ func encodeModerationCursor(cursor moderationCursor) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
+// getModerationCase 返回审核员做决定所需的案件上下文，避免只显示 target_id
+// 就直接执行隐藏、删除或处罚。
+func (s *Server) getModerationCase(w http.ResponseWriter, r *http.Request, caseID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	var targetType, targetID, source, riskLevel, status, communityID string
+	var createdAt time.Time
+	var resolvedAt sql.NullTime
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT mc.target_type, mc.target_id, mc.source, mc.risk_level, mc.status,
+		       mc.created_at, mc.resolved_at,
+		       COALESCE(p.community_id, cp.community_id, '')
+		FROM moderation_cases mc
+		LEFT JOIN posts p ON mc.target_type = 'post' AND p.id = mc.target_id
+		LEFT JOIN comments c ON mc.target_type = 'comment' AND c.id = mc.target_id
+		LEFT JOIN posts cp ON c.post_id = cp.id
+		WHERE mc.id = $1`, caseID).Scan(&targetType, &targetID, &source, &riskLevel, &status, &createdAt, &resolvedAt, &communityID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrModerationCaseNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if !s.hasScopedPermission(r, user.ID, "report.review", communityID) {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+
+	target := map[string]any{"type": targetType, "id": targetID}
+	var authorID, authorName, title, content string
+	var targetCreatedAt time.Time
+	switch targetType {
+	case "post":
+		err = s.db.QueryRowContext(r.Context(), `
+			SELECT p.author_id, COALESCE(up.nickname, u.username), p.title, p.content, p.created_at
+			FROM posts p JOIN users u ON u.id = p.author_id
+			LEFT JOIN user_profiles up ON up.user_id = p.author_id WHERE p.id = $1`, targetID).
+			Scan(&authorID, &authorName, &title, &content, &targetCreatedAt)
+		if err == nil {
+			mediaRows, mediaErr := s.db.QueryContext(r.Context(), `SELECT media_id FROM post_media WHERE post_id = $1 ORDER BY sort_order, media_id`, targetID)
+			if mediaErr != nil {
+				writeInternalError(w, r, mediaErr)
+				return
+			}
+			mediaIDs := make([]string, 0)
+			for mediaRows.Next() {
+				var mediaID string
+				if scanErr := mediaRows.Scan(&mediaID); scanErr != nil {
+					mediaRows.Close()
+					writeInternalError(w, r, scanErr)
+					return
+				}
+				mediaIDs = append(mediaIDs, mediaID)
+			}
+			if rowsErr := mediaRows.Err(); rowsErr != nil {
+				mediaRows.Close()
+				writeInternalError(w, r, rowsErr)
+				return
+			}
+			mediaRows.Close()
+			target["media_ids"] = mediaIDs
+		}
+	case "comment":
+		err = s.db.QueryRowContext(r.Context(), `
+			SELECT c.author_id, COALESCE(up.nickname, u.username), '评论', c.content, c.created_at
+			FROM comments c JOIN users u ON u.id = c.author_id
+			LEFT JOIN user_profiles up ON up.user_id = c.author_id WHERE c.id = $1`, targetID).
+			Scan(&authorID, &authorName, &title, &content, &targetCreatedAt)
+	case "user":
+		err = s.db.QueryRowContext(r.Context(), `
+			SELECT u.id, COALESCE(up.nickname, u.username), '账号处理', u.username, u.created_at
+			FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
+			WHERE u.id = $1`, targetID).
+			Scan(&authorID, &authorName, &title, &content, &targetCreatedAt)
+	default:
+		writeAuthError(w, r, ErrInvalidModerationAction)
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrModerationCaseNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	target["author_id"] = authorID
+	target["author_name"] = authorName
+	target["title"] = title
+	target["content"] = content
+	target["created_at"] = targetCreatedAt
+
+	var reportCount int64
+	var reportReasons string
+	var firstReportedAt, lastReportedAt sql.NullTime
+	if err := s.db.QueryRowContext(r.Context(), `
+		SELECT count(*), COALESCE(string_agg(DISTINCT reason_code, ', ' ORDER BY reason_code), ''), min(created_at), max(created_at)
+		FROM reports WHERE target_type = $1 AND target_id = $2`, targetType, targetID).
+		Scan(&reportCount, &reportReasons, &firstReportedAt, &lastReportedAt); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	report := map[string]any{"count": reportCount, "reasons": reportReasons}
+	if firstReportedAt.Valid {
+		report["first_at"] = firstReportedAt.Time
+	}
+	if lastReportedAt.Valid {
+		report["last_at"] = lastReportedAt.Time
+	}
+
+	account := map[string]any{}
+	if authorID != "" {
+		var accountCreatedAt time.Time
+		var accountStatus string
+		var priorReports, priorActions int64
+		if err := s.db.QueryRowContext(r.Context(), `
+			SELECT u.created_at, u.status,
+			       (SELECT count(*) FROM reports WHERE reporter_id = u.id),
+			       (SELECT count(*) FROM moderation_actions ma JOIN moderation_cases mc ON mc.id = ma.case_id WHERE mc.target_type = 'user' AND mc.target_id = u.id)
+			FROM users u WHERE u.id = $1`, authorID).
+			Scan(&accountCreatedAt, &accountStatus, &priorReports, &priorActions); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		account = map[string]any{"user_id": authorID, "created_at": accountCreatedAt, "status": accountStatus, "report_count": priorReports, "punishment_count": priorActions}
+	}
+	result := map[string]any{
+		"id": caseID, "target_type": targetType, "target_id": targetID,
+		"source": source, "risk_level": riskLevel, "status": status,
+		"community_id": communityID, "created_at": createdAt,
+		"target": target, "report": report, "account": account,
+	}
+	if resolvedAt.Valid {
+		result["resolved_at"] = resolvedAt.Time
+	}
+	httpserver.WriteJSON(w, http.StatusOK, result)
+}
+
 func decodeModerationCursor(value string) (moderationCursor, error) {
 	data, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
@@ -328,7 +474,7 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 		if input.Action != "mute" && input.Action != "ban" && input.Action != "restore" {
 			return ErrInvalidModerationAction
 		}
-		query = `UPDATE users SET status = CASE WHEN $1 = 'restore' THEN 'active' ELSE 'suspended' END, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`
+		query = `UPDATE users SET status = CASE WHEN $1 = 'ban' THEN 'suspended' WHEN $1 = 'restore' THEN 'active' ELSE status END, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`
 	default:
 		return ErrInvalidModerationAction
 	}
@@ -365,7 +511,7 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 	}
 	if targetType == "user" {
 		durationDays := input.DurationDays
-		if durationDays == 0 && input.Action == "mute" {
+		if durationDays == 0 && input.Action == "mute" && !input.Permanent {
 			durationDays = 7
 		}
 		var endsAt any
@@ -401,7 +547,7 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 	if err != nil {
 		return err
 	}
-	return appendAdminLogTx(r.Context(), tx, operatorID, "moderation."+input.Action, targetType, targetID, strings.TrimSpace(input.Reason), r.Header.Get("X-Request-ID"), after, time.Now().UTC())
+	return appendAdminLogTx(r.Context(), tx, operatorID, "moderation."+input.Action, targetType, targetID, strings.TrimSpace(input.Reason), r.Header.Get("X-Request-ID"), httpserver.ClientIP(r), after, time.Now().UTC())
 }
 
 func validModerationAction(input moderationActionInput) bool {

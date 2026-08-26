@@ -22,6 +22,7 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
   late Future<BookmarkFolderPage> _future;
   BookmarkFolderPage _page = const BookmarkFolderPage(items: []);
   bool _loadingMore = false;
+  Object? _loadMoreError;
   bool _creating = false;
 
   @override
@@ -41,6 +42,7 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
     late final Future<BookmarkFolderPage> future;
     setState(() {
       _loadingMore = false;
+      _loadMoreError = null;
       future = _future = _loadPage();
     });
     try {
@@ -55,6 +57,7 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
     final cursor = _page.nextCursor;
     setState(() {
       _loadingMore = true;
+      _loadMoreError = null;
       _future = _appendFolders(cursor!);
     });
   }
@@ -72,7 +75,11 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
         hasMore: page.hasMore && page.nextCursor != cursor,
       );
       _page = merged;
+      _loadMoreError = null;
       return merged;
+    } catch (error) {
+      if (mounted) setState(() => _loadMoreError = error);
+      rethrow;
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -126,31 +133,51 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
               },
               child: ReorderableListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                itemCount: folders.length,
+                itemCount:
+                    folders.length +
+                    (_loadingMore || _loadMoreError != null ? 1 : 0),
                 onReorder: (oldIndex, newIndex) =>
                     _reorderFolders(folders, oldIndex, newIndex),
-                itemBuilder: (context, index) => _FolderCard(
-                  key: ValueKey(folders[index].id),
-                  folder: folders[index],
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => BookmarkFolderScreen(
-                          repository: widget.repository,
-                          folder: folders[index],
-                          onOpenPostId: widget.onOpenPostId,
+                itemBuilder: (context, index) {
+                  if (index >= folders.length) {
+                    return _loadingMore
+                        ? const Center(
+                            key: ValueKey<String>('bookmark-folders-loading'),
+                            child: CircularProgressIndicator(),
+                          )
+                        : Center(
+                            key: const ValueKey<String>(
+                              'bookmark-folders-load-more-error',
+                            ),
+                            child: TextButton(
+                              onPressed: _loadMoreFolders,
+                              child: const Text('加载失败 · 点击重试'),
+                            ),
+                          );
+                  }
+                  return _FolderCard(
+                    key: ValueKey(folders[index].id),
+                    folder: folders[index],
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => BookmarkFolderScreen(
+                            repository: widget.repository,
+                            folder: folders[index],
+                            onOpenPostId: widget.onOpenPostId,
+                          ),
                         ),
-                      ),
-                    );
-                    if (mounted) _reload();
-                  },
-                  onRename: folders[index].isDefault
-                      ? null
-                      : () => _renameFolder(folders[index]),
-                  onDelete: folders[index].isDefault
-                      ? null
-                      : () => _deleteFolder(folders[index]),
-                ),
+                      );
+                      if (mounted) _reload();
+                    },
+                    onRename: folders[index].isDefault
+                        ? null
+                        : () => _renameFolder(folders[index]),
+                    onDelete: folders[index].isDefault
+                        ? null
+                        : () => _deleteFolder(folders[index]),
+                  );
+                },
               ),
             ),
           );
@@ -220,7 +247,9 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
     int oldIndex,
     int newIndex,
   ) async {
-    if (oldIndex == 0 || oldIndex == newIndex) return;
+    if (oldIndex == 0 || oldIndex >= folders.length || oldIndex == newIndex) {
+      return;
+    }
     if (newIndex > oldIndex) newIndex -= 1;
     final ordered = [...folders];
     final moved = ordered.removeAt(oldIndex);
@@ -312,6 +341,7 @@ class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
   late Future<BookmarkPostPage> _future;
   BookmarkPostPage _page = const BookmarkPostPage(items: []);
   bool _loadingMore = false;
+  Object? _loadMoreError;
   int _generation = 0;
 
   @override
@@ -332,6 +362,7 @@ class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
   void _reload() => setState(() {
     _generation += 1;
     _loadingMore = false;
+    _loadMoreError = null;
     _future = _loadPage();
   });
 
@@ -341,6 +372,7 @@ class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
     final generation = _generation;
     setState(() {
       _loadingMore = true;
+      _loadMoreError = null;
       _future = _appendPage(cursor, generation);
     });
   }
@@ -362,7 +394,13 @@ class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
         hasMore: page.hasMore && page.nextCursor != cursor,
       );
       _page = merged;
+      _loadMoreError = null;
       return merged;
+    } catch (error) {
+      if (mounted && generation == _generation) {
+        setState(() => _loadMoreError = error);
+      }
+      rethrow;
     } finally {
       if (mounted && generation == _generation) {
         setState(() => _loadingMore = false);
@@ -402,14 +440,23 @@ class _BookmarkFolderScreenState extends State<BookmarkFolderScreen> {
               },
               child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                itemCount: items.length + (_loadingMore ? 1 : 0),
+                itemCount:
+                    items.length +
+                    (_loadingMore || _loadMoreError != null ? 1 : 0),
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   if (index >= items.length) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
+                    return _loadingMore
+                        ? const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        : Center(
+                            child: TextButton(
+                              onPressed: _loadMorePosts,
+                              child: const Text('加载失败 · 点击重试'),
+                            ),
+                          );
                   }
                   final item = items[index];
                   return Card(

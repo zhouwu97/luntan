@@ -1,9 +1,14 @@
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/auth_repository.dart';
 import '../data/api/bookmark_repository.dart';
 import '../data/api/profile_repository.dart';
+import '../data/api/publish_repository.dart';
 import '../data/api/store_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
@@ -12,6 +17,12 @@ import 'bookmark_folders_screen.dart';
 import 'points_screen.dart';
 
 typedef OpenPostById = void Function(String postId, {String? focusCommentId});
+
+bool _hasUsableAvatarUrl(String? value) {
+  final url = value?.trim().toLowerCase();
+  return url != null &&
+      (url.startsWith('https://') || url.startsWith('http://'));
+}
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
@@ -26,6 +37,8 @@ class ProfileScreen extends StatelessWidget {
     required this.currentUserId,
     this.isApiMode = false,
     this.profileRepository,
+    this.publishRepository,
+    this.canManageProfile = true,
     this.storeRepository,
     this.bookmarkRepository,
     this.onOpenPostId,
@@ -51,6 +64,8 @@ class ProfileScreen extends StatelessWidget {
   final String? currentUserId;
   final bool isApiMode;
   final ProfileRepository? profileRepository;
+  final PublishRepository? publishRepository;
+  final bool canManageProfile;
   final StoreRepository? storeRepository;
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
@@ -80,6 +95,8 @@ class ProfileScreen extends StatelessWidget {
         onDeleteAccount: onDeleteAccount,
         storeRepository: storeRepository,
         bookmarkRepository: bookmarkRepository,
+        publishRepository: publishRepository,
+        canManageProfile: canManageProfile,
         onOpenPostId: onOpenPostId,
         onOpenPostById: onOpenPostById,
         onOpenModeration: onOpenModeration,
@@ -212,11 +229,6 @@ class ProfileScreen extends StatelessWidget {
       builder: (_) => SafeArea(
         child: Wrap(
           children: [
-            const ListTile(
-              leading: Icon(Icons.palette_outlined),
-              title: Text('杯友主题'),
-              trailing: Icon(Icons.check_rounded, color: AppTheme.primary),
-            ),
             ListTile(
               leading: const Icon(Icons.shield_outlined),
               title: const Text('隐私与安全'),
@@ -484,6 +496,8 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onOpenAccountStatus,
     this.onOpenAdmins,
     this.onOpenRelations,
+    this.publishRepository,
+    this.canManageProfile = true,
     required this.refreshToken,
   });
 
@@ -503,6 +517,8 @@ class _ApiProfileScreen extends StatefulWidget {
   final BookmarkRepository? bookmarkRepository;
   final ValueChanged<String>? onOpenPostId;
   final OpenPostById? onOpenPostById;
+  final PublishRepository? publishRepository;
+  final bool canManageProfile;
 
   @override
   State<_ApiProfileScreen> createState() => _ApiProfileScreenState();
@@ -588,14 +604,24 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
             const SizedBox(height: 16),
             Row(
               children: [
-                const CircleAvatar(
+                CircleAvatar(
                   radius: 32,
                   backgroundColor: AppTheme.surfaceBlue,
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: AppTheme.primary,
-                    size: 32,
-                  ),
+                  backgroundImage: _hasUsableAvatarUrl(profile.avatarUrl)
+                      ? NetworkImage(profile.avatarUrl!)
+                      : null,
+                  child: _hasUsableAvatarUrl(profile.avatarUrl)
+                      ? null
+                      : Text(
+                          profile.nickname.isEmpty
+                              ? '杯'
+                              : profile.nickname.characters.first,
+                          style: const TextStyle(
+                            color: AppTheme.primary,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                 ),
                 const SizedBox(width: 13),
                 Expanded(
@@ -633,6 +659,12 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                     ],
                   ),
                 ),
+                if (widget.canManageProfile)
+                  IconButton(
+                    tooltip: '编辑资料',
+                    onPressed: () => _openEditProfile(profile),
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
               ],
             ),
             if (widget.storeRepository != null) ...[
@@ -798,6 +830,22 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     );
   }
 
+  Future<void> _openEditProfile(ProfileSummary profile) async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => _EditProfileScreen(
+          profile: profile,
+          repository: widget.repository,
+          publishRepository: widget.publishRepository,
+        ),
+      ),
+    );
+    if (updated == true && mounted) {
+      widget.onFeedback('个人资料已更新');
+      _refresh();
+    }
+  }
+
   void _openBookmarks() {
     final repository = widget.bookmarkRepository;
     final onOpenPostId = widget.onOpenPostId;
@@ -822,11 +870,6 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
-            const ListTile(
-              leading: Icon(Icons.palette_outlined),
-              title: Text('杯友主题'),
-              trailing: Icon(Icons.check_rounded, color: AppTheme.primary),
-            ),
             if (widget.onLogout != null)
               ListTile(
                 leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
@@ -908,7 +951,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                   Icons.admin_panel_settings_outlined,
                   color: AppTheme.primary,
                 ),
-                title: const Text('管理员详情'),
+                title: const Text('管理员管理'),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   widget.onOpenAdmins!();
@@ -927,6 +970,188 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       ),
     );
   }
+}
+
+class _EditProfileScreen extends StatefulWidget {
+  const _EditProfileScreen({
+    required this.profile,
+    required this.repository,
+    this.publishRepository,
+  });
+
+  final ProfileSummary profile;
+  final ProfileRepository repository;
+  final PublishRepository? publishRepository;
+
+  @override
+  State<_EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<_EditProfileScreen> {
+  late final TextEditingController nicknameController;
+  late final TextEditingController signatureController;
+  XFile? avatarFile;
+  Uint8List? avatarBytes;
+  bool saving = false;
+  String? errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    nicknameController = TextEditingController(text: widget.profile.nickname);
+    signatureController = TextEditingController(text: widget.profile.signature);
+  }
+
+  @override
+  void dispose() {
+    nicknameController.dispose();
+    signatureController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    if (saving) return;
+    final file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+    );
+    if (!mounted || file == null) return;
+    final bytes = await file.readAsBytes();
+    if (bytes.length > 10 * 1024 * 1024) {
+      setState(() => errorText = '头像不能超过 10 MB');
+      return;
+    }
+    setState(() {
+      avatarFile = file;
+      avatarBytes = bytes;
+      errorText = null;
+    });
+  }
+
+  Future<String?> _uploadAvatar() async {
+    final publisher = widget.publishRepository;
+    final file = avatarFile;
+    final bytes = avatarBytes;
+    if (publisher == null || file == null || bytes == null) {
+      return widget.profile.avatarMediaId;
+    }
+    final lower = file.name.toLowerCase();
+    final mimeType = lower.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    final digest = sha256.convert(bytes).toString();
+    final ticket = await publisher.requestMediaUpload(
+      fileName: file.name,
+      mimeType: mimeType,
+      size: bytes.length,
+      sha256: digest,
+    );
+    if (DateTime.now().isAfter(ticket.expiresAt)) {
+      throw const PublishException('头像上传凭证已过期，请重新选择');
+    }
+    await publisher.uploadMedia(
+      ticket: ticket,
+      bytes: bytes,
+      size: bytes.length,
+      sha256: digest,
+    );
+    return ticket.mediaId;
+  }
+
+  Future<void> _save() async {
+    final nickname = nicknameController.text.trim();
+    final signature = signatureController.text.trim();
+    if (nickname.isEmpty) {
+      setState(() => errorText = '昵称不能为空');
+      return;
+    }
+    if (nickname.length > 64 || signature.length > 200) {
+      setState(() => errorText = '昵称最多 64 字，签名最多 200 字');
+      return;
+    }
+    setState(() {
+      saving = true;
+      errorText = null;
+    });
+    try {
+      final avatarMediaId = await _uploadAvatar();
+      await widget.repository.updateProfile(
+        nickname: nickname,
+        signature: signature,
+        avatarMediaId: avatarMediaId,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          saving = false;
+          errorText = userFacingApiMessage(error, fallback: '资料保存失败，请重试');
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('编辑个人资料'),
+      actions: [
+        TextButton(
+          onPressed: saving ? null : _save,
+          child: Text(saving ? '保存中…' : '保存'),
+        ),
+      ],
+    ),
+    body: ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Center(
+          child: GestureDetector(
+            onTap: _pickAvatar,
+            child: CircleAvatar(
+              radius: 42,
+              backgroundColor: AppTheme.surfaceBlue,
+              backgroundImage: avatarBytes == null
+                  ? (_hasUsableAvatarUrl(widget.profile.avatarUrl)
+                        ? NetworkImage(widget.profile.avatarUrl!)
+                        : null)
+                  : MemoryImage(avatarBytes!),
+              child:
+                  avatarBytes == null &&
+                      !_hasUsableAvatarUrl(widget.profile.avatarUrl)
+                  ? const Icon(Icons.camera_alt_outlined, size: 30)
+                  : null,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Center(
+          child: Text(
+            '点击更换头像',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+        ),
+        const SizedBox(height: 24),
+        TextField(
+          controller: nicknameController,
+          enabled: !saving,
+          maxLength: 64,
+          decoration: const InputDecoration(labelText: '昵称'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: signatureController,
+          enabled: !saving,
+          maxLength: 200,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: '个性签名',
+            hintText: '介绍一下现在的你…',
+          ),
+        ),
+        if (errorText != null)
+          Text(errorText!, style: const TextStyle(color: AppTheme.pink)),
+      ],
+    ),
+  );
 }
 
 /// 个人中心列表 sheet：所有入口都展示帖子，区别只在服务端排序字段。
@@ -957,6 +1182,7 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
   bool loading = false;
   bool loadingMore = false;
   String? errorMessage;
+  String? loadMoreError;
 
   @override
   void initState() {
@@ -1012,17 +1238,47 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
         items.addAll(page.items);
         nextCursor = page.nextCursor;
         hasMore = page.hasMore;
+        loadMoreError = null;
       });
     } catch (_) {
-      // 允许滚动到底部后再次触发。
+      if (mounted) setState(() => loadMoreError = '加载失败 · 点击重试');
     } finally {
       if (mounted) setState(() => loadingMore = false);
     }
   }
 
   Future<void> _clearHistory() async {
-    await widget.repository.clearHistory();
-    if (mounted) _load();
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('清空浏览历史？'),
+            content: const Text('清空后将无法恢复。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('清空'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    try {
+      await widget.repository.clearHistory();
+      if (mounted) _load();
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              errorMessage = userFacingApiMessage(error, fallback: '清空失败，请重试'),
+        );
+      }
+    }
   }
 
   @override
@@ -1105,6 +1361,8 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                 )
+              : loadMoreError != null
+              ? TextButton(onPressed: _loadMore, child: Text(loadMoreError!))
               : const SizedBox(height: 6);
         }
         final item = items[index];

@@ -271,6 +271,9 @@ func (s *Server) createComment(w http.ResponseWriter, r *http.Request, postID, f
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capComment) {
+		return
+	}
 	s.createCommentForUser(w, r, user, postID, forcedParentID)
 }
 
@@ -280,6 +283,9 @@ func (s *Server) createReply(w http.ResponseWriter, r *http.Request, parentID st
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capComment) {
 		return
 	}
 	var postID string

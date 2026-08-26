@@ -12,12 +12,14 @@ class ApiCommunityRepository
   Future<List<Community>> getCommunities({
     String? categoryId,
     CommunityStatus? status,
+    bool? canPublish,
   }) async {
     final payload = await _client.getJson(
       '/api/v1/communities',
       queryParameters: {
         'category_id': ?categoryId,
         if (status != null) 'status': status.name,
+        if (canPublish != null) 'can_publish': '$canPublish',
       },
     );
     final items = payload['items'];
@@ -77,6 +79,7 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'latest',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) async {
@@ -87,6 +90,7 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
         'cursor': ?cursor,
         'community_id': ?communityId,
         'sort': sort,
+        'latest_by': latestOrder.name,
         'post_type': ?postType,
         if (hasMedia != null) 'has_media': '$hasMedia',
         'include_details': '1',
@@ -180,6 +184,9 @@ Community _communityFromJson(Map<String, dynamic> json) {
     sortOrder: _int(json['sort_order']),
     isFollowing: _viewerBool(json, 'is_following'),
     isMember: _viewerBool(json, 'is_member'),
+    canPublish: json['can_publish'] != false,
+    canUploadMedia: json['can_upload_media'] != false,
+    canCreatePoll: json['can_create_poll'] != false,
   );
 }
 
@@ -200,6 +207,12 @@ Post _postFromJson(Map<String, dynamic> json) {
   final publishedAt = json['published_at'] == null
       ? null
       : _date(json['published_at'], createdAt);
+  final activityAt = json['activity_at'] == null
+      ? null
+      : _date(json['activity_at'], publishedAt ?? createdAt);
+  final lastCommentAt = json['last_comment_at'] == null
+      ? null
+      : _date(json['last_comment_at'], createdAt);
   final type = _postTypeFromWire(json['type']);
   final viewerJson = json['viewer_state'] is Map
       ? Map<String, dynamic>.from(json['viewer_state'] as Map)
@@ -257,6 +270,10 @@ Post _postFromJson(Map<String, dynamic> json) {
     createdAt: createdAt,
     updatedAt: _date(json['updated_at'], createdAt),
     publishedAt: publishedAt,
+    activityAt: activityAt,
+    lastCommentAt: lastCommentAt,
+    isRecommended: json['is_recommended'] == true,
+    recommendationPosition: _nullableInt(json['recommendation_position']),
     viewerState: ViewerPostState(
       hasLiked: viewerJson['has_liked'] == true,
       hasBookmarked: viewerJson['has_bookmarked'] == true,

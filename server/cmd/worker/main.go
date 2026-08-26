@@ -26,7 +26,16 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	worker := outbox.Worker{DB: db, Handler: outbox.NoopHandler{}, BatchSize: 50, MaxAttempts: 8}
+	worker := outbox.Worker{
+		DB: db,
+		Handler: outbox.NotificationHandler{
+			DB:         db,
+			WebhookURL: os.Getenv("PUSH_WEBHOOK_URL"),
+			Secret:     os.Getenv("PUSH_WEBHOOK_SECRET"),
+		},
+		BatchSize:   50,
+		MaxAttempts: 8,
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	ticker := time.NewTicker(2 * time.Second)

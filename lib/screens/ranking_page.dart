@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
@@ -18,6 +19,8 @@ class RankingItem {
     this.merchant = 'TMT',
     this.releaseYear = 2026,
     this.description = '',
+    this.category = 'cup',
+    this.segments = const [],
   });
 
   final int rank;
@@ -31,10 +34,13 @@ class RankingItem {
   final String merchant;
   final int releaseYear;
   final String description;
+  final String category;
+  final List<String> segments;
 }
 
 const _mainRankingItems = <RankingItem>[
   RankingItem(
+    id: 'toy-yingchuan-2',
     rank: 2,
     name: '樱川爱 二代',
     hot: '401人想冲',
@@ -44,10 +50,13 @@ const _mainRankingItems = <RankingItem>[
     asset: 'assets/ranking/thumb_02.webp',
     merchant: 'TMT',
     releaseYear: 2026,
+    category: 'cup',
+    segments: ['beginner'],
     description:
         '樱2软版本基本延续了前作的慢玩设定。设计结构网状结构+细密绒粒,完全属于纯新手属性的舒适按摩区，末尾方块状奇袭冲刺区也几乎拒绝一切强硬度挑战。相比琉璃子,此作才更能定义A酱最适合新手的杯子！',
   ),
   RankingItem(
+    id: 'toy-yutou',
     rank: 3,
     name: '鱼头',
     hot: '497人想冲',
@@ -55,8 +64,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '90人评分',
     score: '9.1',
     asset: 'assets/ranking/thumb_03.webp',
+    category: 'cup',
+    segments: ['advanced'],
   ),
   RankingItem(
+    id: 'toy-yuanqi',
     rank: 4,
     name: '元气教练',
     hot: '284人想冲',
@@ -64,8 +76,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '6人评分',
     score: '9.3',
     asset: 'assets/ranking/thumb_04.webp',
+    category: 'cup',
+    segments: ['advanced'],
   ),
   RankingItem(
+    id: 'toy-shendai',
     rank: 5,
     name: '神代雪乃',
     hot: '148人想冲',
@@ -73,8 +88,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '11人评分',
     score: '9.8',
     asset: 'assets/ranking/thumb_05.jpg',
+    category: 'half_body',
+    segments: ['beginner', 'advanced'],
   ),
   RankingItem(
+    id: 'toy-hoshino-2',
     rank: 6,
     name: '星野爱丽丝 二代',
     hot: '91人想冲',
@@ -82,8 +100,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '4人评分',
     score: '10',
     asset: 'assets/ranking/thumb_06.webp',
+    category: 'large_hip',
+    segments: ['beginner'],
   ),
   RankingItem(
+    id: 'toy-nanako-2',
     rank: 7,
     name: '奈奈子 二代',
     hot: '430人想冲',
@@ -91,8 +112,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '16人评分',
     score: '9.9',
     asset: 'assets/ranking/thumb_07.webp',
+    category: 'cup',
+    segments: ['advanced'],
   ),
   RankingItem(
+    id: 'toy-aili',
     rank: 8,
     name: '双穴爱莉',
     hot: '365人想冲',
@@ -100,8 +124,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '14人评分',
     score: '9.1',
     asset: 'assets/ranking/thumb_08.webp',
+    category: 'cup',
+    segments: ['beginner'],
   ),
   RankingItem(
+    id: 'toy-liulizi',
     rank: 9,
     name: '水着琉璃子',
     hot: '241人想冲',
@@ -109,8 +136,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '15人评分',
     score: '8.5',
     asset: 'assets/ranking/thumb_09.webp',
+    category: 'cup',
+    segments: ['beginner'],
   ),
   RankingItem(
+    id: 'toy-kekelang',
     rank: 10,
     name: '可可狼姬',
     hot: '464人想冲',
@@ -118,8 +148,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '42人评分',
     score: '9',
     asset: 'assets/ranking/thumb_10.webp',
+    category: 'cup',
+    segments: ['juice', 'high_stim'],
   ),
   RankingItem(
+    id: 'toy-piaogui-2',
     rank: 11,
     name: '皮小鬼 二代',
     hot: '301人想冲',
@@ -127,8 +160,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '33人评分',
     score: '7.9',
     asset: 'assets/ranking/thumb_11.webp',
+    category: 'small_hip',
+    segments: ['advanced'],
   ),
   RankingItem(
+    id: 'toy-hu-hu-zi',
     rank: 12,
     name: '狐狐子',
     hot: '281人想冲',
@@ -136,8 +172,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '15人评分',
     score: '9.7',
     asset: 'assets/ranking/thumb_12.png',
+    category: 'small_hip',
+    segments: ['high_stim'],
   ),
   RankingItem(
+    id: 'toy-huanru',
     rank: 13,
     name: '幻乳龙娘',
     hot: '186人想冲',
@@ -145,8 +184,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '11人评分',
     score: '9.4',
     asset: 'assets/ranking/thumb_13.webp',
+    category: 'large_hip',
+    segments: ['high_stim', 'juice'],
   ),
   RankingItem(
+    id: 'toy-xiaogui',
     rank: 14,
     name: '小鬼魔皇',
     hot: '297人想冲',
@@ -154,8 +196,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '23人评分',
     score: '9',
     asset: 'assets/ranking/thumb_14.webp',
+    category: 'large_hip',
+    segments: ['high_stim', 'juice'],
   ),
   RankingItem(
+    id: 'toy-chiyuan',
     rank: 15,
     name: '赤鸢',
     hot: '36人想冲',
@@ -163,8 +208,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '5人评分',
     score: '9.2',
     asset: 'assets/ranking/thumb_15.webp',
+    category: 'large_hip',
+    segments: ['high_stim'],
   ),
   RankingItem(
+    id: 'toy-tun-niang',
     rank: 16,
     name: '五宫豚娘物语',
     hot: '145人想冲',
@@ -172,8 +220,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '11人评分',
     score: '7.9',
     asset: 'assets/ranking/thumb_16.webp',
+    category: 'cup',
+    segments: ['high_stim'],
   ),
   RankingItem(
+    id: 'toy-baishi-2',
     rank: 17,
     name: '白丝壁女 二代',
     hot: '91人想冲',
@@ -181,8 +232,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '7人评分',
     score: '5.9',
     asset: 'assets/ranking/thumb_17.webp',
+    category: 'half_body',
+    segments: ['high_stim'],
   ),
   RankingItem(
+    id: 'toy-gonglai',
     rank: 18,
     name: '宫濑 Soft',
     hot: '426人想冲',
@@ -190,8 +244,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '26人评分',
     score: '8.7',
     asset: 'assets/ranking/thumb_18.webp',
+    category: 'cup',
+    segments: ['beginner'],
   ),
   RankingItem(
+    id: 'toy-qianmei',
     rank: 19,
     name: '千美',
     hot: '61人想冲',
@@ -199,8 +256,11 @@ const _mainRankingItems = <RankingItem>[
     ratings: '5人评分',
     score: '9',
     asset: 'assets/ranking/thumb_19.webp',
+    category: 'cup',
+    segments: ['advanced'],
   ),
   RankingItem(
+    id: 'toy-shuiye-2',
     rank: 20,
     name: '水野 2',
     hot: '429人想冲',
@@ -208,63 +268,8 @@ const _mainRankingItems = <RankingItem>[
     ratings: '5人评分',
     score: '9.1',
     asset: 'assets/ranking/thumb_20.webp',
-  ),
-];
-
-const _slowRankingItems = <RankingItem>[
-  RankingItem(
-    rank: 1,
-    name: '樱川爱 二代',
-    hot: '401人想冲',
-    tags: ['细密颗粒', '肉褶延续', '极致慢玩'],
-    ratings: '17人评分',
-    score: '9.9',
-    asset: 'assets/ranking/thumb_02.webp',
-  ),
-  RankingItem(
-    rank: 2,
-    name: '双穴爱莉',
-    hot: '365人想冲',
-    tags: ['双穴包裹', '仿真慢玩', '舒适探索'],
-    ratings: '14人评分',
-    score: '9.1',
-    asset: 'assets/ranking/thumb_08.webp',
-  ),
-  RankingItem(
-    rank: 3,
-    name: '宫濑 Soft',
-    hot: '426人想冲',
-    tags: ['脂软材质', '细密包裹', '超软慢玩'],
-    ratings: '26人评分',
-    score: '8.7',
-    asset: 'assets/ranking/thumb_18.webp',
-  ),
-  RankingItem(
-    rank: 4,
-    name: '水着琉璃子',
-    hot: '241人想冲',
-    tags: ['A酱首选', '极易入门', '软呼呼'],
-    ratings: '15人评分',
-    score: '8.5',
-    asset: 'assets/ranking/thumb_09.webp',
-  ),
-  RankingItem(
-    rank: 5,
-    name: '巴布密着 Big',
-    hot: '44人想冲',
-    tags: ['母性包裹', '肉厚吸裹', '慢玩神作'],
-    ratings: '3人评分',
-    score: '9.7',
-    asset: 'assets/ranking/slow_05.webp',
-  ),
-  RankingItem(
-    rank: 6,
-    name: '红绳姐姐',
-    hot: '25人想冲',
-    tags: ['极致偏软', '末端子宫', '螺旋包裹'],
-    ratings: '4人评分',
-    score: '9.8',
-    asset: 'assets/ranking/slow_06.webp',
+    category: 'lubricant',
+    segments: ['beginner'],
   ),
 ];
 
@@ -279,6 +284,8 @@ const _topRankingItem = RankingItem(
   asset: 'assets/ranking/hero.webp',
   merchant: 'COC',
   releaseYear: 2025,
+  category: 'cup',
+  segments: ['beginner'],
   description: '相较前作，黄油小姐2完成了一次华丽的材质蜕变。奶香味提升，肉质的软糯度提升极佳。大结构轨道带来的异物包裹感实战体验飙升。',
 );
 
@@ -289,11 +296,17 @@ class RankingPage extends StatefulWidget {
     super.key,
     this.repository,
     this.isAuthenticated = false,
+    this.canComment = false,
+    this.canLike = false,
+    this.canVote = false,
     this.onRequireAuth,
   });
 
   final RankingRepository? repository;
   final bool isAuthenticated;
+  final bool canComment;
+  final bool canLike;
+  final bool canVote;
   final VoidCallback? onRequireAuth;
 
   @override
@@ -301,23 +314,22 @@ class RankingPage extends StatefulWidget {
 }
 
 class _RankingPageState extends State<RankingPage> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
   int _selectedTab = 0;
   int _selectedCategory = 0;
   List<RankingItem>? _remoteItems;
-
-  static const _slowNames = <String>{
-    '樱川爱 二代',
-    '双穴爱莉',
-    '宫濑 Soft',
-    '水着琉璃子',
-    '巴布密着 Big',
-    '红绳姐姐',
-  };
 
   @override
   void initState() {
     super.initState();
     if (widget.repository != null) _loadRemoteRanking();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadRemoteRanking() async {
@@ -351,24 +363,59 @@ class _RankingPageState extends State<RankingPage> {
       merchant: toy.merchant,
       releaseYear: toy.releaseYear,
       description: toy.description,
+      category: toy.category,
+      segments: toy.segments,
     );
   }
 
-  List<RankingItem> get _items => _selectedTab == 1
-      ? (_remoteItems == null
-            ? _slowRankingItems
-            : _remoteItems!
-                  .where((item) => _slowNames.contains(item.name))
-                  .toList())
-      : (_remoteItems == null
-            ? _mainRankingItems
-            : _remoteItems!.where((item) => item.rank != 1).toList());
+  List<RankingItem> get _allSourceItems {
+    if (_remoteItems != null && _remoteItems!.isNotEmpty) {
+      return _remoteItems!;
+    }
+    return [_topRankingItem, ..._mainRankingItems];
+  }
+
+  List<RankingItem> get _filteredItems {
+    final query = _searchQuery.trim().toLowerCase();
+    return _allSourceItems.where((item) {
+      if (query.isNotEmpty) {
+        final matchesName = item.name.toLowerCase().contains(query);
+        final matchesMerchant = item.merchant.toLowerCase().contains(query);
+        final matchesDesc = item.description.toLowerCase().contains(query);
+        final matchesTags = item.tags.any((t) => t.toLowerCase().contains(query));
+        if (!matchesName && !matchesMerchant && !matchesDesc && !matchesTags) {
+          return false;
+        }
+        return true;
+      }
+
+      // 1. Tab filter (segments)
+      if (_selectedTab == 1 && !item.segments.contains('beginner')) return false;
+      if (_selectedTab == 2 && !item.segments.contains('advanced')) return false;
+      if (_selectedTab == 3 && !item.segments.contains('high_stim')) return false;
+      if (_selectedTab == 4 && !item.segments.contains('juice')) return false;
+
+      // 2. Category filter
+      final catKey = switch (_selectedCategory) {
+        0 => 'cup',
+        1 => 'small_hip',
+        2 => 'large_hip',
+        3 => 'half_body',
+        4 => 'lubricant',
+        _ => 'cup',
+      };
+      if (item.category != catKey) return false;
+
+      return true;
+    }).toList();
+  }
 
   RankingItem get _topItem {
-    if (_remoteItems == null) return _topRankingItem;
-    return _remoteItems!.firstWhere(
+    final items = _filteredItems;
+    if (items.isEmpty) return _topRankingItem;
+    return items.firstWhere(
       (item) => item.rank == 1,
-      orElse: () => _topRankingItem,
+      orElse: () => items.first,
     );
   }
 
@@ -379,6 +426,9 @@ class _RankingPageState extends State<RankingPage> {
           item: item,
           repository: widget.repository,
           isAuthenticated: widget.isAuthenticated,
+          canComment: widget.canComment,
+          canLike: widget.canLike,
+          canVote: widget.canVote,
           onRequireAuth: widget.onRequireAuth,
         ),
       ),
@@ -392,66 +442,130 @@ class _RankingPageState extends State<RankingPage> {
       bottom: false,
       child: Column(
         children: [
-          _RankingHeader(onBack: () => Navigator.of(context).maybePop()),
+          _RankingHeader(
+            onBack: () => Navigator.of(context).maybePop(),
+            searchController: _searchController,
+            onSearchChanged: (value) => setState(() => _searchQuery = value),
+            onClearSearch: () {
+              _searchController.clear();
+              setState(() => _searchQuery = '');
+            },
+          ),
           Expanded(child: _rankingScrollView()),
         ],
       ),
     ),
   );
 
-  Widget _rankingScrollView() => ListView(
-    children: [
-      _RankingTabs(
-        selectedIndex: _selectedTab,
-        onTap: (index) => setState(() => _selectedTab = index),
-      ),
-      _CategoryGrid(
-        selectedIndex: _selectedCategory,
-        onTap: (index) => setState(() => _selectedCategory = index),
-      ),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: _selectedTab == 0
-            ? Column(
-                children: [
-                  _TopRankingCard(
-                    item: _topItem,
-                    onTap: () => _openRankingItem(_topItem),
-                  ),
-                  const SizedBox(height: 10),
-                  ..._items.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _RankingCard(
-                        item: item,
-                        onTap: () => _openRankingItem(item),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : Column(
-                children: [
-                  ..._items.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _RankingCard(
-                        item: item,
-                        onTap: () => _openRankingItem(item),
-                      ),
-                    ),
-                  ),
-                ],
+  Widget _rankingScrollView() {
+    final query = _searchQuery.trim();
+    final items = _filteredItems;
+
+    if (query.isNotEmpty) {
+      return ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12, left: 4),
+            child: Text(
+              '找到 ${items.length} 个榜单结果',
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
-      ),
-    ],
-  );
+            ),
+          ),
+          if (items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 48),
+              child: Center(
+                child: Text(
+                  '未找到匹配的榜单商品',
+                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
+                ),
+              ),
+            )
+          else
+            ...items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _RankingCard(
+                  item: item,
+                  onTap: () => _openRankingItem(item),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    final showTopBanner = _selectedTab == 0 && items.any((i) => i.rank == 1);
+    final listItems = showTopBanner
+        ? items.where((i) => i.id != _topItem.id).toList()
+        : items;
+
+    return ListView(
+      children: [
+        _RankingTabs(
+          selectedIndex: _selectedTab,
+          onTap: (index) => setState(() => _selectedTab = index),
+        ),
+        _CategoryGrid(
+          selectedIndex: _selectedCategory,
+          onTap: (index) => setState(() => _selectedCategory = index),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              if (showTopBanner) ...[
+                _TopRankingCard(
+                  item: _topItem,
+                  onTap: () => _openRankingItem(_topItem),
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (listItems.isEmpty && !showTopBanner)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(
+                    child: Text(
+                      '该分类暂无商品',
+                      style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+                    ),
+                  ),
+                )
+              else
+                ...listItems.map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _RankingCard(
+                      item: item,
+                      onTap: () => _openRankingItem(item),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _RankingHeader extends StatelessWidget {
-  const _RankingHeader({required this.onBack});
+  const _RankingHeader({
+    required this.onBack,
+    required this.searchController,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+  });
 
   final VoidCallback onBack;
+  final TextEditingController searchController;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -477,47 +591,39 @@ class _RankingHeader extends StatelessWidget {
           Expanded(
             child: Container(
               height: 38,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFFF3F4F6),
                 borderRadius: BorderRadius.circular(24),
               ),
-              child: const Row(
-                children: [
-                  Icon(
+              child: TextField(
+                controller: searchController,
+                onChanged: onSearchChanged,
+                textInputAction: TextInputAction.search,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF1F2937)),
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  hintText: '搜索：魅魔、大魔王、慢玩...',
+                  hintStyle: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                  prefixIcon: const Icon(
                     Icons.search_rounded,
                     size: 16,
                     color: Color(0xFF9CA3AF),
                   ),
-                  SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      '搜索：魅魔、大魔王、慢玩...',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
-                    ),
-                  ),
-                ],
+                  prefixIconConstraints: const BoxConstraints.tightFor(width: 32, height: 38),
+                  suffixIcon: searchController.text.isNotEmpty
+                      ? IconButton(
+                          padding: EdgeInsets.zero,
+                          iconSize: 16,
+                          icon: const Icon(Icons.clear_rounded, color: Color(0xFF9CA3AF)),
+                          onPressed: onClearSearch,
+                        )
+                      : null,
+                  suffixIconConstraints: const BoxConstraints.tightFor(width: 32, height: 38),
+                  border: InputBorder.none,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF4F93),
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x22FF4F93),
-                  blurRadius: 6,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.add_rounded, color: Colors.white, size: 19),
           ),
         ],
       ),
@@ -859,12 +965,18 @@ class RankingItemDetailPage extends StatefulWidget {
     required this.item,
     this.repository,
     this.isAuthenticated = false,
+    this.canComment = false,
+    this.canLike = false,
+    this.canVote = false,
     this.onRequireAuth,
   });
 
   final RankingItem item;
   final RankingRepository? repository;
   final bool isAuthenticated;
+  final bool canComment;
+  final bool canLike;
+  final bool canVote;
   final VoidCallback? onRequireAuth;
 
   @override
@@ -953,9 +1065,15 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
-  bool _requireInteractionAuth() {
-    if (!_hasServer || widget.isAuthenticated) return true;
-    widget.onRequireAuth?.call();
+  bool _requireCapability(bool allowed, String message) {
+    if (!_hasServer || allowed) return true;
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+    } else if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
     return false;
   }
 
@@ -974,7 +1092,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _setWanted() async {
-    if (!_requireInteractionAuth()) return;
+    if (!_requireCapability(widget.canVote, '当前身份暂不能记录想要，请登录邮箱账号后重试')) {
+      return;
+    }
     if (!_hasServer) {
       setState(() => _wanted = !_wanted);
       return;
@@ -995,7 +1115,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _setOwned() async {
-    if (!_requireInteractionAuth()) return;
+    if (!_requireCapability(widget.canVote, '当前身份暂不能记录拥有，请登录邮箱账号后重试')) {
+      return;
+    }
     if (!_hasServer) {
       setState(() => _owned = !_owned);
       return;
@@ -1025,7 +1147,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _openRatingDialog() async {
-    if (!_requireInteractionAuth()) return;
+    if (!_requireCapability(widget.canVote, '当前身份暂不能评分，请登录邮箱账号后重试')) {
+      return;
+    }
     if (!_hasServer) {
       ScaffoldMessenger.of(
         context,
@@ -1100,7 +1224,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
 
   Future<void> _submitComment(String value) async {
     if (value.trim().isEmpty) return;
-    if (!_requireInteractionAuth()) return;
+    if (!_requireCapability(widget.canComment, '当前身份暂不能评论，请登录邮箱账号后重试')) {
+      return;
+    }
     if (!_hasServer) {
       _commentController.clear();
       FocusScope.of(context).unfocus();
@@ -1145,7 +1271,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _toggleServerCommentLike(RankingToyComment comment) async {
-    if (!_requireInteractionAuth()) return;
+    if (!_requireCapability(widget.canLike, '当前身份暂不能点赞，请登录邮箱账号后重试')) {
+      return;
+    }
     if (!_hasServer) return;
     try {
       final count = await widget.repository!.setCommentLike(
@@ -1208,9 +1336,18 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
             children: [
               _DetailTopBar(
                 onBack: () => Navigator.of(context).maybePop(),
-                onShare: () => ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('分享链接已复制'))),
+                onShare: () async {
+                  await Clipboard.setData(
+                    ClipboardData(
+                      text: 'https://luntan.community/ranking/${item.id.isNotEmpty ? item.id : item.rank}',
+                    ),
+                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已复制商品链接到剪贴板')),
+                    );
+                  }
+                },
               ),
               Expanded(
                 child: Scrollbar(
@@ -1240,7 +1377,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                           child: InkWell(
                             onTap: _hasServer ? _openRatingDialog : null,
                             borderRadius: BorderRadius.circular(16),
-                            child: _DetailRatingCard(item: displayItem),
+                            child: _DetailRatingCard(
+                              item: displayItem,
+                              ratingDistribution: _remoteDetail?.ratingDistribution ?? const {},
+                            ),
                           ),
                         ),
                         _DetailActions(
@@ -1422,102 +1562,96 @@ class _DetailTag extends StatelessWidget {
 }
 
 class _DetailRatingCard extends StatelessWidget {
-  const _DetailRatingCard({required this.item});
+  const _DetailRatingCard({
+    required this.item,
+    this.ratingDistribution = const {},
+  });
 
   final RankingItem item;
+  final Map<int, int> ratingDistribution;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 156,
-    margin: const EdgeInsets.fromLTRB(24, 0, 24, 0),
-    padding: const EdgeInsets.fromLTRB(18, 8, 14, 8),
-    decoration: BoxDecoration(
-      color: const Color(0xFFFFF0F5),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 116,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(left: 26),
-                child: Text(
-                  '酱友评分',
-                  style: TextStyle(
-                    color: Color(0xFF66738A),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Text(
-                item.score,
-                style: const TextStyle(
-                  color: Color(0xFFF7618E),
-                  fontSize: 48,
-                  height: 1.0,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              Row(
-                children: List.generate(
-                  5,
-                  (index) => const Padding(
-                    padding: EdgeInsets.only(right: 2),
-                    child: Icon(
-                      Icons.favorite,
-                      size: 14,
-                      color: Color(0xFFF7618E),
+  Widget build(BuildContext context) {
+    final total = ratingDistribution.values.fold<int>(0, (s, e) => s + e);
+    final levels = [
+      (5, ((ratingDistribution[10] ?? 0) + (ratingDistribution[9] ?? 0))),
+      (4, ((ratingDistribution[8] ?? 0) + (ratingDistribution[7] ?? 0))),
+      (3, ((ratingDistribution[6] ?? 0) + (ratingDistribution[5] ?? 0))),
+      (2, ((ratingDistribution[4] ?? 0) + (ratingDistribution[3] ?? 0))),
+      (1, ((ratingDistribution[2] ?? 0) + (ratingDistribution[1] ?? 0))),
+    ];
+
+    return Container(
+      height: 156,
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 0),
+      padding: const EdgeInsets.fromLTRB(18, 8, 14, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF0F5),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 116,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 26),
+                  child: Text(
+                    '酱友评分',
+                    style: TextStyle(
+                      color: Color(0xFF66738A),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Text(
-                    'LV2以上权重加成',
-                    style: TextStyle(color: Color(0xFFAAB4C3), fontSize: 12),
+                Text(
+                  item.score,
+                  style: const TextStyle(
+                    color: Color(0xFFF7618E),
+                    fontSize: 48,
+                    height: 1.0,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              for (final entry in const [
-                (5, 1.0),
-                (4, 0.0),
-                (3, 0.18),
-                (2, 0.0),
-                (1, 0.0),
-              ])
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: _RatingBar(level: entry.$1, value: entry.$2),
+                Row(
+                  children: List.generate(
+                    5,
+                    (index) => const Padding(
+                      padding: EdgeInsets.only(right: 2),
+                      child: Icon(
+                        Icons.favorite,
+                        size: 14,
+                        color: Color(0xFFF7618E),
+                      ),
+                    ),
+                  ),
                 ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (final entry in levels)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: _RatingBar(
+                      level: entry.$1,
+                      value: total > 0 ? entry.$2 / total : 0.0,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _RatingBar extends StatelessWidget {
@@ -1725,6 +1859,8 @@ class _ReviewSection extends StatelessWidget {
                 '杂鱼萌萌(538793014)：大佬你好，这张图在店铺里对应的是二代款［普通版］，还有另一张是二代［经典版］，但是是另一张图，应该是哪个大佬',
             replyDate: '07-29',
             avatarColor: Color(0xFFFFE7B6),
+            level: 3,
+            authorRating: 9,
           ),
           const _ReviewCard(
             user: '杂鱼萌萌',
@@ -1733,6 +1869,8 @@ class _ReviewSection extends StatelessWidget {
             reply: null,
             replyDate: null,
             avatarColor: Color(0xFFE3EEFF),
+            level: 2,
+            authorRating: 8,
           ),
         ] else if (comments!.isEmpty)
           const Padding(
@@ -1779,6 +1917,8 @@ class _ReviewCard extends StatelessWidget {
     required this.reply,
     required this.replyDate,
     required this.avatarColor,
+    this.level = 1,
+    this.authorRating,
   }) : liked = false,
        onLike = null,
        replies = const [],
@@ -1797,7 +1937,9 @@ class _ReviewCard extends StatelessWidget {
        reply = null,
        replyDate = null,
        avatarColor = const Color(0xFFE3EEFF),
-       liked = comment.isLiked;
+       liked = comment.isLiked,
+       level = comment.level,
+       authorRating = comment.authorRating;
 
   final String user;
   final String likes;
@@ -1806,6 +1948,8 @@ class _ReviewCard extends StatelessWidget {
   final String? replyDate;
   final Color avatarColor;
   final bool liked;
+  final int level;
+  final int? authorRating;
   final VoidCallback? onLike;
   final List<RankingToyComment> replies;
   final VoidCallback? onReply;
@@ -1856,9 +2000,9 @@ class _ReviewCard extends StatelessWidget {
                       color: const Color(0xFFE4F8F1),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: const Text(
-                      'LV3',
-                      style: TextStyle(
+                    child: Text(
+                      'LV$level',
+                      style: const TextStyle(
                         color: Color(0xFF38AD8B),
                         fontSize: 8,
                         fontWeight: FontWeight.w800,
@@ -1903,17 +2047,34 @@ class _ReviewCard extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Row(
-                children: List.generate(
-                  5,
-                  (index) => const Padding(
-                    padding: EdgeInsets.only(right: 2),
-                    child: Icon(
-                      Icons.favorite,
-                      size: 13,
-                      color: Color(0xFFF76591),
-                    ),
+                children: [
+                  ...List.generate(
+                    5,
+                    (index) {
+                      final filled =
+                          authorRating == null || index < ((authorRating! + 1) ~/ 2);
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 2),
+                        child: Icon(
+                          filled ? Icons.favorite : Icons.favorite_border_rounded,
+                          size: 13,
+                          color: const Color(0xFFF76591),
+                        ),
+                      );
+                    },
                   ),
-                ),
+                  if (authorRating != null) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      '$authorRating分',
+                      style: const TextStyle(
+                        color: Color(0xFFF76591),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
               ),
               const SizedBox(height: 7),
               GestureDetector(

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
+import 'package:luntan/domain/models.dart';
 import 'package:luntan/domain/repositories.dart';
 import 'package:luntan/screens/feature_page.dart';
 import 'package:luntan/screens/ranking_page.dart';
@@ -21,6 +22,7 @@ class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) async {
@@ -138,9 +140,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('慢玩入门'));
+    await tester.tap(find.text('榨汁玩具'));
     await tester.pumpAndSettle();
     expect(find.text('NO.1 本周霸权'), findsNothing);
-    expect(find.text('巴布密着 Big'), findsOneWidget);
+    expect(find.text('可可狼姬'), findsOneWidget);
   });
 }

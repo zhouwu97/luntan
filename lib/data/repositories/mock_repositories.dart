@@ -75,12 +75,14 @@ class MockCommunityRepository implements CommunityRepository {
   Future<List<Community>> getCommunities({
     String? categoryId,
     CommunityStatus? status,
+    bool? canPublish,
   }) async {
     return _store.communities.where((community) {
       final matchesCategory =
           categoryId == null || community.categoryId == categoryId;
       final matchesStatus = status == null || community.status == status;
-      return matchesCategory && matchesStatus;
+      final matchesPublishPolicy = canPublish != true || community.canPublish;
+      return matchesCategory && matchesStatus && matchesPublishPolicy;
     }).toList();
   }
 
@@ -112,6 +114,7 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'latest',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) async {
@@ -124,21 +127,41 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
       )
       ..removeWhere(
         (post) => communityId != null && post.communityId != communityId,
-      )
-      ..sort((a, b) {
-        final int by;
-        switch (sort) {
-          case 'featured':
-            by = (b.isFeatured ? 1 : 0).compareTo(a.isFeatured ? 1 : 0);
-          case 'hot':
-            by = b.commentCount.compareTo(a.commentCount);
-          default:
+      );
+
+    if (sort == 'recommended') {
+      posts.removeWhere((post) => !post.isRecommended);
+    }
+
+    posts.sort((a, b) {
+      final int by;
+      switch (sort) {
+        case 'recommended':
+          final posA = a.recommendationPosition ?? 999999;
+          final posB = b.recommendationPosition ?? 999999;
+          final byPos = posA.compareTo(posB);
+          by = byPos != 0
+              ? byPos
+              : (b.publishedAt ?? b.createdAt).compareTo(
+                  a.publishedAt ?? a.createdAt,
+                );
+        case 'featured':
+          by = (b.isFeatured ? 1 : 0).compareTo(a.isFeatured ? 1 : 0);
+        case 'hot':
+          by = b.commentCount.compareTo(a.commentCount);
+        default:
+          if (latestOrder == LatestOrder.comment) {
+            final timeA = a.activityAt ?? a.publishedAt ?? a.createdAt;
+            final timeB = b.activityAt ?? b.publishedAt ?? b.createdAt;
+            by = timeB.compareTo(timeA);
+          } else {
             by = (b.publishedAt ?? b.createdAt).compareTo(
               a.publishedAt ?? a.createdAt,
             );
-        }
-        return by == 0 ? b.id.compareTo(a.id) : by;
-      });
+          }
+      }
+      return by == 0 ? b.id.compareTo(a.id) : by;
+    });
     final start = int.tryParse(cursor ?? '') ?? 0;
     if (start >= posts.length) return const FeedPage(items: [], hasMore: false);
     final end = (start + normalizedLimit).clamp(0, posts.length).toInt();

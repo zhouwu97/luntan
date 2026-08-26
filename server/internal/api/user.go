@@ -62,7 +62,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	item.ViewerState = map[string]any{
 		"is_following": false,
 		"is_blocked":   false,
-		"can_follow":   viewerID != "" && viewerID != item.ID,
+		"can_follow":   hasViewer && capabilitiesForUser(viewer)[capFollow] && viewerID != item.ID,
 	}
 	if viewerID != "" {
 		var isFollowing, isBlocked bool
@@ -75,7 +75,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		}
 		item.ViewerState["is_following"] = isFollowing
 		item.ViewerState["is_blocked"] = isBlocked
-		item.ViewerState["can_follow"] = viewerID != item.ID && !isBlocked
+		item.ViewerState["can_follow"] = capabilitiesForUser(viewer)[capFollow] && viewerID != item.ID && !isBlocked
 	}
 	httpserver.WriteJSON(w, http.StatusOK, item)
 }
@@ -199,6 +199,9 @@ func (s *Server) listUserRelations(w http.ResponseWriter, r *http.Request, userI
 		if err := rows.Scan(&id, &username, &nickname, &avatarMediaID, &createdAt, &isFollowing, &isBlocked, &canFollow); err != nil {
 			writeInternalError(w, r, err)
 			return
+		}
+		if hasViewer && !capabilitiesForUser(viewer)[capFollow] {
+			canFollow = false
 		}
 		items = append(items, map[string]any{
 			"id": id, "username": username, "nickname": nickname,

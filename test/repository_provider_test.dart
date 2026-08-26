@@ -3,8 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/data/repository_provider.dart';
 
 void main() {
-  test('没有 API 地址时保持 Mock 模式', () {
-    expect(resolveApiBaseUrl(configured: '  ', appEnv: 'production'), isEmpty);
+  test('生产环境没有 API 地址时启动失败', () {
+    expect(
+      () => resolveApiBaseUrl(configured: '  ', appEnv: 'production'),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('开发环境没有 API 地址时保持 Mock 模式', () {
+    expect(resolveApiBaseUrl(configured: '  ', appEnv: 'development'), isEmpty);
   });
 
   test('QA 允许使用 HTTP', () {

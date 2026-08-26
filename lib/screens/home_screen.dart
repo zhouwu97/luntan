@@ -53,6 +53,9 @@ class HomeScreen extends StatefulWidget {
     required this.onRequireAuth,
     required this.onOpenPostId,
     required this.isAuthenticated,
+    this.canComment = true,
+    this.canLike = true,
+    this.canVote = true,
     required this.personalFeedController,
     this.onOpenUserId,
     this.onOpenCommunityId,
@@ -64,6 +67,7 @@ class HomeScreen extends StatefulWidget {
     this.postRepository,
     this.rankingRepository,
     this.storeRepository,
+    this.onRefreshCompleted,
   });
 
   final ForumStore store;
@@ -78,6 +82,9 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback onRequireAuth;
   final ValueChanged<String> onOpenPostId;
   final bool isAuthenticated;
+  final bool canComment;
+  final bool canLike;
+  final bool canVote;
   final HomePersonalFeedController personalFeedController;
   final ValueChanged<String>? onOpenUserId;
   final ValueChanged<String>? onOpenCommunityId;
@@ -89,6 +96,9 @@ class HomeScreen extends StatefulWidget {
   final PostRepository? postRepository;
   final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
+
+  /// 首页内容刷新后通知应用层同步未读数。
+  final Future<void> Function()? onRefreshCompleted;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -102,15 +112,13 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Community> communities = const [];
   String? selectedCommunityId;
   late FeedSort selectedSort;
-  HomeFeedMode feedMode = HomeFeedMode.public;
-  HomeFeedMode? pendingPersonalMode;
+  LatestOrder latestOrder = LatestOrder.comment;
   final feedToolbarKey = GlobalKey();
   bool _autoFillingViewport = false;
   int _viewportFillAttempts = 0;
   bool _showBackToTop = false;
 
   bool get isApiMode => widget.feedRepository != null;
-  bool get isPersonalMode => feedMode != HomeFeedMode.public;
 
   @override
   void initState() {
@@ -123,7 +131,6 @@ class _HomeScreenState extends State<HomeScreen> {
         : const [];
     scrollController = ScrollController()..addListener(_onScroll);
     widget.feedController.addListener(_onFeedStateChanged);
-    widget.personalFeedController.addListener(_onPersonalFeedStateChanged);
     if (widget.communityRepository != null) {
       _loadCommunities();
     }
@@ -139,41 +146,20 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     widget.feedController.removeListener(_onFeedStateChanged);
-    widget.personalFeedController.removeListener(_onPersonalFeedStateChanged);
     scrollController
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
   }
 
-  @override
-  void didUpdateWidget(covariant HomeScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final pending = pendingPersonalMode;
-    if (!oldWidget.isAuthenticated &&
-        widget.isAuthenticated &&
-        pending != null) {
-      pendingPersonalMode = null;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _selectPersonalMode(pending);
-      });
-    }
-  }
-
   Future<void> refresh() async {
     _resetViewportFillAttempts();
-    if (isPersonalMode) {
-      await widget.personalFeedController.refresh(mode: feedMode);
-    } else {
-      await widget.feedController.refresh();
-    }
+    await widget.feedController.refresh();
     if (!mounted) return;
-    final hasRefreshError = isPersonalMode
-        ? widget.personalFeedController.state.status == FeedStatus.error &&
-              widget.personalFeedController.state.items.isEmpty
-        : widget.feedController.state.status == FeedStatus.error &&
-              widget.feedController.state.items.isEmpty;
+    final hasRefreshError = widget.feedController.state.status == FeedStatus.error &&
+        widget.feedController.state.items.isEmpty;
     widget.onFeedback(hasRefreshError ? '刷新失败，请重试' : '已经是最新内容');
+    await widget.onRefreshCompleted?.call();
   }
 
   void _loadFeed() {
@@ -182,6 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
     widget.feedController.setQuery(
       communityId: selectedCommunityId,
       sort: selectedSort.name,
+      latestOrder: latestOrder,
     );
   }
 
@@ -190,11 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onFeedStateChanged() {
-    if (!isPersonalMode) _scheduleViewportFill();
-  }
-
-  void _onPersonalFeedStateChanged() {
-    if (isPersonalMode) _scheduleViewportFill();
+    _scheduleViewportFill();
   }
 
   void _scheduleViewportFill() {
@@ -216,7 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _requestLoadMore() {
-    if (isPersonalMode) return widget.personalFeedController.loadMore();
     return widget.feedController.loadMore();
   }
 
@@ -228,15 +210,9 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final hasMore = isPersonalMode
-        ? widget.personalFeedController.state.hasMore
-        : widget.feedController.state.hasMore;
-    final status = isPersonalMode
-        ? widget.personalFeedController.state.status
-        : widget.feedController.state.status;
-    final error = isPersonalMode
-        ? widget.personalFeedController.state.error
-        : widget.feedController.state.error;
+    final hasMore = widget.feedController.state.hasMore;
+    final status = widget.feedController.state.status;
+    final error = widget.feedController.state.error;
     if (!hasMore ||
         error != null ||
         status == FeedStatus.loading ||
@@ -256,14 +232,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _selectCommunity(String? communityId) {
-    final wasPersonal = isPersonalMode;
     _resetViewportFillAttempts();
     setState(() {
       selectedCommunityId = communityId;
-      feedMode = HomeFeedMode.public;
-      pendingPersonalMode = null;
     });
-    if (wasPersonal) widget.personalFeedController.reset();
     if (!isApiMode && communityId != null) {
       widget.store.selectSection(_sectionForCommunity(communityId));
     }
@@ -300,32 +272,20 @@ class _HomeScreenState extends State<HomeScreen> {
       };
 
   void _selectSort(FeedSort sort) {
-    final wasPersonal = isPersonalMode;
     _resetViewportFillAttempts();
     setState(() {
       selectedSort = sort;
-      feedMode = HomeFeedMode.public;
-      pendingPersonalMode = null;
     });
-    if (wasPersonal) widget.personalFeedController.reset();
     if (!isApiMode) widget.store.selectSort(sort);
     _loadFeed();
   }
 
-  void _selectPersonalMode(HomeFeedMode mode) {
-    if (mode == HomeFeedMode.public) return;
-    if (isApiMode && !widget.isAuthenticated) {
-      final alreadyWaitingForLogin = pendingPersonalMode != null;
-      pendingPersonalMode = mode;
-      if (!alreadyWaitingForLogin) widget.onRequireAuth();
-      return;
-    }
-    setState(() {
-      feedMode = mode;
-      pendingPersonalMode = null;
-    });
+  void _selectLatestOrder(LatestOrder order) {
     _resetViewportFillAttempts();
-    widget.personalFeedController.selectMode(mode);
+    setState(() {
+      latestOrder = order;
+    });
+    _loadFeed();
     _scrollToFeedStart();
   }
 
@@ -363,7 +323,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Post> get _visiblePosts {
-    if (isPersonalMode) return widget.personalFeedController.state.items;
     final posts = widget.feedController.state.items;
     // API 模式：板块与排序由服务端过滤，客户端只展示服务端结果，不再二次筛选/重排。
     if (widget.feedRepository != null) return posts;
@@ -377,18 +336,41 @@ class _HomeScreenState extends State<HomeScreen> {
           if (selectedSort == FeedSort.featured) {
             return post.isFeatured;
           }
+          if (selectedSort == FeedSort.recommended) {
+            return post.isRecommended;
+          }
           return true;
         })
         .toList();
     if (selectedSort == FeedSort.latest) {
       filtered.sort((a, b) {
-        final byTime = (b.publishedAt ?? b.createdAt).compareTo(
-          a.publishedAt ?? a.createdAt,
-        );
+        final DateTime timeA;
+        final DateTime timeB;
+        if (latestOrder == LatestOrder.comment) {
+          timeA = a.activityAt ?? a.publishedAt ?? a.createdAt;
+          timeB = b.activityAt ?? b.publishedAt ?? b.createdAt;
+        } else {
+          timeA = a.publishedAt ?? a.createdAt;
+          timeB = b.publishedAt ?? b.createdAt;
+        }
+        final byTime = timeB.compareTo(timeA);
         return byTime == 0 ? b.id.compareTo(a.id) : byTime;
       });
     } else if (selectedSort == FeedSort.featured) {
       filtered.sort((a, b) => b.commentCount.compareTo(a.commentCount));
+    } else if (selectedSort == FeedSort.hot) {
+      filtered.sort((a, b) => b.commentCount.compareTo(a.commentCount));
+    } else if (selectedSort == FeedSort.recommended) {
+      filtered.sort((a, b) {
+        final posA = a.recommendationPosition ?? 999999;
+        final posB = b.recommendationPosition ?? 999999;
+        final byPos = posA.compareTo(posB);
+        return byPos != 0
+            ? byPos
+            : (b.publishedAt ?? b.createdAt).compareTo(
+                a.publishedAt ?? a.createdAt,
+              );
+      });
     }
     return filtered;
   }
@@ -399,11 +381,17 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => SearchScreen(
           store: widget.store,
           platform: widget.platform,
+          rankingRepository: widget.rankingRepository,
           onOpenPost: widget.onOpenPost,
           onOpenPostId: widget.onOpenPostId,
           interactionController: widget.interactionController,
           onOpenUserId: widget.onOpenUserId,
           onOpenCommunityId: widget.onOpenCommunityId,
+          isAuthenticated: widget.isAuthenticated,
+          canComment: widget.canComment,
+          canLike: widget.canLike,
+          canVote: widget.canVote,
+          onRequireAuth: widget.onRequireAuth,
         ),
       ),
     );
@@ -425,6 +413,9 @@ class _HomeScreenState extends State<HomeScreen> {
           rankingRepository: widget.rankingRepository,
           storeRepository: widget.storeRepository,
           isAuthenticated: widget.isAuthenticated,
+          canComment: widget.canComment,
+          canLike: widget.canLike,
+          canVote: widget.canVote,
           onRequireAuth: widget.onRequireAuth,
         ),
       ),
@@ -437,21 +428,13 @@ class _HomeScreenState extends State<HomeScreen> {
       animation: Listenable.merge([
         widget.store,
         widget.feedController,
-        widget.personalFeedController,
       ]),
       builder: (context, _) {
         final posts = _visiblePosts;
         final feedState = widget.feedController.state;
-        final personalState = widget.personalFeedController.state;
-        final activeStatus = isPersonalMode
-            ? personalState.status
-            : feedState.status;
-        final activeHasMore = isPersonalMode
-            ? personalState.hasMore
-            : feedState.hasMore;
-        final activeError = isPersonalMode
-            ? personalState.error
-            : feedState.error;
+        final activeStatus = feedState.status;
+        final activeHasMore = feedState.hasMore;
+        final activeError = feedState.error;
         final showInitialSkeleton =
             activeStatus == FeedStatus.initial ||
             (activeStatus == FeedStatus.loading && posts.isEmpty);
@@ -475,109 +458,102 @@ class _HomeScreenState extends State<HomeScreen> {
                       parent: BouncingScrollPhysics(),
                     ),
                     slivers: [
-                        SliverToBoxAdapter(
-                          child: _Header(
-                            onProfile: widget.onOpenProfile,
-                            onSearch: openSearch,
-                            onMessages: widget.onOpenMessages,
-                            unread:
-                                widget.unread ?? widget.store.unreadMessages,
+                      SliverToBoxAdapter(
+                        child: _Header(
+                          onProfile: widget.onOpenProfile,
+                          onSearch: openSearch,
+                          onMessages: widget.onOpenMessages,
+                          unread: widget.unread ?? widget.store.unreadMessages,
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: _SectionTabs(
+                          communities: communities,
+                          selectedCommunityId: selectedCommunityId,
+                          onChanged: _selectCommunity,
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: _FeatureEntries(onTap: openFeature),
+                      ),
+                      SliverToBoxAdapter(
+                        child: KeyedSubtree(
+                          key: feedToolbarKey,
+                          child: _FeedToolbar(
+                            selected: selectedSort,
+                            selectedLatestOrder: latestOrder,
+                            onSortChanged: _selectSort,
+                            onLatestOrderChanged: _selectLatestOrder,
                           ),
                         ),
-                        SliverToBoxAdapter(
-                          child: _SectionTabs(
-                            communities: communities,
-                            selectedCommunityId: selectedCommunityId,
-                            onChanged: _selectCommunity,
+                      ),
+                      if (showTopProgress)
+                        const SliverToBoxAdapter(
+                          child: LinearProgressIndicator(
+                            minHeight: 2,
+                            color: AppTheme.primary,
+                            backgroundColor: AppTheme.surfaceBlue,
                           ),
-                        ),
-                        SliverToBoxAdapter(
-                          child: _FeatureEntries(onTap: openFeature),
-                        ),
-                        SliverToBoxAdapter(
-                          child: KeyedSubtree(
-                            key: feedToolbarKey,
-                            child: _FeedToolbar(
-                              selected: isPersonalMode ? null : selectedSort,
-                              selectedMode: feedMode,
-                              onSortChanged: _selectSort,
-                              onModeChanged: _selectPersonalMode,
-                            ),
-                          ),
-                        ),
-                        if (isPersonalMode)
-                          SliverToBoxAdapter(
-                            child: _PersonalFeedHint(mode: feedMode),
-                          ),
-                        if (showTopProgress)
-                          const SliverToBoxAdapter(
-                            child: LinearProgressIndicator(
-                              minHeight: 2,
-                              color: AppTheme.primary,
-                              backgroundColor: AppTheme.surfaceBlue,
-                            ),
-                          )
-                        else
-                          const SliverToBoxAdapter(child: SizedBox(height: 2)),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-                          sliver:
-                              activeStatus == FeedStatus.error && posts.isEmpty
-                              ? SliverToBoxAdapter(
-                                  child: _FeedError(
-                                    onRetry: isPersonalMode
-                                        ? () => widget.personalFeedController
-                                              .refresh(mode: feedMode)
-                                        : widget.feedController.initialLoad,
-                                  ),
-                                )
-                              : showInitialSkeleton
-                              ? const SliverToBoxAdapter(child: _FeedSkeleton())
-                              : posts.isEmpty
-                              ? SliverToBoxAdapter(
-                                  child: _EmptyFeed(
-                                    sort: selectedSort,
-                                    mode: feedMode,
-                                  ),
-                                )
-                              : SliverList.builder(
-                                  itemCount: posts.length,
-                                  itemBuilder: (context, index) {
-                                    final post = posts[index];
-                                    return ForumPostCard(
-                                      post: post,
-                                      onOpen: () => widget.onOpenPost(post),
-                                      onOpenComments: () =>
-                                          widget.onOpenComments(post),
-                                      onLike: () => widget.onToggleLike(post),
-                                      onBookmark: () =>
-                                          widget.onToggleBookmark(post),
-                                      onMenu: () => _showPostMenu(post),
-                                      contextMeta:
-                                          isPersonalMode &&
-                                              feedMode ==
-                                                  HomeFeedMode.receivedComments
-                                          ? _personalContextMeta(post)
-                                          : null,
-                                      interactionListenable:
-                                          widget.interactionController,
-                                    );
-                                  },
+                        )
+                      else
+                        const SliverToBoxAdapter(child: SizedBox(height: 2)),
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                        sliver:
+                            activeStatus == FeedStatus.error && posts.isEmpty
+                            ? SliverToBoxAdapter(
+                                child: _FeedError(
+                                  onRetry: widget.feedController.initialLoad,
                                 ),
-                        ),
-                        if (posts.isNotEmpty &&
-                            !showInitialSkeleton &&
-                            activeStatus != FeedStatus.loading)
-                          SliverToBoxAdapter(
-                            child: _FeedPaginationFooter(
-                              status: activeStatus,
-                              hasMore: activeHasMore,
-                              loadMoreFailed: loadMoreFailed,
-                              isCommunityFeed: selectedCommunityId != null,
-                              onRetry: _requestLoadMore,
-                            ),
+                              )
+                            : showInitialSkeleton
+                            ? const SliverToBoxAdapter(child: _FeedSkeleton())
+                            : posts.isEmpty
+                            ? SliverToBoxAdapter(
+                                child: _EmptyFeed(
+                                  sort: selectedSort,
+                                ),
+                              )
+                            : SliverList.builder(
+                                itemCount: posts.length,
+                                itemBuilder: (context, index) {
+                                  final post = posts[index];
+                                  final showActivity =
+                                      selectedSort == FeedSort.latest &&
+                                      latestOrder == LatestOrder.comment &&
+                                      (post.lastCommentAt != null ||
+                                          post.activityAt != null);
+                                  return ForumPostCard(
+                                    post: post,
+                                    onOpen: () => widget.onOpenPost(post),
+                                    onOpenComments: () =>
+                                        widget.onOpenComments(post),
+                                    onLike: () => widget.onToggleLike(post),
+                                    onBookmark: () =>
+                                        widget.onToggleBookmark(post),
+                                    onMenu: () => _showPostMenu(post),
+                                    contextMeta: showActivity
+                                        ? '💬 最近回复 ${relativeTimeLabel(post.activityAt ?? post.lastCommentAt!)}'
+                                        : null,
+                                    interactionListenable:
+                                        widget.interactionController,
+                                  );
+                                },
+                              ),
+                      ),
+                      if (posts.isNotEmpty &&
+                          !showInitialSkeleton &&
+                          activeStatus != FeedStatus.loading)
+                        SliverToBoxAdapter(
+                          child: _FeedPaginationFooter(
+                            status: activeStatus,
+                            hasMore: activeHasMore,
+                            loadMoreFailed: loadMoreFailed,
+                            isCommunityFeed: selectedCommunityId != null,
+                            onRetry: _requestLoadMore,
                           ),
-                      ],
+                        ),
+                    ],
                   ),
                 ),
                 Positioned(
@@ -595,12 +571,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
-  }
-
-  String? _personalContextMeta(Post post) {
-    final activityAt = widget.personalFeedController.activityAtFor(post.id);
-    if (activityAt == null) return null;
-    return '最近回复 ${relativeTimeLabel(activityAt)}';
   }
 
   void _showPostMenu(Post post) {
@@ -809,27 +779,28 @@ class _SectionTabs extends StatelessWidget {
           border: Border.all(color: AppTheme.border),
         ),
         child: Row(
-          children: tabs
-              .map(
-                (community) => Expanded(
-                  child: _CommunityTab(
-                    label: community.name,
-                    active: selectedCommunityId == community.id,
-                    onTap: () => onChanged(community.id),
+          children:
+              tabs
+                  .map(
+                    (community) => Expanded(
+                      child: _CommunityTab(
+                        label: community.name,
+                        active: selectedCommunityId == community.id,
+                        onTap: () => onChanged(community.id),
+                      ),
+                    ),
+                  )
+                  .toList()
+                ..insert(
+                  0,
+                  Expanded(
+                    child: _CommunityTab(
+                      label: '综合',
+                      active: selectedCommunityId == null,
+                      onTap: () => onChanged(null),
+                    ),
                   ),
                 ),
-              )
-              .toList()
-            ..insert(
-              0,
-              Expanded(
-                child: _CommunityTab(
-                  label: '综合',
-                  active: selectedCommunityId == null,
-                  onTap: () => onChanged(null),
-                ),
-              ),
-            ),
         ),
       ),
     );
@@ -963,18 +934,19 @@ class _FeatureEntries extends StatelessWidget {
 class _FeedToolbar extends StatelessWidget {
   const _FeedToolbar({
     required this.selected,
-    required this.selectedMode,
+    required this.selectedLatestOrder,
     required this.onSortChanged,
-    required this.onModeChanged,
+    required this.onLatestOrderChanged,
   });
 
-  final FeedSort? selected;
-  final HomeFeedMode selectedMode;
+  final FeedSort selected;
+  final LatestOrder selectedLatestOrder;
   final ValueChanged<FeedSort> onSortChanged;
-  final ValueChanged<HomeFeedMode> onModeChanged;
+  final ValueChanged<LatestOrder> onLatestOrderChanged;
 
   @override
   Widget build(BuildContext context) {
+    final showCapsule = selected == FeedSort.latest;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
@@ -997,11 +969,13 @@ class _FeedToolbar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          _FeedModeCapsule(
-            selectedMode: selectedMode,
-            onModeChanged: onModeChanged,
-          ),
+          if (showCapsule) ...[
+            const SizedBox(width: 8),
+            _LatestOrderCapsule(
+              selectedOrder: selectedLatestOrder,
+              onOrderChanged: onLatestOrderChanged,
+            ),
+          ],
         ],
       ),
     );
@@ -1029,14 +1003,14 @@ class _SortItemButton extends StatelessWidget {
   );
 }
 
-class _FeedModeCapsule extends StatelessWidget {
-  const _FeedModeCapsule({
-    required this.selectedMode,
-    required this.onModeChanged,
+class _LatestOrderCapsule extends StatelessWidget {
+  const _LatestOrderCapsule({
+    required this.selectedOrder,
+    required this.onOrderChanged,
   });
 
-  final HomeFeedMode selectedMode;
-  final ValueChanged<HomeFeedMode> onModeChanged;
+  final LatestOrder selectedOrder;
+  final ValueChanged<LatestOrder> onOrderChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1058,11 +1032,11 @@ class _FeedModeCapsule extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _FeedModeChip(
-            label: '评论',
+          _LatestOrderChip(
+            label: '按回复',
             icon: Icons.chat_bubble_outline_rounded,
-            active: selectedMode == HomeFeedMode.receivedComments,
-            onTap: () => onModeChanged(HomeFeedMode.receivedComments),
+            active: selectedOrder == LatestOrder.comment,
+            onTap: () => onOrderChanged(LatestOrder.comment),
           ),
           const SizedBox(
             height: 13,
@@ -1072,11 +1046,11 @@ class _FeedModeCapsule extends StatelessWidget {
               color: Color(0xFFE5EDF4),
             ),
           ),
-          _FeedModeChip(
-            label: '帖子',
+          _LatestOrderChip(
+            label: '按发帖',
             icon: Icons.article_outlined,
-            active: selectedMode == HomeFeedMode.myPosts,
-            onTap: () => onModeChanged(HomeFeedMode.myPosts),
+            active: selectedOrder == LatestOrder.post,
+            onTap: () => onOrderChanged(LatestOrder.post),
           ),
         ],
       ),
@@ -1084,8 +1058,8 @@ class _FeedModeCapsule extends StatelessWidget {
   }
 }
 
-class _FeedModeChip extends StatelessWidget {
-  const _FeedModeChip({
+class _LatestOrderChip extends StatelessWidget {
+  const _LatestOrderChip({
     required this.label,
     required this.icon,
     required this.active,
@@ -1105,23 +1079,24 @@ class _FeedModeChip extends StatelessWidget {
     return Semantics(
       button: true,
       selected: active,
-      label: '$label模式',
+      label: '$label排序',
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: AnimatedContainer(
           duration: AppMotion.duration(context, AppMotion.normal),
           curve: AppMotion.standard,
-          width: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           height: 22,
           decoration: BoxDecoration(
             color: active ? const Color(0xFFE7F3FF) : Colors.transparent,
             borderRadius: BorderRadius.circular(999),
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 13, color: foreground),
+              Icon(icon, size: 12, color: foreground),
               const SizedBox(width: 3),
               Text(
                 label,
@@ -1132,36 +1107,6 @@ class _FeedModeChip extends StatelessWidget {
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PersonalFeedHint extends StatelessWidget {
-  const _PersonalFeedHint({required this.mode});
-
-  final HomeFeedMode mode;
-
-  @override
-  Widget build(BuildContext context) {
-    final isComments = mode == HomeFeedMode.receivedComments;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 7, 16, 0),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceBlue,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          isComments ? '评论模式：按帖子最近收到其他用户评论的时间排序' : '帖子模式：仅显示我发布的帖子，按发布时间排序',
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 10,
-            height: 1.45,
           ),
         ),
       ),
@@ -1385,10 +1330,7 @@ class _FeedPaginationFooter extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.fromLTRB(0, 12, 0, 88),
         child: Center(
-          child: TextButton(
-            onPressed: onRetry,
-            child: const Text('加载失败，点击重试'),
-          ),
+          child: TextButton(onPressed: onRetry, child: const Text('加载失败，点击重试')),
         ),
       );
     }
@@ -1398,10 +1340,7 @@ class _FeedPaginationFooter extends StatelessWidget {
         child: Center(
           child: Text(
             isCommunityFeed ? '这个板块暂时只有这些内容' : '已经到底啦',
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
         ),
       );
@@ -1487,10 +1426,9 @@ class _SkeletonBlock extends StatelessWidget {
 }
 
 class _EmptyFeed extends StatelessWidget {
-  const _EmptyFeed({required this.sort, required this.mode});
+  const _EmptyFeed({required this.sort});
 
   final FeedSort sort;
-  final HomeFeedMode mode;
 
   @override
   Widget build(BuildContext context) {
@@ -1506,11 +1444,7 @@ class _EmptyFeed extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            switch (mode) {
-              HomeFeedMode.receivedComments => '还没有收到评论',
-              HomeFeedMode.myPosts => '还没有发布帖子',
-              HomeFeedMode.public => '${sort.label}暂无内容',
-            },
+            sort == FeedSort.recommended ? '暂无推荐内容' : '${sort.label}暂无内容',
             style: const TextStyle(
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.w700,
@@ -1518,11 +1452,9 @@ class _EmptyFeed extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            switch (mode) {
-              HomeFeedMode.receivedComments => '有新回复的帖子会出现在这里',
-              HomeFeedMode.myPosts => '发布一篇帖子，和社区开始交流吧',
-              HomeFeedMode.public => '换一个筛选条件看看吧',
-            },
+            sort == FeedSort.recommended
+                ? '管理员推荐的精选帖子会出现在这里'
+                : '换一个筛选条件看看吧',
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
         ],

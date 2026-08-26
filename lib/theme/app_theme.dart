@@ -15,22 +15,42 @@ class AppTheme {
   static const pink = Color(0xFFFF86A7);
   static const purple = Color(0xFF9A88E8);
 
+  static const surface = Colors.white;
+
   // 论坛 UI 的统一量尺，页面和基础组件只从这里取值，避免局部漂移。
   static const pagePadding = 14.0;
+  static const contentHorizontal = 16.0;
+  static const sectionGap = 24.0;
+  static const listGap = 16.0;
   static const spacing4 = 4.0;
   static const spacing8 = 8.0;
   static const spacing12 = 12.0;
   static const spacing16 = 16.0;
   static const spacing20 = 20.0;
   static const spacing24 = 24.0;
-  static const avatarSmall = 32.0;
+
+  static const avatarTiny = 28.0;
+  static const avatarSmall = 34.0;
   static const avatarMedium = 40.0;
+  static const avatarLarge = 48.0;
   static const minTapTarget = 44.0;
+
+  static const radiusSmall = 8.0;
+  static const radiusMedium = 14.0;
+  static const radiusLarge = 20.0;
+
   static const compactRadius = 9.0;
   static const searchRadius = 14.0;
   static const cardRadius = 16.0;
   static const iconContainerRadius = 14.0;
   static const publishRadius = 17.0;
+
+  // 高亮与等级样式
+  static const highlight = Color(0xFF2B6DBA);
+  static const highlightBg = Color(0xFFEDF6FF);
+  static const levelBg = Color(0xFFE7F7F2);
+  static const levelText = Color(0xFF36AA92);
+
   // 兼容旧页面的别名；新代码统一从 AppMotion 取动效 token。
   static const fastMotion = AppMotion.fast;
   static const tabMotion = AppMotion.normal;

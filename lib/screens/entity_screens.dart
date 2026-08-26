@@ -16,6 +16,7 @@ class UserProfileScreen extends StatefulWidget {
     required this.repository,
     required this.userId,
     required this.isAuthenticated,
+    this.canFollow = true,
     required this.onRequireAuth,
     required this.onFeedback,
     required this.onOpenPostId,
@@ -25,6 +26,7 @@ class UserProfileScreen extends StatefulWidget {
   final UserRepository repository;
   final String userId;
   final bool isAuthenticated;
+  final bool canFollow;
   final VoidCallback onRequireAuth;
   final ValueChanged<String> onFeedback;
   final ValueChanged<String> onOpenPostId;
@@ -116,6 +118,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Future<void> _toggleFollow() async {
     if (!widget.isAuthenticated) {
       widget.onRequireAuth();
+      return;
+    }
+    if (!widget.canFollow) {
+      widget.onFeedback('当前身份暂不能关注，请登录邮箱账号后重试');
       return;
     }
     final profile = _profile;
@@ -340,6 +346,7 @@ class UserRelationsScreen extends StatefulWidget {
     required this.userId,
     required this.followers,
     required this.isAuthenticated,
+    this.canFollow = true,
     required this.onRequireAuth,
     required this.onOpenUserId,
     required this.onFeedback,
@@ -349,6 +356,7 @@ class UserRelationsScreen extends StatefulWidget {
   final String userId;
   final bool followers;
   final bool isAuthenticated;
+  final bool canFollow;
   final VoidCallback onRequireAuth;
   final ValueChanged<String> onOpenUserId;
   final ValueChanged<String> onFeedback;
@@ -440,6 +448,10 @@ class _UserRelationsScreenState extends State<UserRelationsScreen> {
     final relation = _items[index];
     if (!widget.isAuthenticated) {
       widget.onRequireAuth();
+      return;
+    }
+    if (!widget.canFollow) {
+      widget.onFeedback('当前身份暂不能关注，请登录邮箱账号后重试');
       return;
     }
     if (!relation.canFollow && !relation.isFollowing) return;
@@ -587,6 +599,7 @@ class CommunityDetailScreen extends StatefulWidget {
     required this.feedRepository,
     required this.communityId,
     required this.isAuthenticated,
+    this.canFollow = true,
     required this.onRequireAuth,
     required this.onFeedback,
     required this.onOpenPost,
@@ -600,6 +613,7 @@ class CommunityDetailScreen extends StatefulWidget {
   final FeedRepository feedRepository;
   final String communityId;
   final bool isAuthenticated;
+  final bool canFollow;
   final VoidCallback onRequireAuth;
   final ValueChanged<String> onFeedback;
   final ValueChanged<Post> onOpenPost;
@@ -643,6 +657,10 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
   Future<void> _mutate({required bool membership}) async {
     if (!widget.isAuthenticated) {
       widget.onRequireAuth();
+      return;
+    }
+    if (!widget.canFollow) {
+      widget.onFeedback('游客模式只能浏览、评论和举报，登录邮箱账号后才能关注或加入板块');
       return;
     }
     final community = _community;

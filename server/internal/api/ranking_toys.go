@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ type rankingToyRecord struct {
 	WantCount        int64
 	RatingTotalCenti int64
 	RatingCount      int64
+	Category         string
+	Segments         []string
 	Wanted           bool
 	Owned            bool
 	Rating           sql.NullInt64
@@ -55,6 +58,7 @@ type rankingToyComment struct {
 	ParentID       sql.NullString
 	ReplyToUserID  sql.NullString
 	ReplyCount     int64
+	AuthorRating   sql.NullInt64
 }
 
 func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +73,7 @@ func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 		SELECT t.id, t.rank, t.name, t.merchant, t.release_year, t.description,
 		       array_to_json(t.tags), t.asset_key, t.want_count,
 		       t.rating_total_centi, t.rating_count,
+		       t.category, array_to_json(t.segments),
 		       COALESCE(us.wanted, false), COALESCE(us.owned, false), us.rating
 		FROM ranking_toys t
 		LEFT JOIN ranking_toy_user_states us
@@ -126,9 +131,31 @@ func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID str
 		writeInternalError(w, r, err)
 		return
 	}
+
+	ratingDistribution := map[string]int{
+		"1": 0, "2": 0, "3": 0, "4": 0, "5": 0,
+		"6": 0, "7": 0, "8": 0, "9": 0, "10": 0,
+	}
+	distRows, distErr := s.db.QueryContext(r.Context(), `
+		SELECT rating, COUNT(*)
+		FROM ranking_toy_user_states
+		WHERE toy_id = $1 AND rating IS NOT NULL AND rating >= 1 AND rating <= 10
+		GROUP BY rating`, toyID)
+	if distErr == nil {
+		defer distRows.Close()
+		for distRows.Next() {
+			var score int
+			var count int
+			if scanErr := distRows.Scan(&score, &count); scanErr == nil {
+				ratingDistribution[strconv.Itoa(score)] = count
+			}
+		}
+	}
+
 	response := item.response()
 	response["comments"] = comments
 	response["comment_sort"] = sort
+	response["rating_distribution"] = ratingDistribution
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
@@ -137,6 +164,7 @@ func (s *Server) loadRankingToy(ctx context.Context, toyID, viewerID string) (ra
 		SELECT t.id, t.rank, t.name, t.merchant, t.release_year, t.description,
 		       array_to_json(t.tags), t.asset_key, t.want_count,
 		       t.rating_total_centi, t.rating_count,
+		       t.category, array_to_json(t.segments),
 		       COALESCE(us.wanted, false), COALESCE(us.owned, false), us.rating
 		FROM ranking_toys t
 		LEFT JOIN ranking_toy_user_states us
@@ -147,6 +175,7 @@ func (s *Server) loadRankingToy(ctx context.Context, toyID, viewerID string) (ra
 func scanRankingToy(scanner rankingToyScanner) (rankingToyRecord, error) {
 	var item rankingToyRecord
 	var tagsRaw []byte
+	var segmentsRaw []byte
 	if err := scanner.Scan(
 		&item.ID,
 		&item.Rank,
@@ -159,6 +188,8 @@ func scanRankingToy(scanner rankingToyScanner) (rankingToyRecord, error) {
 		&item.WantCount,
 		&item.RatingTotalCenti,
 		&item.RatingCount,
+		&item.Category,
+		&segmentsRaw,
 		&item.Wanted,
 		&item.Owned,
 		&item.Rating,
@@ -172,6 +203,14 @@ func scanRankingToy(scanner rankingToyScanner) (rankingToyRecord, error) {
 	}
 	if item.Tags == nil {
 		item.Tags = []string{}
+	}
+	if len(segmentsRaw) > 0 {
+		if err := json.Unmarshal(segmentsRaw, &item.Segments); err != nil {
+			return rankingToyRecord{}, err
+		}
+	}
+	if item.Segments == nil {
+		item.Segments = []string{}
 	}
 	return item, nil
 }
@@ -188,6 +227,8 @@ func (item rankingToyRecord) response() map[string]any {
 		"asset_key":    item.AssetKey,
 		"want_count":   item.WantCount,
 		"rating_count": item.RatingCount,
+		"category":     item.Category,
+		"segments":     item.Segments,
 		"score":        item.score(),
 		"viewer_state": map[string]any{
 			"wanted": item.Wanted,
@@ -219,10 +260,12 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 	query := `SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
-	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count
+	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
+	                 aus.rating
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
+	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
 	          WHERE c.toy_id = $1 AND c.deleted_at IS NULL
 	          ORDER BY ` + orderBy + ` LIMIT 100`
 	rows, err := s.db.QueryContext(r.Context(), query, toyID, viewerID)
@@ -247,6 +290,7 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 			&item.ParentID,
 			&item.ReplyToUserID,
 			&item.ReplyCount,
+			&item.AuthorRating,
 		); err != nil {
 			return nil, err
 		}
@@ -265,11 +309,13 @@ func (item rankingToyComment) response() map[string]any {
 		"reply_to_user_id": rankingNullableString(item.ReplyToUserID),
 		"reply_count":      item.ReplyCount,
 		"created_at":       item.CreatedAt,
+		"author_rating":    nullableInt(item.AuthorRating),
 		"author": map[string]any{
-			"id":       item.AuthorID,
-			"username": item.Username,
-			"nickname": item.Nickname,
-			"level":    item.Level,
+			"id":            item.AuthorID,
+			"username":      item.Username,
+			"nickname":      item.Nickname,
+			"level":         item.Level,
+			"author_rating": nullableInt(item.AuthorRating),
 		},
 		"viewer_state": map[string]any{"has_liked": item.ViewerHasLiked},
 	}
@@ -288,6 +334,9 @@ func (s *Server) setRankingToyFlag(w http.ResponseWriter, r *http.Request, toyID
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capVote) {
 		return
 	}
 	if field != "wanted" && field != "owned" {
@@ -363,6 +412,9 @@ func (s *Server) rateRankingToy(w http.ResponseWriter, r *http.Request, toyID st
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capVote) {
+		return
+	}
 	var input struct {
 		Score int `json:"score"`
 	}
@@ -428,6 +480,9 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capComment) {
 		return
 	}
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -535,14 +590,17 @@ func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID stri
 		SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), c.content, c.like_count,
 		       EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
-		       c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count
+		       c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
+		       aus.rating
 		FROM ranking_toy_comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = c.author_id
+		LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
 		WHERE c.id = $1 AND c.deleted_at IS NULL`, commentID, viewerID).Scan(
 		&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 		&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 		&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
+		&item.AuthorRating,
 	)
 	return item, err
 }
@@ -553,6 +611,9 @@ func (s *Server) toggleRankingToyCommentLike(w http.ResponseWriter, r *http.Requ
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capLike) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)

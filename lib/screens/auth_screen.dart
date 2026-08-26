@@ -95,6 +95,16 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  void changeEmail() {
+    countdownTimer?.cancel();
+    setState(() {
+      codeSent = false;
+      retryAfter = 0;
+      deliveryHint = null;
+      codeController.clear();
+    });
+  }
+
   Future<void> enterGuest() async {
     if (widget.onGuest != null) {
       widget.onGuest!();
@@ -176,15 +186,31 @@ class _AuthScreenState extends State<AuthScreen> {
                       height: 1.5,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '参与讨论时：游客身份可评论、举报；邮箱账号可发布、收藏、关注并保存个人数据。',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
+                  ),
                   const SizedBox(height: 26),
                   TextField(
                     controller: emailController,
                     enabled: !busy,
+                    readOnly: codeSent,
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: '邮箱',
                       prefixIcon: Icon(Icons.mail_outline),
+                      suffixIcon: codeSent
+                          ? TextButton(
+                              onPressed: busy ? null : changeEmail,
+                              child: const Text('修改邮箱'),
+                            )
+                          : null,
                     ),
                   ),
                   if (codeSent) ...[
@@ -250,7 +276,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   Center(
                     child: TextButton(
                       onPressed: widget.onBrowse,
-                      child: const Text('仅浏览公开内容'),
+                      child: const Text('返回浏览公开内容'),
                     ),
                   ),
                 ],

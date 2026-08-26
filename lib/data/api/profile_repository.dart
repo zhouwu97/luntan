@@ -6,6 +6,8 @@ class ProfileSummary {
     required this.id,
     required this.username,
     required this.nickname,
+    this.avatarMediaId,
+    this.avatarUrl,
     required this.level,
     required this.trustLevel,
     required this.signature,
@@ -19,6 +21,8 @@ class ProfileSummary {
   final String id;
   final String username;
   final String nickname;
+  final String? avatarMediaId;
+  final String? avatarUrl;
   final int level;
   final String trustLevel;
   final String signature;
@@ -112,6 +116,8 @@ class ProfileRepository {
       id: _string(value['id']),
       username: _string(value['username']),
       nickname: _string(value['nickname']),
+      avatarMediaId: _nullableString(value['avatar_media_id']),
+      avatarUrl: _nullableString(value['avatar_url']),
       level: _int(value['level'], fallback: 1),
       trustLevel: _string(value['trust_level']),
       signature: _string(value['signature']),
@@ -154,6 +160,36 @@ class ProfileRepository {
       _client.postJson('/api/v1/posts/$postId/history').then((_) {});
 
   Future<void> clearHistory() => _client.deleteJson('/api/v1/me/history');
+
+  Future<ProfileSummary> updateProfile({
+    required String nickname,
+    required String signature,
+    String? avatarMediaId,
+  }) async {
+    final value = await _client.patchJson(
+      '/api/v1/me/profile',
+      body: {
+        'nickname': nickname.trim(),
+        'bio': signature.trim(),
+        'avatar_media_id': avatarMediaId,
+      },
+    );
+    return ProfileSummary(
+      id: _string(value['id']),
+      username: _string(value['username']),
+      nickname: _string(value['nickname']),
+      avatarMediaId: _nullableString(value['avatar_media_id']),
+      avatarUrl: _nullableString(value['avatar_url']),
+      level: _int(value['level'], fallback: 1),
+      trustLevel: _string(value['trust_level']),
+      signature: _string(value['signature']),
+      postCount: _int(value['post_count']),
+      commentCount: _int(value['comment_count']),
+      likeReceivedCount: _int(value['like_received_count']),
+      followerCount: _int(value['follower_count']),
+      followingCount: _int(value['following_count']),
+    );
+  }
 
   String _string(dynamic value) => value is String ? value : '';
   int _int(dynamic value, {int fallback = 0}) =>

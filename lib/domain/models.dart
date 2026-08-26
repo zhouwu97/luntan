@@ -29,6 +29,8 @@ enum ModerationStatus { normal, pending, limited, hidden, rejected }
 
 enum CommentPublicationStatus { published, deleted }
 
+enum LatestOrder { comment, post }
+
 class User {
   const User({
     required this.id,
@@ -93,6 +95,9 @@ class Community {
     this.sortOrder = 0,
     this.isFollowing = false,
     this.isMember = false,
+    this.canPublish = true,
+    this.canUploadMedia = true,
+    this.canCreatePoll = true,
   });
 
   final String id;
@@ -111,6 +116,9 @@ class Community {
   final int sortOrder;
   final bool isFollowing;
   final bool isMember;
+  final bool canPublish;
+  final bool canUploadMedia;
+  final bool canCreatePoll;
 }
 
 class ViewerPostState {
@@ -183,6 +191,10 @@ class Post {
     required this.createdAt,
     required this.updatedAt,
     this.publishedAt,
+    this.activityAt,
+    this.lastCommentAt,
+    this.isRecommended = false,
+    this.recommendationPosition,
     ViewerPostState? viewerState,
     this.tags = const [],
     this.extraTag,
@@ -210,6 +222,10 @@ class Post {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? publishedAt;
+  final DateTime? activityAt;
+  final DateTime? lastCommentAt;
+  final bool isRecommended;
+  final int? recommendationPosition;
   final ViewerPostState viewerState;
   final List<String> tags;
   final String? extraTag;
@@ -308,9 +324,14 @@ String relativeTimeLabel(DateTime value, {DateTime? now}) {
   return '${delta.inDays}天前';
 }
 
-String compactCountLabel(int value) {
-  if (value >= 1000) {
-    return '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k';
+String compactCountLabel(int count) {
+  if (count >= 10000) {
+    final value = (count / 10000).toStringAsFixed(1);
+    return '${value.endsWith('.0') ? value.substring(0, value.length - 2) : value}w';
   }
-  return '$value';
+  if (count >= 1000) {
+    final value = (count / 1000).toStringAsFixed(1);
+    return '${value.endsWith('.0') ? value.substring(0, value.length - 2) : value}k';
+  }
+  return '$count';
 }

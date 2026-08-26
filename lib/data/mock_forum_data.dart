@@ -139,7 +139,6 @@ class ForumStore extends ChangeNotifier {
   // 首页默认推荐流（人工精选），最新/精华/热门可通过筛选主动切换。
   FeedSort selectedSort = FeedSort.recommended;
   bool isRefreshing = false;
-  int unreadMessages = 8;
   int points = 3980;
   int publishedCount = 119;
   int replyCount = 2584;
@@ -274,11 +273,6 @@ class ForumStore extends ChangeNotifier {
     history.removeWhere((item) => item.id == post.id);
     history.insert(0, post);
     if (history.length > 20) history.removeLast();
-    notifyListeners();
-  }
-
-  void markMessagesRead() {
-    unreadMessages = 0;
     notifyListeners();
   }
 
@@ -507,7 +501,9 @@ Post _post({
   );
   final activityAt = lastCommentMinutesAgo != null
       ? _now.subtract(Duration(minutes: lastCommentMinutesAgo))
-      : (comments > 0 ? _now.subtract(Duration(minutes: hoursAgo * 20 + 5)) : createdAt);
+      : (comments > 0
+            ? _now.subtract(Duration(minutes: hoursAgo * 20 + 5))
+            : createdAt);
   return Post(
     id: id,
     authorId: authorId,

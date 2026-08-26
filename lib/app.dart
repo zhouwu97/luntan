@@ -118,6 +118,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         }
       });
     }
+    // Mock 与 API 都从同一个通知仓储读取角标；Mock 空通知列表自然返回 0。
+    unawaited(_refreshUnreadCount());
   }
 
   void _handleSessionInvalidated() {
@@ -242,78 +244,37 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     bool isGameShare = false,
     bool isPoll = false,
   }) async {
-    final draftStorage = await ComposerDraftStorage.create();
-    final savedDraft = await draftStorage.load();
     if (!mounted) return;
-    var editorIsGameShare = isGameShare;
-    var editorIsPoll = isPoll;
-    ComposerDraftSnapshot? initialDraft;
-    final draftToRestore = savedDraft;
-    if (draftToRestore != null && draftToRestore.hasContent) {
-      final shouldRestore = await showDialog<bool>(
-        context: appContext,
-        builder: (context) => AlertDialog(
-          title: const Text('检测到未发布草稿'),
-          content: Text(
-            '上次编辑于 ${_draftTimeLabel(draftToRestore.updatedAt)}，是否继续编辑？',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('删除草稿'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('继续编辑'),
-            ),
-          ],
-        ),
-      );
-      if (shouldRestore == true) {
-        initialDraft = draftToRestore;
-        editorIsGameShare = draftToRestore.isGameShare;
-        editorIsPoll = draftToRestore.isPoll;
-      } else if (shouldRestore == false) {
-        await draftStorage.clear();
-      }
-    }
-    List<Community> communities = const [];
-    if (apiMode) {
-      try {
-        communities = await repositories.community.getCommunities(
-          status: CommunityStatus.active,
-          canPublish: true,
-        );
-      } catch (error) {
-        _showQuickFeedback(
-          userFacingApiMessage(error, fallback: '社区列表加载失败，请稍后重试'),
-        );
-        return;
-      }
-      if (!mounted) return;
-      if (communities.isEmpty) {
-        _showQuickFeedback('当前没有可发布的社区');
-        return;
-      }
-    }
-    if (!mounted) return;
+    // 编辑器先打开，再并行读取社区和草稿，避免底部菜单关闭后出现一段无反馈的等待。
+    final draftStorageFuture = ComposerDraftStorage.create();
+    final availableCommunitiesFuture = apiMode
+        ? _loadPublishCommunities()
+        : null;
     await showDialog<void>(
       context: context,
       builder: (_) => PostEditorDialog(
-        isGameShare: editorIsGameShare,
-        isPoll: editorIsPoll,
+        isGameShare: isGameShare,
+        isPoll: isPoll,
         onPublish: _publishDraft,
         publishController: apiMode ? publishController : null,
         enableSampleMedia: !apiMode,
-        availableCommunities: communities,
-        initialDraft: initialDraft,
-        draftStorage: draftStorage,
+        availableCommunities: apiMode ? const [] : store.communities,
+        availableCommunitiesFuture: availableCommunitiesFuture,
+        draftStorageFuture: draftStorageFuture,
       ),
     );
   }
 
-  String _draftTimeLabel(DateTime value) =>
-      '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+  Future<List<Community>> _loadPublishCommunities() async {
+    final communities = await repositories.community.getCommunities(
+      status: CommunityStatus.active,
+      canPublish: true,
+    );
+    if (communities.isEmpty) {
+      throw StateError('当前没有可发布的社区');
+    }
+    return communities;
+  }
 
   Future<void> _publishDraft(PostDraft result) async {
     try {
@@ -777,41 +738,29 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   void showMessages() {
     if (!_requireAuth()) return;
-    if (apiMode && repositories.platform != null) {
-      navigatorKey.currentState!
-          .push(
-            MaterialPageRoute<void>(
-              builder: (_) => NotificationsScreen(
-                repository: repositories.platform!,
-                onOpenPostId: openPostById,
-                onOpenPost: (postId, commentId) =>
-                    openPostById(postId, focusCommentId: commentId),
-                onOpenUserId: openUserProfile,
-                onOpenCommunityId: openCommunity,
-                onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
-                onOpenNotification: _openNotificationDetail,
-                onOpenModerationActionId: openModerationAction,
-                onOpenAppealId: openAppeal,
-              ),
-            ),
-          )
-          .then((_) => _refreshUnreadCount());
+    final platform = repositories.platform;
+    if (platform == null) {
+      _showQuickFeedback('当前模式暂不支持通知');
       return;
     }
-    navigatorKey.currentState!.push(
-      MaterialPageRoute<void>(
-        builder: (_) => NotificationsScreen(
-          repository: repositories.platform!,
-          onOpenPostId: openPostById,
-          onOpenPost: (postId, commentId) =>
-              openPostById(postId, focusCommentId: commentId),
-          onOpenModerationActionId: openModerationAction,
-          onOpenAppealId: openAppeal,
-          onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
-          onOpenNotification: _openNotificationDetail,
-        ),
-      ),
-    );
+    navigatorKey.currentState!
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => NotificationsScreen(
+              repository: platform,
+              onOpenPostId: openPostById,
+              onOpenPost: (postId, commentId) =>
+                  openPostById(postId, focusCommentId: commentId),
+              onOpenSystem: () => _showQuickFeedback('这是一条系统通知'),
+              onOpenNotification: _openNotificationDetail,
+              onOpenUserId: openUserProfile,
+              onOpenCommunityId: openCommunity,
+              onOpenModerationActionId: openModerationAction,
+              onOpenAppealId: openAppeal,
+            ),
+          ),
+        )
+        .then((_) => _refreshUnreadCount());
   }
 
   void _openNotificationDetail(ForumNotification notification) {
@@ -915,9 +864,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
             onRequireAuth: _openLogin,
             isAuthenticated:
                 !apiMode || authController?.status == AuthStatus.authenticated,
-            platform: repositories.isApiMode ? repositories.platform : null,
+            platform: repositories.platform,
             canModerate: canModerate,
-            unread: apiMode ? unreadCount : null,
+            unread: unreadCount,
             interactionController: interactionController,
             feedRepository: repositories.isApiMode ? repositories.feed : null,
             communityRepository: repositories.isApiMode

@@ -26,9 +26,9 @@ func TestSearchReturnsToysInAllAndToysMode(t *testing.T) {
 	toyRows := sqlmock.NewRows(toyCols).
 		AddRow("toy-butter-2", 1, "黄油小姐 二代", "COC", 2025, "奶香软糯", `["奶香材质","软糯包裹"]`, "thumb_01.webp", 401, 1479, 17, "cup", `["beginner"]`, 100.0)
 
-	postCols := []string{"id", "title", "content_preview", "community_id", "community_name", "created_at", "rank"}
+	postCols := []string{"id", "author_id", "username", "author_name", "author_level", "title", "content_preview", "community_id", "community_name", "created_at", "comment_count", "like_count", "view_count", "rank"}
 	postRows := sqlmock.NewRows(postCols).
-		AddRow("post-1", "如何选择黄油小姐二代？", "正文预览", "c-1", "杯子交流", time.Now().UTC(), 50.0)
+		AddRow("post-1", "u-1", "tester", "评测君", 4, "如何选择黄油小姐二代？", "正文预览", "c-1", "杯子交流", time.Now().UTC(), 18, 6, 98, 50.0)
 
 	userCols := []string{"id", "username", "nickname", "created_at", "rank"}
 	userRows := sqlmock.NewRows(userCols)
@@ -37,19 +37,19 @@ func TestSearchReturnsToysInAllAndToysMode(t *testing.T) {
 	commRows := sqlmock.NewRows(commCols)
 
 	mock.ExpectQuery(`(?s)SELECT t.id, t.rank, t.name.*FROM ranking_toys t.*LIMIT \$2`).
-		WithArgs("黄油", 21).
+		WithArgs("黄油", 4).
 		WillReturnRows(toyRows)
 
-	mock.ExpectQuery(`(?s)SELECT p.id, p.title.*FROM posts p.*LIMIT \$2`).
-		WithArgs("黄油", 21).
+	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*p.title.*FROM posts p.*LIMIT \$2`).
+		WithArgs("黄油", 6).
 		WillReturnRows(postRows)
 
 	mock.ExpectQuery(`(?s)SELECT u.id, u.username.*FROM users u.*LIMIT \$2`).
-		WithArgs("黄油", 21).
+		WithArgs("黄油", 4).
 		WillReturnRows(userRows)
 
 	mock.ExpectQuery(`(?s)SELECT c.id, c.slug.*FROM communities c.*LIMIT \$2`).
-		WithArgs("黄油", 21).
+		WithArgs("黄油", 4).
 		WillReturnRows(commRows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=%E9%BB%84%E6%B2%B9&type=all", nil)
@@ -75,6 +75,9 @@ func TestSearchReturnsToysInAllAndToysMode(t *testing.T) {
 	}
 	if len(body.Posts) != 1 || !strings.Contains(body.Posts[0]["title"].(string), "黄油小姐") {
 		t.Fatalf("unexpected posts response: %#v", body.Posts)
+	}
+	if body.Posts[0]["author_name"] != "评测君" || body.Posts[0]["comment_count"] != float64(18) || body.Posts[0]["view_count"] != float64(98) {
+		t.Fatalf("search post metadata missing: %#v", body.Posts[0])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -118,7 +121,7 @@ func TestGetRankingToyReturnsRatingDistribution(t *testing.T) {
 		AddRow(9, 3).
 		AddRow(8, 1)
 
-	mock.ExpectQuery(`(?s)SELECT rating, COUNT\(\*\).*FROM ranking_toy_user_states.*WHERE toy_id = \$1`).
+	mock.ExpectQuery(`(?s)SELECT score, rating_count.*FROM ranking_toy_rating_distribution.*WHERE toy_id = \$1`).
 		WithArgs("toy-butter-2").
 		WillReturnRows(distRows)
 
@@ -131,12 +134,12 @@ func TestGetRankingToyReturnsRatingDistribution(t *testing.T) {
 	}
 
 	var detail struct {
-		ID                 string                 `json:"id"`
-		Name               string                 `json:"name"`
-		Category           string                 `json:"category"`
-		Segments           []string               `json:"segments"`
-		RatingDistribution map[string]int         `json:"rating_distribution"`
-		Comments           []map[string]any       `json:"comments"`
+		ID                 string           `json:"id"`
+		Name               string           `json:"name"`
+		Category           string           `json:"category"`
+		Segments           []string         `json:"segments"`
+		RatingDistribution map[string]int   `json:"rating_distribution"`
+		Comments           []map[string]any `json:"comments"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
 		t.Fatal(err)

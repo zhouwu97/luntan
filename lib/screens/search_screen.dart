@@ -7,6 +7,9 @@ import '../controllers/interaction_controller.dart';
 import '../data/api/platform_repository.dart' hide RankingItem;
 import '../data/api/ranking_repository.dart';
 import '../data/mock_forum_data.dart';
+import '../data/repositories/mock_repositories.dart';
+import '../domain/models.dart' show CommunityStatus;
+import '../domain/repositories.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/search/search_community_row.dart';
@@ -24,7 +27,7 @@ extension SearchKindLabel on SearchKind {
     SearchKind.posts => '帖子',
     SearchKind.users => '用户',
     SearchKind.communities => '板块',
-    SearchKind.toys => '玩具',
+    SearchKind.toys => '榜单',
   };
 }
 
@@ -34,6 +37,8 @@ class SearchScreen extends StatefulWidget {
     required this.store,
     this.platform,
     this.rankingRepository,
+    this.communities = const [],
+    this.communityRepository,
     required this.onOpenPost,
     required this.onOpenPostId,
     required this.interactionController,
@@ -49,6 +54,8 @@ class SearchScreen extends StatefulWidget {
   final ForumStore store;
   final PlatformRepository? platform;
   final RankingRepository? rankingRepository;
+  final List<Community> communities;
+  final CommunityRepository? communityRepository;
   final ValueChanged<Post> onOpenPost;
   final ValueChanged<String> onOpenPostId;
   final InteractionController interactionController;
@@ -82,6 +89,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String activeQuery = '';
   SearchKind activeKind = SearchKind.all;
   SharedPreferences? preferences;
+  List<Community> recommendedCommunities = const [];
 
   static const recentSearchesKey = 'search.recent.v1';
   static const suggestedSearches = <String>['黄油小姐', '润滑', '保养', '慢玩', '樱川爱'];
@@ -98,7 +106,25 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    recommendedCommunities = widget.communities;
     _loadRecentSearches();
+    if (widget.platform != null &&
+        recommendedCommunities.isEmpty &&
+        widget.communityRepository != null) {
+      unawaited(_loadRecommendedCommunities());
+    }
+  }
+
+  Future<void> _loadRecommendedCommunities() async {
+    try {
+      final loaded = await widget.communityRepository!.getCommunities(
+        status: CommunityStatus.active,
+      );
+      if (!mounted) return;
+      setState(() => recommendedCommunities = loaded);
+    } catch (_) {
+      // 推荐板块加载失败不影响搜索主流程，也不回退到 API 模式的本地种子数据。
+    }
   }
 
   Future<void> _loadRecentSearches() async {
@@ -268,6 +294,9 @@ class _SearchScreenState extends State<SearchScreen> {
       description: toy.description,
       category: toy.category,
       segments: toy.segments,
+      ratingDistribution: toy.id == 'toy-butter-2'
+          ? const {8: 5, 9: 12}
+          : const {},
     );
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -367,7 +396,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                 color: AppTheme.textPrimary,
                               ),
                               decoration: const InputDecoration(
-                                hintText: '搜索帖子、用户、板块',
+                                hintText: '搜索帖子、用户、板块、榜单',
                                 hintStyle: TextStyle(
                                   fontSize: 14,
                                   color: AppTheme.textSecondary,
@@ -496,6 +525,31 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
 
+          // 榜单商品模块优先展示，保证精确命中商品名时用户先看到榜单结果。
+          if (result.toys.isNotEmpty &&
+              (kind == SearchKind.all || kind == SearchKind.toys)) ...[
+            SearchSectionHeader(
+              title: '榜单商品',
+              actionText: kind == SearchKind.all && result.toys.length >= 2
+                  ? '查看全部 >'
+                  : null,
+              onAction: () => _switchKind(SearchKind.toys),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Column(
+                children: result.toys
+                    .map(
+                      (toy) => _SearchToyCard(
+                        toy: toy,
+                        onTap: () => _openToyDetail(toy),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
+
           // 帖子模块
           if (result.posts.isNotEmpty &&
               (kind == SearchKind.all || kind == SearchKind.posts)) ...[
@@ -512,8 +566,12 @@ class _SearchScreenState extends State<SearchScreen> {
                   title: post.title,
                   snippet: post.contentPreview,
                   communityName: post.communityName,
-                  authorName: '社区作者',
-                  timeLabel: '',
+                  authorName: post.authorName.isEmpty ? '用户' : post.authorName,
+                  authorLevel: post.authorLevel,
+                  timeLabel: relativeTimeLabel(post.createdAt),
+                  commentCount: post.commentCount,
+                  likeCount: post.likeCount,
+                  viewCount: post.viewCount,
                   query: query,
                   onTap: () => widget.onOpenPostId(post.id),
                 );
@@ -551,7 +609,8 @@ class _SearchScreenState extends State<SearchScreen> {
               (kind == SearchKind.all || kind == SearchKind.communities)) ...[
             SearchSectionHeader(
               title: '板块',
-              actionText: kind == SearchKind.all && result.communities.length >= 2
+              actionText:
+                  kind == SearchKind.all && result.communities.length >= 2
                   ? '查看全部 >'
                   : null,
               onAction: () => _switchKind(SearchKind.communities),
@@ -568,29 +627,6 @@ class _SearchScreenState extends State<SearchScreen> {
                       : () => widget.onOpenCommunityId!(community.id),
                 );
               }).toList(),
-            ),
-          ],
-
-          // 榜单商品模块
-          if (result.toys.isNotEmpty &&
-              (kind == SearchKind.all || kind == SearchKind.toys)) ...[
-            SearchSectionHeader(
-              title: '榜单商品',
-              actionText: kind == SearchKind.all && result.toys.length >= 2
-                  ? '查看全部 >'
-                  : null,
-              onAction: () => _switchKind(SearchKind.toys),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Column(
-                children: result.toys
-                    .map(
-                      (toy) =>
-                          _SearchToyCard(toy: toy, onTap: () => _openToyDetail(toy)),
-                    )
-                    .toList(),
-              ),
             ),
           ],
 
@@ -742,40 +778,61 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         const SizedBox(height: 8),
         _buildGroupContainer(
-          children: widget.store.communities.map((community) {
-            return SearchCommunityRow.fromCommunity(
-              community: community,
-              onTap: widget.onOpenCommunityId == null
-                  ? () {}
-                  : () => widget.onOpenCommunityId!(community.id),
-            );
-          }).toList(),
+          children:
+              (widget.platform == null
+                      ? (widget.communities.isEmpty
+                            ? widget.store.communities
+                            : widget.communities)
+                      : recommendedCommunities)
+                  .map((community) {
+                    return SearchCommunityRow.fromCommunity(
+                      community: community,
+                      onTap: widget.onOpenCommunityId == null
+                          ? () {}
+                          : () => widget.onOpenCommunityId!(community.id),
+                    );
+                  })
+                  .toList(),
         ),
       ],
     );
   }
 
   Widget _buildMockBody(String query) {
+    final toys =
+        (kind == SearchKind.posts ||
+            kind == SearchKind.users ||
+            kind == SearchKind.communities)
+        ? const <SearchToy>[]
+        : MockPlatformRepository.rankingToys
+              .where(
+                (toy) =>
+                    '${toy.name} ${toy.merchant} ${toy.description} ${toy.tags.join(' ')}'
+                        .toLowerCase()
+                        .contains(query.trim().toLowerCase()),
+              )
+              .take(3)
+              .toList();
     final posts =
         (kind == SearchKind.users ||
-                kind == SearchKind.communities ||
-                kind == SearchKind.toys)
-            ? const <Post>[]
-            : widget.store.search(query);
+            kind == SearchKind.communities ||
+            kind == SearchKind.toys)
+        ? const <Post>[]
+        : widget.store.search(query);
     final users =
         (kind == SearchKind.posts ||
-                kind == SearchKind.communities ||
-                kind == SearchKind.toys)
-            ? const <User>[]
-            : widget.store.searchUsers(query);
+            kind == SearchKind.communities ||
+            kind == SearchKind.toys)
+        ? const <User>[]
+        : widget.store.searchUsers(query);
     final communities =
         (kind == SearchKind.posts ||
-                kind == SearchKind.users ||
-                kind == SearchKind.toys)
-            ? const <Community>[]
-            : widget.store.searchCommunities(query);
+            kind == SearchKind.users ||
+            kind == SearchKind.toys)
+        ? const <Community>[]
+        : widget.store.searchCommunities(query);
 
-    if (posts.isEmpty && users.isEmpty && communities.isEmpty) {
+    if (toys.isEmpty && posts.isEmpty && users.isEmpty && communities.isEmpty) {
       return _buildEmptyState(query);
     }
 
@@ -794,6 +851,28 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
         ),
+        if (toys.isNotEmpty) ...[
+          SearchSectionHeader(
+            title: '榜单商品',
+            actionText: kind == SearchKind.all && toys.length >= 2
+                ? '查看全部 >'
+                : null,
+            onAction: () => _switchKind(SearchKind.toys),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Column(
+              children: toys
+                  .map(
+                    (toy) => _SearchToyCard(
+                      toy: toy,
+                      onTap: () => _openToyDetail(toy),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
         if (posts.isNotEmpty) ...[
           SearchSectionHeader(
             title: '帖子',
@@ -869,11 +948,8 @@ class _SearchScreenState extends State<SearchScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: children.length,
-          separatorBuilder: (context, index) => const Divider(
-            height: 1,
-            thickness: 1,
-            color: Color(0xFFEDF2F6),
-          ),
+          separatorBuilder: (context, index) =>
+              const Divider(height: 1, thickness: 1, color: Color(0xFFEDF2F6)),
           itemBuilder: (context, index) => children[index],
         ),
       ),

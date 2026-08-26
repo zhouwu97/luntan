@@ -23,6 +23,17 @@ String apiBaseUrlFromEnvironment() {
   return resolveApiBaseUrl(configured: configured, appEnv: appEnv);
 }
 
+bool requiresConfiguredApi(String appEnv) {
+  switch (appEnv.trim().toLowerCase()) {
+    case 'qa':
+    case 'staging':
+    case 'production':
+      return true;
+    default:
+      return false;
+  }
+}
+
 /// 解析编译期 API 地址。
 ///
 /// QA 可以继续使用 HTTP；生产构建必须显式声明 APP_ENV=production，并且
@@ -30,8 +41,8 @@ String apiBaseUrlFromEnvironment() {
 String resolveApiBaseUrl({required String configured, required String appEnv}) {
   final baseUrl = configured.trim();
   if (baseUrl.isEmpty) {
-    if (appEnv.trim().toLowerCase() == 'production') {
-      throw StateError('生产环境必须配置 API_BASE_URL，禁止回退到 Mock');
+    if (requiresConfiguredApi(appEnv)) {
+      throw StateError('${appEnv.trim()} 环境必须配置 API_BASE_URL，禁止回退到 Mock');
     }
     // 开发和测试环境允许显式选择 Mock，避免 Android、Web、桌面端因为默认值
     // 不同而出现无法复现的真实 API / Mock 混用。
@@ -98,7 +109,7 @@ class ForumRepositories {
       post: MockPostRepository(store: actualStore),
       comments: MockCommentRepository(store: actualStore),
       interactions: MockInteractionRepository(),
-      platform: MockPlatformRepository(),
+      platform: MockPlatformRepository(store: actualStore),
       appeals: MockAppealRepository(),
       bookmarks: MockBookmarkRepository(store: actualStore),
       publish: MockPublishRepository(store: actualStore),

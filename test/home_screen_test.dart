@@ -15,7 +15,15 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
   _PagedHomeFeed(this.pages);
 
   final List<FeedPage> pages;
-  final List<({String? cursor, String? communityId, String sort, LatestOrder latestOrder})> calls = [];
+  final List<
+    ({
+      String? cursor,
+      String? communityId,
+      String sort,
+      LatestOrder latestOrder,
+    })
+  >
+  calls = [];
 
   @override
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
@@ -31,7 +39,12 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
     String? postType,
     bool? hasMedia,
   }) async {
-    calls.add((cursor: cursor, communityId: communityId, sort: sort, latestOrder: latestOrder));
+    calls.add((
+      cursor: cursor,
+      communityId: communityId,
+      sort: sort,
+      latestOrder: latestOrder,
+    ));
     return pages[calls.length - 1];
   }
 }
@@ -58,18 +71,19 @@ class _RecordingRecommendationRepository extends PlatformRepository {
   }
 }
 
-Post _post(String id, {DateTime? activityAt, bool isRecommended = false}) => Post(
-  id: id,
-  authorId: 'author-$id',
-  communityId: 'community-unboxing',
-  title: '自动分页帖子 $id',
-  content: '用于验证首页在首屏没有滚动空间时会继续补充下一页。',
-  createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-  updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
-  activityAt: activityAt,
-  lastCommentAt: activityAt,
-  isRecommended: isRecommended,
-);
+Post _post(String id, {DateTime? activityAt, bool isRecommended = false}) =>
+    Post(
+      id: id,
+      authorId: 'author-$id',
+      communityId: 'community-unboxing',
+      title: '自动分页帖子 $id',
+      content: '用于验证首页在首屏没有滚动空间时会继续补充下一页。',
+      createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+      updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
+      activityAt: activityAt,
+      lastCommentAt: activityAt,
+      isRecommended: isRecommended,
+    );
 
 Widget _homeFor(
   FeedController controller,
@@ -103,7 +117,7 @@ Widget _homeFor(
 }
 
 void main() {
-  test('首页公开板块默认跳过 QA 测试板块并保留导入社区', () {
+  test('首页只按产品固定顺序展示三个正式板块', () {
     final communities = [
       const Community(
         id: 'community_qa',
@@ -114,16 +128,24 @@ void main() {
         sortOrder: 0,
       ),
       const Community(
-        id: 'community-import-unboxing',
-        slug: 'import-unboxing',
+        id: 'community-daily',
+        slug: 'daily',
+        name: '杂鱼日常',
+        description: '日常内容',
+        categoryId: 'cat-life',
+        sortOrder: 3,
+      ),
+      const Community(
+        id: 'community-unboxing',
+        slug: 'unboxing',
         name: '大型拆箱',
         description: '导入内容',
         categoryId: 'cat-import',
         sortOrder: 10,
       ),
       const Community(
-        id: 'community-import-forum',
-        slug: 'import-forum',
+        id: 'community-campus',
+        slug: 'campus',
         name: '酱紫社区',
         description: '导入内容',
         categoryId: 'cat-import',
@@ -133,11 +155,11 @@ void main() {
 
     final visible = selectHomeCommunities(communities);
 
-    expect(visible.map((item) => item.name), ['大型拆箱', '酱紫社区']);
+    expect(visible.map((item) => item.name), ['大型拆箱', '杂鱼日常', '酱紫社区']);
     expect(visible, isNot(contains(communities.first)));
   });
 
-  testWidgets('API 首页默认综合流并在首屏不足时最多自动补四页', (tester) async {
+  testWidgets('API 首页默认杂鱼日常并在首屏不足时最多自动补四页', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final pages = List<FeedPage>.generate(
@@ -154,29 +176,42 @@ void main() {
     await tester.pumpWidget(_homeFor(controller, repository));
     await tester.pumpAndSettle();
 
-    expect(find.text('综合'), findsOneWidget);
+    expect(find.text('综合'), findsNothing);
+    expect(find.text('杂鱼日常'), findsOneWidget);
     expect(repository.calls, hasLength(5));
-    expect(repository.calls.every((call) => call.communityId == null), isTrue);
     expect(
-      repository.calls.skip(1).map((call) => call.cursor),
-      ['cursor-1', 'cursor-2', 'cursor-3', 'cursor-4'],
+      repository.calls.every((call) => call.communityId == 'community-daily'),
+      isTrue,
     );
+    expect(repository.calls.skip(1).map((call) => call.cursor), [
+      'cursor-1',
+      'cursor-2',
+      'cursor-3',
+      'cursor-4',
+    ]);
   });
 
   testWidgets('最新排序下显示按回复与按发帖胶囊，无需登录即可切换', (tester) async {
     final pages = [
       FeedPage(
-        items: [_post('1', activityAt: DateTime.now().subtract(const Duration(minutes: 10)))],
+        items: [
+          _post(
+            '1',
+            activityAt: DateTime.now().subtract(const Duration(minutes: 10)),
+          ),
+        ],
         hasMore: false,
       ),
       FeedPage(
-        items: [_post('2', activityAt: DateTime.now().subtract(const Duration(minutes: 5)))],
+        items: [
+          _post(
+            '2',
+            activityAt: DateTime.now().subtract(const Duration(minutes: 5)),
+          ),
+        ],
         hasMore: false,
       ),
-      FeedPage(
-        items: [_post('3')],
-        hasMore: false,
-      ),
+      FeedPage(items: [_post('3')], hasMore: false),
     ];
     final repository = _PagedHomeFeed(pages);
     final controller = FeedController(repository: repository);
@@ -214,12 +249,7 @@ void main() {
     final controller = FeedController(repository: repository);
 
     await tester.pumpWidget(
-      _homeFor(
-        controller,
-        repository,
-        platform: platform,
-        canModerate: true,
-      ),
+      _homeFor(controller, repository, platform: platform, canModerate: true),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);

@@ -73,4 +73,26 @@ void main() {
     await tester.tap(find.text('板块'));
     await tester.pumpAndSettle();
   });
+
+  testWidgets('Mock 模式综合搜索也能展示榜单商品', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SearchScreen(
+          store: store,
+          platform: MockPlatformRepository(store: store),
+          onOpenPost: (_) {},
+          onOpenPostId: (_) {},
+          interactionController: interactionController,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '黄油小姐');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    expect(find.text('榜单商品'), findsOneWidget);
+    expect(find.text('黄油小姐 二代'), findsOneWidget);
+  });
 }

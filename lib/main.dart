@@ -16,5 +16,11 @@ Future<void> main() async {
       tokenStore: MemoryTokenStore(),
     );
   }
+  if (repositories.isApiMode) {
+    debugPrint('[LUNTAN ENV] mode=API');
+    debugPrint('[LUNTAN ENV] api=${apiBaseUrlFromEnvironment()}');
+  } else {
+    debugPrint('[LUNTAN ENV] mode=MOCK');
+  }
   runApp(LuntanApp(repositories: repositories));
 }

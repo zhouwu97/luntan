@@ -143,8 +143,10 @@ class PostEditorDialog extends StatefulWidget {
     this.publishController,
     this.enableSampleMedia = true,
     this.availableCommunities = const [],
+    this.availableCommunitiesFuture,
     this.initialDraft,
     this.draftStorage,
+    this.draftStorageFuture,
   });
 
   final bool isGameShare;
@@ -153,8 +155,10 @@ class PostEditorDialog extends StatefulWidget {
   final PublishController? publishController;
   final bool enableSampleMedia;
   final List<Community> availableCommunities;
+  final Future<List<Community>>? availableCommunitiesFuture;
   final ComposerDraftSnapshot? initialDraft;
   final ComposerDraftStorage? draftStorage;
+  final Future<ComposerDraftStorage>? draftStorageFuture;
 
   @override
   State<PostEditorDialog> createState() => _PostEditorDialogState();
@@ -184,8 +188,13 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     TextEditingController(),
     TextEditingController(),
   ];
-  ForumSection section = ForumSection.unboxing;
+  ForumSection section = ForumSection.daily;
   String? communityId;
+  late final List<Community> _availableCommunities = [
+    ...widget.availableCommunities,
+  ];
+  ComposerDraftStorage? _draftStorage;
+  bool _loadingCommunities = false;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
   final List<String> _restoredMediaIds = <String>[];
@@ -208,7 +217,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   Community? get _selectedCommunity {
     final id = communityId;
     if (id == null) return null;
-    for (final community in widget.availableCommunities) {
+    for (final community in _availableCommunities) {
       if (community.id == id) return community;
     }
     return null;
@@ -236,27 +245,34 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   @override
   void initState() {
     super.initState();
+    _draftStorage = widget.draftStorage;
+    communityId = _defaultCommunityId(_availableCommunities);
     final draft = widget.initialDraft;
-    if (draft == null) {
-      communityId = widget.availableCommunities.isEmpty
-          ? null
-          : widget.availableCommunities.first.id;
-      return;
+    if (draft != null) _applyDraft(draft);
+    unawaited(_loadCommunities());
+    unawaited(_loadDraftStorage());
+  }
+
+  String? _defaultCommunityId(List<Community> communities) {
+    for (final community in communities) {
+      if (community.id == 'community-daily') return community.id;
     }
+    return communities.isEmpty ? null : communities.first.id;
+  }
+
+  void _applyDraft(ComposerDraftSnapshot draft) {
     titleController.text = draft.title;
     bodyController.text = draft.body;
     section = ForumSection.values.firstWhere(
       (value) => value.name == draft.sectionName,
-      orElse: () => ForumSection.unboxing,
+      orElse: () => ForumSection.daily,
     );
     communityId =
-        widget.availableCommunities.any(
+        _availableCommunities.any(
           (community) => community.id == draft.communityId,
         )
         ? draft.communityId
-        : widget.availableCommunities.isEmpty
-        ? null
-        : widget.availableCommunities.first.id;
+        : draft.communityId ?? _defaultCommunityId(_availableCommunities);
     for (var index = 0; index < pollOptionControllers.length; index++) {
       if (index < draft.pollOptions.length) {
         pollOptionControllers[index].text = draft.pollOptions[index];
@@ -279,6 +295,72 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
       }
     }
   }
+
+  Future<void> _loadCommunities() async {
+    final future = widget.availableCommunitiesFuture;
+    if (future == null) return;
+    if (mounted) setState(() => _loadingCommunities = true);
+    try {
+      final communities = await future;
+      if (!mounted) return;
+      setState(() {
+        _availableCommunities
+          ..clear()
+          ..addAll(communities);
+        if (!_availableCommunities.any((item) => item.id == communityId)) {
+          communityId = _defaultCommunityId(_availableCommunities);
+        }
+        _loadingCommunities = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCommunities = false;
+        errorText = '可发布板块加载失败，请稍后重试';
+      });
+    }
+  }
+
+  Future<void> _loadDraftStorage() async {
+    final future = widget.draftStorageFuture;
+    if (future == null) return;
+    try {
+      final storage = await future;
+      if (!mounted) return;
+      _draftStorage = storage;
+      if (widget.initialDraft != null) return;
+      final draft = await storage.load();
+      if (!mounted || draft == null || !draft.hasContent) return;
+      final shouldRestore = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('检测到未发布草稿'),
+          content: Text('上次编辑于 ${_draftTimeLabel(draft.updatedAt)}，是否继续编辑？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('删除草稿'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('继续编辑'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (shouldRestore == true) {
+        setState(() => _applyDraft(draft));
+      } else if (shouldRestore == false) {
+        await storage.clear();
+      }
+    } catch (_) {
+      // 草稿存储不可用时不阻塞编辑器，发布失败仍会保留当前页面内容。
+    }
+  }
+
+  String _draftTimeLabel(DateTime value) =>
+      '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
 
   @override
   void dispose() {
@@ -303,6 +385,14 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   void submit() {
     if (submitting) return;
+    if (widget.availableCommunitiesFuture != null &&
+        _availableCommunities.isEmpty) {
+      return setState(
+        () => errorText = _loadingCommunities
+            ? '正在加载可发布社区，请稍候'
+            : '当前没有可发布的社区，请稍后重试',
+      );
+    }
     final title = titleController.text.trim();
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
@@ -350,7 +440,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   );
 
   void _scheduleDraftSave() {
-    if (widget.draftStorage == null || _submitted) return;
+    if (_draftStorage == null || _submitted) return;
     _draftSaveTimer?.cancel();
     _draftSaveTimer = Timer(const Duration(milliseconds: 700), () {
       unawaited(_saveDraftNow());
@@ -358,7 +448,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   }
 
   Future<void> _saveDraftNow() async {
-    final storage = widget.draftStorage;
+    final storage = _draftStorage;
     if (storage == null) return;
     if (!_hasDraftContent) {
       await storage.clear();
@@ -369,7 +459,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   Future<void> _clearDraft() async {
     _draftSaveTimer?.cancel();
-    await widget.draftStorage?.clear();
+    await _draftStorage?.clear();
   }
 
   Future<void> _closeEditor() async {
@@ -643,11 +733,16 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
               children: [
-                if (widget.availableCommunities.isNotEmpty)
+                if (_loadingCommunities && _availableCommunities.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+                if (_availableCommunities.isNotEmpty)
                   DropdownButtonFormField<String>(
                     initialValue: communityId,
                     decoration: const InputDecoration(labelText: '发布社区'),
-                    items: widget.availableCommunities
+                    items: _availableCommunities
                         .map(
                           (item) => DropdownMenuItem(
                             value: item.id,

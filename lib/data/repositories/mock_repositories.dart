@@ -11,10 +11,92 @@ import '../mock_forum_data.dart';
 
 /// 离线预览也使用正式通知页，不再回退到旧消息抽屉。
 class MockPlatformRepository extends PlatformRepository {
-  MockPlatformRepository()
-    : super(ApiClient(baseUri: Uri.parse('https://mock.invalid')));
+  MockPlatformRepository({ForumStore? store})
+    : _store = store ?? ForumStore.seeded(),
+      super(ApiClient(baseUri: Uri.parse('https://mock.invalid')));
 
+  final ForumStore _store;
   final List<ForumNotification> _notifications = <ForumNotification>[];
+
+  static const _rankingToys = <SearchToy>[
+    SearchToy(
+      id: 'toy-butter-2',
+      rank: 1,
+      name: '黄油小姐 二代',
+      merchant: 'COC',
+      releaseYear: 2025,
+      description: '奶香材质、软糯包裹，适合新手入门。',
+      tags: ['奶香材质', '软糯包裹', '新手友好'],
+      assetKey: 'thumb_01.webp',
+      wantCount: 401,
+      ratingCount: 17,
+      score: 8.7,
+      category: 'cup',
+      segments: ['beginner'],
+    ),
+    SearchToy(
+      id: 'toy-yingchuan-2',
+      rank: 2,
+      name: '樱川爱 二代',
+      merchant: 'TMT',
+      releaseYear: 2026,
+      description: '细密颗粒和慢玩结构，适合循序渐进。',
+      tags: ['细密颗粒', '肉褶延续', '极致慢玩'],
+      assetKey: 'thumb_02.webp',
+      wantCount: 401,
+      ratingCount: 17,
+      score: 9.9,
+      category: 'cup',
+      segments: ['beginner'],
+    ),
+    SearchToy(
+      id: 'toy-yutou',
+      rank: 3,
+      name: '鱼头',
+      merchant: 'TMT',
+      releaseYear: 2025,
+      description: '猎奇造型与高性价比兼顾。',
+      tags: ['猎奇', '高性价比', '传说神器'],
+      assetKey: 'thumb_03.webp',
+      wantCount: 497,
+      ratingCount: 90,
+      score: 9.1,
+      category: 'cup',
+      segments: ['advanced'],
+    ),
+    SearchToy(
+      id: 'toy-yuanqi',
+      rank: 4,
+      name: '元气教练',
+      merchant: 'TMT',
+      releaseYear: 2025,
+      description: '软硬适中的训练向结构。',
+      tags: ['强烈挤压', '脂软工艺', '后入抓握'],
+      assetKey: 'thumb_04.webp',
+      wantCount: 284,
+      ratingCount: 60,
+      score: 9.3,
+      category: 'cup',
+      segments: ['advanced'],
+    ),
+    SearchToy(
+      id: 'toy-shendai',
+      rank: 5,
+      name: '神代雪乃',
+      merchant: 'TMT',
+      releaseYear: 2025,
+      description: '顶级材料和一字开腿结构。',
+      tags: ['顶级材料', '一字开腿', '冷门神作'],
+      assetKey: 'thumb_05.jpg',
+      wantCount: 148,
+      ratingCount: 110,
+      score: 9.8,
+      category: 'half_body',
+      segments: ['beginner', 'advanced'],
+    ),
+  ];
+
+  static List<SearchToy> get rankingToys => _rankingToys;
 
   @override
   Future<NotificationPage> listNotifications({
@@ -48,6 +130,92 @@ class MockPlatformRepository extends PlatformRepository {
   @override
   Future<int> unreadNotificationCount() async =>
       _notifications.where((item) => !item.isRead).length;
+
+  @override
+  Future<SearchResult> search(
+    String query, {
+    String type = 'all',
+    int limit = 20,
+    String? cursor,
+  }) async {
+    final keyword = query.trim().toLowerCase();
+    if (keyword.isEmpty || cursor != null) return const SearchResult();
+    bool include(String value) => type == 'all' || type == value;
+    if (!include('posts') &&
+        !include('users') &&
+        !include('communities') &&
+        !include('toys')) {
+      return const SearchResult();
+    }
+
+    final toys = include('toys')
+        ? _rankingToys
+              .where(
+                (toy) =>
+                    '${toy.name} ${toy.merchant} ${toy.description} ${toy.tags.join(' ')}'
+                        .toLowerCase()
+                        .contains(keyword),
+              )
+              .take(limit.clamp(1, 50).toInt())
+              .toList()
+        : const <SearchToy>[];
+    final posts = include('posts')
+        ? _store
+              .search(query)
+              .take(limit.clamp(1, 50).toInt())
+              .map(
+                (post) => SearchPost(
+                  id: post.id,
+                  title: post.title,
+                  contentPreview: post.content,
+                  communityId: post.communityId,
+                  communityName: post.community?.name ?? post.tag,
+                  createdAt: post.createdAt,
+                  authorId: post.authorId,
+                  authorName: post.author?.nickname ?? '用户',
+                  authorLevel: post.author?.level ?? 1,
+                  commentCount: post.commentCount,
+                  likeCount: post.likeCount,
+                  viewCount: post.viewCount,
+                ),
+              )
+              .toList()
+        : const <SearchPost>[];
+    final users = include('users')
+        ? _store
+              .searchUsers(query)
+              .take(limit.clamp(1, 50).toInt())
+              .map(
+                (user) => SearchUser(
+                  id: user.id,
+                  username: user.username,
+                  nickname: user.nickname,
+                ),
+              )
+              .toList()
+        : const <SearchUser>[];
+    final communities = include('communities')
+        ? _store
+              .searchCommunities(query)
+              .take(limit.clamp(1, 50).toInt())
+              .map(
+                (community) => SearchCommunity(
+                  id: community.id,
+                  slug: community.slug,
+                  name: community.name,
+                  description: community.description,
+                  followerCount: community.followerCount,
+                ),
+              )
+              .toList()
+        : const <SearchCommunity>[];
+    return SearchResult(
+      toys: toys,
+      posts: posts,
+      users: users,
+      communities: communities,
+    );
+  }
 }
 
 class MockAppealRepository extends AppealRepository {
@@ -610,7 +778,10 @@ class MockInteractionRepository implements InteractionRepository {
 }
 
 class MockPublishRepository
-    implements PublishRepository, PollPublishRepository {
+    implements
+        PublishRepository,
+        PollPublishRepository,
+        AtomicPollPublishRepository {
   MockPublishRepository({required ForumStore store}) : _store = store;
 
   final ForumStore _store;
@@ -648,6 +819,35 @@ class MockPublishRepository
     bool allowMultiple = false,
     DateTime? endsAt,
   }) async => {'id': 'poll-$postId', 'post_id': postId, 'options': options};
+
+  @override
+  Future<Map<String, dynamic>> createPollPost({
+    required String communityId,
+    required String title,
+    required String content,
+    required String idempotencyKey,
+    required List<String> options,
+    bool allowMultiple = false,
+    DateTime? endsAt,
+    List<String> mediaIds = const [],
+  }) async {
+    final response = await createPost(
+      communityId: communityId,
+      type: 'poll',
+      title: title,
+      content: content,
+      idempotencyKey: idempotencyKey,
+      mediaIds: mediaIds,
+    );
+    return {
+      ...response,
+      'poll': {
+        'options': options,
+        'allow_multiple': allowMultiple,
+        if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
+      },
+    };
+  }
 
   @override
   Future<MediaUploadTicket> requestMediaUpload({

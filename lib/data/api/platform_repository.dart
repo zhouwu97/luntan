@@ -72,13 +72,10 @@ class ForumNotification {
     final customTitle = targetData['title'];
     if (customTitle is String && customTitle.isNotEmpty) return customTitle;
     return switch (type) {
-      'like' || 'post.liked' => targetType == 'comment'
-          ? '$actorName 点赞了你的评论'
-          : '$actorName 赞了你的帖子',
+      'like' || 'post.liked' =>
+        targetType == 'comment' ? '$actorName 点赞了你的评论' : '$actorName 赞了你的帖子',
       'bookmark' || 'post.bookmarked' => '$actorName 收藏了你的帖子',
-      'comment.created' ||
-      'comment.replied' ||
-      'reply' => '$actorName 回复了你的评论',
+      'comment.created' || 'comment.replied' || 'reply' => '$actorName 回复了你的评论',
       'follow' || 'user.followed' => '$actorName 关注了你',
       'moderation.action' => switch (targetData['action']) {
         'mute' => '账号禁言通知',
@@ -99,7 +96,8 @@ class ForumNotification {
   }
 
   String get content {
-    final customContent = targetData['content'] ??
+    final customContent =
+        targetData['content'] ??
         targetData['snippet'] ??
         targetData['message'] ??
         targetData['body'] ??
@@ -153,6 +151,12 @@ class SearchPost {
     required this.communityId,
     required this.communityName,
     required this.createdAt,
+    this.authorId = '',
+    this.authorName = '',
+    this.authorLevel = 1,
+    this.commentCount = 0,
+    this.likeCount = 0,
+    this.viewCount = 0,
   });
 
   final String id;
@@ -161,6 +165,12 @@ class SearchPost {
   final String communityId;
   final String communityName;
   final DateTime createdAt;
+  final String authorId;
+  final String authorName;
+  final int authorLevel;
+  final int commentCount;
+  final int likeCount;
+  final int viewCount;
 }
 
 class SearchUser {
@@ -624,18 +634,37 @@ class PlatformRepository {
             ),
           )
           .toList(),
-      posts: _searchList(payload['posts'])
-          .map(
-            (value) => SearchPost(
-              id: _string(value['id']),
-              title: _string(value['title']),
-              contentPreview: _string(value['content_preview']),
-              communityId: _string(value['community_id']),
-              communityName: _string(value['community_name']),
-              createdAt: _date(value['created_at']),
+      posts: _searchList(payload['posts']).map((value) {
+        final author = value['author'] is Map
+            ? Map<String, dynamic>.from(value['author'] as Map)
+            : const <String, dynamic>{};
+        return SearchPost(
+          id: _string(value['id']),
+          title: _string(value['title']),
+          contentPreview: _string(value['content_preview']),
+          communityId: _string(value['community_id']),
+          communityName: _string(value['community_name']),
+          createdAt: _date(value['created_at']),
+          authorId: _string(
+            value['author_id'],
+            fallback: _string(author['id']),
+          ),
+          authorName: _string(
+            value['author_name'],
+            fallback: _string(
+              author['nickname'],
+              fallback: _string(author['username'], fallback: '用户'),
             ),
-          )
-          .toList(),
+          ),
+          authorLevel: _int(
+            value['author_level'],
+            fallback: _int(author['level'], fallback: 1),
+          ),
+          commentCount: _int(value['comment_count']),
+          likeCount: _int(value['like_count']),
+          viewCount: _int(value['view_count']),
+        );
+      }).toList(),
       users: _searchList(payload['users'])
           .map(
             (value) => SearchUser(

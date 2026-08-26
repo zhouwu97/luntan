@@ -940,6 +940,7 @@ class _KindTabs extends StatelessWidget {
       SearchKind.posts,
       SearchKind.users,
       SearchKind.communities,
+      SearchKind.toys,
     ];
 
     return Container(

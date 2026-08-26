@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/platform_repository.dart';
-import 'package:luntan/domain/models.dart';
 import 'package:luntan/screens/notifications_screen.dart';
 import 'package:luntan/widgets/notifications/notification_empty_state.dart';
 import 'package:luntan/widgets/notifications/notification_row.dart';
@@ -52,12 +51,14 @@ void main() {
       type: 'comment.created',
       actorId: 'u1',
       actorName: '杂鱼萌萌',
-      title: '杂鱼萌萌 回复了你的评论',
-      content: '我觉得普通版更适合第一次用',
       targetType: 'comment',
       targetId: 'c1',
-      targetData: const {'post_id': 'p1', 'comment_id': 'c1'},
-      category: NotificationCategory.interaction,
+      targetData: const {
+        'post_id': 'p1',
+        'comment_id': 'c1',
+        'title': '杂鱼萌萌 回复了你的评论',
+        'content': '我觉得普通版更适合第一次用',
+      },
       isRead: false,
       createdAt: DateTime.now(),
     );
@@ -88,12 +89,13 @@ void main() {
         type: 'comment.created',
         actorId: 'u1',
         actorName: '杂鱼萌萌',
-        title: '杂鱼萌萌 回复了你的评论',
-        content: '我觉得普通版更适合',
         targetType: 'comment',
         targetId: 'c1',
-        targetData: const {'post_id': 'p1'},
-        category: NotificationCategory.interaction,
+        targetData: const {
+          'post_id': 'p1',
+          'title': '杂鱼萌萌 回复了你的评论',
+          'content': '我觉得普通版更适合',
+        },
         isRead: false,
         createdAt: DateTime.now(),
       ),
@@ -102,12 +104,12 @@ void main() {
         type: 'community.announcement',
         actorId: 'admin',
         actorName: '拆箱小助手',
-        title: '大型拆箱发布了新公告',
-        content: '发帖前请补充版本与使用时间',
         targetType: 'community',
         targetId: 'community-unboxing',
-        targetData: const {},
-        category: NotificationCategory.community,
+        targetData: const {
+          'title': '大型拆箱发布了新公告',
+          'content': '发帖前请补充版本与使用时间',
+        },
         isRead: false,
         createdAt: DateTime.now().subtract(const Duration(days: 2)),
       ),

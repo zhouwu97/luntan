@@ -8,6 +8,7 @@ import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/screens/ranking_page.dart';
 import 'package:luntan/screens/search_screen.dart';
+import 'package:luntan/widgets/search/search_post_row.dart';
 
 class _FakeApiClient extends ApiClient {
   _FakeApiClient() : super(baseUri: Uri.parse('http://127.0.0.1:8080'));
@@ -265,10 +266,10 @@ void main() {
       // Verify both toy and post results are rendered
       expect(find.text('榜单商品'), findsOneWidget);
       expect(find.text('黄油小姐 二代'), findsOneWidget);
-      expect(find.text('关于黄油小姐二代的使用体验'), findsOneWidget);
+      expect(find.byType(SearchPostRow), findsOneWidget);
 
       // Switch to Toy tab
-      await tester.tap(find.widgetWithText(ChoiceChip, '玩具'));
+      await tester.tap(find.text('玩具'));
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 

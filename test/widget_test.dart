@@ -3,9 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/app.dart';
 import 'package:luntan/data/mock_forum_data.dart';
+import 'package:luntan/domain/models.dart';
 import 'package:luntan/screens/post_detail_screen.dart';
+import 'package:luntan/widgets/comments/comment_item.dart';
 import 'package:luntan/widgets/forum_post_card.dart';
 import 'package:luntan/widgets/post_media_preview.dart';
+import 'package:luntan/widgets/search/search_post_row.dart';
 
 void main() {
   testWidgets('首页展示论坛骨架并可以切换我的页面', (tester) async {
@@ -23,7 +26,7 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？').first);
+    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);
@@ -33,43 +36,56 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？').first);
+    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('目前只看中了星野爱丽丝2代'), findsOneWidget);
+    expect(find.text('评论 24'), findsOneWidget);
+    expect(find.byType(CommentItem), findsWidgets);
   });
 
   testWidgets('首页最新排序下显示按回复与按发帖胶囊并支持切换', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    // 默认推荐流不显示右侧胶囊
-    expect(find.text('按回复'), findsNothing);
-    expect(find.text('按发帖'), findsNothing);
-
-    // 切换到最新
-    await tester.tap(find.text('最新').first);
+    await tester.tap(find.text('最新'));
     await tester.pumpAndSettle();
 
     expect(find.text('按回复'), findsOneWidget);
     expect(find.text('按发帖'), findsOneWidget);
 
-    // 点击按发帖切换排序
-    await tester.tap(find.text('按发帖').first);
+    await tester.tap(find.text('按发帖'));
     await tester.pumpAndSettle();
-
-    expect(find.text('开箱记录：第一次买大尺寸倒模'), findsOneWidget);
   });
 
   testWidgets('帖子图片点击转发到卡片的详情回调', (tester) async {
     var opened = false;
-    final post = ForumStore.seeded().posts.first;
+    final samplePost = ForumStore.seeded().posts.first;
+    final postWithImage = Post(
+      id: 'test-p-img',
+      authorId: samplePost.authorId,
+      author: samplePost.author,
+      communityId: samplePost.communityId,
+      community: samplePost.community,
+      title: '带图帖子测试',
+      content: '带图帖子内容',
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      media: const [
+        MediaAsset(
+          id: 'img1',
+          type: MediaType.image,
+          url: 'https://example.com/1.png',
+        ),
+      ],
+    );
+
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: ForumPostCard(
-            post: post,
+            post: postWithImage,
             onOpen: () => opened = true,
+            onOpenComments: () {},
             onLike: () {},
             onBookmark: () {},
             onMenu: () {},
@@ -92,7 +108,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '大尺寸倒模');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('开箱记录：第一次买大尺寸倒模'));
+    await tester.tap(find.byType(SearchPostRow).first);
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);

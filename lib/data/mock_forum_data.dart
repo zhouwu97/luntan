@@ -81,6 +81,7 @@ class PostDraft {
     this.pollOptions = const [],
     this.allowMultiple = false,
     this.pollEndsAt,
+    this.communityId,
   });
 
   final String title;
@@ -93,6 +94,7 @@ class PostDraft {
   final List<String> pollOptions;
   final bool allowMultiple;
   final DateTime? pollEndsAt;
+  final String? communityId;
 }
 
 class StoreProduct {
@@ -134,8 +136,8 @@ class ForumStore extends ChangeNotifier {
   final Set<String> likedCommentIds = <String>{};
   final List<Post> history = [];
   ForumSection selectedSection = ForumSection.unboxing;
-  // 首页默认按发布时间倒序，推荐/精华/热门仍可通过筛选主动切换。
-  FeedSort selectedSort = FeedSort.latest;
+  // 首页默认推荐流（人工精选），最新/精华/热门可通过筛选主动切换。
+  FeedSort selectedSort = FeedSort.recommended;
   bool isRefreshing = false;
   int unreadMessages = 8;
   int points = 3980;
@@ -151,6 +153,7 @@ class ForumStore extends ChangeNotifier {
         .where((post) => post.communityId == selectedSection.communityId)
         .where((post) {
           if (selectedSort == FeedSort.featured) return post.isFeatured;
+          if (selectedSort == FeedSort.recommended) return post.isRecommended;
           return true;
         })
         .toList();
@@ -158,6 +161,19 @@ class ForumStore extends ChangeNotifier {
       result.sort(_comparePostsByPublishTime);
     } else if (selectedSort == FeedSort.featured) {
       result.sort((a, b) => b.commentCount.compareTo(a.commentCount));
+    } else if (selectedSort == FeedSort.hot) {
+      result.sort((a, b) => b.commentCount.compareTo(a.commentCount));
+    } else if (selectedSort == FeedSort.recommended) {
+      result.sort((a, b) {
+        final posA = a.recommendationPosition ?? 999999;
+        final posB = b.recommendationPosition ?? 999999;
+        final byPos = posA.compareTo(posB);
+        return byPos != 0
+            ? byPos
+            : (b.publishedAt ?? b.createdAt).compareTo(
+                a.publishedAt ?? a.createdAt,
+              );
+      });
     }
     return result;
   }
@@ -480,12 +496,18 @@ Post _post({
   required int views,
   String? extraTag,
   bool isFeatured = false,
+  bool isRecommended = false,
+  int? recommendationPosition,
+  int? lastCommentMinutesAgo,
   List<MediaAsset> images = const [],
 }) {
   final createdAt = _now.subtract(Duration(hours: hoursAgo));
   final community = _seedCommunities().firstWhere(
     (item) => item.id == section.communityId,
   );
+  final activityAt = lastCommentMinutesAgo != null
+      ? _now.subtract(Duration(minutes: lastCommentMinutesAgo))
+      : (comments > 0 ? _now.subtract(Duration(minutes: hoursAgo * 20 + 5)) : createdAt);
   return Post(
     id: id,
     authorId: authorId,
@@ -500,6 +522,10 @@ Post _post({
     createdAt: createdAt,
     updatedAt: createdAt,
     publishedAt: createdAt,
+    activityAt: activityAt,
+    lastCommentAt: comments > 0 ? activityAt : null,
+    isRecommended: isRecommended,
+    recommendationPosition: recommendationPosition,
     tags: [tag],
     extraTag: extraTag,
     isFeatured: isFeatured,
@@ -520,6 +546,9 @@ List<Post> _seedPosts() => [
     views: 133,
     extraTag: '求真实体验',
     isFeatured: true,
+    isRecommended: true,
+    recommendationPosition: 1,
+    lastCommentMinutesAgo: 23,
   ),
   _post(
     id: 'u2',
@@ -531,6 +560,9 @@ List<Post> _seedPosts() => [
     hoursAgo: 5,
     comments: 18,
     views: 98,
+    isRecommended: true,
+    recommendationPosition: 2,
+    lastCommentMinutesAgo: 45,
   ),
   _post(
     id: 'u3',
@@ -566,6 +598,8 @@ List<Post> _seedPosts() => [
     views: 860,
     extraTag: '精华',
     isFeatured: true,
+    isRecommended: true,
+    recommendationPosition: 3,
   ),
   _post(
     id: 'c1',

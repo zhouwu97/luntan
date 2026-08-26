@@ -30,8 +30,11 @@ String apiBaseUrlFromEnvironment() {
 String resolveApiBaseUrl({required String configured, required String appEnv}) {
   final baseUrl = configured.trim();
   if (baseUrl.isEmpty) {
-    // 所有平台在没有显式 API_BASE_URL 时统一使用 Mock，避免 Android、Web、
-    // 桌面端因为默认值不同而出现无法复现的真实 API / Mock 混用。
+    if (appEnv.trim().toLowerCase() == 'production') {
+      throw StateError('生产环境必须配置 API_BASE_URL，禁止回退到 Mock');
+    }
+    // 开发和测试环境允许显式选择 Mock，避免 Android、Web、桌面端因为默认值
+    // 不同而出现无法复现的真实 API / Mock 混用。
     return '';
   }
   final uri = Uri.tryParse(baseUrl);
@@ -95,6 +98,7 @@ class ForumRepositories {
       post: MockPostRepository(store: actualStore),
       comments: MockCommentRepository(store: actualStore),
       interactions: MockInteractionRepository(),
+      platform: MockPlatformRepository(),
       appeals: MockAppealRepository(),
       bookmarks: MockBookmarkRepository(store: actualStore),
       publish: MockPublishRepository(store: actualStore),

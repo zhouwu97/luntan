@@ -23,7 +23,7 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('开箱记录：第一次买大尺寸倒模'));
+    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？').first);
     await tester.pumpAndSettle();
 
     expect(find.byType(PostDetailScreen), findsOneWidget);
@@ -33,37 +33,32 @@ void main() {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('开箱记录：第一次买大尺寸倒模'));
+    await tester.tap(find.text('为啥很少朋友推荐星野爱丽丝2代？').first);
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('包装比我想象中扎实'), findsOneWidget);
-    expect(find.text('还没有回复，来抢沙发吧'), findsNothing);
+    expect(find.textContaining('目前只看中了星野爱丽丝2代'), findsOneWidget);
   });
 
-  testWidgets('首页评论胶囊切换到收到回复的帖子 Feed', (tester) async {
+  testWidgets('首页最新排序下显示按回复与按发帖胶囊并支持切换', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('评论').first);
+    // 默认推荐流不显示右侧胶囊
+    expect(find.text('按回复'), findsNothing);
+    expect(find.text('按发帖'), findsNothing);
+
+    // 切换到最新
+    await tester.tap(find.text('最新').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('为啥很少朋友推荐星野爱丽丝2代？'), findsOneWidget);
-    expect(find.textContaining('最近回复'), findsOneWidget);
-    expect(find.text('我的评论'), findsNothing);
-  });
+    expect(find.text('按回复'), findsOneWidget);
+    expect(find.text('按发帖'), findsOneWidget);
 
-  testWidgets('首页帖子胶囊按发布时间展示我的帖子', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    // 点击按发帖切换排序
+    await tester.tap(find.text('按发帖').first);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('帖子').first);
-    await tester.pumpAndSettle();
-
-    expect(find.text('为啥很少朋友推荐星野爱丽丝2代？'), findsOneWidget);
-    expect(find.text('帖子模式：仅显示我发布的帖子，按发布时间排序'), findsOneWidget);
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -420));
-    await tester.pumpAndSettle();
-    expect(find.text('新手入门：预算 300-400 怎么选屯磨？'), findsOneWidget);
+    expect(find.text('开箱记录：第一次买大尺寸倒模'), findsOneWidget);
   });
 
   testWidgets('帖子图片点击转发到卡片的详情回调', (tester) async {

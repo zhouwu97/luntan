@@ -21,7 +21,7 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       - run: flutter build web --release
-      - run: flutter build apk --debug
+      - run: flutter build apk --release
 
   go:
     runs-on: ubuntu-latest

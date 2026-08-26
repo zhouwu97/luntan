@@ -23,6 +23,25 @@ type Server struct {
 	appEnv       string
 }
 
+// ReadinessCheck 将业务依赖检查接入统一 /ready 端点。保持构造函数返回
+// http.Handler，避免破坏现有测试和调用方，同时允许主进程检查对象存储。
+func ReadinessCheck(handler http.Handler) func(context.Context) error {
+	server, ok := handler.(*Server)
+	if !ok || server == nil {
+		return nil
+	}
+	return server.Ready
+}
+
+func (s *Server) Ready(_ context.Context) error {
+	if strings.EqualFold(strings.TrimSpace(s.appEnv), "production") {
+		if _, unavailable := s.mediaStorage.(unavailableMediaStorage); unavailable {
+			return ErrStorageUnavailable
+		}
+	}
+	return nil
+}
+
 type mailSender interface {
 	Send(context.Context, string, string, string) error
 }
@@ -66,6 +85,10 @@ func NewHandlerWithPointRewards(db *sql.DB, rules PointRewardRules) http.Handler
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
+	if strings.EqualFold(strings.TrimSpace(s.appEnv), "production") && s.isIPRestricted(r) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusForbidden, Code: "IP_RESTRICTED", Message: "当前网络地址暂不可访问"})
+		return
+	}
 	switch {
 	case r.Method == http.MethodPost && path == "/api/v1/auth/register":
 		s.register(w, r)
@@ -94,11 +117,44 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/me/profile":
 		s.profile(w, r)
 		return
+	case r.Method == http.MethodPatch && path == "/api/v1/me/profile":
+		s.updateProfile(w, r)
+		return
 	case r.Method == http.MethodGet && path == "/api/v1/me/account-status":
 		s.accountStatus(w, r)
 		return
 	case r.Method == http.MethodGet && path == "/api/v1/admins":
 		s.listAdmins(w, r)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/admins/candidates":
+		s.listAdminCandidates(w, r)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admins/") && strings.HasSuffix(path, "/roles"):
+		adminID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admins/"), "/roles")
+		s.updateAdminRoles(w, r, adminID)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/ip-restrictions":
+		s.listIPRestrictions(w, r)
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/admin/ip-restrictions":
+		s.createIPRestriction(w, r)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/admin/ip-restrictions/"):
+		s.revokeIPRestriction(w, r, strings.TrimPrefix(path, "/api/v1/admin/ip-restrictions/"))
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/recommendations":
+		s.listHomeRecommendations(w, r)
+		return
+	case r.Method == http.MethodPut && path == "/api/v1/admin/recommendations/reorder":
+		s.reorderHomeRecommendations(w, r)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admin/recommendations/"):
+		postID := strings.TrimPrefix(path, "/api/v1/admin/recommendations/")
+		s.setHomeRecommendation(w, r, postID)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/admin/recommendations/"):
+		postID := strings.TrimPrefix(path, "/api/v1/admin/recommendations/")
+		s.removeHomeRecommendation(w, r, postID)
 		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admins/"):
 		s.getAdmin(w, r, strings.TrimPrefix(path, "/api/v1/admins/"))
@@ -276,6 +332,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		caseID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/moderation/cases/"), "/actions")
 		s.createModerationAction(w, r, caseID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/moderation/cases/"):
+		caseID := strings.TrimPrefix(path, "/api/v1/moderation/cases/")
+		s.getModerationCase(w, r, caseID)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/media/upload-token":
 		s.createMediaUploadToken(w, r)
 		return
@@ -393,6 +453,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
+	applyBaseCapabilities(&response.User)
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 
@@ -418,6 +479,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
+	applyBaseCapabilities(&response.User)
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
@@ -437,6 +499,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
+	applyBaseCapabilities(&response.User)
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
@@ -487,6 +550,13 @@ func (s *Server) authenticatedUser(w http.ResponseWriter, r *http.Request) (auth
 	return user, true
 }
 
+func applyBaseCapabilities(user *auth.User) {
+	if user == nil {
+		return
+	}
+	user.Capabilities = capabilitiesForUser(*user)
+}
+
 func decodeJSON(r *http.Request, target any) error {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	if err := decoder.Decode(target); err != nil {
@@ -532,6 +602,20 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "USER_DISABLED", Message: "账户当前不可用"}
 	case errors.Is(err, ErrRegisteredAccountRequired):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "REGISTERED_ACCOUNT_REQUIRED", Message: "游客可以评论和举报，登录邮箱账号后才能发布内容"}
+	case errors.Is(err, ErrUserMuted):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "USER_MUTED", Message: "账号当前处于禁言状态，暂不能发表评论"}
+	case errors.Is(err, ErrCapabilityRequired):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "CAPABILITY_REQUIRED", Message: "当前身份没有执行该操作的权限"}
+	case errors.Is(err, ErrAdminRoleManageDenied):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "ADMIN_ROLE_MANAGE_DENIED", Message: "只有超级管理员可以调整管理员权限"}
+	case errors.Is(err, ErrInvalidAdminRole):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_ADMIN_ROLE", Message: "管理员角色或社区范围不合法"}
+	case errors.Is(err, ErrLastSuperAdmin):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "LAST_SUPER_ADMIN", Message: "不能撤销最后一个超级管理员"}
+	case errors.Is(err, ErrInvalidIPRestriction):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_IP_RESTRICTION", Message: "IP 地址或限制参数不合法"}
+	case errors.Is(err, ErrIPRestrictionNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "IP_RESTRICTION_NOT_FOUND", Message: "IP 限制不存在"}
 	case errors.Is(err, ErrCommunityNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "COMMUNITY_NOT_FOUND", Message: "社区不存在或不可用"}
 	case errors.Is(err, ErrPostNotFound):

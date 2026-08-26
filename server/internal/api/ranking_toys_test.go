@@ -1,6 +1,10 @@
 package api
 
-import "testing"
+import (
+	"database/sql"
+	"testing"
+	"time"
+)
 
 func TestRankingToyScoreUsesCentiUnits(t *testing.T) {
 	tests := []struct {
@@ -22,3 +26,45 @@ func TestRankingToyScoreUsesCentiUnits(t *testing.T) {
 		})
 	}
 }
+
+func TestRankingToyRecordResponseIncludesCategoryAndSegments(t *testing.T) {
+	item := rankingToyRecord{
+		ID:               "toy-butter-2",
+		Rank:             1,
+		Name:             "黄油小姐 二代",
+		Category:         "cup",
+		Segments:         []string{"beginner"},
+		RatingTotalCenti: 870,
+		RatingCount:      1,
+	}
+	resp := item.response()
+	if resp["category"] != "cup" {
+		t.Fatalf("resp[category] = %v, want 'cup'", resp["category"])
+	}
+	segments, ok := resp["segments"].([]string)
+	if !ok || len(segments) != 1 || segments[0] != "beginner" {
+		t.Fatalf("resp[segments] = %#v, want ['beginner']", resp["segments"])
+	}
+}
+
+func TestRankingToyCommentResponseIncludesAuthorRatingAndLevel(t *testing.T) {
+	comment := rankingToyComment{
+		ID:           "c-1",
+		AuthorID:     "u-1",
+		Username:     "tester",
+		Nickname:     "Tester Nick",
+		Level:        4,
+		Content:      "非常好",
+		CreatedAt:    time.Now(),
+		AuthorRating: sql.NullInt64{Int64: 9, Valid: true},
+	}
+	resp := comment.response()
+	if resp["author_rating"] != int64(9) {
+		t.Fatalf("resp[author_rating] = %v, want 9", resp["author_rating"])
+	}
+	author, ok := resp["author"].(map[string]any)
+	if !ok || author["level"] != 4 || author["author_rating"] != int64(9) {
+		t.Fatalf("author map = %#v, want level=4, author_rating=9", author)
+	}
+}
+

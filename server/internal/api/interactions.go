@@ -24,6 +24,9 @@ func (s *Server) togglePostLike(w http.ResponseWriter, r *http.Request, postID s
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capLike) {
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -73,6 +76,9 @@ func (s *Server) toggleBookmark(w http.ResponseWriter, r *http.Request, postID s
 	}
 	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capBookmark) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
@@ -129,6 +135,9 @@ func (s *Server) toggleCommentLike(w http.ResponseWriter, r *http.Request, comme
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capLike) {
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -167,6 +176,9 @@ func (s *Server) toggleUserFollow(w http.ResponseWriter, r *http.Request, target
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capFollow) {
 		return
 	}
 	if strings.TrimSpace(targetUserID) == "" {
@@ -222,6 +234,9 @@ func (s *Server) toggleCommunityFollow(w http.ResponseWriter, r *http.Request, c
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capFollow) {
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -258,7 +273,7 @@ func (s *Server) toggleCommunityMembership(w http.ResponseWriter, r *http.Reques
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	user, ok := s.authenticatedUser(w, r)
+	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
 		return
 	}

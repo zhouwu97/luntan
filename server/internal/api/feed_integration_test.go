@@ -137,12 +137,55 @@ func requireFeedOrder(t *testing.T, got []string, want []string, sort string) {
 	}
 }
 
+func fetchFeedIDsWithLatestBy(t *testing.T, s *Server, sort, latestBy, communityID string) []string {
+	t.Helper()
+	var all []string
+	cursor := ""
+	for page := 0; page < 10; page++ {
+		u := fmt.Sprintf("/api/v1/feed/latest?sort=%s&latest_by=%s&community_id=%s&limit=2", sort, latestBy, communityID)
+		if cursor != "" {
+			u += "&cursor=" + url.QueryEscape(cursor)
+		}
+		req := httptest.NewRequest(http.MethodGet, u, nil)
+		rec := httptest.NewRecorder()
+		s.latestFeed(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("sort=%s latest_by=%s page=%d status=%d body=%s", sort, latestBy, page, rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+			Next *string `json:"next_cursor"`
+			More bool    `json:"has_more"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range payload.Items {
+			all = append(all, item.ID)
+		}
+		if payload.Next == nil || !payload.More {
+			break
+		}
+		cursor = *payload.Next
+	}
+	return all
+}
+
 // 固定三篇帖：p1 很旧零互动、p2 很新低互动、p3 一天前高互动。
 // 期望排序：latest=[p2,p3,p1]（纯时间）、featured=[p3,p2,p1]（无时间衰减）、
-// recommended=[p3,p2,p1]（衰减平缓，质量取胜）、hot=[p2,p3,p1]（近期爆发领先）。
+// hot=[p2,p3,p1]（近期爆发领先）。
 func TestFeedSortsAgainstPostgres(t *testing.T) {
 	s := feedIntegrationServer(t)
 	communityID, ids := insertFeedFixtures(t, s)
+
+	// 为 p3 插入一条管理员推荐
+	if _, err := s.db.Exec(`
+		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at)
+		VALUES ($1, (SELECT author_id FROM posts WHERE id = $1), 1, now())`, ids["p3"]); err != nil {
+		t.Fatal(err)
+	}
 
 	cases := []struct {
 		sort string
@@ -150,13 +193,94 @@ func TestFeedSortsAgainstPostgres(t *testing.T) {
 	}{
 		{"latest", []string{ids["p2"], ids["p3"], ids["p1"]}},
 		{"featured", []string{ids["p3"], ids["p2"], ids["p1"]}},
-		{"recommended", []string{ids["p3"], ids["p2"], ids["p1"]}},
+		{"recommended", []string{ids["p3"]}},
 		{"hot", []string{ids["p2"], ids["p3"], ids["p1"]}},
 	}
 	for _, tc := range cases {
 		got := fetchFeedIDs(t, s, tc.sort, communityID)
 		requireFeedOrder(t, got, tc.want, tc.sort)
 	}
+}
+
+// 验收测试：拿三篇帖子测试按回复与按发帖排序
+// A：09:00 发布，10:05 有回复
+// B：10:00 发布，无回复
+// C：09:30 发布，10:02 有回复
+// 最新 → 按回复：A (10:05) -> C (10:02) -> B (10:00 发布)
+// 最新 → 按发帖：B (10:00) -> C (09:30) -> A (09:00)
+// 然后 10:10 给 C 发新评论 -> 刷新最新按回复：C (10:10) -> A (10:05) -> B (10:00)
+func TestFeedLatestByCommentAndPostOrder(t *testing.T) {
+	s := feedIntegrationServer(t)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID := "itest-abc-user-" + suffix
+	categoryID := "itest-abc-cat-" + suffix
+	communityID := "itest-abc-com-" + suffix
+	if _, err := s.db.Exec(`INSERT INTO users (id, username, status) VALUES ($1, $2, 'active')`, userID, "user_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO community_categories (id, name, slug) VALUES ($1, $2, $3)`, categoryID, "abc", "abc-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO communities (id, category_id, slug, name, status) VALUES ($1, $2, $3, $4, 'active')`, communityID, categoryID, "abc-com-"+suffix, "abc"); err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
+	postA := "itest-post-A-" + suffix // 09:00
+	postB := "itest-post-B-" + suffix // 10:00
+	postC := "itest-post-C-" + suffix // 09:30
+
+	createPost := func(id, title string, pubAt time.Time) {
+		t.Helper()
+		if _, err := s.db.Exec(`
+			INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status,
+				title, content, comment_count, like_count, bookmark_count, share_count, view_count,
+				created_at, updated_at, published_at)
+			VALUES ($1, $2, $3, 'normal', 'published', 'normal', $4, 'body', 0, 0, 0, 0, 0, $5, $5, $5)`,
+			id, userID, communityID, title, pubAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	createPost(postA, "Post A", base)
+	createPost(postB, "Post B", base.Add(60*time.Minute))
+	createPost(postC, "Post C", base.Add(30*time.Minute))
+
+	// A 10:05 (base + 65m) 回复
+	if _, err := s.db.Exec(`
+		INSERT INTO comments (id, post_id, author_id, root_id, content, publication_status, moderation_status, created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, $1, 'comment A', 'published', 'normal', $4, $4, $4)`,
+		"cmt-A-"+suffix, postA, userID, base.Add(65*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// C 10:02 (base + 62m) 回复
+	if _, err := s.db.Exec(`
+		INSERT INTO comments (id, post_id, author_id, root_id, content, publication_status, moderation_status, created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, $1, 'comment C1', 'published', 'normal', $4, $4, $4)`,
+		"cmt-C1-"+suffix, postC, userID, base.Add(62*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// 最新 -> 按回复: [A, C, B]
+	orderComment := fetchFeedIDsWithLatestBy(t, s, "latest", "comment", communityID)
+	requireFeedOrder(t, orderComment, []string{postA, postC, postB}, "latest_by=comment")
+
+	// 最新 -> 按发帖: [B, C, A]
+	orderPost := fetchFeedIDsWithLatestBy(t, s, "latest", "post", communityID)
+	requireFeedOrder(t, orderPost, []string{postB, postC, postA}, "latest_by=post")
+
+	// 10:10 给 C 发新评论 (base + 70m)
+	if _, err := s.db.Exec(`
+		INSERT INTO comments (id, post_id, author_id, root_id, content, publication_status, moderation_status, created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, $1, 'comment C2', 'published', 'normal', $4, $4, $4)`,
+		"cmt-C2-"+suffix, postC, userID, base.Add(70*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// 刷新按回复: [C, A, B]
+	orderCommentUpdated := fetchFeedIDsWithLatestBy(t, s, "latest", "comment", communityID)
+	requireFeedOrder(t, orderCommentUpdated, []string{postC, postA, postB}, "latest_by=comment after new reply")
 }
 
 // 楼中楼：入口评论下按创建时间分页拉取整条回复线程（含孙级回复）。

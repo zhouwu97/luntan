@@ -70,7 +70,7 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var recent bool
-	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM email_codes WHERE lower(email) = $1 AND purpose = 'login' AND consumed_at IS NULL AND created_at > now() - interval '60 seconds')`, email).Scan(&recent); err != nil {
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM email_codes WHERE lower(email) = $1 AND purpose = 'login' AND status IN ('created', 'sending', 'sent') AND consumed_at IS NULL AND created_at > now() - interval '60 seconds')`, email).Scan(&recent); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -85,11 +85,12 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	// 旧验证码作废，保证同一邮箱只有最后一次请求有效。
-	if _, err := tx.ExecContext(r.Context(), `UPDATE email_codes SET consumed_at = COALESCE(consumed_at, $1) WHERE lower(email) = $2 AND purpose = 'login' AND consumed_at IS NULL`, now, email); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `UPDATE email_codes SET consumed_at = COALESCE(consumed_at, $1), status = CASE WHEN status IN ('created', 'sending', 'sent') THEN 'expired' ELSE status END WHERE lower(email) = $2 AND purpose = 'login' AND consumed_at IS NULL`, now, email); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO email_codes (id, email, purpose, code_hash, expires_at, requested_ip, created_at) VALUES ($1, $2, 'login', $3, $4, $5, $6)`, newPostID(), email, emailCodeHash(code), now.Add(emailCodeLifetime), httpserver.ClientIP(r), now); err != nil {
+	codeID := newPostID()
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO email_codes (id, email, purpose, code_hash, expires_at, requested_ip, status, created_at) VALUES ($1, $2, 'login', $3, $4, $5, 'sending', $6)`, codeID, email, emailCodeHash(code), now.Add(emailCodeLifetime), httpserver.ClientIP(r), now); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -108,12 +109,18 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 	}
 	mailErr := s.mailSender.Send(r.Context(), email, "杯友酱登录验证码", fmt.Sprintf(`<p>你的杯友酱登录验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">%s</p><p>验证码 10 分钟内有效。如非本人操作，请忽略此邮件。</p>`, html.EscapeString(code)))
 	if mailErr != nil {
+		_, _ = s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'delivery_failed', failure_reason = $1 WHERE id = $2`, mailErr.Error(), codeID)
 		if strings.EqualFold(s.appEnv, "production") {
 			writeAuthError(w, r, ErrMailUnavailable)
 			return
 		}
 		// 本地开发无 SMTP 时返回开发验证码，生产环境永不返回，便于联调而不降低线上安全性。
 		devCode = code
+	} else {
+		if _, err := s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'sent', sent_at = now() WHERE id = $1`, codeID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	response := map[string]any{"expires_in": int(emailCodeLifetime.Seconds()), "retry_after": 60, "delivery": "email"}
 	if devCode != "" {
@@ -147,7 +154,7 @@ func (s *Server) verifyEmailCode(w http.ResponseWriter, r *http.Request) {
 	var id, codeHash string
 	var expiresAt time.Time
 	var attempts int
-	err = tx.QueryRowContext(r.Context(), `SELECT id, code_hash, expires_at, attempts FROM email_codes WHERE lower(email) = $1 AND purpose = 'login' AND consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`, email).Scan(&id, &codeHash, &expiresAt, &attempts)
+	err = tx.QueryRowContext(r.Context(), `SELECT id, code_hash, expires_at, attempts FROM email_codes WHERE lower(email) = $1 AND purpose = 'login' AND status IN ('created', 'sending', 'sent') AND consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`, email).Scan(&id, &codeHash, &expiresAt, &attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrInvalidEmailCode)
 		return
@@ -157,7 +164,7 @@ func (s *Server) verifyEmailCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !expiresAt.After(time.Now().UTC()) {
-		_, _ = tx.ExecContext(r.Context(), `UPDATE email_codes SET consumed_at = now() WHERE id = $1`, id)
+		_, _ = tx.ExecContext(r.Context(), `UPDATE email_codes SET consumed_at = now(), status = 'expired' WHERE id = $1`, id)
 		_ = tx.Commit()
 		writeAuthError(w, r, ErrEmailCodeExpired)
 		return
@@ -165,12 +172,12 @@ func (s *Server) verifyEmailCode(w http.ResponseWriter, r *http.Request) {
 	expected := emailCodeHash(code)
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(codeHash)) != 1 {
 		attempts++
-		_, _ = tx.ExecContext(r.Context(), `UPDATE email_codes SET attempts = $1, consumed_at = CASE WHEN $1 >= 5 THEN now() ELSE consumed_at END WHERE id = $2`, attempts, id)
+		_, _ = tx.ExecContext(r.Context(), `UPDATE email_codes SET attempts = $1, status = CASE WHEN $1 >= 5 THEN 'expired' ELSE status END, consumed_at = CASE WHEN $1 >= 5 THEN now() ELSE consumed_at END WHERE id = $2`, attempts, id)
 		_ = tx.Commit()
 		writeAuthError(w, r, ErrInvalidEmailCode)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `UPDATE email_codes SET consumed_at = now() WHERE id = $1`, id); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `UPDATE email_codes SET consumed_at = now(), status = 'verified', verified_at = now() WHERE id = $1`, id); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -187,6 +194,7 @@ func (s *Server) verifyEmailCode(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
+	applyBaseCapabilities(&response.User)
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
@@ -199,6 +207,7 @@ func (s *Server) guest(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
+	applyBaseCapabilities(&response.User)
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 

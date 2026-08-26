@@ -40,6 +40,9 @@ func (s *Server) listBookmarkFolders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capBookmark) {
+		return
+	}
 	if err := ensureDefaultBookmarkFolder(r.Context(), s.db, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -111,6 +114,9 @@ func (s *Server) createBookmarkFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capBookmark) {
 		return
 	}
 	var input bookmarkFolderInput
@@ -244,6 +250,9 @@ func (s *Server) updateBookmarkFolder(w http.ResponseWriter, r *http.Request, fo
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capBookmark) {
+		return
+	}
 	var input bookmarkFolderInput
 	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, ErrInvalidBookmarkFolderName)
@@ -311,6 +320,9 @@ func (s *Server) deleteBookmarkFolder(w http.ResponseWriter, r *http.Request, fo
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capBookmark) {
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -368,6 +380,9 @@ func (s *Server) listBookmarkFolderPosts(w http.ResponseWriter, r *http.Request,
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capBookmark) {
 		return
 	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
@@ -437,6 +452,9 @@ func (s *Server) getPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capBookmark) {
+		return
+	}
 	if err := ensureDefaultBookmarkFolder(r.Context(), s.db, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -487,6 +505,9 @@ func (s *Server) setPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 	}
 	user, ok := s.requireRegisteredUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capBookmark) {
 		return
 	}
 	var input bookmarkFolderIDsInput

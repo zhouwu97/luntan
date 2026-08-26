@@ -3,13 +3,101 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/auth"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
+
+type profileUpdateInput struct {
+	Nickname      *string `json:"nickname"`
+	Bio           *string `json:"bio"`
+	AvatarMediaID *string `json:"avatar_media_id"`
+}
+
+func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capManageProfile) {
+		return
+	}
+	var input profileUpdateInput
+	if err := decodeJSON(r, &input); err != nil {
+		writeAuthError(w, r, auth.ErrInvalidInput)
+		return
+	}
+	nickname := strings.TrimSpace(user.Nickname)
+	bio := ""
+	if input.Nickname == nil || input.Bio == nil {
+		var currentNickname, currentBio string
+		if err := s.db.QueryRowContext(r.Context(), `
+			SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, '')
+			FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
+			WHERE u.id = $1`, user.ID).Scan(&currentNickname, &currentBio); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if input.Nickname == nil {
+			nickname = strings.TrimSpace(currentNickname)
+		}
+		if input.Bio == nil {
+			bio = strings.TrimSpace(currentBio)
+		}
+	}
+	if input.Nickname != nil {
+		nickname = strings.TrimSpace(*input.Nickname)
+	}
+	if input.Bio != nil {
+		bio = strings.TrimSpace(*input.Bio)
+	}
+	if nickname == "" || len([]rune(nickname)) > 64 || len([]rune(bio)) > 200 {
+		writeAuthError(w, r, auth.ErrInvalidInput)
+		return
+	}
+	avatarMediaID := ""
+	if input.AvatarMediaID != nil {
+		avatarMediaID = strings.TrimSpace(*input.AvatarMediaID)
+		if avatarMediaID != "" {
+			var ownedID string
+			if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM media_assets WHERE id = $1 AND owner_id = $2 AND status = 'ready' AND deleted_at IS NULL`, avatarMediaID, user.ID).Scan(&ownedID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeAuthError(w, r, ErrMediaNotFound)
+					return
+				}
+				writeInternalError(w, r, err)
+				return
+			}
+		}
+	} else {
+		// PATCH 未携带头像字段时保留现有头像；只有显式传空字符串才代表移除头像。
+		if err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(avatar_media_id, '') FROM user_profiles WHERE user_id = $1`, user.ID).Scan(&avatarMediaID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	if _, err := s.db.ExecContext(r.Context(), `UPDATE user_profiles SET nickname = $1, bio = $2, avatar_media_id = NULLIF($3, ''), updated_at = now() WHERE user_id = $4`, nickname, bio, avatarMediaID, user.ID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var avatar any
+	if avatarMediaID != "" {
+		avatar = avatarMediaID
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"id": user.ID, "username": user.Username, "nickname": nickname,
+		"signature": bio, "avatar_media_id": avatar,
+	})
+}
 
 // profile 返回个人中心所需的聚合数据。列表接口保持统一的 cursor 形状，
 // 让客户端可以复用 Feed/通知的分页状态机。
@@ -21,12 +109,17 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var nickname, bio, trustLevel string
+	var nickname, bio, trustLevel, avatarObjectKey string
+	var avatarMediaID sql.NullString
 	var level int
 	if err := s.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.level, 1), COALESCE(up.trust_level, 'new')
-		FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id WHERE u.id = $1`, user.ID).
-		Scan(&nickname, &bio, &level, &trustLevel); err != nil {
+		SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.avatar_media_id, ''),
+		       COALESCE(ma.object_key, ''), COALESCE(up.level, 1), COALESCE(up.trust_level, 'new')
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
+		WHERE u.id = $1`, user.ID).
+		Scan(&nickname, &bio, &avatarMediaID, &avatarObjectKey, &level, &trustLevel); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -47,12 +140,24 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
-		"level": level, "trust_level": trustLevel, "signature": bio, "post_count": posts,
+		"avatar_media_id": nullableProfileString(avatarMediaID),
+		"level":           level, "trust_level": trustLevel, "signature": bio, "post_count": posts,
 		"comment_count": comments, "like_received_count": receivedLikes,
 		"follower_count": followers, "following_count": following,
-	})
+	}
+	if avatarObjectKey != "" {
+		response["avatar_url"] = publicMediaURL(avatarObjectKey)
+	}
+	httpserver.WriteJSON(w, http.StatusOK, response)
+}
+
+func nullableProfileString(value sql.NullString) any {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	return value.String
 }
 
 func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string) {

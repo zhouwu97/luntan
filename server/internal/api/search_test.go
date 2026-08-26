@@ -26,4 +26,22 @@ func TestSearchCursorRoundTripAndKindBinding(t *testing.T) {
 	if _, err := decodeSearchCursor("not-a-cursor"); err == nil {
 		t.Fatal("invalid search cursor should be rejected")
 	}
+
+	toyCursor := searchCursor{
+		Kind:      "toys",
+		Rank:      100.0,
+		SortOrder: 999,
+		ID:        "toy-butter-2",
+	}
+	encodedToy, err := encodeSearchCursor(toyCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedToy, err := decodeSearchCursor(encodedToy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decodedToy.Kind != "toys" || decodedToy.ID != "toy-butter-2" || decodedToy.Rank != 100.0 || decodedToy.SortOrder != 999 {
+		t.Fatalf("decoded toy cursor = %#v, want %#v", decodedToy, toyCursor)
+	}
 }

@@ -10,7 +10,7 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
   _RecordingFeed(this.pages);
 
   final List<FeedPage> pages;
-  final List<({String? cursor, String? communityId, String sort})> calls = [];
+  final List<({String? cursor, String? communityId, String sort, LatestOrder latestOrder})> calls = [];
   int index = 0;
 
   @override
@@ -23,10 +23,11 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) {
-    calls.add((cursor: cursor, communityId: communityId, sort: sort));
+    calls.add((cursor: cursor, communityId: communityId, sort: sort, latestOrder: latestOrder));
     final page = pages[index < pages.length ? index : pages.length - 1];
     index += 1;
     return Future.value(page);
@@ -54,6 +55,7 @@ class _PendingFeed implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) {
@@ -79,6 +81,7 @@ class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) {
@@ -107,20 +110,27 @@ Post _post(String id, String communityId) => Post(
 );
 
 void main() {
-  test('setQuery 切换板块/排序时清空旧内容并透传参数', () async {
+  test('setQuery 切换板块/排序与 LatestOrder 时清空旧内容并透传参数', () async {
     final feed = _RecordingFeed([
       FeedPage(items: [_post('a', 'campus')], hasMore: true, nextCursor: 'p1'),
       FeedPage(items: [_post('b', 'gaming')]),
+      FeedPage(items: [_post('c', 'gaming')]),
     ]);
     final controller = FeedController(repository: feed);
 
     await controller.initialLoad();
     expect(controller.state.items.map((post) => post.id), ['a']);
 
-    await controller.setQuery(communityId: 'gaming', sort: 'latest');
+    await controller.setQuery(communityId: 'gaming', sort: 'latest', latestOrder: LatestOrder.comment);
     expect(feed.calls.last.communityId, 'gaming');
     expect(feed.calls.last.sort, 'latest');
+    expect(feed.calls.last.latestOrder, LatestOrder.comment);
     expect(controller.state.items.map((post) => post.id), ['b']);
+
+    await controller.setLatestOrder(LatestOrder.post);
+    expect(feed.calls.last.sort, 'latest');
+    expect(feed.calls.last.latestOrder, LatestOrder.post);
+    expect(controller.state.items.map((post) => post.id), ['c']);
   });
 
   test('相同查询不重复加载', () async {
@@ -131,7 +141,7 @@ void main() {
     final controller = FeedController(repository: feed);
 
     await controller.initialLoad();
-    await controller.setQuery(communityId: null, sort: 'recommended');
+    await controller.setQuery(communityId: null, sort: 'recommended', latestOrder: LatestOrder.comment);
 
     expect(feed.calls, hasLength(1));
   });

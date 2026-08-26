@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/zhouwu97/luntan/server/internal/auth"
@@ -15,6 +17,11 @@ func TestCapabilityMatrix(t *testing.T) {
 		"can_publish",
 		"can_comment",
 		"can_like",
+		"can_bookmark",
+		"can_follow",
+		"can_upload_media",
+		"can_vote",
+		"can_manage_profile",
 		"can_manage_bookmarks",
 		"can_create_poll",
 		"can_report",
@@ -43,6 +50,8 @@ func TestCapabilityMatrix(t *testing.T) {
 			user: auth.User{ID: "guest-1", AccountType: "guest"},
 			expect: map[string]bool{
 				"can_publish": false, "can_comment": true, "can_like": true,
+				"can_bookmark": false, "can_follow": false, "can_upload_media": false,
+				"can_vote": false, "can_manage_profile": false,
 				"can_manage_bookmarks": false, "can_create_poll": false,
 				"can_report": true, "can_moderate": false,
 				"can_manage_admins": false, "can_ban_ip": false,
@@ -53,6 +62,8 @@ func TestCapabilityMatrix(t *testing.T) {
 			user: auth.User{ID: "user-1", AccountType: "email"},
 			expect: map[string]bool{
 				"can_publish": true, "can_comment": true, "can_like": true,
+				"can_bookmark": true, "can_follow": true, "can_upload_media": true,
+				"can_vote": true, "can_manage_profile": true,
 				"can_manage_bookmarks": true, "can_create_poll": true,
 				"can_report": true, "can_moderate": false,
 				"can_manage_admins": false, "can_ban_ip": false,
@@ -65,9 +76,11 @@ func TestCapabilityMatrix(t *testing.T) {
 			permissions: rolePermissions,
 			expect: map[string]bool{
 				"can_publish": true, "can_comment": true, "can_like": true,
+				"can_bookmark": true, "can_follow": true, "can_upload_media": true,
+				"can_vote": true, "can_manage_profile": true,
 				"can_manage_bookmarks": true, "can_create_poll": true,
 				"can_report": true, "can_moderate": true,
-				"can_manage_admins": false, "can_ban_ip": true,
+				"can_manage_admins": false, "can_ban_ip": false,
 			},
 		},
 		{
@@ -77,6 +90,8 @@ func TestCapabilityMatrix(t *testing.T) {
 			permissions: rolePermissions,
 			expect: map[string]bool{
 				"can_publish": true, "can_comment": true, "can_like": true,
+				"can_bookmark": true, "can_follow": true, "can_upload_media": true,
+				"can_vote": true, "can_manage_profile": true,
 				"can_manage_bookmarks": true, "can_create_poll": true,
 				"can_report": true, "can_moderate": true,
 				"can_manage_admins": true, "can_ban_ip": true,
@@ -127,6 +142,38 @@ func TestRegisteredCapabilitiesAllowPublishing(t *testing.T) {
 	}
 	if registered["can_manage_bookmarks"] != true {
 		t.Fatal("正式账号应当可以管理收藏夹")
+	}
+}
+
+func TestActiveMuteRemovesCommentCapabilityAndExposesExpiry(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	until := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Microsecond)
+	mock.ExpectQuery(`(?s)SELECT ends_at.*FROM restrictions`).
+		WithArgs("user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"ends_at"}).AddRow(until))
+
+	server := &Server{db: db}
+	user := auth.User{ID: "user-1", AccountType: "email"}
+	caps := capabilitiesForUser(user)
+	if err := server.applyActiveMute(context.Background(), &user, caps); err != nil {
+		t.Fatal(err)
+	}
+	if caps[capComment] {
+		t.Fatal("active mute must disable comment capability")
+	}
+	if !user.CommentRestricted || user.CommentRestrictedUntil == nil {
+		t.Fatal("active mute expiry should be exposed on user state")
+	}
+	if !user.CommentRestrictedUntil.Equal(until) {
+		t.Fatalf("mute expiry = %v, want %v", user.CommentRestrictedUntil, until)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

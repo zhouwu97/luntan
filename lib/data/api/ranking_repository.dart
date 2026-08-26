@@ -15,6 +15,8 @@ class RankingToy {
     required this.score,
     required this.wanted,
     required this.owned,
+    this.category = 'cup',
+    this.segments = const [],
     this.rating,
   });
 
@@ -31,6 +33,8 @@ class RankingToy {
   final double score;
   final bool wanted;
   final bool owned;
+  final String category;
+  final List<String> segments;
   final int? rating;
 }
 
@@ -45,6 +49,7 @@ class RankingToyComment {
     required this.likeCount,
     required this.isLiked,
     required this.createdAt,
+    this.authorRating,
     this.rootId,
     this.parentId,
     this.replyToUserId,
@@ -60,6 +65,7 @@ class RankingToyComment {
   final int likeCount;
   final bool isLiked;
   final DateTime createdAt;
+  final int? authorRating;
   final String? rootId;
   final String? parentId;
   final String? replyToUserId;
@@ -71,11 +77,13 @@ class RankingToyDetail {
     required this.toy,
     required this.comments,
     required this.commentSort,
+    this.ratingDistribution = const {},
   });
 
   final RankingToy toy;
   final List<RankingToyComment> comments;
   final String commentSort;
+  final Map<int, int> ratingDistribution;
 }
 
 class RankingRepository {
@@ -108,10 +116,22 @@ class RankingRepository {
               .map((item) => _commentFromJson(Map<String, dynamic>.from(item)))
               .toList()
         : <RankingToyComment>[];
+    final rawDist = payload['rating_distribution'];
+    final ratingDistribution = <int, int>{};
+    if (rawDist is Map) {
+      for (final entry in rawDist.entries) {
+        final key = int.tryParse('${entry.key}');
+        final val = entry.value is num ? (entry.value as num).toInt() : int.tryParse('${entry.value}') ?? 0;
+        if (key != null) {
+          ratingDistribution[key] = val;
+        }
+      }
+    }
     return RankingToyDetail(
       toy: _toyFromJson(payload),
       comments: comments,
       commentSort: _string(payload['comment_sort'], fallback: commentSort),
+      ratingDistribution: ratingDistribution,
     );
   }
 
@@ -181,6 +201,13 @@ RankingToy _toyFromJson(Map<String, dynamic> json) {
             .where((value) => value.isNotEmpty)
             .toList()
       : const <String>[];
+  final rawSegments = json['segments'];
+  final segments = rawSegments is List
+      ? rawSegments
+            .map((value) => '$value')
+            .where((value) => value.isNotEmpty)
+            .toList()
+      : const <String>[];
   return RankingToy(
     id: _string(json['id']),
     rank: _int(json['rank']),
@@ -193,6 +220,8 @@ RankingToy _toyFromJson(Map<String, dynamic> json) {
     wantCount: _int(json['want_count']),
     ratingCount: _int(json['rating_count']),
     score: _double(json['score']),
+    category: _string(json['category'], fallback: 'cup'),
+    segments: segments,
     wanted: viewerState['wanted'] == true,
     owned: viewerState['owned'] == true,
     rating: _nullableInt(viewerState['rating']),
@@ -215,6 +244,7 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
         json['viewer_state'] is Map &&
         (json['viewer_state'] as Map)['has_liked'] == true,
     createdAt: _date(json['created_at']),
+    authorRating: _nullableInt(json['author_rating'] ?? author['author_rating']),
     rootId: _nullableString(json['root_id']),
     parentId: _nullableString(json['parent_id']),
     replyToUserId: _nullableString(json['reply_to_user_id']),

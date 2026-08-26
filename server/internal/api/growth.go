@@ -29,6 +29,9 @@ func (s *Server) createPoll(w http.ResponseWriter, r *http.Request, postID strin
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capCreatePoll) {
+		return
+	}
 	var input pollInput
 	if err := decodeJSON(r, &input); err != nil || !validPollInput(&input) {
 		writeAuthError(w, r, ErrInvalidPost)
@@ -111,7 +114,7 @@ func (s *Server) getPoll(w http.ResponseWriter, r *http.Request, postID string) 
 	}
 	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
 		viewerState["authentication_required"] = false
-		viewerState["can_vote"] = !(endsAt.Valid && !endsAt.Time.After(time.Now()))
+		viewerState["can_vote"] = capabilitiesForUser(viewer)[capVote] && !(endsAt.Valid && !endsAt.Time.After(time.Now()))
 		votedRows, queryErr := s.db.QueryContext(r.Context(), `SELECT option_id FROM poll_votes WHERE poll_id = $1 AND user_id = $2 ORDER BY option_id ASC`, pollID, viewer.ID)
 		if queryErr != nil {
 			writeInternalError(w, r, queryErr)
@@ -146,6 +149,9 @@ func (s *Server) votePoll(w http.ResponseWriter, r *http.Request, pollID string)
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capVote) {
 		return
 	}
 	var input struct {

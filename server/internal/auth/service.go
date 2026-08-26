@@ -27,16 +27,18 @@ const (
 )
 
 type User struct {
-	ID              string          `json:"id"`
-	Username        string          `json:"username"`
-	Nickname        string          `json:"nickname"`
-	Level           int             `json:"level"`
-	Status          string          `json:"status"`
-	AccountType     string          `json:"account_type"`
-	Email           string          `json:"email,omitempty"`
-	EmailVerified   bool            `json:"email_verified"`
-	EmailVerifiedAt *time.Time      `json:"email_verified_at,omitempty"`
-	Capabilities    map[string]bool `json:"capabilities,omitempty"`
+	ID                     string          `json:"id"`
+	Username               string          `json:"username"`
+	Nickname               string          `json:"nickname"`
+	Level                  int             `json:"level"`
+	Status                 string          `json:"status"`
+	AccountType            string          `json:"account_type"`
+	Email                  string          `json:"email,omitempty"`
+	EmailVerified          bool            `json:"email_verified"`
+	EmailVerifiedAt        *time.Time      `json:"email_verified_at,omitempty"`
+	CommentRestricted      bool            `json:"comment_restricted,omitempty"`
+	CommentRestrictedUntil *time.Time      `json:"comment_restricted_until,omitempty"`
+	Capabilities           map[string]bool `json:"capabilities,omitempty"`
 }
 
 type RegisterInput struct {
@@ -152,8 +154,8 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname string, meta
 	if errors.Is(err, sql.ErrNoRows) {
 		now := s.clock().UTC()
 		user = User{ID: newID("usr"), Username: "email_" + newID("acct")[5:17], Nickname: strings.TrimSpace(nickname), Level: 1, Status: "active", AccountType: "email", Email: email, EmailVerified: true, EmailVerifiedAt: &now}
-		if user.Nickname == "" {
-			user.Nickname = email
+		if user.Nickname == "" || strings.EqualFold(user.Nickname, email) {
+			user.Nickname = generatedNickname(user.ID)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
 			return AuthResponse{}, err
@@ -169,6 +171,12 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname string, meta
 		}
 		if user.AccountType == "" {
 			user.AccountType = "email"
+		}
+		if strings.TrimSpace(user.Nickname) == "" || strings.EqualFold(strings.TrimSpace(user.Nickname), email) {
+			user.Nickname = generatedNickname(user.ID)
+			if _, err := tx.ExecContext(ctx, `UPDATE user_profiles SET nickname = $1, updated_at = $2 WHERE user_id = $3`, user.Nickname, s.clock().UTC(), user.ID); err != nil {
+				return AuthResponse{}, err
+			}
 		}
 		if user.Status != "active" {
 			return AuthResponse{}, ErrUserDisabled
@@ -485,4 +493,12 @@ func newID(prefix string) string {
 		return prefix + "_fallback"
 	}
 	return prefix + "_" + token[:24]
+}
+
+func generatedNickname(userID string) string {
+	clean := strings.TrimSpace(userID)
+	if len(clean) >= 4 {
+		return "杯友_" + strings.ToUpper(clean[len(clean)-4:])
+	}
+	return "用户_A81C"
 }

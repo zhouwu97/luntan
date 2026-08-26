@@ -54,6 +54,8 @@ String userFacingApiMessage(Object error, {String fallback = '操作失败，请
       return '邮件服务暂时不可用，请稍后再试';
     case 'REGISTERED_ACCOUNT_REQUIRED':
       return '游客可以评论和举报，登录邮箱账号后才能发布内容';
+    case 'USER_MUTED':
+      return '账号当前处于禁言状态，暂不能发表评论；请在账号状态查看解除时间';
   }
   return switch (error.type) {
     ApiErrorType.unauthorized => '登录状态已失效，请重新登录',

@@ -272,6 +272,9 @@ func (s *Server) createMediaUploadToken(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	if !s.requireCapability(w, r, user, capUploadMedia) {
+		return
+	}
 	var input mediaUploadInput
 	if err := decodeJSON(r, &input); err != nil || !validMediaInput(input) {
 		writeAuthError(w, r, ErrInvalidMedia)

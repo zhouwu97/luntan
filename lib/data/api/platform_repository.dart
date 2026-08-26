@@ -57,6 +57,85 @@ class ForumNotification {
     final value = targetData['moderation_action_id'];
     return value is String && value.isNotEmpty ? value : null;
   }
+
+  NotificationCategory get category {
+    if (isModeration) return NotificationCategory.moderation;
+    if (type.startsWith('community.') ||
+        type == 'announcement' ||
+        type == 'event') {
+      return NotificationCategory.community;
+    }
+    return NotificationCategory.interaction;
+  }
+
+  String get title {
+    final customTitle = targetData['title'];
+    if (customTitle is String && customTitle.isNotEmpty) return customTitle;
+    return switch (type) {
+      'like' || 'post.liked' => '$actorName 赞了你的帖子',
+      'bookmark' || 'post.bookmarked' => '$actorName 收藏了你的帖子',
+      'comment.created' ||
+      'comment.replied' ||
+      'reply' => '$actorName 回复了你的评论',
+      'follow' || 'user.followed' => '$actorName 关注了你',
+      'moderation.action' => switch (targetData['action']) {
+        'mute' => '账号禁言通知',
+        'ban' => '账号封禁通知',
+        'delete' => '帖子处理通知',
+        'hide' => '内容处理通知',
+        _ => '处理通知',
+      },
+      'appeal.result' => '申诉结果通知',
+      'announcement' || 'community.announcement' => '社区公告',
+      'event' || 'community.event' => '活动通知',
+      _ => '你有一条新通知',
+    };
+  }
+
+  String get content {
+    final customContent = targetData['content'] ??
+        targetData['snippet'] ??
+        targetData['message'] ??
+        targetData['body'] ??
+        targetData['post_title'] ??
+        targetData['description'];
+    if (customContent is String && customContent.isNotEmpty) {
+      return customContent;
+    }
+    return '';
+  }
+}
+
+class SearchToy {
+  const SearchToy({
+    required this.id,
+    required this.rank,
+    required this.name,
+    required this.merchant,
+    required this.releaseYear,
+    required this.description,
+    required this.tags,
+    required this.assetKey,
+    required this.wantCount,
+    required this.ratingCount,
+    required this.score,
+    required this.category,
+    required this.segments,
+  });
+
+  final String id;
+  final int rank;
+  final String name;
+  final String merchant;
+  final int releaseYear;
+  final String description;
+  final List<String> tags;
+  final String assetKey;
+  final int wantCount;
+  final int ratingCount;
+  final double score;
+  final String category;
+  final List<String> segments;
 }
 
 class SearchPost {
@@ -107,6 +186,7 @@ class SearchCommunity {
 
 class SearchResult {
   const SearchResult({
+    this.toys = const [],
     this.posts = const [],
     this.users = const [],
     this.communities = const [],
@@ -114,13 +194,15 @@ class SearchResult {
     this.hasMore = false,
   });
 
+  final List<SearchToy> toys;
   final List<SearchPost> posts;
   final List<SearchUser> users;
   final List<SearchCommunity> communities;
   final String? nextCursor;
   final bool hasMore;
 
-  bool get isEmpty => posts.isEmpty && users.isEmpty && communities.isEmpty;
+  bool get isEmpty =>
+      toys.isEmpty && posts.isEmpty && users.isEmpty && communities.isEmpty;
 }
 
 class RankingItem {
@@ -169,6 +251,59 @@ class ModerationCasePage {
   final List<ModerationCase> items;
   final String? nextCursor;
   final bool hasMore;
+}
+
+class ModerationCaseDetail {
+  const ModerationCaseDetail({
+    required this.id,
+    required this.targetType,
+    required this.targetId,
+    required this.source,
+    required this.riskLevel,
+    required this.status,
+    required this.communityId,
+    required this.createdAt,
+    this.resolvedAt,
+    this.target = const <String, dynamic>{},
+    this.report = const <String, dynamic>{},
+    this.account = const <String, dynamic>{},
+  });
+
+  final String id;
+  final String targetType;
+  final String targetId;
+  final String source;
+  final String riskLevel;
+  final String status;
+  final String communityId;
+  final DateTime createdAt;
+  final DateTime? resolvedAt;
+  final Map<String, dynamic> target;
+  final Map<String, dynamic> report;
+  final Map<String, dynamic> account;
+}
+
+class IpRestriction {
+  const IpRestriction({
+    required this.id,
+    required this.cidr,
+    required this.reason,
+    required this.startsAt,
+    required this.createdAt,
+    this.endsAt,
+    this.revokedAt,
+  });
+
+  final String id;
+  final String cidr;
+  final String reason;
+  final DateTime startsAt;
+  final DateTime? endsAt;
+  final DateTime? revokedAt;
+  final DateTime createdAt;
+
+  bool get active =>
+      revokedAt == null && (endsAt == null || endsAt!.isAfter(DateTime.now()));
 }
 
 class AccountPunishment {
@@ -235,6 +370,27 @@ class AdminSummary {
   final List<String> roles;
   final int actionCount;
   final DateTime? lastActionAt;
+}
+
+class AdminCandidate {
+  const AdminCandidate({
+    required this.id,
+    required this.username,
+    required this.nickname,
+    required this.email,
+  });
+
+  final String id;
+  final String username;
+  final String nickname;
+  final String email;
+}
+
+class AdminRoleAssignment {
+  const AdminRoleAssignment({required this.name, this.communityId});
+
+  final String name;
+  final String? communityId;
 }
 
 class AdminActionSummary {
@@ -317,6 +473,7 @@ class AdminLogEntry {
     required this.previousHash,
     required this.hash,
     required this.createdAt,
+    this.ipAddress = '',
   });
 
   final String id;
@@ -326,6 +483,7 @@ class AdminLogEntry {
   final String reason;
   final String previousHash;
   final String hash;
+  final String ipAddress;
   final DateTime createdAt;
 }
 
@@ -410,6 +568,31 @@ class PlatformRepository {
       queryParameters: queryParameters,
     );
     return SearchResult(
+      toys: _searchList(payload['toys'])
+          .map(
+            (value) => SearchToy(
+              id: _string(value['id']),
+              rank: _int(value['rank']),
+              name: _string(value['name']),
+              merchant: _string(value['merchant']),
+              releaseYear: _int(value['release_year']),
+              description: _string(value['description']),
+              tags: (value['tags'] as List? ?? const [])
+                  .map((e) => '$e')
+                  .where((e) => e.isNotEmpty)
+                  .toList(),
+              assetKey: _string(value['asset_key']),
+              wantCount: _int(value['want_count']),
+              ratingCount: _int(value['rating_count']),
+              score: _double(value['score']),
+              category: _string(value['category'], fallback: 'cup'),
+              segments: (value['segments'] as List? ?? const [])
+                  .map((e) => '$e')
+                  .where((e) => e.isNotEmpty)
+                  .toList(),
+            ),
+          )
+          .toList(),
       posts: _searchList(payload['posts'])
           .map(
             (value) => SearchPost(
@@ -511,10 +694,38 @@ class PlatformRepository {
     required String caseId,
     required String action,
     String reason = '',
+    int durationDays = 0,
+    bool permanent = false,
   }) async {
     await _client.postJson(
       '/api/v1/moderation/cases/$caseId/actions',
-      body: {'action': action, 'reason': reason},
+      body: {
+        'action': action,
+        'reason': reason,
+        if (action == 'mute' || action == 'ban') 'duration_days': durationDays,
+        if (action == 'mute' || action == 'ban') 'permanent': permanent,
+      },
+    );
+  }
+
+  Future<ModerationCaseDetail> getModerationCase(String caseId) async {
+    final payload = await _client.getJson('/api/v1/moderation/cases/$caseId');
+    Map<String, dynamic> map(dynamic value) => value is Map
+        ? Map<String, dynamic>.from(value)
+        : const <String, dynamic>{};
+    return ModerationCaseDetail(
+      id: _string(payload['id']),
+      targetType: _string(payload['target_type']),
+      targetId: _string(payload['target_id']),
+      source: _string(payload['source']),
+      riskLevel: _string(payload['risk_level']),
+      status: _string(payload['status']),
+      communityId: _string(payload['community_id']),
+      createdAt: _date(payload['created_at']),
+      resolvedAt: _nullableDate(payload['resolved_at']),
+      target: map(payload['target']),
+      report: map(payload['report']),
+      account: map(payload['account']),
     );
   }
 
@@ -548,8 +759,11 @@ class PlatformRepository {
     );
   }
 
-  Future<List<AdminSummary>> listAdmins() async {
-    final payload = await _client.getJson('/api/v1/admins');
+  Future<List<AdminSummary>> listAdmins({String query = ''}) async {
+    final payload = await _client.getJson(
+      '/api/v1/admins',
+      queryParameters: {if (query.trim().isNotEmpty) 'q': query.trim()},
+    );
     final raw = payload['items'];
     if (raw is! List) return const <AdminSummary>[];
     return raw.whereType<Map>().map((item) {
@@ -567,6 +781,45 @@ class PlatformRepository {
         lastActionAt: _nullableDate(value['last_action_at']),
       );
     }).toList();
+  }
+
+  Future<List<AdminCandidate>> listAdminCandidates({String query = ''}) async {
+    final payload = await _client.getJson(
+      '/api/v1/admins/candidates',
+      queryParameters: {if (query.trim().isNotEmpty) 'q': query.trim()},
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <AdminCandidate>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      return AdminCandidate(
+        id: _string(value['id']),
+        username: _string(value['username']),
+        nickname: _string(value['nickname']),
+        email: _string(value['email']),
+      );
+    }).toList();
+  }
+
+  Future<void> updateAdminRoles({
+    required String adminId,
+    required List<AdminRoleAssignment> roles,
+    required String reason,
+  }) async {
+    await _client.putJson(
+      '/api/v1/admins/$adminId/roles',
+      body: {
+        'roles': roles
+            .map(
+              (role) => {
+                'name': role.name,
+                if (role.communityId != null) 'community_id': role.communityId,
+              },
+            )
+            .toList(),
+        'reason': reason,
+      },
+    );
   }
 
   Future<AdminDetail> getAdmin(String adminId) async {
@@ -643,9 +896,49 @@ class PlatformRepository {
         reason: _string(item['reason']),
         previousHash: _string(item['previous_hash']),
         hash: _string(item['hash']),
+        ipAddress: _string(item['ip_address']),
         createdAt: _date(item['created_at']),
       );
     }).toList();
+  }
+
+  Future<List<IpRestriction>> listIPRestrictions() async {
+    final payload = await _client.getJson('/api/v1/admin/ip-restrictions');
+    final raw = payload['items'];
+    if (raw is! List) return const <IpRestriction>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      return IpRestriction(
+        id: _string(value['id']),
+        cidr: _string(value['ip_cidr']),
+        reason: _string(value['reason']),
+        startsAt: _date(value['starts_at']),
+        endsAt: _nullableDate(value['ends_at']),
+        revokedAt: _nullableDate(value['revoked_at']),
+        createdAt: _date(value['created_at']),
+      );
+    }).toList();
+  }
+
+  Future<void> createIPRestriction({
+    required String cidr,
+    required String reason,
+    int durationDays = 0,
+    bool permanent = false,
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/ip-restrictions',
+      body: {
+        'ip_cidr': cidr,
+        'reason': reason,
+        'duration_days': durationDays,
+        'permanent': permanent,
+      },
+    );
+  }
+
+  Future<void> revokeIPRestriction(String restrictionId) async {
+    await _client.deleteJson('/api/v1/admin/ip-restrictions/$restrictionId');
   }
 
   Future<void> report({
@@ -674,10 +967,14 @@ class PlatformRepository {
     }
   }
 
-  String _string(dynamic value) => value is String ? value : '';
+  String _string(dynamic value, {String fallback = ''}) =>
+      value is String && value.isNotEmpty ? value : fallback;
 
-  int _int(dynamic value) =>
-      value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+  int _int(dynamic value, {int fallback = 0}) =>
+      value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
+
+  double _double(dynamic value, {double fallback = 0.0}) =>
+      value is num ? value.toDouble() : double.tryParse('$value') ?? fallback;
 
   List<Map<String, dynamic>> _searchList(dynamic value) => value is List
       ? value

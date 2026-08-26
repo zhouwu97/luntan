@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 /// 漂移。动画必须能在状态变化时被打断，并且尊重系统的减少动态效果设置。
 class AppMotion {
   static const fast = Duration(milliseconds: 120);
+  static const tab = Duration(milliseconds: 200);
   static const normal = Duration(milliseconds: 200);
   static const page = Duration(milliseconds: 280);
+  static const highlightFade = Duration(milliseconds: 1500);
 
   static const Curve standard = Curves.easeOutCubic;
   static const Curve emphasized = Curves.easeInOutCubic;

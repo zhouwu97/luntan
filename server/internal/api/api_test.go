@@ -472,10 +472,10 @@ func TestLatestFeedUsesStableCursorAndReturnsNextCursor(t *testing.T) {
 	}
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
-	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at"}).
-		AddRow("p2", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第二条", "正文", 2, 3, 0, 0, 5, created, created, created).
-		AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第一条", "正文", 1, 2, 0, 0, 4, created.Add(-time.Minute), created.Add(-time.Minute), created.Add(-time.Minute))
-	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*ORDER BY p.published_at DESC, p.id DESC LIMIT \$1`).WithArgs(2).WillReturnRows(rows)
+	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at", "rec_position", "rec_at", "last_comment_at", "activity_at"}).
+		AddRow("p2", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第二条", "正文", 2, 3, 0, 0, 5, created, created, created, nil, nil, nil, created).
+		AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第一条", "正文", 1, 2, 0, 0, 4, created.Add(-time.Minute), created.Add(-time.Minute), created.Add(-time.Minute), nil, nil, nil, created.Add(-time.Minute))
+	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*ORDER BY.*LIMIT \$1`).WithArgs(2).WillReturnRows(rows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?limit=1", nil)
 	res := httptest.NewRecorder()

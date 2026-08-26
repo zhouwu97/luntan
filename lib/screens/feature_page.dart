@@ -40,6 +40,9 @@ class FeaturePage extends StatefulWidget {
     this.rankingRepository,
     this.storeRepository,
     this.isAuthenticated = false,
+    this.canComment = false,
+    this.canLike = false,
+    this.canVote = false,
     this.onRequireAuth,
   });
 
@@ -56,121 +59,17 @@ class FeaturePage extends StatefulWidget {
   final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
   final bool isAuthenticated;
+  final bool canComment;
+  final bool canLike;
+  final bool canVote;
   final VoidCallback? onRequireAuth;
 
   @override
   State<FeaturePage> createState() => _FeaturePageState();
 }
 
-class _ApiRankingProduct extends StatelessWidget {
-  const _ApiRankingProduct({required this.rank, required this.product});
-
-  final int rank;
-  final ApiStoreProduct product;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 10),
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppTheme.border),
-    ),
-    child: Row(
-      children: [
-        Text(
-          rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '$rank',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(width: 12),
-        Container(
-          width: 48,
-          height: 48,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: Color(product.color),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Text(product.emoji, style: const TextStyle(fontSize: 27)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                product.name,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                '${product.points} 积分 · 已有 ${product.redeemedCount} 人兑换',
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-              if (product.description.isNotEmpty)
-                Text(
-                  product.description,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _MockRankingProduct extends StatelessWidget {
-  const _MockRankingProduct({required this.rank, required this.product});
-
-  final int rank;
-  final StoreProduct product;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 10),
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: AppTheme.border),
-    ),
-    child: Row(
-      children: [
-        Text(rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '$rank'),
-        const SizedBox(width: 12),
-        Text(product.emoji, style: const TextStyle(fontSize: 27)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            '${product.name}\n${product.points} 积分 · 热门兑换',
-            style: const TextStyle(
-              color: AppTheme.textPrimary,
-              height: 1.45,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 class _FeaturePageState extends State<FeaturePage> {
   Future<List<Post>>? remoteFuture;
-  Future<List<ApiStoreProduct>>? productsFuture;
 
   FeatureType get type => widget.type;
   ForumStore get store => widget.store;
@@ -183,6 +82,9 @@ class _FeaturePageState extends State<FeaturePage> {
   RankingRepository? get rankingRepository => widget.rankingRepository;
   StoreRepository? get storeRepository => widget.storeRepository;
   bool get isAuthenticated => widget.isAuthenticated;
+  bool get canComment => widget.canComment;
+  bool get canLike => widget.canLike;
+  bool get canVote => widget.canVote;
   VoidCallback? get onRequireAuth => widget.onRequireAuth;
 
   @override
@@ -210,15 +112,31 @@ class _FeaturePageState extends State<FeaturePage> {
     }
   }
 
-  List<Post> _posts() {
-    if (type == FeatureType.ranking) {
-      final list = [...store.posts]
-        ..sort((a, b) => b.comments.compareTo(a.comments));
-      return list.take(6).toList();
+  Future<List<Post>> _remotePosts() async {
+    final repository = feedRepository!;
+    final page = repository is QueryableFeedRepository
+        ? await (repository as QueryableFeedRepository).getFeed(
+            sort: type == FeatureType.hot ? 'hot' : 'recommended',
+            limit: 50,
+            postType: switch (type) {
+              FeatureType.activity => 'activity',
+              FeatureType.gameShare => 'game_share',
+              _ => null,
+            },
+            hasMedia: type == FeatureType.outfit ? true : null,
+          )
+        : await repository.getLatestFeed(limit: 50);
+    final items = page.items;
+    if (type == FeatureType.hot) {
+      return items.take(20).toList();
     }
+    return items;
+  }
+
+  List<Post> _posts() {
     if (type == FeatureType.hot) {
       final list = [...store.posts]
-        ..sort((a, b) => _views(b.views).compareTo(_views(a.views)));
+        ..sort((a, b) => b.commentCount.compareTo(a.commentCount));
       return list.take(6).toList();
     }
     if (type == FeatureType.gameShare) {
@@ -226,7 +144,7 @@ class _FeaturePageState extends State<FeaturePage> {
     }
     if (type == FeatureType.outfit) {
       return store.posts
-          .where((post) => post.tag == '穿搭分享' || post.images.isNotEmpty)
+          .where((post) => post.tag == '穿搭分享' || post.media.isNotEmpty)
           .take(6)
           .toList();
     }
@@ -238,52 +156,16 @@ class _FeaturePageState extends State<FeaturePage> {
     return const <Post>[];
   }
 
-  int _views(String value) =>
-      int.tryParse(value.replaceAll('k', '000').replaceAll('.', '')) ?? 0;
-
   @override
   Widget build(BuildContext context) {
     if (type == FeatureType.ranking) {
       return RankingPage(
         repository: rankingRepository,
         isAuthenticated: isAuthenticated,
+        canComment: canComment,
+        canLike: canLike,
+        canVote: canVote,
         onRequireAuth: onRequireAuth,
-      );
-    }
-    if (type == FeatureType.ranking && storeRepository != null) {
-      return Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: FutureBuilder<List<ApiStoreProduct>>(
-          future: productsFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('玩具排行榜加载失败'),
-                    TextButton(
-                      onPressed: () => setState(
-                        () => productsFuture = storeRepository!.products(),
-                      ),
-                      child: const Text('重试'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            return _productBody(snapshot.data ?? const []);
-          },
-        ),
-      );
-    }
-    if (feedRepository == null && type == FeatureType.ranking) {
-      return Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: _mockProductBody(),
       );
     }
     if (feedRepository != null) {
@@ -319,36 +201,6 @@ class _FeaturePageState extends State<FeaturePage> {
       appBar: AppBar(title: Text(title)),
       body: _body(posts),
     );
-  }
-
-  Future<List<Post>> _remotePosts() async {
-    final repository = feedRepository!;
-    final page = repository is QueryableFeedRepository
-        ? await (repository as QueryableFeedRepository).getFeed(
-            sort: type == FeatureType.ranking
-                ? 'featured'
-                : type == FeatureType.hot
-                ? 'hot'
-                : 'recommended',
-            limit: 50,
-            postType: switch (type) {
-              FeatureType.activity => 'activity',
-              FeatureType.gameShare => 'game_share',
-              _ => null,
-            },
-            hasMedia: type == FeatureType.outfit ? true : null,
-          )
-        : await repository.getLatestFeed(limit: 50);
-    final items = page.items;
-    if (type == FeatureType.ranking || type == FeatureType.hot) {
-      return items.take(20).toList();
-    }
-    if (type == FeatureType.activity ||
-        type == FeatureType.gameShare ||
-        type == FeatureType.outfit) {
-      return items;
-    }
-    return const <Post>[];
   }
 
   Widget _body(List<Post> posts) => CustomScrollView(
@@ -414,75 +266,6 @@ class _FeaturePageState extends State<FeaturePage> {
     // 专题页暂不提供帖子菜单，不渲染一个没有行为的省略号入口。
     onMenu: null,
     interactionListenable: widget.interactionController,
-  );
-
-  Widget _productBody(List<ApiStoreProduct> products) => CustomScrollView(
-    slivers: [
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
-        sliver: SliverToBoxAdapter(
-          child: _featureIntro('本周热门内容\n用社区积分兑换喜欢的论坛周边。'),
-        ),
-      ),
-      if (products.isEmpty)
-        const SliverFillRemaining(
-          hasScrollBody: false,
-          child: Center(child: Text('暂时还没有商品')),
-        )
-      else
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) =>
-                  _ApiRankingProduct(rank: index + 1, product: products[index]),
-              childCount: products.length,
-            ),
-          ),
-        ),
-      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
-    ],
-  );
-
-  Widget _mockProductBody() => CustomScrollView(
-    slivers: [
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
-        sliver: SliverToBoxAdapter(
-          child: _featureIntro('本周热门内容\n用社区积分兑换喜欢的论坛周边。'),
-        ),
-      ),
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        sliver: SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) => _MockRankingProduct(
-              rank: index + 1,
-              product: storeProducts[index],
-            ),
-            childCount: storeProducts.length,
-          ),
-        ),
-      ),
-      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
-    ],
-  );
-
-  Widget _featureIntro(String text) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      gradient: AppTheme.primaryGradient,
-      borderRadius: BorderRadius.circular(22),
-    ),
-    child: Text(
-      text,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 14,
-        height: 1.5,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
   );
 
   String _description(FeatureType type) => switch (type) {

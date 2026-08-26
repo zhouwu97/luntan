@@ -4,6 +4,7 @@ abstract interface class CommunityRepository {
   Future<List<Community>> getCommunities({
     String? categoryId,
     CommunityStatus? status,
+    bool? canPublish,
   });
 
   Future<Community?> getCommunity(String id);
@@ -30,6 +31,7 @@ abstract interface class QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'latest',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   });

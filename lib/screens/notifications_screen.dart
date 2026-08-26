@@ -5,7 +5,11 @@ import 'package:flutter/material.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../domain/models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/notifications/notification_empty_state.dart';
+import '../widgets/notifications/notification_row.dart';
+import '../widgets/notifications/notification_skeleton.dart';
 
 typedef NotificationPostOpener =
     void Function(String postId, String? commentId);
@@ -64,6 +68,7 @@ class NotificationsScreen extends StatefulWidget {
     this.onOpenUserId,
     this.onOpenCommunityId,
     this.onOpenSystem,
+    this.onOpenNotification,
     this.onOpenModerationActionId,
     this.onOpenAppealId,
   });
@@ -74,6 +79,7 @@ class NotificationsScreen extends StatefulWidget {
   final ValueChanged<String>? onOpenUserId;
   final ValueChanged<String>? onOpenCommunityId;
   final VoidCallback? onOpenSystem;
+  final ValueChanged<ForumNotification>? onOpenNotification;
   final ValueChanged<String>? onOpenModerationActionId;
   final ValueChanged<String>? onOpenAppealId;
 
@@ -89,6 +95,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool loading = false;
   bool loadingMore = false;
   String? errorMessage;
+  String? loadMoreError;
   NotificationCategory filter = NotificationCategory.all;
   int _generation = 0;
 
@@ -117,6 +124,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     setState(() {
       loading = true;
       errorMessage = null;
+      loadMoreError = null;
       items.clear();
       nextCursor = null;
       hasMore = true;
@@ -164,9 +172,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         items.addAll(page.items);
         nextCursor = page.nextCursor;
         hasMore = page.hasMore;
+        loadMoreError = null;
       });
     } catch (_) {
-      // 允许滚动到底部后再次触发。
+      if (mounted && generation == _generation) {
+        setState(() => loadMoreError = '加载更多失败，点击重试');
+      }
     } finally {
       if (mounted && generation == _generation) {
         setState(() => loadingMore = false);
@@ -178,172 +189,76 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (value == filter) return;
     setState(() => filter = value);
     load();
+    if (scrollController.hasClients) {
+      scrollController.animateTo(
+        0,
+        duration: AppMotion.fast,
+        curve: AppMotion.standard,
+      );
+    }
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('通知', style: TextStyle(fontWeight: FontWeight.w800)),
-      actions: [
-        if (items.isNotEmpty)
-          TextButton(
-            onPressed: () async {
-              try {
-                await widget.repository.markAllNotificationsRead();
-                if (!context.mounted) return;
-                setState(() {
-                  for (final item in items) {
-                    item.isRead = true;
-                  }
-                });
-              } catch (error) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(userFacingApiMessage(error))),
-                );
-              }
-            },
-            child: const Text('全部已读'),
-          ),
-      ],
-    ),
-    body: Column(
-      children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-          child: Row(
-            children:
-                const [
-                  NotificationCategory.all,
-                  NotificationCategory.interaction,
-                  NotificationCategory.community,
-                  NotificationCategory.moderation,
-                ].map((value) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(switch (value) {
-                        NotificationCategory.all => '全部',
-                        NotificationCategory.interaction => '互动',
-                        NotificationCategory.community => '社区',
-                        NotificationCategory.moderation => '处理',
-                        NotificationCategory.reply => '回复',
-                        NotificationCategory.like => '赞与收藏',
-                        NotificationCategory.system => '系统',
-                      }),
-                      selected: value == filter,
-                      onSelected: (_) => _selectFilter(value),
-                    ),
-                  );
-                }).toList(),
-          ),
-        ),
-        Expanded(child: _body()),
-      ],
-    ),
-  );
-
-  Widget _body() {
-    if (loading && items.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (errorMessage != null && items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              '消息加载失败',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-            TextButton(onPressed: load, child: const Text('重试')),
-          ],
-        ),
-      );
-    }
-    if (items.isEmpty) {
-      return Center(
-        child: Text(
-          filter == NotificationCategory.all ? '暂时没有新通知' : '该分类暂无通知',
-          style: const TextStyle(color: AppTheme.textSecondary),
-        ),
-      );
-    }
-    return ListView.separated(
-      controller: scrollController,
-      padding: const EdgeInsets.all(AppTheme.pagePadding),
-      itemCount: items.length + 1,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        if (index == items.length) {
-          return loadingMore
-              ? const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : const SizedBox(height: 8);
+  Future<void> _markAllRead() async {
+    try {
+      await widget.repository.markAllNotificationsRead();
+      if (!mounted) return;
+      setState(() {
+        for (final item in items) {
+          item.isRead = true;
         }
-        final item = items[index];
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 5),
-          leading: CircleAvatar(
-            backgroundColor: AppTheme.surfaceBlue,
-            child: Icon(_icon(item.type), color: AppTheme.primary, size: 20),
-          ),
-          title: Text(
-            _title(item),
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-          subtitle: Text(
-            relativeTimeLabel(item.createdAt),
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-          ),
-          trailing: item.isRead
-              ? null
-              : const CircleAvatar(radius: 4, backgroundColor: AppTheme.pink),
-          onTap: () async {
-            if (!item.isRead) {
-              setState(() => item.isRead = true);
-              // 先打开目标页面，已读回写不应阻塞用户查看通知内容。
-              unawaited(_markNotificationRead(item));
-            }
-            if (!context.mounted) return;
-            if (item.isModeration && item.type == 'moderation.action') {
-              final actionId = item.moderationActionId ?? item.targetId;
-              if (widget.onOpenModerationActionId != null &&
-                  actionId.isNotEmpty) {
-                widget.onOpenModerationActionId!(actionId);
-                return;
-              }
-            }
-            if (item.type == 'appeal.result') {
-              final appealId = item.targetData['appeal_id'];
-              if (widget.onOpenAppealId != null &&
-                  appealId is String &&
-                  appealId.isNotEmpty) {
-                widget.onOpenAppealId!(appealId);
-                return;
-              }
-            }
-            NotificationTargetRouter.open(
-              notification: item,
-              onOpenPost: (postId, commentId) {
-                if (widget.onOpenPost != null) {
-                  widget.onOpenPost!(postId, commentId);
-                } else {
-                  widget.onOpenPostId(postId);
-                }
-              },
-              onOpenUser: widget.onOpenUserId,
-              onOpenCommunity: widget.onOpenCommunityId,
-              onOpenSystem: widget.onOpenSystem,
-            );
-          },
-        );
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('全部通知已标为已读')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(userFacingApiMessage(error))),
+      );
+    }
+  }
+
+  void _handleNotificationTap(ForumNotification item) {
+    if (!item.isRead) {
+      setState(() => item.isRead = true);
+      unawaited(_markNotificationRead(item));
+    }
+    if (item.type == 'system' ||
+        item.type == 'announcement' ||
+        item.type.startsWith('community.')) {
+      if (widget.onOpenNotification != null) {
+        widget.onOpenNotification!(item);
+        return;
+      }
+    }
+    if (item.isModeration && item.type == 'moderation.action') {
+      final actionId = item.moderationActionId ?? item.targetId;
+      if (widget.onOpenModerationActionId != null && actionId.isNotEmpty) {
+        widget.onOpenModerationActionId!(actionId);
+        return;
+      }
+    }
+    if (item.type == 'appeal.result') {
+      final appealId = item.targetData['appeal_id'];
+      if (widget.onOpenAppealId != null &&
+          appealId is String &&
+          appealId.isNotEmpty) {
+        widget.onOpenAppealId!(appealId);
+        return;
+      }
+    }
+    NotificationTargetRouter.open(
+      notification: item,
+      onOpenPost: (postId, commentId) {
+        if (widget.onOpenPost != null) {
+          widget.onOpenPost!(postId, commentId);
+        } else {
+          widget.onOpenPostId(postId);
+        }
       },
+      onOpenUser: widget.onOpenUserId,
+      onOpenCommunity: widget.onOpenCommunityId,
+      onOpenSystem: widget.onOpenSystem,
     );
   }
 
@@ -356,36 +271,355 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  IconData _icon(String type) => type.contains('like')
-      ? Icons.favorite_rounded
-      : type.contains('follow')
-      ? Icons.person_add_alt_1_rounded
-      : type.contains('comment') || type.contains('reply')
-      ? Icons.chat_bubble_rounded
-      : type.startsWith('appeal.') || type.startsWith('moderation.')
-      ? Icons.gavel_rounded
-      : Icons.campaign_rounded;
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: const Padding(
+          padding: EdgeInsets.only(left: 4),
+          child: Text(
+            '通知',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+        ),
+        actions: [
+          if (items.isNotEmpty)
+            TextButton(
+              onPressed: _markAllRead,
+              child: const Text(
+                '全部已读',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // 分类选择轻量 Segment
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
+            child: _NoticeKindTabs(
+              selected: filter,
+              onChanged: _selectFilter,
+            ),
+          ),
+          Expanded(child: _buildBody()),
+        ],
+      ),
+    );
+  }
 
-  String _title(ForumNotification item) => switch (item.type) {
-    'like' || 'post.liked' => '${item.actorName} 赞了你的帖子',
-    'bookmark' || 'post.bookmarked' => '${item.actorName} 收藏了你的帖子',
-    'comment.created' ||
-    'comment.replied' ||
-    'reply' => '${item.actorName} 回复了你',
-    'follow' || 'user.followed' => '${item.actorName} 关注了你',
-    'moderation.action' => _moderationTitle(item),
-    'appeal.result' => '申诉结果通知',
-    'announcement' || 'community.announcement' => '社区公告',
-    'event' || 'community.event' => '活动通知',
-    _ => '你有一条新通知',
+  Widget _buildBody() {
+    if (loading && items.isEmpty) {
+      return const NotificationSkeleton(itemCount: 4);
+    }
+    if (errorMessage != null && items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 40,
+              color: AppTheme.textSecondary,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              errorMessage!,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: load,
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.primary,
+              ),
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (items.isEmpty) {
+      return NotificationEmptyState(
+        categoryName: _categoryLabel(filter),
+        onResetCategory: () => _selectFilter(NotificationCategory.all),
+      );
+    }
+
+    // 按自然日期分组（今天 / 更早）
+    final today = DateTime.now();
+    final todayItems = <ForumNotification>[];
+    final earlierItems = <ForumNotification>[];
+
+    for (final item in items) {
+      final isToday = item.createdAt.year == today.year &&
+          item.createdAt.month == today.month &&
+          item.createdAt.day == today.day;
+      if (isToday) {
+        todayItems.add(item);
+      } else {
+        earlierItems.add(item);
+      }
+    }
+
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(0, 2, 0, 24),
+      children: [
+        if (todayItems.isNotEmpty) ...[
+          _buildDayHeader('今天'),
+          _buildGroupContainer(
+            children: todayItems
+                .map((item) => NotificationRow(
+                      item: item,
+                      onTap: () => _handleNotificationTap(item),
+                    ))
+                .toList(),
+          ),
+        ],
+        if (earlierItems.isNotEmpty) ...[
+          _buildDayHeader('更早'),
+          _buildGroupContainer(
+            children: earlierItems
+                .map((item) => NotificationRow(
+                      item: item,
+                      onTap: () => _handleNotificationTap(item),
+                    ))
+                .toList(),
+          ),
+        ],
+        if (loadingMore)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        if (loadMoreError != null)
+          Center(
+            child: TextButton(
+              onPressed: loadMore,
+              child: Text(
+                loadMoreError!,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDayHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF8A9BAC),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupContainer({required List<Widget> children}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: children.length,
+          separatorBuilder: (context, index) => const Divider(
+            height: 1,
+            thickness: 1,
+            color: Color(0xFFEDF2F6),
+          ),
+          itemBuilder: (context, index) => children[index],
+        ),
+      ),
+    );
+  }
+
+  String _categoryLabel(NotificationCategory category) => switch (category) {
+    NotificationCategory.all => '全部',
+    NotificationCategory.interaction => '互动',
+    NotificationCategory.community => '社区',
+    NotificationCategory.moderation => '处理',
+    _ => '全部',
   };
-
-  String _moderationTitle(ForumNotification item) =>
-      switch (item.targetData['action']) {
-        'mute' => '账号禁言通知',
-        'ban' => '账号封禁通知',
-        'delete' => '帖子处理通知',
-        'hide' => '内容处理通知',
-        _ => '处理通知',
-      };
 }
+
+class _NoticeKindTabs extends StatelessWidget {
+  const _NoticeKindTabs({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final NotificationCategory selected;
+  final ValueChanged<NotificationCategory> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final values = [
+      NotificationCategory.all,
+      NotificationCategory.interaction,
+      NotificationCategory.community,
+      NotificationCategory.moderation,
+    ];
+
+    return Container(
+      height: 38,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEAF1F7),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: values.map((value) {
+          final isSelected = value == selected;
+          final label = switch (value) {
+            NotificationCategory.all => '全部',
+            NotificationCategory.interaction => '互动',
+            NotificationCategory.community => '社区',
+            NotificationCategory.moderation => '处理',
+            _ => '全部',
+          };
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onChanged(value),
+              child: AnimatedContainer(
+                duration: AppMotion.fast,
+                curve: AppMotion.standard,
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: isSelected
+                      ? const [
+                          BoxShadow(
+                            color: Color(0x122D4B69),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isSelected
+                        ? const Color(0xFF2E5F96)
+                        : const Color(0xFF6C8093),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+/// 统一的系统/公告通知详情页，避免用户点击通知后只得到一条无上下文的提示。
+class NotificationDetailScreen extends StatelessWidget {
+  const NotificationDetailScreen({
+    super.key,
+    required this.repository,
+    required this.notification,
+    this.onOpenTarget,
+  });
+
+  final PlatformRepository repository;
+  final ForumNotification notification;
+  final VoidCallback? onOpenTarget;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = notification.targetData;
+    final title = _text(data, 'title') ?? _notificationTitle(notification);
+    final body =
+        _text(data, 'body') ??
+        _text(data, 'content') ??
+        _text(data, 'message') ??
+        _text(data, 'description') ??
+        '暂无详细内容';
+    return Scaffold(
+      appBar: AppBar(title: const Text('通知详情')),
+      body: ListView(
+        padding: const EdgeInsets.all(AppTheme.pagePadding),
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${notification.createdAt.year}-${notification.createdAt.month.toString().padLeft(2, '0')}-${notification.createdAt.day.toString().padLeft(2, '0')} ${notification.createdAt.hour.toString().padLeft(2, '0')}:${notification.createdAt.minute.toString().padLeft(2, '0')}',
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 20),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Text(body, style: const TextStyle(height: 1.6)),
+            ),
+          ),
+          if (onOpenTarget != null) ...[
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: onOpenTarget,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('查看相关内容'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String? _text(Map<String, dynamic> data, String key) {
+    final value = data[key];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
+}
+
+String _notificationTitle(ForumNotification item) => switch (item.type) {
+  'announcement' || 'community.announcement' => '社区公告',
+  'community.event' || 'event' => '活动通知',
+  'community.maintenance' || 'maintenance' => '系统维护通知',
+  'moderation.action' => '账号/内容处理通知',
+  'appeal.result' => '申诉结果通知',
+  _ => '系统通知',
+};

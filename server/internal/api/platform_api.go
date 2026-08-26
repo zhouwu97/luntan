@@ -256,13 +256,13 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	if searchType == "" {
 		searchType = "all"
 	}
-	if searchType != "all" && searchType != "posts" && searchType != "users" && searchType != "communities" {
+	if searchType != "all" && searchType != "posts" && searchType != "users" && searchType != "communities" && searchType != "toys" {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SEARCH_TYPE", Message: "搜索类型不支持"})
 		return
 	}
 	rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
 	if rawCursor != "" && searchType == "all" {
-		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "综合搜索请先选择帖子、用户或板块分类"})
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "综合搜索请先选择帖子、榜单、用户或板块分类"})
 		return
 	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
@@ -273,6 +273,22 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{}
 	var nextCursor any
 	var hasMore bool
+	if searchType == "all" || searchType == "toys" {
+		page, queryErr := s.searchToys(r, query, limit, rawCursor)
+		if queryErr != nil {
+			if errors.Is(queryErr, ErrInvalidSearchCursor) {
+				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			} else {
+				writeInternalError(w, r, queryErr)
+			}
+			return
+		}
+		response["toys"] = page.Items
+		if searchType == "toys" {
+			nextCursor = nullableSearchCursor(page)
+			hasMore = page.HasMore
+		}
+	}
 	if searchType == "all" || searchType == "posts" {
 		page, queryErr := s.searchPosts(r, query, limit, rawCursor)
 		if queryErr != nil {
@@ -326,10 +342,121 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) searchPosts(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
-	rankExpression := "ts_rank(p.search_vector, plainto_tsquery('simple', $1))"
+func (s *Server) searchToys(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
+	rankExpression := `(
+		CASE
+			WHEN lower(t.name) = lower($1) THEN 100.0
+			WHEN lower(t.name) LIKE lower($1) || '%' THEN 50.0
+			WHEN lower(t.name) LIKE '%' || lower($1) || '%' THEN 30.0
+			WHEN lower(t.merchant) LIKE '%' || lower($1) || '%' THEN 20.0
+			WHEN EXISTS (SELECT 1 FROM unnest(t.tags) tag WHERE lower(tag) LIKE '%' || lower($1) || '%') THEN 20.0
+			WHEN lower(t.description) LIKE '%' || lower($1) || '%' THEN 10.0
+			ELSE 1.0
+		END)`
 	args := []any{query}
-	where := `p.search_vector @@ plainto_tsquery('simple', $1)
+	where := `t.active = true AND (
+		lower(t.name) LIKE '%' || lower($1) || '%'
+		OR lower(t.merchant) LIKE '%' || lower($1) || '%'
+		OR lower(t.description) LIKE '%' || lower($1) || '%'
+		OR EXISTS (SELECT 1 FROM unnest(t.tags) tag WHERE lower(tag) LIKE '%' || lower($1) || '%')
+	)`
+	if rawCursor != "" {
+		cursor, err := decodeSearchCursor(rawCursor)
+		if err != nil {
+			return searchPage{}, err
+		}
+		if cursor.Kind != "" && cursor.Kind != "toys" {
+			return searchPage{}, ErrInvalidSearchCursor
+		}
+		where += fmt.Sprintf(" AND (%s, 1000 - t.rank, t.id) < ($%d, $%d, $%d)", rankExpression, len(args)+1, len(args)+2, len(args)+3)
+		args = append(args, cursor.Rank, cursor.SortOrder, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT t.id, t.rank, t.name, t.merchant, t.release_year, t.description,
+		       array_to_json(t.tags), t.asset_key, t.want_count,
+		       t.rating_total_centi, t.rating_count,
+		       t.category, array_to_json(t.segments),
+		       `+rankExpression+` AS search_rank
+		FROM ranking_toys t
+		WHERE `+where+`
+		ORDER BY `+rankExpression+` DESC, t.rank ASC, t.id ASC
+		LIMIT $`+strconv.Itoa(limitPosition), args...)
+	if err != nil {
+		return searchPage{}, err
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0, limit+1)
+	for rows.Next() {
+		var item rankingToyRecord
+		var tagsRaw, segmentsRaw []byte
+		var rank float64
+		if err := rows.Scan(
+			&item.ID,
+			&item.Rank,
+			&item.Name,
+			&item.Merchant,
+			&item.ReleaseYear,
+			&item.Description,
+			&tagsRaw,
+			&item.AssetKey,
+			&item.WantCount,
+			&item.RatingTotalCenti,
+			&item.RatingCount,
+			&item.Category,
+			&segmentsRaw,
+			&rank,
+		); err != nil {
+			return searchPage{}, err
+		}
+		if len(tagsRaw) > 0 {
+			_ = json.Unmarshal(tagsRaw, &item.Tags)
+		}
+		if item.Tags == nil {
+			item.Tags = []string{}
+		}
+		if len(segmentsRaw) > 0 {
+			_ = json.Unmarshal(segmentsRaw, &item.Segments)
+		}
+		if item.Segments == nil {
+			item.Segments = []string{}
+		}
+		resp := item.response()
+		resp["rank_score"] = rank
+		items = append(items, resp)
+	}
+	if err := rows.Err(); err != nil {
+		return searchPage{}, err
+	}
+	page := searchPage{Items: items, HasMore: len(items) > limit}
+	if page.HasMore {
+		page.Items = page.Items[:limit]
+		last := page.Items[len(page.Items)-1]
+		rankScore, _ := last["rank_score"].(float64)
+		itemRank, _ := last["rank"].(int)
+		id, _ := last["id"].(string)
+		page.NextCursor, _ = encodeSearchCursor(searchCursor{
+			Kind:      "toys",
+			Rank:      rankScore,
+			SortOrder: 1000 - itemRank,
+			ID:        id,
+		})
+	}
+	return page, nil
+}
+
+func (s *Server) searchPosts(r *http.Request, query string, limit int, rawCursor string) (searchPage, error) {
+	rankExpression := `(ts_rank(p.search_vector, plainto_tsquery('simple', $1)) +
+		CASE
+			WHEN lower(p.title) = lower($1) THEN 50.0
+			WHEN lower(p.title) LIKE lower($1) || '%' THEN 20.0
+			WHEN lower(p.title) LIKE '%' || lower($1) || '%' THEN 10.0
+			WHEN lower(p.content) LIKE '%' || lower($1) || '%' THEN 5.0
+			ELSE 0.0
+		END)`
+	args := []any{query}
+	where := `(p.search_vector @@ plainto_tsquery('simple', $1) OR lower(p.title) LIKE '%' || lower($1) || '%' OR lower(p.content) LIKE '%' || lower($1) || '%')
 		  AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.type <> 'market'`
 	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
 		where += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = $%d AND b.blocked_id = p.author_id) OR (b.blocker_id = p.author_id AND b.blocked_id = $%d))", len(args)+1, len(args)+1)
@@ -528,6 +655,9 @@ func (s *Server) createReport(w http.ResponseWriter, r *http.Request) {
 	}
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capReport) {
 		return
 	}
 	var input reportInput

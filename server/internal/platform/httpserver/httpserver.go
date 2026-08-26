@@ -29,6 +29,9 @@ type Options struct {
 	RateLimitEnabled  bool
 	RateLimitStore    RateLimitStore
 	TrustedProxyCIDRs []string
+	// ReadinessCheck 用于检查 API 依赖的非数据库资源，例如对象存储。
+	// 留空表示只检查数据库，兼容没有业务 API 的基础 HTTP server。
+	ReadinessCheck func(context.Context) error
 }
 
 // BuildVersion 和 BuildCommit 由构建命令通过 -ldflags 注入，开发环境使用默认值。
@@ -77,6 +80,12 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 			if err := pingDatabase(ctx, db); err != nil {
 				WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "DATABASE_UNAVAILABLE", Message: "服务暂时不可用"})
 				return
+			}
+			if options.ReadinessCheck != nil {
+				if err := options.ReadinessCheck(ctx); err != nil {
+					WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "DEPENDENCY_UNAVAILABLE", Message: "服务依赖暂时不可用"})
+					return
+				}
 			}
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 		case apiHandler != nil && len(r.URL.Path) >= len("/api/") && r.URL.Path[:len("/api/")] == "/api/":

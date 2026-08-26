@@ -96,7 +96,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	}
 	state.CanEdit = viewer.ID == response.Author.ID
 	state.CanDelete = state.CanEdit
-	state.CanReport = viewer.ID != response.Author.ID
+	state.CanReport = capabilitiesForUser(viewer)[capReport] && viewer.ID != response.Author.ID
 	response.ViewerState = &state
 	return nil
 }

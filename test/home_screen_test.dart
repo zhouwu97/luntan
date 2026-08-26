@@ -6,6 +6,7 @@ import 'package:luntan/controllers/home_personal_feed_controller.dart';
 import 'package:luntan/controllers/interaction_controller.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
+import 'package:luntan/domain/models.dart';
 import 'package:luntan/domain/repositories.dart';
 import 'package:luntan/screens/home_screen.dart';
 
@@ -13,7 +14,7 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
   _PagedHomeFeed(this.pages);
 
   final List<FeedPage> pages;
-  final List<({String? cursor, String? communityId, String sort})> calls = [];
+  final List<({String? cursor, String? communityId, String sort, LatestOrder latestOrder})> calls = [];
 
   @override
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
@@ -25,22 +26,25 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
     int limit = 20,
     String? communityId,
     String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
   }) async {
-    calls.add((cursor: cursor, communityId: communityId, sort: sort));
+    calls.add((cursor: cursor, communityId: communityId, sort: sort, latestOrder: latestOrder));
     return pages[calls.length - 1];
   }
 }
 
-Post _post(String id) => Post(
+Post _post(String id, {DateTime? activityAt}) => Post(
   id: id,
   authorId: 'author-$id',
   communityId: 'community-unboxing',
   title: '自动分页帖子 $id',
   content: '用于验证首页在首屏没有滚动空间时会继续补充下一页。',
-  createdAt: DateTime(2026, 1, 1),
-  updatedAt: DateTime(2026, 1, 1),
+  createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+  updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
+  activityAt: activityAt,
+  lastCommentAt: activityAt,
 );
 
 Widget _homeFor(FeedController controller, _PagedHomeFeed repository) {
@@ -127,5 +131,47 @@ void main() {
       repository.calls.skip(1).map((call) => call.cursor),
       ['cursor-1', 'cursor-2', 'cursor-3', 'cursor-4'],
     );
+  });
+
+  testWidgets('最新排序下显示按回复与按发帖胶囊，无需登录即可切换', (tester) async {
+    final pages = [
+      FeedPage(
+        items: [_post('1', activityAt: DateTime.now().subtract(const Duration(minutes: 10)))],
+        hasMore: false,
+      ),
+      FeedPage(
+        items: [_post('2', activityAt: DateTime.now().subtract(const Duration(minutes: 5)))],
+        hasMore: false,
+      ),
+      FeedPage(
+        items: [_post('3')],
+        hasMore: false,
+      ),
+    ];
+    final repository = _PagedHomeFeed(pages);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(_homeFor(controller, repository));
+    await tester.pumpAndSettle();
+
+    // 默认在推荐 Tab，不显示右侧最新排序胶囊
+    expect(find.text('按回复'), findsNothing);
+    expect(find.text('按发帖'), findsNothing);
+
+    // 点击「最新」Tab
+    await tester.tap(find.text('最新'));
+    await tester.pumpAndSettle();
+
+    // 显示右侧胶囊，默认按回复
+    expect(find.text('按回复'), findsOneWidget);
+    expect(find.text('按发帖'), findsOneWidget);
+    expect(find.textContaining('最近回复'), findsOneWidget);
+
+    // 点击「按发帖」
+    await tester.tap(find.text('按发帖'));
+    await tester.pumpAndSettle();
+
+    expect(repository.calls.last.sort, 'latest');
+    expect(repository.calls.last.latestOrder, LatestOrder.post);
   });
 }

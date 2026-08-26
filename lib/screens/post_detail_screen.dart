@@ -22,6 +22,13 @@ class PostDetailScreen extends StatefulWidget {
     required this.interactionController,
     this.currentUserId,
     this.isAuthenticated = true,
+    this.canLike,
+    this.canComment,
+    this.commentRestricted = false,
+    this.commentRestrictedUntil,
+    this.canBookmark,
+    this.canReport,
+    this.canVote,
     this.onRequireAuth,
     this.focusComments = false,
     this.focusCommentId,
@@ -39,6 +46,15 @@ class PostDetailScreen extends StatefulWidget {
   final InteractionController interactionController;
   final String? currentUserId;
   final bool isAuthenticated;
+
+  /// 能力字段由 /me 下发；可空是为了兼容直接使用该页面的旧调用方。
+  final bool? canLike;
+  final bool? canComment;
+  final bool commentRestricted;
+  final DateTime? commentRestrictedUntil;
+  final bool? canBookmark;
+  final bool? canReport;
+  final bool? canVote;
   final VoidCallback? onRequireAuth;
   final bool focusComments;
   final String? focusCommentId;
@@ -93,6 +109,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       widget.onRequireAuth?.call();
       return;
     }
+    if (widget.canComment == false) {
+      widget.onFeedback(_commentBlockedMessage);
+      return;
+    }
     if (isSending) return;
     final content = replyController.text.trim();
     if (content.isEmpty) return;
@@ -120,6 +140,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     } finally {
       if (mounted) setState(() => isSending = false);
     }
+  }
+
+  String get _commentBlockedMessage {
+    if (widget.commentRestricted) {
+      final until = widget.commentRestrictedUntil;
+      if (until == null) return '你已被永久禁言，仍可浏览内容';
+      return '你已被禁言至 ${_formatDateTime(until)}，仍可浏览内容';
+    }
+    return '当前身份暂不能评论，请登录邮箱账号后重试';
   }
 
   void _focusCommentsIfNeeded(List<Comment> allComments) {
@@ -214,8 +243,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             ),
             actions: [
               IconButton(
-                onPressed: () =>
-                    _runInteraction(() => widget.onToggleBookmark(post)),
+                onPressed: () => _runInteraction(() => _toggleBookmark(post)),
                 tooltip: '收藏帖子',
                 icon: MotionTapIcon(
                   active: post.isBookmarked,
@@ -226,8 +254,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 ),
               ),
               IconButton(
-                onPressed: () =>
-                    _runInteraction(() => widget.onToggleLike(post)),
+                onPressed: () => _runInteraction(() => _toggleLike(post)),
                 tooltip: '点赞帖子',
                 icon: MotionTapIcon(
                   active: post.isLiked,
@@ -293,6 +320,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 repository: widget.pollRepository!,
                                 postId: post.id,
                                 isAuthenticated: widget.isAuthenticated,
+                                canVote: widget.canVote,
                                 onRequireAuth: widget.onRequireAuth,
                               ),
                             if (post.images.isNotEmpty)
@@ -456,6 +484,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           ),
                         ),
                       ),
+                    if (commentsController.errorMessage != null &&
+                        allComments.isNotEmpty &&
+                        commentsController.isLoadingMore != true)
+                      SliverToBoxAdapter(
+                        child: Center(
+                          child: TextButton(
+                            onPressed: commentsController.loadMore,
+                            child: const Text('加载失败 · 点击重试'),
+                          ),
+                        ),
+                      ),
                     if (!commentsController.hasMore && allComments.isNotEmpty)
                       const SliverToBoxAdapter(
                         child: Padding(
@@ -479,7 +518,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 target: replyTarget,
                 sending: isSending,
                 isAuthenticated: widget.isAuthenticated,
+                canComment: widget.canComment ?? widget.isAuthenticated,
                 onRequireAuth: widget.onRequireAuth,
+                blockedMessage: _commentBlockedMessage,
+                onFeedback: widget.onFeedback,
                 onSubmit: () => _submitReply(post),
               ),
             ],
@@ -497,9 +539,37 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  Future<void> _toggleLike(Post post) async {
+    if (widget.canLike == false) {
+      if (!widget.isAuthenticated) {
+        widget.onRequireAuth?.call();
+      } else {
+        widget.onFeedback('当前身份暂不能点赞，请登录邮箱账号后重试');
+      }
+      return;
+    }
+    await widget.onToggleLike(post);
+  }
+
+  Future<void> _toggleBookmark(Post post) async {
+    if (widget.canBookmark == false) {
+      if (!widget.isAuthenticated) {
+        widget.onRequireAuth?.call();
+      } else {
+        widget.onFeedback('游客模式只能浏览、评论和举报，登录邮箱账号后才能收藏');
+      }
+      return;
+    }
+    await widget.onToggleBookmark(post);
+  }
+
   Future<void> _likeComment(Comment comment) async {
     if (!widget.isAuthenticated) {
       widget.onRequireAuth?.call();
+      return;
+    }
+    if (widget.canLike == false) {
+      widget.onFeedback('当前身份暂不能点赞，请登录邮箱账号后重试');
       return;
     }
     try {
@@ -519,6 +589,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         repository: widget.commentsController.repository,
         isAuthenticated: widget.isAuthenticated,
         onRequireAuth: widget.onRequireAuth,
+        canComment: widget.canComment ?? widget.isAuthenticated,
+        blockedMessage: _commentBlockedMessage,
         onReply: (target, content) => widget.commentsController.replyTo(
           target,
           content,
@@ -549,7 +621,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                _runInteraction(() => widget.onToggleBookmark(post));
+                _runInteraction(() => _toggleBookmark(post));
               },
             ),
             ListTile(
@@ -740,6 +812,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _report(String targetType, String targetId) async {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
+    if (widget.canReport == false) {
+      widget.onFeedback('当前身份暂不能举报');
+      return;
+    }
     try {
       if (widget.onReport != null) {
         await widget.onReport!(targetType, targetId);
@@ -813,11 +893,13 @@ class _PollPanel extends StatefulWidget {
     required this.repository,
     required this.postId,
     required this.isAuthenticated,
+    this.canVote,
     this.onRequireAuth,
   });
   final PollRepository repository;
   final String postId;
   final bool isAuthenticated;
+  final bool? canVote;
   final VoidCallback? onRequireAuth;
   @override
   State<_PollPanel> createState() => _PollPanelState();
@@ -896,7 +978,12 @@ class _PollPanelState extends State<_PollPanel> {
       final authenticationRequired =
           !widget.isAuthenticated ||
           viewerState['authentication_required'] == true;
-      final locked = voted || viewerVoted || !canVote || authenticationRequired;
+      final locked =
+          voted ||
+          viewerVoted ||
+          !canVote ||
+          authenticationRequired ||
+          widget.canVote == false;
       final viewerOptionIds = viewerState['option_ids'] is List
           ? (viewerState['option_ids'] as List).whereType<String>().toSet()
           : const <String>{};
@@ -1037,20 +1124,32 @@ class _CommentError extends StatelessWidget {
   );
 }
 
+String _formatDateTime(DateTime value) {
+  final local = value.toLocal();
+  String two(int number) => number.toString().padLeft(2, '0');
+  return '${local.year}-${two(local.month)}-${two(local.day)} ${two(local.hour)}:${two(local.minute)}';
+}
+
 class _ReplyBar extends StatelessWidget {
   const _ReplyBar({
     required this.controller,
     required this.target,
     required this.sending,
     required this.isAuthenticated,
+    required this.canComment,
+    required this.blockedMessage,
     this.onRequireAuth,
+    this.onFeedback,
     required this.onSubmit,
   });
   final TextEditingController controller;
   final Comment? target;
   final bool sending;
   final bool isAuthenticated;
+  final bool canComment;
+  final String blockedMessage;
   final VoidCallback? onRequireAuth;
+  final ValueChanged<String>? onFeedback;
   final VoidCallback onSubmit;
   @override
   Widget build(BuildContext context) {
@@ -1067,17 +1166,25 @@ class _ReplyBar extends StatelessWidget {
             Expanded(
               child: TextField(
                 controller: controller,
-                readOnly: !isAuthenticated,
-                onTap: !isAuthenticated
+                readOnly: !isAuthenticated || !canComment,
+                onTap: !isAuthenticated || !canComment
                     ? () {
                         FocusScope.of(context).unfocus();
-                        onRequireAuth?.call();
+                        if (!isAuthenticated) {
+                          onRequireAuth?.call();
+                        } else {
+                          onFeedback?.call(blockedMessage);
+                        }
                       }
                     : null,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSubmit(),
                 decoration: InputDecoration(
-                  hintText: target == null ? '友善地回复一句…' : '回复这位同学…',
+                  hintText: !isAuthenticated || !canComment
+                      ? blockedMessage
+                      : target == null
+                      ? '友善地回复一句…'
+                      : '回复这位同学…',
                   isDense: true,
                 ),
               ),
@@ -1340,6 +1447,8 @@ class _CommentThreadSheet extends StatefulWidget {
     required this.rootComment,
     required this.repository,
     required this.isAuthenticated,
+    required this.canComment,
+    required this.blockedMessage,
     this.onRequireAuth,
     required this.onReply,
   });
@@ -1347,6 +1456,8 @@ class _CommentThreadSheet extends StatefulWidget {
   final Comment rootComment;
   final CommentRepository repository;
   final bool isAuthenticated;
+  final bool canComment;
+  final String blockedMessage;
   final VoidCallback? onRequireAuth;
   final Future<Comment> Function(Comment target, String content) onReply;
 
@@ -1365,6 +1476,7 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
   bool sending = false;
   Comment? replyTarget;
   String? errorMessage;
+  String? loadMoreError;
 
   @override
   void initState() {
@@ -1385,6 +1497,12 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
   Future<void> _submitReply() async {
     if (!widget.isAuthenticated) {
       widget.onRequireAuth?.call();
+      return;
+    }
+    if (!widget.canComment) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(widget.blockedMessage)));
       return;
     }
     final content = inputController.text.trim();
@@ -1415,6 +1533,7 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
     setState(() {
       loading = true;
       errorMessage = null;
+      loadMoreError = null;
     });
     try {
       final page = await widget.repository.listReplies(
@@ -1427,6 +1546,7 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
           ..addAll(page.items);
         nextCursor = page.nextCursor;
         hasMore = page.hasMore;
+        loadMoreError = null;
       });
     } catch (_) {
       if (mounted) setState(() => errorMessage = '回复加载失败，请重试');
@@ -1452,9 +1572,10 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
         replies.addAll(page.items);
         nextCursor = page.nextCursor;
         hasMore = page.hasMore;
+        loadMoreError = null;
       });
     } catch (_) {
-      // 滚动到底部触发加载失败时保留当前内容，允许再次滚动重试。
+      if (mounted) setState(() => loadMoreError = '加载失败 · 点击重试');
     } finally {
       if (mounted) setState(() => loadingMore = false);
     }
@@ -1517,6 +1638,13 @@ class _CommentThreadSheetState extends State<_CommentThreadSheet> {
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                     ),
+                                  ),
+                                )
+                              : loadMoreError != null
+                              ? Center(
+                                  child: TextButton(
+                                    onPressed: _loadMore,
+                                    child: Text(loadMoreError!),
                                   ),
                                 )
                               : const SizedBox(height: 8);

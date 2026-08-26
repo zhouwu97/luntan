@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"time"
+
+	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
 
 // deleteAccount 执行可追溯的账号注销：保留公开内容的作者关系，清理账号身份与私密状态，
@@ -76,7 +78,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	if err := appendAdminLogTx(r.Context(), tx, user.ID, "account.delete", "user", user.ID, "user_requested", requestIDFromRequest(r), map[string]any{"status": "deleted"}, time.Now().UTC()); err != nil {
+	if err := appendAdminLogTx(r.Context(), tx, user.ID, "account.delete", "user", user.ID, "user_requested", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{"status": "deleted"}, time.Now().UTC()); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

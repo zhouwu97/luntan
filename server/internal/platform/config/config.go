@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -29,6 +31,28 @@ func Load() Config {
 		RateLimitEnabled:           valueOrDefault("RATE_LIMIT_ENABLED", "false") == "true",
 		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
 	}
+}
+
+// Validate 检查会导致线上服务以“半可用”状态启动的配置。
+// 开发环境保留本地数据库/邮件/对象存储的可选性；生产环境则必须显式配置，
+// 由启动进程直接失败，避免运行到用户旅程中途才暴露基础设施缺失。
+func (c Config) Validate() error {
+	if !strings.EqualFold(strings.TrimSpace(c.AppEnv), "production") {
+		return nil
+	}
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("production requires DATABASE_URL")
+	}
+	storageURL := strings.TrimSpace(c.ObjectStorageUploadBaseURL)
+	if storageURL == "" || strings.TrimSpace(c.ObjectStorageSigningSecret) == "" {
+		return fmt.Errorf("production requires object storage URL and signing secret")
+	}
+	parsed, err := url.Parse(storageURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("OBJECT_STORAGE_UPLOAD_BASE_URL must be a complete HTTP(S) URL")
+	}
+	return nil
 }
 
 func splitCSV(value string) []string {

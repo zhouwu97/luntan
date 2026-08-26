@@ -40,6 +40,27 @@ func TestFeedCursorRoundTripWithScore(t *testing.T) {
 	}
 }
 
+func TestFeedCursorRoundTripWithAsOf(t *testing.T) {
+	asOf := time.Date(2026, 8, 26, 12, 0, 0, 123, time.UTC)
+	activity := time.Date(2026, 8, 26, 11, 59, 0, 0, time.UTC)
+	original := feedCursor{
+		ActivityAt: &activity,
+		AsOf:       &asOf,
+		ID:         "post-2",
+	}
+	encoded, err := encodeFeedCursor(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeFeedCursor(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.AsOf == nil || !decoded.AsOf.Equal(asOf) {
+		t.Fatalf("as_of changed after round trip: %#v", decoded.AsOf)
+	}
+}
+
 func TestFeedCursorRejectsInvalidValue(t *testing.T) {
 	if _, err := decodeFeedCursor("not-a-cursor"); err == nil {
 		t.Fatal("invalid cursor was accepted")

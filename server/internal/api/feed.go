@@ -110,14 +110,19 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		latestBy = "comment" // 默认按最新评论/回复时间
 	}
 	if latestBy != "comment" && latestBy != "post" {
-		latestBy = "comment"
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusBadRequest,
+			Code:    "INVALID_LATEST_ORDER",
+			Message: "latest_by 只能是 comment 或 post",
+		})
+		return
 	}
 
 	isRecommended := sortMode == "recommended"
 	scored := sortMode == "hot" || sortMode == "featured"
-	usesAsOf := sortMode == "hot"
 	isLatestComment := (sortMode == "latest" || sortMode == "") && latestBy == "comment"
 	isLatestPost := (sortMode == "latest" || sortMode == "") && latestBy == "post"
+	usesAsOf := sortMode == "hot" || isLatestComment
 
 	var cursor *feedCursor
 	if value := r.URL.Query().Get("cursor"); value != "" {
@@ -134,7 +139,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
-		if isLatestComment && decoded.ActivityAt == nil {
+		if isLatestComment && (decoded.ActivityAt == nil || decoded.AsOf == nil) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
@@ -160,20 +165,21 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	scoreExpr, orderBy := feedSortColumnsAt(sortMode, asOfPlaceholder)
 
-	activityExpr := "COALESCE((SELECT MAX(c.created_at) FROM comments c WHERE c.post_id = p.id AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND c.deleted_at IS NULL), p.published_at, p.created_at)"
+	commentActivityExpr := "SELECT MAX(c.created_at) FROM comments c WHERE c.post_id = p.id AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND c.deleted_at IS NULL"
+	if isLatestComment {
+		commentActivityExpr += " AND c.created_at <= " + asOfPlaceholder
+	}
+	lastCommentExpr := "(" + commentActivityExpr + ")"
+	activityExpr := "COALESCE(" + lastCommentExpr + ", p.published_at, p.created_at)"
 
 	columns := `
 		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), p.community_id, c.slug, c.name,
 		       p.type, p.title, p.content, p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
 		       p.created_at, p.updated_at, p.published_at`
 
-	if isRecommended {
-		columns += `, hr.position AS rec_position, hr.recommended_at AS rec_at`
-	} else {
-		columns += `, NULL::integer AS rec_position, NULL::timestamptz AS rec_at`
-	}
+	columns += `, hr.position AS rec_position, hr.recommended_at AS rec_at`
 
-	columns += `, (SELECT MAX(c.created_at) FROM comments c WHERE c.post_id = p.id AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND c.deleted_at IS NULL) AS last_comment_at`
+	columns += `, ` + lastCommentExpr + ` AS last_comment_at`
 	columns += `, ` + activityExpr + ` AS activity_at`
 
 	if scored {
@@ -197,6 +203,8 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		FROM posts p
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN home_recommendations hr ON hr.post_id = p.id
+		  AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)
 		JOIN communities c ON c.id = p.community_id
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
@@ -364,6 +372,8 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if isLatestComment {
 			next.ActivityAt = last.activityAt
+			asOf := feedAsOf
+			next.AsOf = &asOf
 		} else {
 			next.PublishedAt = last.publishedAt
 		}

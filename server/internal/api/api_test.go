@@ -475,13 +475,34 @@ func TestLatestFeedUsesStableCursorAndReturnsNextCursor(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at", "rec_position", "rec_at", "last_comment_at", "activity_at"}).
 		AddRow("p2", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第二条", "正文", 2, 3, 0, 0, 5, created, created, created, nil, nil, nil, created).
 		AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第一条", "正文", 1, 2, 0, 0, 4, created.Add(-time.Minute), created.Add(-time.Minute), created.Add(-time.Minute), nil, nil, nil, created.Add(-time.Minute))
-	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*ORDER BY.*LIMIT \$1`).WithArgs(2).WillReturnRows(rows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT CURRENT_TIMESTAMP`)).
+		WillReturnRows(sqlmock.NewRows([]string{"current_timestamp"}).AddRow(created))
+	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*ORDER BY.*LIMIT \$2`).WithArgs(created, 2).WillReturnRows(rows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?limit=1", nil)
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"has_more":true`) || !strings.Contains(res.Body.String(), `"next_cursor":"`) {
 		t.Fatalf("feed response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLatestFeedRejectsInvalidLatestBy(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?latest_by=abcdef", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), `"code":"INVALID_LATEST_ORDER"`) {
+		t.Fatalf("invalid latest_by status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

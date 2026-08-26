@@ -21,6 +21,7 @@ import 'domain/repositories.dart';
 import 'screens/auth_screen.dart';
 import 'screens/appeal_detail_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/home_recommendations_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
@@ -624,6 +625,25 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
+          onOpenRecommendations: openHomeRecommendations,
+        ),
+      ),
+    );
+  }
+
+  void openHomeRecommendations() {
+    if (apiMode && !canModerate) {
+      _showQuickFeedback('你暂时没有管理首页推荐的权限');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => HomeRecommendationsScreen(
+          repository: platform,
+          onFeedback: _showQuickFeedback,
+          onOpenPostId: openPostById,
         ),
       ),
     );
@@ -699,6 +719,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           repository: platform,
           onOpenAdmin: openAdminDetail,
           onOpenRisk: openRiskCenter,
+          onOpenRecommendations: openHomeRecommendations,
           communityRepository: repositories.community,
         ),
       ),
@@ -894,8 +915,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
             onRequireAuth: _openLogin,
             isAuthenticated:
                 !apiMode || authController?.status == AuthStatus.authenticated,
-            personalFeedController: personalFeedController,
             platform: repositories.isApiMode ? repositories.platform : null,
+            canModerate: canModerate,
             unread: apiMode ? unreadCount : null,
             interactionController: interactionController,
             feedRepository: repositories.isApiMode ? repositories.feed : null,
@@ -924,6 +945,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
             onOpenMessages: showMessages,
             onFeedback: _showQuickFeedback,
             onOpenModeration: apiMode && canModerate ? openModeration : null,
+            onOpenRecommendations: apiMode && canModerate
+                ? openHomeRecommendations
+                : null,
             onOpenAppeals: openMyAppeals,
             onOpenAccountStatus: apiMode && isAuthenticated
                 ? openAccountStatus

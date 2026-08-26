@@ -283,6 +283,71 @@ func TestFeedLatestByCommentAndPostOrder(t *testing.T) {
 	requireFeedOrder(t, orderCommentUpdated, []string{postC, postA, postB}, "latest_by=comment after new reply")
 }
 
+// 评论排序分页使用首屏快照：翻页期间给旧页中的帖子新增回复，也不能把它从本次滚动中漏掉。
+func TestFeedLatestByCommentKeepsSnapshotAcrossNewReply(t *testing.T) {
+	s := feedIntegrationServer(t)
+	communityID, ids := insertFeedFixtures(t, s)
+	var authorID string
+	if err := s.db.QueryRow(`SELECT author_id FROM posts WHERE id = $1`, ids["p1"]).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	insertComment := func(id, postID string, createdAt time.Time) {
+		t.Helper()
+		if _, err := s.db.Exec(`
+			INSERT INTO comments (id, post_id, author_id, root_id, content,
+				publication_status, moderation_status, created_at, updated_at, published_at)
+			VALUES ($1, $2, $3, $1, 'snapshot comment', 'published', 'normal', $4, $4, $4)`,
+			id, postID, authorID, createdAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertComment("snapshot-p1-old", ids["p1"], now.Add(-20*time.Minute))
+	insertComment("snapshot-p2-old", ids["p2"], now.Add(-10*time.Minute))
+	insertComment("snapshot-p3-old", ids["p3"], now.Add(-30*time.Minute))
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?sort=latest&latest_by=comment&community_id="+url.QueryEscape(communityID)+"&limit=1", nil)
+	firstRes := httptest.NewRecorder()
+	s.latestFeed(firstRes, firstReq)
+	if firstRes.Code != http.StatusOK {
+		t.Fatalf("first page status=%d body=%s", firstRes.Code, firstRes.Body.String())
+	}
+	var first struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+		Next *string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(firstRes.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 1 || first.Items[0].ID != ids["p2"] || first.Next == nil {
+		t.Fatalf("unexpected first page: %s", firstRes.Body.String())
+	}
+
+	// 这条回复发生在首屏快照之后；没有 as_of 时，p1 会被挪到游标之前而漏掉。
+	insertComment("snapshot-p1-new", ids["p1"], now.Add(time.Hour))
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?sort=latest&latest_by=comment&community_id="+url.QueryEscape(communityID)+"&limit=2&cursor="+url.QueryEscape(*first.Next), nil)
+	secondRes := httptest.NewRecorder()
+	s.latestFeed(secondRes, secondReq)
+	if secondRes.Code != http.StatusOK {
+		t.Fatalf("second page status=%d body=%s", secondRes.Code, secondRes.Body.String())
+	}
+	var second struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(secondRes.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Items) != 2 || second.Items[0].ID != ids["p1"] || second.Items[1].ID != ids["p3"] {
+		t.Fatalf("snapshot page lost an item: %s", secondRes.Body.String())
+	}
+}
+
 // 楼中楼：入口评论下按创建时间分页拉取整条回复线程（含孙级回复）。
 func TestCommentThreadAgainstPostgres(t *testing.T) {
 	s := feedIntegrationServer(t)

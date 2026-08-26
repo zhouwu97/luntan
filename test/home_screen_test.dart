@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/controllers/feed_controller.dart';
-import 'package:luntan/controllers/home_personal_feed_controller.dart';
 import 'package:luntan/controllers/interaction_controller.dart';
+import 'package:luntan/data/api/api_client.dart';
+import 'package:luntan/data/api/platform_repository.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/domain/models.dart';
@@ -35,7 +36,29 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
   }
 }
 
-Post _post(String id, {DateTime? activityAt}) => Post(
+class _RecordingRecommendationRepository extends PlatformRepository {
+  _RecordingRecommendationRepository()
+    : super(ApiClient(baseUri: Uri.parse('https://example.com')));
+
+  bool setCalled = false;
+  bool removeCalled = false;
+
+  @override
+  Future<void> setHomeRecommendation({
+    required String postId,
+    int? position,
+    DateTime? expiresAt,
+  }) async {
+    setCalled = true;
+  }
+
+  @override
+  Future<void> removeHomeRecommendation(String postId) async {
+    removeCalled = true;
+  }
+}
+
+Post _post(String id, {DateTime? activityAt, bool isRecommended = false}) => Post(
   id: id,
   authorId: 'author-$id',
   communityId: 'community-unboxing',
@@ -45,16 +68,23 @@ Post _post(String id, {DateTime? activityAt}) => Post(
   updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
   activityAt: activityAt,
   lastCommentAt: activityAt,
+  isRecommended: isRecommended,
 );
 
-Widget _homeFor(FeedController controller, _PagedHomeFeed repository) {
+Widget _homeFor(
+  FeedController controller,
+  _PagedHomeFeed repository, {
+  PlatformRepository? platform,
+  bool canModerate = false,
+}) {
   final store = ForumStore.uiOnly();
   return MaterialApp(
     home: HomeScreen(
       store: store,
       feedController: controller,
       feedRepository: repository,
-      personalFeedController: HomePersonalFeedController(mockStore: store),
+      platform: platform,
+      canModerate: canModerate,
       interactionController: InteractionController(
         repository: MockInteractionRepository(),
       ),
@@ -173,5 +203,31 @@ void main() {
 
     expect(repository.calls.last.sort, 'latest');
     expect(repository.calls.last.latestOrder, LatestOrder.post);
+  });
+
+  testWidgets('管理员可以从帖子菜单加入或移出首页推荐', (tester) async {
+    final repository = _PagedHomeFeed([
+      FeedPage(items: [_post('p1', isRecommended: true)], hasMore: false),
+      FeedPage(items: [_post('p1', isRecommended: true)], hasMore: false),
+    ]);
+    final platform = _RecordingRecommendationRepository();
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(
+      _homeFor(
+        controller,
+        repository,
+        platform: platform,
+        canModerate: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);
+    await tester.pumpAndSettle();
+    expect(find.text('移出首页推荐'), findsOneWidget);
+    await tester.tap(find.text('移出首页推荐'));
+    await tester.pumpAndSettle();
+
+    expect(platform.removeCalled, isTrue);
   });
 }

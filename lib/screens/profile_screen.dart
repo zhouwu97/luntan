@@ -47,6 +47,7 @@ class ProfileScreen extends StatelessWidget {
     this.onDeleteAccount,
     this.onRequireAuth,
     this.onOpenModeration,
+    this.onOpenRecommendations,
     this.onOpenAppeals,
     this.onOpenAccountStatus,
     this.onOpenAdmins,
@@ -74,6 +75,7 @@ class ProfileScreen extends StatelessWidget {
   final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenModeration;
+  final VoidCallback? onOpenRecommendations;
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenAccountStatus;
   final VoidCallback? onOpenAdmins;
@@ -100,6 +102,7 @@ class ProfileScreen extends StatelessWidget {
         onOpenPostId: onOpenPostId,
         onOpenPostById: onOpenPostById,
         onOpenModeration: onOpenModeration,
+        onOpenRecommendations: onOpenRecommendations,
         onOpenAppeals: onOpenAppeals,
         onOpenAccountStatus: onOpenAccountStatus,
         onOpenAdmins: onOpenAdmins,
@@ -492,6 +495,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onLogout,
     this.onDeleteAccount,
     this.onOpenModeration,
+    this.onOpenRecommendations,
     this.onOpenAppeals,
     this.onOpenAccountStatus,
     this.onOpenAdmins,
@@ -508,6 +512,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final Future<void> Function()? onLogout;
   final Future<void> Function()? onDeleteAccount;
   final VoidCallback? onOpenModeration;
+  final VoidCallback? onOpenRecommendations;
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenAccountStatus;
   final VoidCallback? onOpenAdmins;
@@ -931,6 +936,18 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                 onTap: () {
                   Navigator.pop(sheetContext);
                   widget.onOpenModeration!();
+                },
+              ),
+            if (widget.onOpenRecommendations != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.push_pin_outlined,
+                  color: AppTheme.primary,
+                ),
+                title: const Text('首页推荐'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  widget.onOpenRecommendations!();
                 },
               ),
             if (widget.onOpenAccountStatus != null)

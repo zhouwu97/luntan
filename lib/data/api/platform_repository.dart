@@ -494,6 +494,30 @@ class AdminLogEntry {
   final DateTime createdAt;
 }
 
+class HomeRecommendation {
+  const HomeRecommendation({
+    required this.postId,
+    required this.position,
+    required this.recommendedBy,
+    required this.recommendedAt,
+    required this.title,
+    required this.contentPreview,
+    required this.authorName,
+    required this.communityName,
+    this.expiresAt,
+  });
+
+  final String postId;
+  final int position;
+  final String recommendedBy;
+  final DateTime recommendedAt;
+  final DateTime? expiresAt;
+  final String title;
+  final String contentPreview;
+  final String authorName;
+  final String communityName;
+}
+
 class PlatformRepository {
   PlatformRepository(this._client);
 
@@ -638,6 +662,68 @@ class PlatformRepository {
   }
 
   Future<Map<String, dynamic>> getHome() => _client.getJson('/api/v1/home');
+
+  Future<List<HomeRecommendation>> listHomeRecommendations() async {
+    final payload = await _client.getJson('/api/v1/admin/recommendations');
+    final raw = payload['items'];
+    if (raw is! List) return const <HomeRecommendation>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      final post = value['post'] is Map
+          ? Map<String, dynamic>.from(value['post'] as Map)
+          : const <String, dynamic>{};
+      final author = post['author'] is Map
+          ? Map<String, dynamic>.from(post['author'] as Map)
+          : const <String, dynamic>{};
+      final community = post['community'] is Map
+          ? Map<String, dynamic>.from(post['community'] as Map)
+          : const <String, dynamic>{};
+      final nickname = _string(author['nickname']);
+      return HomeRecommendation(
+        postId: _string(value['post_id'], fallback: _string(post['id'])),
+        position: _int(value['position']),
+        recommendedBy: _string(value['recommended_by']),
+        recommendedAt: _date(value['recommended_at']),
+        expiresAt: _nullableDate(value['expires_at']),
+        title: _string(post['title'], fallback: '无标题'),
+        contentPreview: _string(post['content_preview'] ?? post['content']),
+        authorName: nickname.isNotEmpty
+            ? nickname
+            : _string(author['username']),
+        communityName: _string(community['name']),
+      );
+    }).toList();
+  }
+
+  Future<void> setHomeRecommendation({
+    required String postId,
+    int? position,
+    DateTime? expiresAt,
+  }) async {
+    await _client.putJson(
+      '/api/v1/admin/recommendations/$postId',
+      body: {
+        'position': ?position,
+        'expires_at': ?expiresAt?.toUtc().toIso8601String(),
+      },
+    );
+  }
+
+  Future<void> removeHomeRecommendation(String postId) async {
+    await _client.deleteJson('/api/v1/admin/recommendations/$postId');
+  }
+
+  Future<void> reorderHomeRecommendations(List<String> postIds) async {
+    await _client.putJson(
+      '/api/v1/admin/recommendations/reorder',
+      body: {
+        'items': [
+          for (var index = 0; index < postIds.length; index++)
+            {'post_id': postIds[index], 'position': index},
+        ],
+      },
+    );
+  }
 
   Future<List<RankingItem>> getRanking({
     String window = '24h',

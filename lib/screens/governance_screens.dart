@@ -183,11 +183,13 @@ class AdminListScreen extends StatefulWidget {
     required this.repository,
     required this.onOpenAdmin,
     required this.onOpenRisk,
+    this.onOpenRecommendations,
     this.communityRepository,
   });
   final PlatformRepository repository;
   final ValueChanged<String> onOpenAdmin;
   final VoidCallback onOpenRisk;
+  final VoidCallback? onOpenRecommendations;
   final CommunityRepository? communityRepository;
   @override
   State<AdminListScreen> createState() => _AdminListScreenState();
@@ -242,6 +244,12 @@ class _AdminListScreenState extends State<AdminListScreen> {
     appBar: AppBar(
       title: const Text('管理员管理'),
       actions: [
+        if (widget.onOpenRecommendations != null)
+          IconButton(
+            onPressed: widget.onOpenRecommendations,
+            icon: const Icon(Icons.push_pin_outlined),
+            tooltip: '首页推荐',
+          ),
         IconButton(
           onPressed: widget.onOpenRisk,
           icon: const Icon(Icons.shield_outlined),

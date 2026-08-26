@@ -10,11 +10,13 @@ class ModerationConsoleScreen extends StatefulWidget {
     required this.repository,
     required this.onFeedback,
     this.onOpenAppeals,
+    this.onOpenRecommendations,
   });
 
   final PlatformRepository repository;
   final ValueChanged<String> onFeedback;
   final VoidCallback? onOpenAppeals;
+  final VoidCallback? onOpenRecommendations;
 
   @override
   State<ModerationConsoleScreen> createState() =>
@@ -439,6 +441,12 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
     appBar: AppBar(
       title: const Text('审核中心'),
       actions: [
+        if (widget.onOpenRecommendations != null)
+          IconButton(
+            onPressed: widget.onOpenRecommendations,
+            icon: const Icon(Icons.push_pin_outlined),
+            tooltip: '首页推荐',
+          ),
         if (widget.onOpenAppeals != null)
           TextButton.icon(
             onPressed: widget.onOpenAppeals,

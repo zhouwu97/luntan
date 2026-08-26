@@ -11,22 +11,63 @@ import (
 
 var ErrRegisteredAccountRequired = errors.New("registered account required")
 
+const (
+	capPublish         = "can_publish"
+	capCreatePoll      = "can_create_poll"
+	capManageBookmarks = "can_manage_bookmarks"
+	capComment         = "can_comment"
+	capLike            = "can_like"
+	capReport          = "can_report"
+	capModerate        = "can_moderate"
+	capManageAdmins    = "can_manage_admins"
+	capBanIP           = "can_ban_ip"
+	capViewAdminLogs   = "can_view_admin_logs"
+)
+
 // capabilitiesForUser 是未查询角色权限前的基础能力集合。
 // 游客仍然是可追踪的正式 users 记录，因此参与型能力保持开放；
 // 发布、投票和收藏夹管理必须绑定邮箱账号，避免游客身份变成可批量生产内容的入口。
 func capabilitiesForUser(user auth.User) map[string]bool {
+	if user.ID == "" && user.Username == "" && user.AccountType == "" {
+		return map[string]bool{
+			capPublish:         false,
+			capCreatePoll:      false,
+			capManageBookmarks: false,
+			capComment:         false,
+			capLike:            false,
+			capReport:          false,
+			capModerate:        false,
+			capManageAdmins:    false,
+			capBanIP:           false,
+			capViewAdminLogs:   false,
+		}
+	}
 	registered := user.AccountType != "guest"
 	return map[string]bool{
-		"can_publish":          registered,
-		"can_create_poll":      registered,
-		"can_manage_bookmarks": registered,
-		"can_comment":          true,
-		"can_like":             true,
-		"can_report":           true,
-		"can_moderate":         false,
-		"can_manage_admins":    false,
-		"can_ban_ip":           false,
-		"can_view_admin_logs":  false,
+		capPublish:         registered,
+		capCreatePoll:      registered,
+		capManageBookmarks: registered,
+		capComment:         true,
+		capLike:            true,
+		capReport:          true,
+		capModerate:        false,
+		capManageAdmins:    false,
+		capBanIP:           false,
+		capViewAdminLogs:   false,
+	}
+}
+
+func applyPermissionCapability(caps map[string]bool, role, permission string) {
+	switch permission {
+	case "moderation.action", "report.review":
+		caps[capModerate] = true
+	case "audit.read":
+		caps[capViewAdminLogs] = true
+	case "user.ban.global":
+		caps[capBanIP] = true
+	}
+	if role == "super_admin" {
+		caps[capManageAdmins] = true
 	}
 }
 
@@ -63,17 +104,7 @@ func (s *Server) populateUserCapabilities(ctx context.Context, user *auth.User) 
 		if err := rows.Scan(&role, &permission); err != nil {
 			return err
 		}
-		switch permission {
-		case "moderation.action", "report.review":
-			caps["can_moderate"] = true
-		case "audit.read":
-			caps["can_view_admin_logs"] = true
-		case "user.ban.global":
-			caps["can_ban_ip"] = true
-		}
-		if role == "super_admin" {
-			caps["can_manage_admins"] = true
-		}
+		applyPermissionCapability(caps, role, permission)
 	}
 	if err := rows.Err(); err != nil {
 		return err

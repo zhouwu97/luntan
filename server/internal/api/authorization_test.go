@@ -10,6 +10,95 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/auth"
 )
 
+func TestCapabilityMatrix(t *testing.T) {
+	actions := []string{
+		"can_publish",
+		"can_comment",
+		"can_like",
+		"can_manage_bookmarks",
+		"can_create_poll",
+		"can_report",
+		"can_moderate",
+		"can_manage_admins",
+		"can_ban_ip",
+	}
+	allFalse := func() map[string]bool {
+		caps := make(map[string]bool, len(actions))
+		for _, action := range actions {
+			caps[action] = false
+		}
+		return caps
+	}
+	rolePermissions := []string{"moderation.action", "report.review", "audit.read", "user.ban.global"}
+	roles := []struct {
+		name        string
+		user        auth.User
+		role        string
+		permissions []string
+		expect      map[string]bool
+	}{
+		{name: "anonymous", user: auth.User{}, expect: allFalse()},
+		{
+			name: "guest_user",
+			user: auth.User{ID: "guest-1", AccountType: "guest"},
+			expect: map[string]bool{
+				"can_publish": false, "can_comment": true, "can_like": true,
+				"can_manage_bookmarks": false, "can_create_poll": false,
+				"can_report": true, "can_moderate": false,
+				"can_manage_admins": false, "can_ban_ip": false,
+			},
+		},
+		{
+			name: "normal_user",
+			user: auth.User{ID: "user-1", AccountType: "email"},
+			expect: map[string]bool{
+				"can_publish": true, "can_comment": true, "can_like": true,
+				"can_manage_bookmarks": true, "can_create_poll": true,
+				"can_report": true, "can_moderate": false,
+				"can_manage_admins": false, "can_ban_ip": false,
+			},
+		},
+		{
+			name:        "admin",
+			user:        auth.User{ID: "admin-1", AccountType: "email"},
+			role:        "platform_admin",
+			permissions: rolePermissions,
+			expect: map[string]bool{
+				"can_publish": true, "can_comment": true, "can_like": true,
+				"can_manage_bookmarks": true, "can_create_poll": true,
+				"can_report": true, "can_moderate": true,
+				"can_manage_admins": false, "can_ban_ip": true,
+			},
+		},
+		{
+			name:        "super_admin",
+			user:        auth.User{ID: "super-1", AccountType: "email"},
+			role:        "super_admin",
+			permissions: rolePermissions,
+			expect: map[string]bool{
+				"can_publish": true, "can_comment": true, "can_like": true,
+				"can_manage_bookmarks": true, "can_create_poll": true,
+				"can_report": true, "can_moderate": true,
+				"can_manage_admins": true, "can_ban_ip": true,
+			},
+		},
+	}
+
+	for _, role := range roles {
+		t.Run(role.name, func(t *testing.T) {
+			caps := capabilitiesForUser(role.user)
+			for _, permission := range role.permissions {
+				applyPermissionCapability(caps, role.role, permission)
+			}
+			for _, action := range actions {
+				if got, want := caps[action], role.expect[action]; got != want {
+					t.Errorf("%s: %s=%v，期望=%v", role.name, action, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestGuestCapabilitiesAllowParticipationButBlockPublishing(t *testing.T) {
 	guest := capabilitiesForUser(auth.User{AccountType: "guest"})
 

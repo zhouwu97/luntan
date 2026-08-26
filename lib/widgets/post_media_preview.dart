@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 
 /// 帖子媒体预览。
@@ -155,8 +156,11 @@ class PostMediaPreview extends StatelessWidget {
                               opacity: frame == null && !wasSynchronouslyLoaded
                                   ? 0
                                   : 1,
-                              duration: AppTheme.fastMotion,
-                              curve: AppTheme.contentCurve,
+                              duration: AppMotion.duration(
+                                context,
+                                AppMotion.fast,
+                              ),
+                              curve: AppMotion.standard,
                               child: child,
                             ),
                           ],

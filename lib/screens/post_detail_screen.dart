@@ -8,8 +8,10 @@ import '../data/api/api_client.dart';
 import '../data/api/comment_repository.dart';
 import '../data/api/poll_repository.dart';
 import '../domain/models.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_author_row.dart';
+import '../widgets/motion_tap_icon.dart';
 import '../widgets/post_media_preview.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -150,7 +152,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         hasFocusedComments = true;
         Scrollable.ensureVisible(
           context,
-          duration: AppTheme.tabMotion,
+          duration: AppMotion.duration(this.context, AppMotion.normal),
           alignment: .08,
         );
       }
@@ -215,24 +217,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 onPressed: () =>
                     _runInteraction(() => widget.onToggleBookmark(post)),
                 tooltip: '收藏帖子',
-                icon: Icon(
-                  post.isBookmarked
-                      ? Icons.bookmark_rounded
-                      : Icons.bookmark_border_rounded,
-                  color: post.isBookmarked
-                      ? AppTheme.primary
-                      : AppTheme.textSecondary,
+                icon: MotionTapIcon(
+                  active: post.isBookmarked,
+                  activeIcon: Icons.bookmark_rounded,
+                  inactiveIcon: Icons.bookmark_border_rounded,
+                  activeColor: AppTheme.primary,
+                  inactiveColor: AppTheme.textSecondary,
                 ),
               ),
               IconButton(
                 onPressed: () =>
                     _runInteraction(() => widget.onToggleLike(post)),
                 tooltip: '点赞帖子',
-                icon: Icon(
-                  post.isLiked
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  color: post.isLiked ? AppTheme.pink : AppTheme.textSecondary,
+                icon: MotionTapIcon(
+                  active: post.isLiked,
+                  activeIcon: Icons.favorite_rounded,
+                  inactiveIcon: Icons.favorite_border_rounded,
+                  activeColor: AppTheme.pink,
+                  inactiveColor: AppTheme.textSecondary,
                 ),
               ),
             ],
@@ -1090,7 +1092,10 @@ class _ReplyBar extends StatelessWidget {
                   vertical: 12,
                 ),
               ),
-              child: Text(sending ? '…' : '发送'),
+              child: AnimatedSwitcher(
+                duration: AppMotion.duration(context, AppMotion.fast),
+                child: Text(sending ? '…' : '发送', key: ValueKey(sending)),
+              ),
             ),
           ],
         ),

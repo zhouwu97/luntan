@@ -19,10 +19,30 @@ import '../domain/repositories.dart';
 
 String apiBaseUrlFromEnvironment() {
   const configured = String.fromEnvironment('API_BASE_URL');
-  if (configured.trim().isNotEmpty) return configured;
-  // 所有平台在没有显式 API_BASE_URL 时统一使用 Mock，避免 Android、Web、
-  // 桌面端因为默认值不同而出现无法复现的真实 API / Mock 混用。
-  return '';
+  const appEnv = String.fromEnvironment('APP_ENV', defaultValue: 'development');
+  return resolveApiBaseUrl(configured: configured, appEnv: appEnv);
+}
+
+/// 解析编译期 API 地址。
+///
+/// QA 可以继续使用 HTTP；生产构建必须显式声明 APP_ENV=production，并且
+/// 通过 HTTPS 访问 API，避免 Token、媒体和 PWA 资源落入明文链路。
+String resolveApiBaseUrl({required String configured, required String appEnv}) {
+  final baseUrl = configured.trim();
+  if (baseUrl.isEmpty) {
+    // 所有平台在没有显式 API_BASE_URL 时统一使用 Mock，避免 Android、Web、
+    // 桌面端因为默认值不同而出现无法复现的真实 API / Mock 混用。
+    return '';
+  }
+  final uri = Uri.tryParse(baseUrl);
+  if (uri == null || uri.scheme.isEmpty || uri.host.isEmpty) {
+    throw StateError('API_BASE_URL 必须是完整的 HTTP(S) 地址');
+  }
+  if (appEnv.trim().toLowerCase() == 'production' &&
+      uri.scheme.toLowerCase() != 'https') {
+    throw StateError('生产环境 API_BASE_URL 必须使用 HTTPS');
+  }
+  return baseUrl;
 }
 
 class ForumRepositories {
@@ -68,7 +88,10 @@ class ForumRepositories {
     final actualStore = store ?? ForumStore.seeded();
     return ForumRepositories(
       community: MockCommunityRepository(store: actualStore),
-      feed: MockFeedRepository(store: actualStore),
+      // Mock 首页故意按小页返回，保留真实 API 的触底分页链路，便于本地
+      // 验证下滑追加、loading more 和游标去重；单元测试仍可直接使用默认
+      // pageSize 覆盖完整数据集。
+      feed: MockFeedRepository(store: actualStore, pageSize: 3),
       post: MockPostRepository(store: actualStore),
       comments: MockCommentRepository(store: actualStore),
       interactions: MockInteractionRepository(),

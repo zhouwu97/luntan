@@ -94,10 +94,12 @@ class MockCommunityRepository implements CommunityRepository {
 }
 
 class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
-  MockFeedRepository({ForumStore? store})
-    : _store = store ?? ForumStore.seeded();
+  MockFeedRepository({ForumStore? store, int pageSize = 20})
+    : _store = store ?? ForumStore.seeded(),
+      _pageSize = pageSize.clamp(1, 50).toInt();
 
   final ForumStore _store;
+  final int _pageSize;
 
   @override
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) async {
@@ -113,7 +115,7 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
     String? postType,
     bool? hasMedia,
   }) async {
-    final normalizedLimit = limit.clamp(1, 50).toInt();
+    final normalizedLimit = limit.clamp(1, _pageSize).toInt();
     final posts = [..._store.posts]
       ..removeWhere(
         (post) =>

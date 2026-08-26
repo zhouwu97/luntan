@@ -66,6 +66,36 @@ class _PendingFeed implements FeedRepository, QueryableFeedRepository {
   }
 }
 
+class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
+  final List<String?> cursors = <String?>[];
+
+  @override
+  Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
+      getFeed(cursor: cursor, limit: limit);
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+    String? postType,
+    bool? hasMedia,
+  }) {
+    cursors.add(cursor);
+    if (cursor == null) {
+      return Future.value(
+        FeedPage(
+          items: [_post('first', 'campus')],
+          hasMore: true,
+          nextCursor: 'page-2',
+        ),
+      );
+    }
+    return Future.error(StateError('模拟下一页网络失败'));
+  }
+}
+
 Post _post(String id, String communityId) => Post(
   id: id,
   authorId: 'author-1',
@@ -250,5 +280,22 @@ void main() {
     await oldLoadMore;
 
     expect(controller.state.items.map((post) => post.id), ['fresh']);
+  });
+
+  test('加载更多失败保留旧帖子，并允许使用原游标重试', () async {
+    final feed = _FailingLoadMoreFeed();
+    final controller = FeedController(repository: feed);
+
+    await controller.initialLoad();
+    await Future.wait([controller.loadMore(), controller.loadMore()]);
+
+    expect(feed.cursors, [null, 'page-2'], reason: '并发触底只能请求一次');
+    expect(controller.state.status, FeedStatus.success);
+    expect(controller.state.items.map((post) => post.id), ['first']);
+    expect(controller.state.error, isA<StateError>());
+    expect(controller.state.nextCursor, 'page-2');
+
+    await controller.loadMore();
+    expect(feed.cursors, [null, 'page-2', 'page-2']);
   });
 }

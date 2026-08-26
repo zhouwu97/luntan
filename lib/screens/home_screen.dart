@@ -13,6 +13,7 @@ import '../data/api/store_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 import 'feature_page.dart';
@@ -94,6 +95,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const double _loadMoreThreshold = 600;
+  static const int _maxViewportFillAttempts = 4;
+
   late final ScrollController scrollController;
   List<Community> communities = const [];
   String? selectedCommunityId;
@@ -101,6 +105,9 @@ class _HomeScreenState extends State<HomeScreen> {
   HomeFeedMode feedMode = HomeFeedMode.public;
   HomeFeedMode? pendingPersonalMode;
   final feedToolbarKey = GlobalKey();
+  bool _autoFillingViewport = false;
+  int _viewportFillAttempts = 0;
+  bool _showBackToTop = false;
 
   bool get isApiMode => widget.feedRepository != null;
   bool get isPersonalMode => feedMode != HomeFeedMode.public;
@@ -108,18 +115,19 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    selectedCommunityId = widget.feedRepository == null
-        ? widget.store.selectedSection.communityId
-        : null;
+    // 首页默认展示综合流；只有用户主动选择板块时才带 community_id。
+    selectedCommunityId = null;
     selectedSort = widget.store.selectedSort;
     communities = widget.feedRepository == null
         ? widget.store.communities
         : const [];
-    scrollController = ScrollController();
+    scrollController = ScrollController()..addListener(_onScroll);
+    widget.feedController.addListener(_onFeedStateChanged);
+    widget.personalFeedController.addListener(_onPersonalFeedStateChanged);
     if (widget.communityRepository != null) {
       _loadCommunities();
     }
-    // 有板块仓储时，首个 feed 查询要等板块选择完成，避免先发一次空条件请求。
+    // 有板块仓储时，先加载标签再请求综合流，避免标签和列表状态短暂不同步。
     if (widget.communityRepository == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -130,7 +138,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    scrollController.dispose();
+    widget.feedController.removeListener(_onFeedStateChanged);
+    widget.personalFeedController.removeListener(_onPersonalFeedStateChanged);
+    scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
     super.dispose();
   }
 
@@ -149,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> refresh() async {
+    _resetViewportFillAttempts();
     if (isPersonalMode) {
       await widget.personalFeedController.refresh(mode: feedMode);
     } else {
@@ -172,8 +185,79 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _resetViewportFillAttempts() {
+    _viewportFillAttempts = 0;
+  }
+
+  void _onFeedStateChanged() {
+    if (!isPersonalMode) _scheduleViewportFill();
+  }
+
+  void _onPersonalFeedStateChanged() {
+    if (isPersonalMode) _scheduleViewportFill();
+  }
+
+  void _scheduleViewportFill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fillViewportIfNeeded();
+    });
+  }
+
+  void _onScroll() {
+    if (!scrollController.hasClients) return;
+    final position = scrollController.position;
+    final showBackToTop = position.pixels > _loadMoreThreshold;
+    if (showBackToTop != _showBackToTop) {
+      setState(() => _showBackToTop = showBackToTop);
+    }
+    if (position.extentAfter <= _loadMoreThreshold) {
+      _requestLoadMore();
+    }
+  }
+
+  Future<void> _requestLoadMore() {
+    if (isPersonalMode) return widget.personalFeedController.loadMore();
+    return widget.feedController.loadMore();
+  }
+
+  Future<void> _fillViewportIfNeeded() async {
+    if (_autoFillingViewport ||
+        _viewportFillAttempts >= _maxViewportFillAttempts ||
+        !mounted ||
+        !scrollController.hasClients) {
+      return;
+    }
+
+    final hasMore = isPersonalMode
+        ? widget.personalFeedController.state.hasMore
+        : widget.feedController.state.hasMore;
+    final status = isPersonalMode
+        ? widget.personalFeedController.state.status
+        : widget.feedController.state.status;
+    final error = isPersonalMode
+        ? widget.personalFeedController.state.error
+        : widget.feedController.state.error;
+    if (!hasMore ||
+        error != null ||
+        status == FeedStatus.loading ||
+        status == FeedStatus.loadingMore ||
+        scrollController.position.maxScrollExtent > _loadMoreThreshold) {
+      return;
+    }
+
+    _autoFillingViewport = true;
+    _viewportFillAttempts += 1;
+    try {
+      await _requestLoadMore();
+    } finally {
+      _autoFillingViewport = false;
+      _scheduleViewportFill();
+    }
+  }
+
   void _selectCommunity(String? communityId) {
     final wasPersonal = isPersonalMode;
+    _resetViewportFillAttempts();
     setState(() {
       selectedCommunityId = communityId;
       feedMode = HomeFeedMode.public;
@@ -193,18 +277,15 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (!mounted) return;
       final visibleCommunities = selectHomeCommunities(result);
-      final nextSelectedCommunityId =
-          visibleCommunities.any((item) => item.id == selectedCommunityId)
-          ? selectedCommunityId
-          : visibleCommunities.isEmpty
-          ? null
-          : visibleCommunities.first.id;
-      final shouldReload = nextSelectedCommunityId != selectedCommunityId;
       setState(() {
         communities = visibleCommunities;
-        selectedCommunityId = nextSelectedCommunityId;
+        // 不自动选择首个板块，否则首页会意外退化为某个小板块的列表。
+        if (!visibleCommunities.any((item) => item.id == selectedCommunityId)) {
+          selectedCommunityId = null;
+        }
       });
-      if (shouldReload || visibleCommunities.isEmpty) _loadFeed();
+      _resetViewportFillAttempts();
+      _loadFeed();
     } catch (_) {
       if (!mounted) return;
       widget.onFeedback('板块加载失败，稍后可重试');
@@ -220,6 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _selectSort(FeedSort sort) {
     final wasPersonal = isPersonalMode;
+    _resetViewportFillAttempts();
     setState(() {
       selectedSort = sort;
       feedMode = HomeFeedMode.public;
@@ -242,6 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
       feedMode = mode;
       pendingPersonalMode = null;
     });
+    _resetViewportFillAttempts();
     widget.personalFeedController.selectMode(mode);
     _scrollToFeedStart();
   }
@@ -254,17 +337,29 @@ class _HomeScreenState extends State<HomeScreen> {
         Scrollable.ensureVisible(
           toolbarContext,
           alignment: 0,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
+          duration: AppMotion.duration(context, AppMotion.normal),
+          curve: AppMotion.standard,
         );
       } else if (scrollController.hasClients) {
         scrollController.animateTo(
           200,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
+          duration: AppMotion.duration(context, AppMotion.normal),
+          curve: AppMotion.standard,
         );
       }
     });
+  }
+
+  Future<void> _handleFloatingAction() async {
+    if (_showBackToTop && scrollController.hasClients) {
+      await scrollController.animateTo(
+        0,
+        duration: AppMotion.duration(context, AppMotion.normal),
+        curve: AppMotion.standard,
+      );
+      return;
+    }
+    await refresh();
   }
 
   List<Post> get _visiblePosts {
@@ -300,7 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void openSearch() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      AppMotion.pageRoute<void>(
         builder: (_) => SearchScreen(
           store: widget.store,
           platform: widget.platform,
@@ -316,7 +411,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void openFeature(FeatureType type) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      AppMotion.pageRoute<void>(
         builder: (_) => FeaturePage(
           type: type,
           store: widget.store,
@@ -351,12 +446,21 @@ class _HomeScreenState extends State<HomeScreen> {
         final activeStatus = isPersonalMode
             ? personalState.status
             : feedState.status;
-        final activeIsBusy = isPersonalMode
-            ? personalState.isBusy
-            : feedState.isBusy;
+        final activeHasMore = isPersonalMode
+            ? personalState.hasMore
+            : feedState.hasMore;
+        final activeError = isPersonalMode
+            ? personalState.error
+            : feedState.error;
         final showInitialSkeleton =
             activeStatus == FeedStatus.initial ||
             (activeStatus == FeedStatus.loading && posts.isEmpty);
+        final showTopProgress =
+            activeStatus == FeedStatus.loading && posts.isNotEmpty;
+        final loadMoreFailed =
+            activeError != null &&
+            posts.isNotEmpty &&
+            activeStatus == FeedStatus.success;
         return Scaffold(
           body: SafeArea(
             bottom: false,
@@ -365,23 +469,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 RefreshIndicator(
                   color: AppTheme.primary,
                   onRefresh: refresh,
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (notification) {
-                      if (notification.metrics.extentAfter < 360) {
-                        if (isPersonalMode) {
-                          widget.personalFeedController.loadMore();
-                        } else {
-                          widget.feedController.loadMore();
-                        }
-                      }
-                      return false;
-                    },
-                    child: CustomScrollView(
-                      controller: scrollController,
-                      physics: const AlwaysScrollableScrollPhysics(
-                        parent: BouncingScrollPhysics(),
-                      ),
-                      slivers: [
+                  child: CustomScrollView(
+                    controller: scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    slivers: [
                         SliverToBoxAdapter(
                           child: _Header(
                             onProfile: widget.onOpenProfile,
@@ -416,7 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           SliverToBoxAdapter(
                             child: _PersonalFeedHint(mode: feedMode),
                           ),
-                        if (activeIsBusy)
+                        if (showTopProgress)
                           const SliverToBoxAdapter(
                             child: LinearProgressIndicator(
                               minHeight: 2,
@@ -427,7 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         else
                           const SliverToBoxAdapter(child: SizedBox(height: 2)),
                         SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 88),
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
                           sliver:
                               activeStatus == FeedStatus.error && posts.isEmpty
                               ? SliverToBoxAdapter(
@@ -472,14 +565,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                   },
                                 ),
                         ),
+                        if (posts.isNotEmpty &&
+                            !showInitialSkeleton &&
+                            activeStatus != FeedStatus.loading)
+                          SliverToBoxAdapter(
+                            child: _FeedPaginationFooter(
+                              status: activeStatus,
+                              hasMore: activeHasMore,
+                              loadMoreFailed: loadMoreFailed,
+                              isCommunityFeed: selectedCommunityId != null,
+                              onRetry: _requestLoadMore,
+                            ),
+                          ),
                       ],
-                    ),
                   ),
                 ),
                 Positioned(
                   right: 16,
                   bottom: 16,
-                  child: _FloatingRefresh(active: activeIsBusy, onTap: refresh),
+                  child: _FloatingRefresh(
+                    active: showTopProgress,
+                    showBackToTop: _showBackToTop,
+                    onTap: _handleFloatingAction,
+                  ),
                 ),
               ],
             ),
@@ -711,7 +819,17 @@ class _SectionTabs extends StatelessWidget {
                   ),
                 ),
               )
-              .toList(),
+              .toList()
+            ..insert(
+              0,
+              Expanded(
+                child: _CommunityTab(
+                  label: '综合',
+                  active: selectedCommunityId == null,
+                  onTap: () => onChanged(null),
+                ),
+              ),
+            ),
         ),
       ),
     );
@@ -735,8 +853,8 @@ class _CommunityTab extends StatelessWidget {
     child: GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: AppTheme.tabMotion,
-        curve: AppTheme.stateCurve,
+        duration: AppMotion.duration(context, AppMotion.normal),
+        curve: AppMotion.emphasized,
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
@@ -992,8 +1110,8 @@ class _FeedModeChip extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 170),
-          curve: Curves.easeOutCubic,
+          duration: AppMotion.duration(context, AppMotion.normal),
+          curve: AppMotion.standard,
           width: 56,
           height: 22,
           decoration: BoxDecoration(
@@ -1103,8 +1221,8 @@ class _SortItem extends StatelessWidget {
         ),
         const SizedBox(height: 5),
         AnimatedContainer(
-          duration: AppTheme.tabMotion,
-          curve: AppTheme.contentCurve,
+          duration: AppMotion.duration(context, AppMotion.normal),
+          curve: AppMotion.standard,
           width: active ? 20 : 0,
           height: 3,
           decoration: BoxDecoration(
@@ -1149,9 +1267,14 @@ class _ToolbarButton extends StatelessWidget {
 }
 
 class _FloatingRefresh extends StatefulWidget {
-  const _FloatingRefresh({required this.active, required this.onTap});
+  const _FloatingRefresh({
+    required this.active,
+    required this.showBackToTop,
+    required this.onTap,
+  });
 
   final bool active;
+  final bool showBackToTop;
   final Future<void> Function() onTap;
 
   @override
@@ -1193,7 +1316,7 @@ class _FloatingRefreshState extends State<_FloatingRefresh>
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '刷新',
+      label: widget.showBackToTop ? '返回顶部' : '刷新',
       child: Material(
         color: Colors.white,
         elevation: 5,
@@ -1211,8 +1334,10 @@ class _FloatingRefreshState extends State<_FloatingRefresh>
             ),
             child: RotationTransition(
               turns: controller,
-              child: const Icon(
-                Icons.refresh_rounded,
+              child: Icon(
+                widget.showBackToTop
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.refresh_rounded,
                 color: AppTheme.primary,
                 size: 22,
               ),
@@ -1221,6 +1346,67 @@ class _FloatingRefreshState extends State<_FloatingRefresh>
         ),
       ),
     );
+  }
+}
+
+class _FeedPaginationFooter extends StatelessWidget {
+  const _FeedPaginationFooter({
+    required this.status,
+    required this.hasMore,
+    required this.loadMoreFailed,
+    required this.isCommunityFeed,
+    required this.onRetry,
+  });
+
+  final FeedStatus status;
+  final bool hasMore;
+  final bool loadMoreFailed;
+  final bool isCommunityFeed;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (status == FeedStatus.loadingMore) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(0, 20, 0, 88),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppTheme.primary,
+            ),
+          ),
+        ),
+      );
+    }
+    if (loadMoreFailed) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(0, 12, 0, 88),
+        child: Center(
+          child: TextButton(
+            onPressed: onRetry,
+            child: const Text('加载失败，点击重试'),
+          ),
+        ),
+      );
+    }
+    if (!hasMore) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(0, 18, 0, 88),
+        child: Center(
+          child: Text(
+            isCommunityFeed ? '这个板块暂时只有这些内容' : '已经到底啦',
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      );
+    }
+    return const SizedBox(height: 88);
   }
 }
 

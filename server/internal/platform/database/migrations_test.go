@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -61,5 +63,75 @@ func TestMigrationsAgainstPostgres(t *testing.T) {
 		if !exists {
 			t.Fatalf("table %s does not exist", table)
 		}
+	}
+}
+
+func TestMigrateSerializesIndependentDatabaseConnections(t *testing.T) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL 未配置，跳过跨连接 Migration 并发集成测试")
+	}
+
+	db1, err := Open(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db1.Close()
+	db2, err := Open(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+
+	ctx := context.Background()
+	if err := db1.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db2.PingContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := filepath.Join("..", "..", "..", "migrations")
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var group sync.WaitGroup
+	for _, db := range []*sql.DB{db1, db2} {
+		group.Add(1)
+		go func(connection *sql.DB) {
+			defer group.Done()
+			<-start
+			results <- Migrate(ctx, connection, directory)
+		}(db)
+	}
+	close(start)
+	group.Wait()
+	close(results)
+
+	for err := range results {
+		if err != nil {
+			t.Fatalf("并发 Migration 失败: %v", err)
+		}
+	}
+
+	files, err := ListUpMigrations(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var appliedCount int
+	if err := db1.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&appliedCount); err != nil {
+		t.Fatal(err)
+	}
+	if appliedCount != len(files) {
+		t.Fatalf("schema_migrations 记录数=%d，期望=%d", appliedCount, len(files))
+	}
+	var duplicateCount int
+	if err := db1.QueryRowContext(ctx, `
+		SELECT COUNT(*) - COUNT(DISTINCT version)
+		FROM schema_migrations
+	`).Scan(&duplicateCount); err != nil {
+		t.Fatal(err)
+	}
+	if duplicateCount != 0 {
+		t.Fatalf("schema_migrations 存在重复版本: %d", duplicateCount)
 	}
 }

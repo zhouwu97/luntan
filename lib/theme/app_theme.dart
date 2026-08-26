@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_motion.dart';
+
 class AppTheme {
   static const primary = Color(0xFF5A9EFF);
   static const sky = Color(0xFF71CFFF);
@@ -29,11 +31,12 @@ class AppTheme {
   static const cardRadius = 16.0;
   static const iconContainerRadius = 14.0;
   static const publishRadius = 17.0;
-  static const fastMotion = Duration(milliseconds: 100);
-  static const tabMotion = Duration(milliseconds: 200);
-  static const sheetMotion = Duration(milliseconds: 250);
-  static const Curve contentCurve = Curves.easeOutCubic;
-  static const Curve stateCurve = Curves.easeInOutCubic;
+  // 兼容旧页面的别名；新代码统一从 AppMotion 取动效 token。
+  static const fastMotion = AppMotion.fast;
+  static const tabMotion = AppMotion.normal;
+  static const sheetMotion = AppMotion.page;
+  static const Curve contentCurve = AppMotion.standard;
+  static const Curve stateCurve = AppMotion.emphasized;
 
   static const primaryGradient = LinearGradient(
     colors: [primary, sky],

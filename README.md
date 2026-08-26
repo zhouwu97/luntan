@@ -107,12 +107,25 @@ Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为�
 
 ### 远端占位展示数据
 
-服务器已通过 `http://101.42.27.44/api/v1` 提供客户端 API。远端导入了约 100 条帖子、随机化占位用户和帖子图片；图片通过 `/imported-media/` 公开读取。API 模式必须显式传入地址，启动示例：
+QA 服务器通过 `http://101.42.27.44/api/v1` 提供客户端 API。远端导入了约 100 条帖子、随机化占位用户和帖子图片；图片通过 `/imported-media/` 公开读取。该 HTTP 地址只用于 QA，API、图片媒体和 Web 正式发布必须统一使用 HTTPS。API 模式必须显式传入地址，启动示例：
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://101.42.27.44
 flutter build apk --debug --dart-define=API_BASE_URL=http://101.42.27.44
 ```
+
+生产构建必须同时声明 `APP_ENV=production`；客户端会拒绝 HTTP API 地址：
+
+```bash
+flutter build web --release --base-href /forum/ \
+  --dart-define=APP_ENV=production \
+  --dart-define=API_BASE_URL=https://forum.example.com
+flutter build apk --release \
+  --dart-define=APP_ENV=production \
+  --dart-define=API_BASE_URL=https://forum.example.com
+```
+
+正式域名还需要由 HTTPS 反向代理统一承载 API、媒体和 Web，并配置证书续期；不要在生产构建中复用 QA 的 `http://101.42.27.44` 地址。
 
 如需重新生成占位数据，使用 `scripts/import_placeholder_content.py`。脚本只写入占位用户名，不会保存源站作者用户名；数据库连接应通过远端进程环境中的 `DATABASE_URL` 提供，不要把连接凭据写入仓库。
 
@@ -203,6 +216,8 @@ test/                                   # Flutter 单元测试和 Widget Test
 - 增长功能：投票、排行榜、积分商品和事务兑换；历史市场表仅保留用于数据兼容，不再创建或展示市场帖子
 
 客户端 API 仓储位于 `lib/data/api/`，默认 mock / API 切换逻辑位于 `lib/data/repository_provider.dart`。
+
+权限回归固定矩阵见 [`docs/capability-regression-matrix.md`](docs/capability-regression-matrix.md)。涉及权限、认证或治理接口的改动必须覆盖五种身份和九类动作，服务端测试入口为 `TestCapabilityMatrix`。
 
 ## 设计约束
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 import 'forum_author_row.dart';
+import 'motion_tap_icon.dart';
 import 'post_media_preview.dart';
 
 class ForumPostCard extends StatelessWidget {
@@ -124,6 +125,7 @@ class ForumPostCard extends StatelessWidget {
                   const SizedBox(width: 14),
                   _ActionStat(
                     icon: Icons.favorite_border_rounded,
+                    activeIcon: Icons.favorite_rounded,
                     text: '${post.likeCount}',
                     onTap: onLike,
                     active: post.isLiked,
@@ -134,14 +136,12 @@ class ForumPostCard extends StatelessWidget {
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     onPressed: onBookmark,
-                    icon: Icon(
-                      post.isBookmarked
-                          ? Icons.bookmark_rounded
-                          : Icons.bookmark_border_rounded,
-                      size: 20,
-                      color: post.isBookmarked
-                          ? AppTheme.primary
-                          : AppTheme.textSecondary,
+                    icon: MotionTapIcon(
+                      active: post.isBookmarked,
+                      activeIcon: Icons.bookmark_rounded,
+                      inactiveIcon: Icons.bookmark_border_rounded,
+                      activeColor: AppTheme.primary,
+                      inactiveColor: AppTheme.textSecondary,
                     ),
                     tooltip: '收藏帖子',
                   ),
@@ -210,9 +210,11 @@ class _ActionStat extends StatelessWidget {
     required this.text,
     required this.onTap,
     this.active = false,
+    this.activeIcon,
   });
 
   final IconData icon;
+  final IconData? activeIcon;
   final String text;
   final VoidCallback onTap;
   final bool active;
@@ -231,10 +233,13 @@ class _ActionStat extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
+            MotionTapIcon(
+              active: active,
+              activeIcon: activeIcon ?? icon,
+              inactiveIcon: icon,
+              activeColor: AppTheme.pink,
+              inactiveColor: AppTheme.textSecondary,
               size: 16,
-              color: active ? AppTheme.pink : AppTheme.textSecondary,
             ),
             const SizedBox(width: 4),
             Text(

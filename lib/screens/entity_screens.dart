@@ -6,6 +6,7 @@ import '../data/api/api_client.dart';
 import '../data/api/user_repository.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/forum_post_card.dart';
 
@@ -231,7 +232,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 if (profile.canFollow)
                   FilledButton.tonal(
                     onPressed: _busy ? null : _toggleFollow,
-                    child: Text(profile.isFollowing ? '已关注' : '关注'),
+                    child: AnimatedSwitcher(
+                      duration: AppMotion.duration(context, AppMotion.fast),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: ScaleTransition(scale: animation, child: child),
+                      ),
+                      child: Text(
+                        profile.isFollowing ? '已关注' : '关注',
+                        key: ValueKey(profile.isFollowing),
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -739,7 +750,13 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
           Expanded(
             child: OutlinedButton(
               onPressed: _busy ? null : () => _mutate(membership: false),
-              child: Text(community.isFollowing ? '已关注' : '关注板块'),
+              child: AnimatedSwitcher(
+                duration: AppMotion.duration(context, AppMotion.fast),
+                child: Text(
+                  community.isFollowing ? '已关注' : '关注板块',
+                  key: ValueKey(community.isFollowing),
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 10),

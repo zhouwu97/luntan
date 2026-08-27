@@ -158,7 +158,9 @@ class AuthRepository {
     required String password,
   }) async {
     final payload = await _client.postJson(
-      '/api/v1/auth/login/password',
+      // 旧版线上服务只暴露 /auth/login；当前服务端也保留该路径，
+      // 并根据 email 字段执行邮箱密码登录。
+      '/api/v1/auth/login',
       body: {'email': email.trim(), 'password': password},
     );
     return _saveSession(payload);
@@ -189,7 +191,8 @@ class AuthRepository {
     String scene = 'login',
   }) async {
     final payload = await _client.postJson(
-      '/api/v1/auth/code/request',
+      // /email/request 是新旧服务端都支持的认证入口。
+      '/api/v1/auth/email/request',
       body: {'email': email.trim(), 'scene': scene},
     );
     return EmailCodeChallenge(
@@ -208,7 +211,8 @@ class AuthRepository {
     String? nickname,
   }) async {
     final payload = await _client.postJson(
-      '/api/v1/auth/login/code',
+      // /email/verify 是新旧服务端都支持的验证码登录入口。
+      '/api/v1/auth/email/verify',
       body: {
         'email': email.trim(),
         'code': code.trim(),

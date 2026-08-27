@@ -230,8 +230,7 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
-// profileCommentList 返回收到过评论的帖子，一条帖子对应一条列表项。
-// 评论入口按最近收到的评论排序；帖子入口仍由 profileListQuery 按发布时间排序。
+// profileCommentList 返回当前认证用户发表的评论列表，一条评论对应一条列表项。
 func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, userID string, limit int) {
 	query, args, err := profileCommentListQuery(userID, r.URL.Query().Get("cursor"), limit)
 	if err != nil {
@@ -246,15 +245,15 @@ func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, user
 	defer rows.Close()
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
-		var id, title, content, communityID, communityName string
+		var commentID, postID, title, content, communityID, communityName string
 		var publishedAt, activityAt time.Time
 		var commentCount, likeCount, bookmarkCount int64
-		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &publishedAt, &activityAt); err != nil {
+		if err := rows.Scan(&commentID, &postID, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &publishedAt, &activityAt); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 		items = append(items, map[string]any{
-			"id": id, "title": title, "content_preview": content,
+			"id": postID, "comment_id": commentID, "title": title, "content_preview": content,
 			"community_id": communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "published_at": publishedAt,
@@ -272,40 +271,34 @@ func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, user
 	var nextCursor any
 	if hasMore && len(items) > 0 {
 		last := items[len(items)-1]
-		nextCursor = encodeProfileCursor(last["activity_at"].(time.Time), last["id"].(string))
+		nextCursor = encodeProfileCursor(last["activity_at"].(time.Time), last["comment_id"].(string))
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
 func profileCommentListQuery(userID, rawCursor string, limit int) (string, []any, error) {
 	args := []any{userID}
-	where := `p.author_id = $1 AND p.publication_status = 'published' AND p.deleted_at IS NULL AND p.type <> 'market'
-		AND p.moderation_status = 'normal'
-		AND c.publication_status = 'published' AND c.moderation_status = 'normal'
-		AND c.deleted_at IS NULL AND c.author_id <> p.author_id`
-	having := ""
+	where := `c.author_id = $1 AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND c.deleted_at IS NULL
+		AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.type <> 'market'`
 	if rawCursor != "" {
 		createdAt, id, err := decodeProfileCursor(rawCursor)
 		if err != nil {
 			return "", nil, err
 		}
-		having = "HAVING (MAX(c.created_at), p.id) < ($2, $3)"
+		where += " AND (c.created_at, c.id) < ($2, $3)"
 		args = append(args, createdAt, id)
 	}
 	args = append(args, limit+1)
 	return fmt.Sprintf(`
-		SELECT p.id, p.title, LEFT(p.content, 200), p.community_id, cm.name,
+		SELECT c.id, p.id, p.title, LEFT(c.content, 200), p.community_id, cm.name,
 		       p.comment_count, p.like_count, p.bookmark_count,
-		       COALESCE(p.published_at, p.created_at), MAX(c.created_at) AS latest_comment_at
-		FROM posts p
-		JOIN comments c ON c.post_id = p.id
+		       COALESCE(p.published_at, p.created_at), c.created_at
+		FROM comments c
+		JOIN posts p ON p.id = c.post_id
 		JOIN communities cm ON cm.id = p.community_id
 		WHERE %s
-		GROUP BY p.id, p.title, p.content, p.community_id, cm.name,
-		         p.comment_count, p.like_count, p.bookmark_count, p.published_at, p.created_at
-		%s
-		ORDER BY latest_comment_at DESC, p.id DESC
-		LIMIT $%d`, where, having, len(args)), args, nil
+		ORDER BY c.created_at DESC, c.id DESC
+		LIMIT $%d`, where, len(args)), args, nil
 }
 
 func profileListQuery(kind, userID, rawCursor string, limit int) (string, []any, error) {

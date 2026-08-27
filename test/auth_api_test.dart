@@ -157,7 +157,7 @@ void main() {
         baseUri: Uri.parse('https://example.com'),
         tokenStore: store,
         client: MockClient((request) async {
-          if (request.url.path == '/api/v1/auth/login/password') {
+          if (request.url.path == '/api/v1/auth/login') {
             return http.Response(
               '{"access_token":"access-1","refresh_token":"refresh-1","token_type":"Bearer","expires_in":900,"user":{"id":"u1","username":"user","nickname":"User","level":1,"status":"active","email":"user@test.com"}}',
               200,
@@ -192,7 +192,7 @@ void main() {
       tokenStore: store,
       client: MockClient((request) async {
         // print path
-        if (request.url.path == '/api/v1/auth/code/request') {
+        if (request.url.path == '/api/v1/auth/email/request') {
           return http.Response(
             '{"expires_in":300,"retry_after":60,"delivery":"email","dev_code":"123456"}',
             200,
@@ -205,7 +205,7 @@ void main() {
             headers: {'content-type': 'application/json; charset=utf-8'},
           );
         }
-        if (request.url.path == '/api/v1/auth/login/code') {
+        if (request.url.path == '/api/v1/auth/email/verify') {
           return http.Response(
             '{"access_token":"code-access","refresh_token":"code-refresh","token_type":"Bearer","expires_in":900,"user":{"id":"u3","username":"usr_3","nickname":"老用户","level":2,"status":"active","email":"old@test.com"}}',
             200,

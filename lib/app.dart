@@ -75,7 +75,11 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   bool get canViewAdminLogs => currentUser?.canViewAdminLogs == true;
   bool get canBanIP => currentUser?.canBanIP == true;
   bool get canAccessGovernance =>
-      canModerate || canManageAdmins || canManageUsers || canViewAdminLogs || canBanIP;
+      canModerate ||
+      canManageAdmins ||
+      canManageUsers ||
+      canViewAdminLogs ||
+      canBanIP;
 
   bool get canManageBookmarks =>
       !apiMode || currentUser?.canManageBookmarks == true;
@@ -235,48 +239,29 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   void showComposer() {
     if (!_requireRegisteredAccount()) return;
-    showModalBottomSheet<void>(
-      context: appContext,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => ComposerSheet(
-        onCreatePost: () {
-          Navigator.of(sheetContext).pop();
-          _showPostEditor();
-        },
-        onCreatePoll: () {
-          Navigator.of(sheetContext).pop();
-          _showPostEditor(isPoll: true);
-        },
-        onCreateGameShare: () {
-          Navigator.of(sheetContext).pop();
-          _showPostEditor(isGameShare: true);
-        },
-      ),
+    _openPostEditor(
+      initialCommunityId: feedController.communityId ?? 'community-campus',
     );
   }
 
-  Future<void> _showPostEditor({
-    bool isGameShare = false,
-    bool isPoll = false,
-  }) async {
-    if (!mounted) return;
-    // 编辑器先打开，再并行读取社区和草稿，避免底部菜单关闭后出现一段无反馈的等待。
+  void _openPostEditor({required String initialCommunityId}) {
     final draftStorageFuture = ComposerDraftStorage.create();
     final availableCommunitiesFuture = apiMode
         ? _loadPublishCommunities()
         : null;
-    await showDialog<void>(
-      context: context,
-      builder: (_) => PostEditorDialog(
-        isGameShare: isGameShare,
-        isPoll: isPoll,
-        onPublish: _publishDraft,
-        publishController: apiMode ? publishController : null,
-        enableSampleMedia: !apiMode,
-        availableCommunities: apiMode ? const [] : store.communities,
-        availableCommunitiesFuture: availableCommunitiesFuture,
-        draftStorageFuture: draftStorageFuture,
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => PostEditorScreen(
+          initialCommunityId: initialCommunityId,
+          onPublish: _publishDraft,
+          publishController: apiMode ? publishController : null,
+          enableSampleMedia: !apiMode,
+          availableCommunities: apiMode
+              ? const []
+              : selectHomeCommunities(store.communities),
+          availableCommunitiesFuture: availableCommunitiesFuture,
+          draftStorageFuture: draftStorageFuture,
+        ),
       ),
     );
   }
@@ -286,39 +271,30 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
       status: CommunityStatus.active,
       canPublish: true,
     );
-    if (communities.isEmpty) {
-      throw StateError('当前没有可发布的社区');
+
+    final result = selectHomeCommunities(communities);
+
+    if (result.isEmpty) {
+      throw StateError('当前没有可发布分类');
     }
-    return communities;
+
+    return result;
   }
 
   Future<void> _publishDraft(PostDraft result) async {
     try {
       final communityId = result.communityId ?? result.section.communityId;
-      final type = result.isGameShare
-          ? 'game_share'
-          : result.isPoll
-          ? 'poll'
-          : 'normal';
-      await (result.isPoll
-          ? publishController.publishPoll(
-              communityId: communityId,
-              title: result.title,
-              content: result.body,
-              options: result.pollOptions,
-              allowMultiple: result.allowMultiple,
-              endsAt: result.pollEndsAt,
-              mediaIds: result.mediaIds,
-              topic: result.topic,
-            )
-          : publishController.publish(
-              communityId: communityId,
-              type: type,
-              title: result.title,
-              content: result.body,
-              mediaIds: result.mediaIds,
-              topic: result.topic,
-            ));
+      await publishController.publish(
+        communityId: communityId,
+        type: result.isPoll ? 'poll' : 'normal',
+        title: result.title,
+        content: result.body,
+        mediaIds: result.mediaIds,
+        topic: result.topic,
+        pollOptions: result.pollOptions,
+        allowMultiple: result.allowMultiple,
+        pollEndsAt: result.pollEndsAt,
+      );
       await feedController.setQuery(communityId: communityId, sort: 'latest');
       if (!mounted) return;
       setState(() => currentTab = 0);
@@ -997,7 +973,6 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
                 ? openAccountStatus
                 : null,
             onOpenAdmins: apiMode && canManageAdmins ? openAdmins : null,
-            onOpenUsers: apiMode && canManageUsers ? openUserManagement : null,
             onOpenGovernance: apiMode && canAccessGovernance
                 ? openGovernance
                 : null,

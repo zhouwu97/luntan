@@ -11,135 +11,15 @@ import '../controllers/publish_controller.dart';
 import '../data/composer_draft_storage.dart';
 import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
+import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import 'post_media_preview.dart';
 
-class ComposerSheet extends StatelessWidget {
-  const ComposerSheet({
+class PostEditorScreen extends StatefulWidget {
+  const PostEditorScreen({
     super.key,
-    required this.onCreatePost,
-    required this.onCreatePoll,
-    required this.onCreateGameShare,
-  });
-
-  final VoidCallback onCreatePost;
-  final VoidCallback onCreatePoll;
-  final VoidCallback onCreateGameShare;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.border,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ),
-          const SizedBox(height: 18),
-          const Text(
-            '发布到论坛',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            '选择一种发布方式，进入完整编辑页',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _PublishOption(
-                icon: Icons.article_rounded,
-                label: '普通帖子',
-                color: AppTheme.primary,
-                onTap: onCreatePost,
-              ),
-              _PublishOption(
-                icon: Icons.poll_rounded,
-                label: '发起投票',
-                color: AppTheme.mint,
-                onTap: onCreatePoll,
-              ),
-              _PublishOption(
-                icon: Icons.sports_esports_outlined,
-                label: '玩法分享',
-                color: AppTheme.orange,
-                onTap: onCreateGameShare,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PublishOption extends StatelessWidget {
-  const _PublishOption({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(16),
-    onTap: onTap,
-    child: Ink(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .1),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 30),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class PostEditorDialog extends StatefulWidget {
-  const PostEditorDialog({
-    super.key,
-    required this.isGameShare,
+    required this.initialCommunityId,
     required this.onPublish,
-    this.isPoll = false,
     this.publishController,
     this.enableSampleMedia = true,
     this.availableCommunities = const [],
@@ -149,8 +29,7 @@ class PostEditorDialog extends StatefulWidget {
     this.draftStorageFuture,
   });
 
-  final bool isGameShare;
-  final bool isPoll;
+  final String initialCommunityId;
   final Future<void> Function(PostDraft draft) onPublish;
   final PublishController? publishController;
   final bool enableSampleMedia;
@@ -161,7 +40,7 @@ class PostEditorDialog extends StatefulWidget {
   final Future<ComposerDraftStorage>? draftStorageFuture;
 
   @override
-  State<PostEditorDialog> createState() => _PostEditorDialogState();
+  State<PostEditorScreen> createState() => _PostEditorScreenState();
 }
 
 enum _DraftImageStatus { pending, uploading, done, failed }
@@ -181,23 +60,24 @@ class _DraftImage {
   bool pendingDelete = false;
 }
 
-class _PostEditorDialogState extends State<PostEditorDialog> {
+class _PostEditorScreenState extends State<PostEditorScreen> {
   final titleController = TextEditingController();
   final bodyController = TextEditingController();
   final pollOptionControllers = [
     TextEditingController(),
     TextEditingController(),
   ];
+  bool isPoll = false;
   bool allowMultiple = false;
   DateTime? pollEndsAt;
   String? topic;
-  ForumSection section = ForumSection.daily;
   String? communityId;
   late final List<Community> _availableCommunities = [
     ...widget.availableCommunities,
   ];
   ComposerDraftStorage? _draftStorage;
   bool _loadingCommunities = false;
+  bool _communitiesLoadFailed = false;
   bool _restoringDraft = false;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
@@ -217,9 +97,6 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   static const int maxTotalBytes = 30 * 1024 * 1024;
 
   bool get _usesRealUpload => widget.publishController != null;
-  bool get _isApiMode =>
-      widget.availableCommunitiesFuture != null ||
-      widget.publishController != null;
 
   Community? get _selectedCommunity {
     final id = communityId;
@@ -239,11 +116,11 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   bool get _hasDraftContent =>
       titleController.text.trim().isNotEmpty ||
       bodyController.text.trim().isNotEmpty ||
+      images.isNotEmpty ||
+      selectedMedia.isNotEmpty ||
       pollOptionControllers.any(
         (controller) => controller.text.trim().isNotEmpty,
       ) ||
-      images.isNotEmpty ||
-      selectedMedia.isNotEmpty ||
       _restoredMediaIds.isNotEmpty;
 
   List<MediaAsset> get sampleMedia =>
@@ -255,16 +132,22 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     _draftStorage = widget.draftStorage;
     _restoringDraft =
         widget.initialDraft == null && widget.draftStorageFuture != null;
-    communityId = _defaultCommunityId(_availableCommunities);
+    communityId = _resolveInitialCommunityId();
     final draft = widget.initialDraft;
     if (draft != null) _applyDraft(draft);
     unawaited(_loadCommunities());
     unawaited(_loadDraftStorage());
   }
 
+  String? _resolveInitialCommunityId() {
+    final requested = widget.initialCommunityId;
+    if (requested.isNotEmpty) return requested;
+    return _defaultCommunityId(_availableCommunities);
+  }
+
   String? _defaultCommunityId(List<Community> communities) {
     for (final community in communities) {
-      if (community.id == 'community-daily') return community.id;
+      if (community.id == 'community-campus') return community.id;
     }
     return communities.isEmpty ? null : communities.first.id;
   }
@@ -272,19 +155,12 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   void _applyDraft(ComposerDraftSnapshot draft) {
     titleController.text = draft.title;
     bodyController.text = draft.body;
-    section = ForumSection.values.firstWhere(
-      (value) => value.name == draft.sectionName,
-      orElse: () => ForumSection.daily,
-    );
     communityId =
-        _availableCommunities.any(
-          (community) => community.id == draft.communityId,
-        )
-        ? draft.communityId
-        : draft.communityId ?? _defaultCommunityId(_availableCommunities);
+        draft.communityId ?? _defaultCommunityId(_availableCommunities);
+    topic = draft.topic;
+    isPoll = draft.isPoll;
     allowMultiple = draft.allowMultiple;
     pollEndsAt = draft.pollEndsAt;
-    topic = draft.topic;
     while (pollOptionControllers.length < draft.pollOptions.length) {
       pollOptionControllers.add(TextEditingController());
     }
@@ -309,45 +185,15 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     }
   }
 
-  void _addPollOption() {
-    if (pollOptionControllers.length >= 10) return;
-    setState(() => pollOptionControllers.add(TextEditingController()));
-    _scheduleDraftSave();
-  }
-
-  void _removePollOption(int index) {
-    if (pollOptionControllers.length <= 2) return;
-    final controller = pollOptionControllers.removeAt(index);
-    controller.dispose();
-    setState(() {});
-    _scheduleDraftSave();
-  }
-
-  Future<void> _choosePollDeadline() async {
-    final initialDate =
-        pollEndsAt ?? DateTime.now().add(const Duration(days: 7));
-    final picked = await showDatePicker(
-      context: context,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDate: initialDate.isBefore(DateTime.now())
-          ? DateTime.now()
-          : initialDate,
-      helpText: '选择投票截止日期',
-      cancelText: '取消',
-      confirmText: '确定',
-    );
-    if (!mounted || picked == null) return;
-    setState(() {
-      pollEndsAt = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
-    });
-    _scheduleDraftSave();
-  }
-
   Future<void> _loadCommunities() async {
     final future = widget.availableCommunitiesFuture;
     if (future == null) return;
-    if (mounted) setState(() => _loadingCommunities = true);
+    if (mounted) {
+      setState(() {
+        _loadingCommunities = true;
+        _communitiesLoadFailed = false;
+      });
+    }
     try {
       final communities = await future;
       if (!mounted) return;
@@ -364,9 +210,16 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
       if (!mounted) return;
       setState(() {
         _loadingCommunities = false;
-        errorText = '可发布板块加载失败，请稍后重试';
+        _communitiesLoadFailed = true;
+        errorText = '可发布分类加载失败，请稍后重试';
       });
     }
+  }
+
+  void _retryCommunities() {
+    if (_loadingCommunities) return;
+    setState(() => errorText = null);
+    unawaited(_loadCommunities());
   }
 
   Future<void> _loadDraftStorage() async {
@@ -433,32 +286,68 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     super.dispose();
   }
 
+  void _addPollOption() {
+    if (pollOptionControllers.length >= 10) return;
+    setState(() => pollOptionControllers.add(TextEditingController()));
+    _scheduleDraftSave();
+  }
+
+  void _removePollOption(int index) {
+    if (pollOptionControllers.length <= 2) return;
+    final controller = pollOptionControllers.removeAt(index);
+    controller.dispose();
+    setState(() {});
+    _scheduleDraftSave();
+  }
+
+  Future<void> _choosePollDeadline() async {
+    final now = DateTime.now();
+    final initialDate = pollEndsAt ?? now.add(const Duration(days: 7));
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 1, now.month, now.day),
+      initialDate: initialDate.isBefore(now) ? now : initialDate,
+      helpText: '选择投票截止日期',
+      cancelText: '取消',
+      confirmText: '确定',
+    );
+    if (!mounted || picked == null) return;
+    setState(() {
+      pollEndsAt = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
+    });
+    _scheduleDraftSave();
+  }
+
   void submit() {
     if (submitting) return;
     if (widget.availableCommunitiesFuture != null &&
         _availableCommunities.isEmpty) {
       return setState(
         () => errorText = _loadingCommunities
-            ? '正在加载可发布社区，请稍候'
-            : '当前没有可发布的社区，请稍后重试',
+            ? '正在加载可发布分类，请稍候'
+            : '当前没有可发布的分类，请稍后重试',
       );
     }
     final title = titleController.text.trim();
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
     if (body.isEmpty) return setState(() => errorText = '正文不能为空');
-    if (widget.isPoll && !_canCreatePollSelectedCommunity) {
+    if (isPoll && !_canCreatePollSelectedCommunity) {
       return setState(() => errorText = '当前社区暂不允许发起投票，请更换社区');
-    }
-    if (images.isNotEmpty && !_canUploadSelectedCommunity) {
-      return setState(() => errorText = '当前社区暂不允许上传图片，请更换社区');
     }
     final pollOptions = pollOptionControllers
         .map((controller) => controller.text.trim())
         .where((value) => value.isNotEmpty)
         .toList();
-    if (widget.isPoll && pollOptions.length < 2) {
+    if (isPoll && pollOptions.length < 2) {
       return setState(() => errorText = '投票至少需要两个选项');
+    }
+    if (isPoll && pollOptions.toSet().length != pollOptions.length) {
+      return setState(() => errorText = '投票选项不能重复');
+    }
+    if (images.isNotEmpty && !_canUploadSelectedCommunity) {
+      return setState(() => errorText = '当前社区暂不允许上传图片，请更换社区');
     }
     if (_usesRealUpload &&
         images.any((image) => image.status != _DraftImageStatus.done)) {
@@ -474,16 +363,17 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   }
 
   ComposerDraftSnapshot _snapshot() => ComposerDraftSnapshot(
-    isGameShare: widget.isGameShare,
-    isPoll: widget.isPoll,
     title: titleController.text,
     body: bodyController.text,
-    sectionName: section.name,
     communityId: communityId,
-    pollOptions: pollOptionControllers.map((item) => item.text).toList(),
+    topic: topic,
+    isPoll: isPoll,
+    pollOptions: pollOptionControllers
+        .map((controller) => controller.text.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(),
     allowMultiple: allowMultiple,
     pollEndsAt: pollEndsAt,
-    topic: topic,
     localImagePaths: images.map((item) => item.file.path).toList(),
     uploadedMediaIds: <String>{
       ..._restoredMediaIds,
@@ -576,16 +466,15 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
       final draft = PostDraft(
         title: title,
         body: body,
-        section: section,
+        section: _sectionForCommunityId(communityId),
         communityId: communityId,
-        isGameShare: widget.isGameShare,
-        isPoll: widget.isPoll,
         media: selectedMedia,
         mediaIds: mediaIds,
+        topic: topic,
+        isPoll: isPoll,
         pollOptions: pollOptions,
         allowMultiple: allowMultiple,
         pollEndsAt: pollEndsAt,
-        topic: topic,
       );
       await widget.onPublish(draft);
       if (!mounted) return;
@@ -750,269 +639,95 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.isGameShare
-        ? '发布玩法分享'
-        : widget.isPoll
-        ? '发起投票'
-        : '发布普通帖子';
-    return Dialog.fullscreen(
-      child: PopScope<void>(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) unawaited(_closeEditor());
-        },
-        child: Scaffold(
-          backgroundColor: AppTheme.background,
-          appBar: AppBar(
-            title: Text(
-              title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+    return PopScope<void>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_closeEditor());
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: const Text(
+            '发布帖子',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          leading: TextButton(
+            onPressed: submitting ? null : () => unawaited(_closeEditor()),
+            child: const Text('取消'),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: FilledButton(
+                onPressed: submitting ? null : submit,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                ),
+                child: Text(submitting ? '发布中…' : '发布'),
+              ),
             ),
-            leading: TextButton(
-              onPressed: submitting ? null : () => unawaited(_closeEditor()),
-              child: const Text('取消'),
-            ),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: FilledButton(
-                  onPressed: submitting ? null : submit,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
+          ],
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
+            children: [
+              _CommunitySelector(
+                communities: _availableCommunities,
+                selectedCommunityId: communityId,
+                onChanged: (value) {
+                  setState(() => communityId = value);
+                  _scheduleDraftSave();
+                },
+                enabled: !submitting && !_restoringDraft,
+                loading: _loadingCommunities,
+                loadFailed: _communitiesLoadFailed,
+                onRetry: _retryCommunities,
+              ),
+              if (errorText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    errorText!,
+                    style: const TextStyle(color: AppTheme.pink, fontSize: 12),
                   ),
-                  child: Text(submitting ? '发布中…' : '发布'),
+                ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: isPoll ? 'poll' : 'normal',
+                decoration: const InputDecoration(labelText: '内容类型'),
+                items: const [
+                  DropdownMenuItem(value: 'normal', child: Text('普通帖子')),
+                  DropdownMenuItem(value: 'poll', child: Text('投票')),
+                ],
+                onChanged: submitting || _restoringDraft
+                    ? null
+                    : (value) {
+                        setState(() {
+                          isPoll = value == 'poll';
+                          if (!isPoll) {
+                            allowMultiple = false;
+                            pollEndsAt = null;
+                          }
+                        });
+                        _scheduleDraftSave();
+                      },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: titleController,
+                enabled: !submitting && !_restoringDraft,
+                maxLength: 40,
+                onChanged: (_) => _scheduleDraftSave(),
+                decoration: const InputDecoration(
+                  labelText: '标题',
+                  hintText: '给帖子起一个清楚的标题',
                 ),
               ),
-            ],
-          ),
-          body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
-              children: [
-                if (_loadingCommunities && _availableCommunities.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: LinearProgressIndicator(minHeight: 2),
-                  ),
-                if (_isApiMode)
-                  if (_availableCommunities.isNotEmpty)
-                    DropdownButtonFormField<String>(
-                      initialValue: communityId,
-                      decoration: const InputDecoration(labelText: '发布社区'),
-                      items: _availableCommunities
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item.id,
-                              child: Text(item.name),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: submitting || _restoringDraft
-                          ? null
-                          : (value) {
-                              setState(() => communityId = value);
-                              _scheduleDraftSave();
-                            },
-                    )
-                  else
-                    InputDecorator(
-                      decoration: InputDecoration(
-                        labelText: '发布社区',
-                        suffixIcon: _loadingCommunities
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: Center(
-                                  child: SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
-                              )
-                            : null,
-                      ),
-                      child: Text(
-                        _loadingCommunities ? '正在加载社区…' : '暂无可用社区',
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 14,
-                        ),
-                      ),
-                    )
-                else
-                  DropdownButtonFormField<ForumSection>(
-                    initialValue: section,
-                    decoration: const InputDecoration(labelText: '发布板块'),
-                    items: ForumSection.values
-                        .map(
-                          (item) => DropdownMenuItem(
-                            value: item,
-                            child: Text(item.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: submitting || _restoringDraft
-                        ? null
-                        : (value) {
-                            setState(() => section = value ?? section);
-                            _scheduleDraftSave();
-                          },
-                  ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: titleController,
-                  enabled: !submitting && !_restoringDraft,
-                  maxLength: 40,
-                  onChanged: (_) => _scheduleDraftSave(),
-                  decoration: const InputDecoration(
-                    labelText: '标题',
-                    hintText: '给帖子起一个清楚的标题',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bodyController,
-                  enabled: !submitting && !_restoringDraft,
-                  maxLength: 2000,
-                  minLines: 8,
-                  maxLines: 12,
-                  onChanged: (_) => _scheduleDraftSave(),
-                  decoration: const InputDecoration(
-                    labelText: '正文',
-                    hintText: '分享你的真实体验、问题或发现…',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  initialValue: topic,
-                  decoration: const InputDecoration(
-                    labelText: '内容主题（可选）',
-                    helperText: '选择后，内容会进入对应主题页；不再按是否有图片猜测',
-                  ),
-                  items: const [
-                    DropdownMenuItem<String?>(value: null, child: Text('不设置')),
-                    DropdownMenuItem<String?>(value: 'outfit', child: Text('穿搭分享')),
-                    DropdownMenuItem<String?>(value: 'activity', child: Text('活动')),
-                    DropdownMenuItem<String?>(value: 'game_share', child: Text('玩法分享')),
-                  ],
-                  onChanged: submitting
-                      ? null
-                      : (value) {
-                          setState(() => topic = value);
-                          _scheduleDraftSave();
-                        },
-                ),
-                if (widget.isPoll) ...[
-                  const SizedBox(height: 12),
-                  const Text(
-                    '投票选项',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...pollOptionControllers.asMap().entries.map(
-                    (entry) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: entry.value,
-                              enabled: !submitting,
-                              onChanged: (_) => _scheduleDraftSave(),
-                              decoration: InputDecoration(
-                                labelText: '选项 ${entry.key + 1}',
-                                prefixIcon: const Icon(
-                                  Icons.radio_button_unchecked_rounded,
-                                ),
-                              ),
-                            ),
-                          ),
-                          if (pollOptionControllers.length > 2)
-                            IconButton(
-                              tooltip: '删除选项',
-                              onPressed: submitting
-                                  ? null
-                                  : () => _removePollOption(entry.key),
-                              icon: const Icon(Icons.remove_circle_outline),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed:
-                            submitting || pollOptionControllers.length >= 10
-                            ? null
-                            : _addPollOption,
-                        icon: const Icon(Icons.add),
-                        label: const Text('添加选项'),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: const Text('允许多选'),
-                          value: allowMultiple,
-                          onChanged: submitting
-                              ? null
-                              : (value) {
-                                  setState(() => allowMultiple = value);
-                                  _scheduleDraftSave();
-                                },
-                        ),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.event_outlined,
-                        size: 19,
-                        color: AppTheme.textSecondary,
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          pollEndsAt == null
-                              ? '投票截止：不限时间'
-                              : '投票截止：${pollEndsAt!.year}-${pollEndsAt!.month.toString().padLeft(2, '0')}-${pollEndsAt!.day.toString().padLeft(2, '0')}',
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: submitting ? null : _choosePollDeadline,
-                        child: Text(pollEndsAt == null ? '设置' : '修改'),
-                      ),
-                      if (pollEndsAt != null)
-                        IconButton(
-                          tooltip: '清除截止时间',
-                          onPressed: submitting
-                              ? null
-                              : () {
-                                  setState(() => pollEndsAt = null);
-                                  _scheduleDraftSave();
-                                },
-                          icon: const Icon(Icons.close, size: 18),
-                        ),
-                    ],
-                  ),
-                ],
+              if (isPoll) ...[
                 const SizedBox(height: 12),
                 const Text(
-                  '图片',
+                  '投票选项',
                   style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 12,
@@ -1020,127 +735,385 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                ...pollOptionControllers.asMap().entries.map(
+                  (entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: entry.value,
+                            enabled: !submitting && !_restoringDraft,
+                            onChanged: (_) => _scheduleDraftSave(),
+                            decoration: InputDecoration(
+                              labelText: '选项 ${entry.key + 1}',
+                              prefixIcon: const Icon(
+                                Icons.radio_button_unchecked_rounded,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (pollOptionControllers.length > 2)
+                          IconButton(
+                            tooltip: '删除选项',
+                            onPressed: submitting || _restoringDraft
+                                ? null
+                                : () => _removePollOption(entry.key),
+                            icon: const Icon(Icons.remove_circle_outline),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
                 Row(
                   children: [
                     OutlinedButton.icon(
-                      onPressed: submitting || !_canUploadSelectedCommunity
+                      onPressed:
+                          submitting ||
+                              _restoringDraft ||
+                              pollOptionControllers.length >= 10
                           ? null
-                          : (_usesRealUpload
-                                ? _pickImages
-                                : widget.enableSampleMedia
-                                ? _addSampleImage
-                                : _pickImages),
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: Text(
-                        _usesRealUpload
-                            ? '选择图片'
-                            : widget.enableSampleMedia
-                            ? '添加示例图'
-                            : '选择图片',
-                      ),
+                          : _addPollOption,
+                      icon: const Icon(Icons.add),
+                      label: const Text('添加选项'),
                     ),
-                    if (!_canUploadSelectedCommunity)
-                      const Expanded(
-                        child: Text(
-                          '当前社区不允许图片',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _usesRealUpload
-                          ? '${images.length} / $maxImages'
-                          : '${selectedMedia.length} / $maxImages',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: const Text('允许多选'),
+                        value: allowMultiple,
+                        onChanged: submitting || _restoringDraft
+                            ? null
+                            : (value) {
+                                setState(() => allowMultiple = value);
+                                _scheduleDraftSave();
+                              },
                       ),
                     ),
                   ],
                 ),
-                if (_usesRealUpload && images.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 104,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: images.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 10),
-                      itemBuilder: (_, index) {
-                        final image = images[index];
-                        return _DraftImageThumb(
-                          image: image,
-                          onRetry: () => _enqueueUpload(image),
-                          onDelete: () => _deleteImage(image),
-                        );
-                      },
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.event_outlined,
+                      size: 19,
+                      color: AppTheme.textSecondary,
                     ),
-                  ),
-                ],
-                if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 86,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: selectedMedia.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (_, index) => Stack(
-                        children: [
-                          SizedBox(
-                            width: 86,
-                            height: 86,
-                            child: PostMediaPreview(
-                              images: [selectedMedia[index]],
-                            ),
-                          ),
-                          Positioned(
-                            right: 0,
-                            top: 0,
-                            child: IconButton(
-                              onPressed: submitting
-                                  ? null
-                                  : () {
-                                      setState(
-                                        () =>
-                                            selectedMedia = [...selectedMedia]
-                                              ..removeAt(index),
-                                      );
-                                      _scheduleDraftSave();
-                                    },
-                              icon: const Icon(
-                                Icons.cancel,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                          ),
-                        ],
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        pollEndsAt == null
+                            ? '投票截止：不限时间'
+                            : '投票截止：${pollEndsAt!.year}-${pollEndsAt!.month.toString().padLeft(2, '0')}-${pollEndsAt!.day.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-                if (errorText != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      errorText!,
-                      style: const TextStyle(
-                        color: AppTheme.pink,
-                        fontSize: 12,
-                      ),
+                    TextButton(
+                      onPressed: submitting || _restoringDraft
+                          ? null
+                          : _choosePollDeadline,
+                      child: Text(pollEndsAt == null ? '设置' : '修改'),
                     ),
-                  ),
+                    if (pollEndsAt != null)
+                      IconButton(
+                        tooltip: '清除截止时间',
+                        onPressed: submitting || _restoringDraft
+                            ? null
+                            : () {
+                                setState(() => pollEndsAt = null);
+                                _scheduleDraftSave();
+                              },
+                        icon: const Icon(Icons.close, size: 18),
+                      ),
+                  ],
+                ),
               ],
-            ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: bodyController,
+                enabled: !submitting && !_restoringDraft,
+                maxLength: 2000,
+                minLines: 8,
+                maxLines: 12,
+                onChanged: (_) => _scheduleDraftSave(),
+                decoration: const InputDecoration(
+                  labelText: '正文',
+                  hintText: '分享你的真实体验、问题或发现…',
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String?>(
+                initialValue: topic,
+                decoration: const InputDecoration(
+                  labelText: '内容主题（可选）',
+                  helperText: '选择后，内容会进入对应主题页；不再按是否有图片猜测',
+                ),
+                items: const [
+                  DropdownMenuItem<String?>(value: null, child: Text('不设置')),
+                  DropdownMenuItem<String?>(
+                    value: 'outfit',
+                    child: Text('穿搭分享'),
+                  ),
+                  DropdownMenuItem<String?>(
+                    value: 'activity',
+                    child: Text('活动'),
+                  ),
+                ],
+                onChanged: submitting
+                    ? null
+                    : (value) {
+                        setState(() => topic = value);
+                        _scheduleDraftSave();
+                      },
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '图片',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: submitting || !_canUploadSelectedCommunity
+                        ? null
+                        : (_usesRealUpload
+                              ? _pickImages
+                              : widget.enableSampleMedia
+                              ? _addSampleImage
+                              : _pickImages),
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                    label: Text(
+                      _usesRealUpload
+                          ? '选择图片'
+                          : widget.enableSampleMedia
+                          ? '添加示例图'
+                          : '选择图片',
+                    ),
+                  ),
+                  if (!_canUploadSelectedCommunity)
+                    const Expanded(
+                      child: Text(
+                        '当前社区不允许图片',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _usesRealUpload
+                        ? '${images.length} / $maxImages'
+                        : '${selectedMedia.length} / $maxImages',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              if (_usesRealUpload && images.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 104,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: images.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 10),
+                    itemBuilder: (_, index) {
+                      final image = images[index];
+                      return _DraftImageThumb(
+                        image: image,
+                        onRetry: () => _enqueueUpload(image),
+                        onDelete: () => _deleteImage(image),
+                      );
+                    },
+                  ),
+                ),
+              ],
+              if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 86,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: selectedMedia.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    itemBuilder: (_, index) => Stack(
+                      children: [
+                        SizedBox(
+                          width: 86,
+                          height: 86,
+                          child: PostMediaPreview(
+                            images: [selectedMedia[index]],
+                          ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: IconButton(
+                            onPressed: submitting
+                                ? null
+                                : () {
+                                    setState(
+                                      () =>
+                                          selectedMedia = [...selectedMedia]
+                                            ..removeAt(index),
+                                    );
+                                    _scheduleDraftSave();
+                                  },
+                            icon: const Icon(
+                              Icons.cancel,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+/// 发帖分类选择器，视觉与首页三段 Tab 一致：三个正式板块（大型拆箱 /
+/// 酱紫社区 / 杂鱼日常），不再提供“发布社区”下拉框。
+class _CommunitySelector extends StatelessWidget {
+  const _CommunitySelector({
+    required this.communities,
+    required this.selectedCommunityId,
+    required this.onChanged,
+    required this.enabled,
+    required this.loading,
+    required this.loadFailed,
+    required this.onRetry,
+  });
+
+  final List<Community> communities;
+  final String? selectedCommunityId;
+  final ValueChanged<String> onChanged;
+  final bool enabled;
+  final bool loading;
+  final bool loadFailed;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: communities.isEmpty
+          ? loading
+                ? const Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          loadFailed ? '分类加载失败' : '暂无可用分类',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      if (loadFailed)
+                        InkWell(
+                          onTap: onRetry,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              '重试',
+                              style: TextStyle(
+                                color: AppTheme.primary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  )
+          : Row(
+              children: communities
+                  .map(
+                    (community) => Expanded(
+                      child: _CommunitySegment(
+                        label: community.name,
+                        active: selectedCommunityId == community.id,
+                        onTap: enabled ? () => onChanged(community.id) : null,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+    );
+  }
+}
+
+class _CommunitySegment extends StatelessWidget {
+  const _CommunitySegment({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 2),
+    child: GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: AppMotion.duration(context, AppMotion.normal),
+        curve: AppMotion.emphasized,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: active ? AppTheme.textPrimary : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : AppTheme.textSecondary,
+            fontSize: 13,
+            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _DraftImageThumb extends StatelessWidget {
@@ -1264,3 +1237,10 @@ String _statusLabel(_DraftImageStatus status) => switch (status) {
 };
 
 String _sha256Hex(Uint8List bytes) => sha256.convert(bytes).toString();
+
+ForumSection _sectionForCommunityId(String? communityId) =>
+    switch (communityId) {
+      'community-campus' => ForumSection.community,
+      'community-daily' => ForumSection.daily,
+      _ => ForumSection.unboxing,
+    };

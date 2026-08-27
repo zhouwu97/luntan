@@ -41,7 +41,7 @@ func BootstrapSuperAdmin(ctx context.Context, db *sql.DB, email string) (created
 		return false, tx.Commit()
 	}
 	var userID string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE lower(email) = $1 AND deleted_at IS NULL AND status = 'active' FOR UPDATE`, email).Scan(&userID); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE lower(email) = $1 AND email_verified = true AND deleted_at IS NULL AND status = 'active' FOR UPDATE`, email).Scan(&userID); errors.Is(err, sql.ErrNoRows) {
 		return false, ErrBootstrapUserNotFound
 	} else if err != nil {
 		return false, err

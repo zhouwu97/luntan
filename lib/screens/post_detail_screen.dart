@@ -370,9 +370,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             Text(
                               post.body,
                               style: const TextStyle(
-                                color: Color(0xFF294158),
-                                fontSize: 14.5,
-                                height: 1.75,
+                                color: Color(0xFF243647),
+                                fontSize: 15.5,
+                                height: 1.72,
+                                letterSpacing: 0.1,
                               ),
                             ),
                             if (post.type == PostType.poll &&
@@ -631,6 +632,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 onFeedback: widget.onFeedback,
                 onCancelTarget: () => setState(() => replyTarget = null),
                 onSubmit: () => _submitReply(post),
+                commentCount: post.comments,
+                likeCount: post.likeCount,
+                isLiked: post.isLiked,
+                isBookmarked: post.isBookmarked,
+                onToggleLike: () => _toggleLike(post),
+                onToggleBookmark: () => _toggleBookmark(post),
+                onScrollToComments: () {
+                  final context = commentsKey.currentContext;
+                  if (context != null) {
+                    Scrollable.ensureVisible(
+                      context,
+                      duration: AppMotion.normal,
+                      alignment: 0.08,
+                    );
+                  }
+                },
               ),
             ],
           ),

@@ -9,7 +9,7 @@ import '../api/publish_repository.dart';
 import '../api/platform_repository.dart';
 import '../mock_forum_data.dart';
 
-/// 离线预览也使用正式通知页，不再回退到旧消息抽屉。
+/// 离线预览也使用正式通知页，不再回退到旧通知抽屉。
 class MockPlatformRepository extends PlatformRepository {
   MockPlatformRepository({ForumStore? store})
     : _store = store ?? ForumStore.seeded(),
@@ -779,11 +779,7 @@ class MockInteractionRepository implements InteractionRepository {
   }) async {}
 }
 
-class MockPublishRepository
-    implements
-        PublishRepository,
-        PollPublishRepository,
-        AtomicPollPublishRepository {
+class MockPublishRepository implements PublishRepository {
   MockPublishRepository({required ForumStore store}) : _store = store;
 
   final ForumStore _store;
@@ -796,6 +792,10 @@ class MockPublishRepository
     required String content,
     required String idempotencyKey,
     List<String> mediaIds = const [],
+    String? topic,
+    List<String> pollOptions = const [],
+    bool allowMultiple = false,
+    DateTime? pollEndsAt,
   }) async {
     final section = ForumSection.values.firstWhere(
       (item) => item.communityId == communityId,
@@ -806,52 +806,14 @@ class MockPublishRepository
         title: title,
         body: content,
         section: section,
-        isGameShare: type == 'game_share',
-        isPoll: type == 'poll',
         topic: topic,
+        isPoll: type == 'poll',
+        pollOptions: pollOptions,
+        allowMultiple: allowMultiple,
+        pollEndsAt: pollEndsAt,
       ),
     );
     return {'id': _store.posts.first.id, 'idempotency_key': idempotencyKey};
-  }
-
-  @override
-  Future<Map<String, dynamic>> createPoll({
-    required String postId,
-    required String question,
-    required List<String> options,
-    bool allowMultiple = false,
-    DateTime? endsAt,
-  }) async => {'id': 'poll-$postId', 'post_id': postId, 'options': options};
-
-  @override
-  Future<Map<String, dynamic>> createPollPost({
-    required String communityId,
-    required String title,
-    required String content,
-    required String idempotencyKey,
-    required List<String> options,
-    bool allowMultiple = false,
-    DateTime? endsAt,
-    List<String> mediaIds = const [],
-    String? topic,
-  }) async {
-    final response = await createPost(
-      communityId: communityId,
-      type: 'poll',
-      title: title,
-      content: content,
-      idempotencyKey: idempotencyKey,
-      mediaIds: mediaIds,
-      topic: topic,
-    );
-    return {
-      ...response,
-      'poll': {
-        'options': options,
-        'allow_multiple': allowMultiple,
-        if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
-      },
-    };
   }
 
   @override

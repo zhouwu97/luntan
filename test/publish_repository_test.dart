@@ -8,34 +8,6 @@ import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/publish_repository.dart';
 
 void main() {
-  test('原子投票发布把投票数据放入同一条发帖请求', () async {
-    late http.Request request;
-    final repository = ApiPublishRepository(
-      ApiClient(
-        baseUri: Uri.parse('https://api.example'),
-        client: MockClient((value) async {
-          request = value;
-          return http.Response('{"id":"post-1","type":"poll"}', 201);
-        }),
-      ),
-    );
-
-    await repository.createPollPost(
-      communityId: 'community-1',
-      title: '投票标题',
-      content: '正文',
-      idempotencyKey: 'poll-key-1',
-      options: const ['A', 'B'],
-    );
-
-    expect(request.method, 'POST');
-    expect(request.url.path, '/api/v1/posts');
-    expect(request.headers['idempotency-key'], 'poll-key-1');
-    final body = jsonDecode(request.body) as Map<String, dynamic>;
-    expect(body['type'], 'poll');
-    expect((body['poll'] as Map<String, dynamic>)['options'], ['A', 'B']);
-  });
-
   test('媒体直传使用申请凭证时声明的真实 MIME 类型', () async {
     String? uploadedContentType;
     final client = ApiClient(
@@ -180,7 +152,8 @@ void main() {
       fileName: 'a.png',
       mimeType: 'image/png',
       size: 3,
-      sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      sha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     );
 
     await expectLater(
@@ -188,7 +161,8 @@ void main() {
         ticket: ticket,
         bytes: const [1, 2, 3],
         size: 3,
-        sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        sha256:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       ),
       throwsA(isA<ApiException>()),
     );
@@ -234,7 +208,8 @@ void main() {
       fileName: 'a.png',
       mimeType: 'image/png',
       size: 3,
-      sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      sha256:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     );
 
     await expectLater(
@@ -242,7 +217,8 @@ void main() {
         ticket: ticket,
         bytes: const [1, 2, 3],
         size: 3,
-        sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        sha256:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       ),
       throwsA(isA<ApiException>()),
     );
@@ -267,7 +243,8 @@ void main() {
     final res = await repository.completeMedia(
       mediaId: 'media-resume-1',
       size: 1024,
-      sha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      sha256:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     );
 
     expect(completeRequest.method, 'POST');

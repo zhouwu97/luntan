@@ -101,14 +101,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/api/v1/auth/register":
 		s.register(w, r)
 		return
-	case r.Method == http.MethodPost && path == "/api/v1/auth/login":
+	case r.Method == http.MethodPost && (path == "/api/v1/auth/login" || path == "/api/v1/auth/login/password"):
 		s.login(w, r)
 		return
-	case r.Method == http.MethodPost && path == "/api/v1/auth/email/request":
+	case r.Method == http.MethodPost && (path == "/api/v1/auth/code/request" || path == "/api/v1/auth/email/request"):
 		s.requestEmailCode(w, r)
 		return
-	case r.Method == http.MethodPost && path == "/api/v1/auth/email/verify":
-		s.verifyEmailCode(w, r)
+	case r.Method == http.MethodPost && (path == "/api/v1/auth/login/code" || path == "/api/v1/auth/email/verify"):
+		s.loginWithEmailCode(w, r)
 		return
 	case r.Method == http.MethodPost && path == "/api/v1/auth/guest":
 		s.guest(w, r)
@@ -469,12 +469,80 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	var input auth.RegisterInput
+	var input struct {
+		Email    string `json:"email"`
+		Code     string `json:"code"`
+		Password string `json:"password"`
+		Nickname string `json:"nickname"`
+		Username string `json:"username"`
+	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, auth.ErrInvalidInput)
 		return
 	}
-	response, err := s.authService.Register(r.Context(), input, requestMetadata(r))
+	// 现代邮箱注册流程
+	if strings.TrimSpace(input.Email) != "" {
+		email := normalizeEmailAddress(input.Email)
+		code := strings.TrimSpace(input.Code)
+		if !validEmailAddress(email) || len(code) != 6 {
+			writeAuthError(w, r, ErrInvalidEmailCode)
+			return
+		}
+		if len([]rune(input.Password)) < 8 {
+			writeAuthError(w, r, auth.ErrPasswordTooShort)
+			return
+		}
+
+		tx, err := s.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		defer tx.Rollback()
+
+		// 严格校验 purpose = 'register' 验证码
+		if err := s.verifyAndConsumeEmailCodeTx(r.Context(), tx, email, code, "register"); err != nil {
+			_ = tx.Commit()
+			writeAuthError(w, r, err)
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `INSERT INTO risk_events (id, event_type, severity, ip_address, metadata, created_at) VALUES ($1, 'email_register_verified', 'low', $2, $3::jsonb, now())`, newPostID(), httpserver.ClientIP(r), emailRiskMetadata(email)); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+
+		var guestUserID string
+		if token, hasToken := bearerToken(r.Header.Get("Authorization")); hasToken {
+			if u, err := s.authService.Me(r.Context(), token); err == nil && u.AccountType == "guest" {
+				guestUserID = u.ID
+			}
+		}
+
+		response, err := s.authService.RegisterWithEmail(r.Context(), auth.EmailRegisterInput{
+			Email:       email,
+			Password:    input.Password,
+			Nickname:    input.Nickname,
+			GuestUserID: guestUserID,
+		}, requestMetadata(r))
+		if err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
+		applyBaseCapabilities(&response.User)
+		httpserver.WriteJSON(w, http.StatusCreated, response)
+		return
+	}
+
+	// 兼容旧 username + password 注册
+	response, err := s.authService.Register(r.Context(), auth.RegisterInput{
+		Username: input.Username,
+		Password: input.Password,
+		Nickname: input.Nickname,
+	}, requestMetadata(r))
 	if err != nil {
 		writeAuthError(w, r, err)
 		return
@@ -495,12 +563,36 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	var input auth.LoginInput
+	var input struct {
+		Email    string `json:"email"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, auth.ErrInvalidCredentials)
 		return
 	}
-	response, err := s.authService.Login(r.Context(), input, requestMetadata(r))
+	// 支持邮箱密码登录与旧用户名密码登录
+	targetEmail := strings.TrimSpace(input.Email)
+	if targetEmail == "" && strings.Contains(input.Username, "@") {
+		targetEmail = strings.TrimSpace(input.Username)
+	}
+
+	if targetEmail != "" {
+		response, err := s.authService.EmailPasswordLogin(r.Context(), targetEmail, input.Password, requestMetadata(r))
+		if err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
+		applyBaseCapabilities(&response.User)
+		httpserver.WriteJSON(w, http.StatusOK, response)
+		return
+	}
+
+	response, err := s.authService.Login(r.Context(), auth.LoginInput{
+		Username: input.Username,
+		Password: input.Password,
+	}, requestMetadata(r))
 	if err != nil {
 		writeAuthError(w, r, err)
 		return
@@ -614,6 +706,12 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "用户名或密码错误"}
 	case errors.Is(err, auth.ErrInvalidEmail):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_EMAIL", Message: "邮箱地址不合法"}
+	case errors.Is(err, auth.ErrEmailAlreadyRegistered):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "EMAIL_ALREADY_REGISTERED", Message: "该邮箱已注册，请直接登录"}
+	case errors.Is(err, auth.ErrEmailNotRegistered):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "EMAIL_NOT_REGISTERED", Message: "该邮箱尚未注册，请先注册"}
+	case errors.Is(err, auth.ErrPasswordTooShort):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_PASSWORD", Message: "密码长度不能少于 8 位"}
 	case errors.Is(err, ErrInvalidEmailCode):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_EMAIL_CODE", Message: "验证码错误或已失效"}
 	case errors.Is(err, ErrEmailCodeExpired):

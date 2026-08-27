@@ -4,10 +4,18 @@ import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 
 class ForumAuthorRow extends StatelessWidget {
-  const ForumAuthorRow({super.key, required this.post, this.onMenu});
+  const ForumAuthorRow({
+    super.key,
+    required this.post,
+    this.onMenu,
+    this.avatarRadius = 19.0,
+    this.showCommunity = true,
+  });
 
   final Post post;
   final VoidCallback? onMenu;
+  final double avatarRadius;
+  final bool showCommunity;
 
   Color get levelColor {
     if (post.level >= 8) return AppTheme.purple;
@@ -23,47 +31,55 @@ class ForumAuthorRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final avatarUrl = post.author?.avatar?.trim();
+    final nickname = post.author?.nickname.trim();
+    final initialChar = (nickname != null && nickname.isNotEmpty)
+        ? nickname.characters.first
+        : (post.authorId.startsWith('guest') ? '游' : '匿');
+    final displayName = (nickname != null && nickname.isNotEmpty)
+        ? nickname
+        : (post.authorId.startsWith('guest') ? '游客' : '匿名用户');
+
+    final metaText = showCommunity
+        ? '$communityLabel · ${post.time}'
+        : post.time;
+
     return Row(
       children: [
-        CircleAvatar(
-          radius: 17,
-          backgroundColor: AppTheme.surfaceBlue,
-          child: Text(
-            (post.author?.nickname ?? '匿').characters.first,
-            style: const TextStyle(
-              color: AppTheme.primary,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        const SizedBox(width: 9),
+        _buildAvatar(context, avatarUrl, initialChar),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
                 children: [
                   Flexible(
                     child: Text(
-                      post.author?.nickname ?? '匿名用户',
+                      displayName,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: 13,
+                        fontSize: 13.5,
                         fontWeight: FontWeight.w800,
+                        height: 1.25,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
                   _LevelBadge(level: post.level, color: levelColor),
                 ],
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 2.5),
               Text(
-                '$communityLabel · ${post.time}',
+                metaText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: AppTheme.textSecondary,
-                  fontSize: 10.5,
+                  fontSize: 11,
+                  height: 1.2,
                 ),
               ),
             ],
@@ -71,13 +87,67 @@ class ForumAuthorRow extends StatelessWidget {
         ),
         if (onMenu != null)
           IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             onPressed: onMenu,
             icon: const Icon(
               Icons.more_horiz_rounded,
               color: AppTheme.textSecondary,
+              size: 20,
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildAvatar(
+    BuildContext context,
+    String? avatarUrl,
+    String initialChar,
+  ) {
+    final diameter = avatarRadius * 2;
+    final placeholder = Container(
+      width: diameter,
+      height: diameter,
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initialChar,
+        style: TextStyle(
+          color: AppTheme.primary,
+          fontSize: avatarRadius * 0.72,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return placeholder;
+    }
+
+    return ClipOval(
+      child: SizedBox(
+        width: diameter,
+        height: diameter,
+        child: Image.network(
+          avatarUrl,
+          fit: BoxFit.cover,
+          width: diameter,
+          height: diameter,
+          cacheWidth: (diameter * MediaQuery.devicePixelRatioOf(context)).round(),
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded || frame != null) {
+              return child;
+            }
+            return placeholder;
+          },
+          errorBuilder: (context, error, stackTrace) => placeholder,
+        ),
+      ),
     );
   }
 }
@@ -91,10 +161,10 @@ class _LevelBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: .12),
-        borderRadius: BorderRadius.circular(6),
+        color: color.withValues(alpha: .1),
+        borderRadius: BorderRadius.circular(5),
       ),
       child: Text(
         'Lv.$level',
@@ -102,8 +172,10 @@ class _LevelBadge extends StatelessWidget {
           color: color,
           fontSize: 9.5,
           fontWeight: FontWeight.w800,
+          height: 1.15,
         ),
       ),
     );
   }
 }
+

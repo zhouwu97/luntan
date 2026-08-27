@@ -62,8 +62,34 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> loginWithPassword({
+    required String email,
+    required String password,
+  }) async {
+    status = AuthStatus.authenticating;
+    error = null;
+    notifyListeners();
+    try {
+      final session = await _repository.loginWithPassword(
+        email: email,
+        password: password,
+      );
+      await _adoptSession(session);
+      status = AuthStatus.authenticated;
+      return true;
+    } on ApiException catch (exception) {
+      status = AuthStatus.error;
+      error = exception;
+      user = null;
+      return false;
+    } finally {
+      notifyListeners();
+    }
+  }
+
   Future<bool> login({
-    required String username,
+    String? username,
+    String? email,
     required String password,
   }) async {
     status = AuthStatus.authenticating;
@@ -72,6 +98,7 @@ class AuthController extends ChangeNotifier {
     try {
       final session = await _repository.login(
         username: username,
+        email: email,
         password: password,
       );
       await _adoptSession(session);
@@ -88,7 +115,8 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> register({
-    required String username,
+    required String email,
+    required String code,
     required String password,
     String? nickname,
   }) async {
@@ -97,7 +125,8 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
     try {
       final session = await _repository.register(
-        username: username,
+        email: email,
+        code: code,
         password: password,
         nickname: nickname,
       );
@@ -114,10 +143,13 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<EmailCodeChallenge?> requestEmailCode(String email) async {
+  Future<EmailCodeChallenge?> requestEmailCode(
+    String email, {
+    String scene = 'login',
+  }) async {
     try {
       error = null;
-      return await _repository.requestEmailCode(email);
+      return await _repository.requestEmailCode(email, scene: scene);
     } on ApiException catch (exception) {
       error = exception;
       rethrow;

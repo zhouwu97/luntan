@@ -11,16 +11,17 @@ void main() {
       MaterialApp(
         home: Builder(
           builder: (context) => FilledButton(
-            onPressed: () => showDialog<void>(
-              context: context,
-              builder: (_) => PostEditorDialog(
-                isGameShare: false,
-                onPublish: (_) async {
-                  attempts += 1;
-                  if (attempts == 1) {
-                    throw const PublishException('网络断开，请重试');
-                  }
-                },
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => PostEditorScreen(
+                  initialCommunityId: 'community-campus',
+                  onPublish: (_) async {
+                    attempts += 1;
+                    if (attempts == 1) {
+                      throw const PublishException('网络断开，请重试');
+                    }
+                  },
+                ),
               ),
             ),
             child: const Text('打开编辑器'),
@@ -36,7 +37,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '发布'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(PostEditorDialog), findsOneWidget);
+    expect(find.byType(PostEditorScreen), findsOneWidget);
     expect(find.text('网络断开，请重试'), findsOneWidget);
     expect(
       tester.widget<TextField>(find.byType(TextField).at(0)).controller!.text,
@@ -46,6 +47,6 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '发布'));
     await tester.pumpAndSettle();
     expect(attempts, 2);
-    expect(find.byType(PostEditorDialog), findsNothing);
+    expect(find.byType(PostEditorScreen), findsNothing);
   });
 }

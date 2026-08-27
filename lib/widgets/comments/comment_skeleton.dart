@@ -12,11 +12,8 @@ class CommentSkeleton extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: itemCount,
-      separatorBuilder: (context, index) => const Divider(
-        height: 24,
-        thickness: 1,
-        color: Color(0xFFEDF2F6),
-      ),
+      separatorBuilder: (context, index) =>
+          const Divider(height: 24, thickness: 1, color: Color(0xFFEDF2F6)),
       itemBuilder: (context, index) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -61,8 +58,8 @@ class CommentSkeleton extends StatelessWidget {
                       width: 60,
                       height: 10,
                       decoration: BoxDecoration(
-                            color: const Color(0xFFEAF0F6),
-                            borderRadius: BorderRadius.circular(4),
+                        color: const Color(0xFFEAF0F6),
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                   ],

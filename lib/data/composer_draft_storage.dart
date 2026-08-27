@@ -8,13 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 也会保留，发布成功后才清除。服务端仍会在帖子发布时校验媒体归属和状态。
 class ComposerDraftSnapshot {
   const ComposerDraftSnapshot({
-    required this.isGameShare,
-    required this.isPoll,
     required this.title,
     required this.body,
-    required this.sectionName,
     this.communityId,
     this.topic,
+    this.isPoll = false,
     this.pollOptions = const [],
     this.allowMultiple = false,
     this.pollEndsAt,
@@ -23,13 +21,11 @@ class ComposerDraftSnapshot {
     required this.updatedAt,
   });
 
-  final bool isGameShare;
-  final bool isPoll;
   final String title;
   final String body;
-  final String sectionName;
   final String? communityId;
   final String? topic;
+  final bool isPoll;
   final List<String> pollOptions;
   final bool allowMultiple;
   final DateTime? pollEndsAt;
@@ -45,13 +41,11 @@ class ComposerDraftSnapshot {
       uploadedMediaIds.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
-    'is_game_share': isGameShare,
-    'is_poll': isPoll,
     'title': title,
     'body': body,
-    'section_name': sectionName,
     if (communityId != null) 'community_id': communityId,
     if (topic != null) 'topic': topic,
+    'is_poll': isPoll,
     'poll_options': pollOptions,
     'allow_multiple': allowMultiple,
     if (pollEndsAt != null)
@@ -70,24 +64,19 @@ class ComposerDraftSnapshot {
               .where((item) => item.trim().isNotEmpty)
               .toList()
         : const <String>[];
-    final pollEndsAt = value['poll_ends_at'] == null
-        ? null
-        : DateTime.tryParse('${value['poll_ends_at']}');
     return ComposerDraftSnapshot(
-      isGameShare: value['is_game_share'] == true,
-      isPoll: value['is_poll'] == true,
       title: value['title'] is String ? value['title'] as String : '',
       body: value['body'] is String ? value['body'] as String : '',
-      sectionName: value['section_name'] is String
-          ? value['section_name'] as String
-          : 'unboxing',
       communityId: value['community_id'] is String
           ? value['community_id'] as String
           : null,
       topic: value['topic'] is String ? value['topic'] as String : null,
+      isPoll: value['is_poll'] == true,
       pollOptions: readStrings(value['poll_options']),
       allowMultiple: value['allow_multiple'] == true,
-      pollEndsAt: pollEndsAt,
+      pollEndsAt: value['poll_ends_at'] is String
+          ? DateTime.tryParse(value['poll_ends_at'] as String)
+          : null,
       localImagePaths: readStrings(value['local_image_paths']),
       uploadedMediaIds: readStrings(value['uploaded_media_ids']),
       updatedAt: updatedAt,

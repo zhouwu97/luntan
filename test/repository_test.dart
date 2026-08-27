@@ -15,12 +15,18 @@ void main() {
   test('MockFeedRepository 使用 FeedPage 和游标分页', () async {
     final repository = MockFeedRepository();
     final first = await repository.getLatestFeed(limit: 5);
-    final second = await repository.getLatestFeed(cursor: first.nextCursor, limit: 5);
+    final second = await repository.getLatestFeed(
+      cursor: first.nextCursor,
+      limit: 5,
+    );
 
     expect(first.items, hasLength(5));
     expect(first.hasMore, isTrue);
     expect(second.items, hasLength(5));
-    final overlap = first.items.map((item) => item.id).toSet().intersection(second.items.map((item) => item.id).toSet());
+    final overlap = first.items
+        .map((item) => item.id)
+        .toSet()
+        .intersection(second.items.map((item) => item.id).toSet());
     expect(overlap, isEmpty);
   });
 

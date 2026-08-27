@@ -45,6 +45,8 @@ void main() {
     expect(find.textContaining('包装比我想象中扎实'), findsOneWidget);
 
     // 在底部输入栏输入新评论并发送
+    await tester.tap(find.text('友善地回复一句…'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, '我也觉得收纳很重要！');
     await tester.tap(find.text('发送'));
     await tester.pumpAndSettle();

@@ -28,14 +28,13 @@ List<InlineSpan> buildHighlightedSpans({
       break;
     }
     if (index > start) {
-      spans.add(TextSpan(text: source.substring(start, index), style: baseStyle));
+      spans.add(
+        TextSpan(text: source.substring(start, index), style: baseStyle),
+      );
     }
     final matchEnd = index + lowerQuery.length;
     spans.add(
-      TextSpan(
-        text: source.substring(index, matchEnd),
-        style: highlightStyle,
-      ),
+      TextSpan(text: source.substring(index, matchEnd), style: highlightStyle),
     );
     start = matchEnd;
   }
@@ -140,8 +139,9 @@ class SearchPostRow extends StatelessWidget {
                 CircleAvatar(
                   radius: 14,
                   backgroundColor: AppTheme.surfaceBlue,
-                  backgroundImage:
-                      authorAvatar != null ? NetworkImage(authorAvatar!) : null,
+                  backgroundImage: authorAvatar != null
+                      ? NetworkImage(authorAvatar!)
+                      : null,
                   child: authorAvatar == null
                       ? Text(
                           authorName.isNotEmpty

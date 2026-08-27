@@ -85,10 +85,7 @@ void main() {
         actorName: '拆箱管理员',
         targetType: 'community',
         targetId: 'community-unboxing',
-        targetData: const {
-          'title': '大型拆箱发布了新公告',
-          'content': '公告内容',
-        },
+        targetData: const {'title': '大型拆箱发布了新公告', 'content': '公告内容'},
         isRead: false,
         createdAt: DateTime.now(),
       ),

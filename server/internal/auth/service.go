@@ -13,12 +13,15 @@ import (
 )
 
 var (
-	ErrInvalidInput       = errors.New("invalid auth input")
-	ErrUsernameTaken      = errors.New("username is already taken")
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrInvalidToken       = errors.New("invalid token")
-	ErrUserDisabled       = errors.New("user is disabled")
-	ErrInvalidEmail       = errors.New("invalid email")
+	ErrInvalidInput            = errors.New("invalid auth input")
+	ErrUsernameTaken           = errors.New("username is already taken")
+	ErrInvalidCredentials      = errors.New("invalid credentials")
+	ErrInvalidToken            = errors.New("invalid token")
+	ErrUserDisabled            = errors.New("user is disabled")
+	ErrInvalidEmail            = errors.New("invalid email")
+	ErrEmailAlreadyRegistered  = errors.New("email is already registered")
+	ErrEmailNotRegistered      = errors.New("email is not registered")
+	ErrPasswordTooShort        = errors.New("password must be at least 8 characters")
 )
 
 const (
@@ -51,6 +54,18 @@ type RegisterInput struct {
 type LoginInput struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type EmailPasswordLoginInput struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type EmailRegisterInput struct {
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	Nickname    string `json:"nickname"`
+	GuestUserID string `json:"guest_user_id,omitempty"`
 }
 
 type SessionMetadata struct {
@@ -142,10 +157,22 @@ func levelForExperience(exp int64) int {
 	return 1
 }
 
-// LoginByEmail 为邮箱验证码登录完成会话创建。验证码的校验由 API 层完成，
-// 这里负责查找或创建正式邮箱账号并签发会话。若当前会话为游客且邮箱尚未被注册，
-// 则原地将游客账号升级为正式账号，无缝保留全部历史数据与经验。
-func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID string, metadata SessionMetadata) (AuthResponse, error) {
+// IsEmailRegistered 检查邮箱是否已注册为正式账号。
+func (s *Service) IsEmailRegistered(ctx context.Context, email string) (bool, error) {
+	email = normalizeEmail(email)
+	if !validEmail(email) {
+		return false, ErrInvalidEmail
+	}
+	if s == nil || s.db == nil {
+		return false, sql.ErrConnDone
+	}
+	var exists bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = $1 AND account_type != 'guest' AND deleted_at IS NULL)`, email).Scan(&exists)
+	return exists, err
+}
+
+// EmailCodeLogin 为验证码登录签发会话。该邮箱必须已注册，未注册邮箱直接报错 ErrEmailNotRegistered，严禁自动注册。
+func (s *Service) EmailCodeLogin(ctx context.Context, email string, metadata SessionMetadata) (AuthResponse, error) {
 	email = normalizeEmail(email)
 	if !validEmail(email) {
 		return AuthResponse{}, ErrInvalidEmail
@@ -158,6 +185,7 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID
 		return AuthResponse{}, err
 	}
 	defer tx.Rollback()
+
 	var user User
 	var verifiedAt sql.NullTime
 	var exp int64
@@ -166,87 +194,29 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(u.account_type, 'email'), u.email, u.email_verified, u.email_verified_at,
 		       COALESCE(up.experience, 0)
-		FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE lower(u.email) = $1 AND u.deleted_at IS NULL
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL
 		FOR UPDATE OF u`, email).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &exp)
 	if errors.Is(err, sql.ErrNoRows) {
-		now := s.clock().UTC()
-		upgraded := false
-		if strings.TrimSpace(guestUserID) != "" {
-			var guestUsername, guestNickname, guestStatus string
-			var guestExp int64
-			err := tx.QueryRowContext(ctx, `
-				SELECT u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.experience, 0)
-				FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
-				WHERE u.id = $1 AND u.account_type = 'guest' AND u.deleted_at IS NULL
-				FOR UPDATE OF u`, guestUserID).Scan(&guestUsername, &guestStatus, &guestNickname, &guestExp)
-			if err == nil && guestStatus == "active" {
-				targetLevel := levelForExperience(guestExp)
-				targetNickname := strings.TrimSpace(nickname)
-				if targetNickname == "" || targetNickname == "游客" || strings.EqualFold(targetNickname, email) {
-					targetNickname = guestNickname
-				}
-				if targetNickname == "" || targetNickname == "游客" {
-					targetNickname = generatedNickname(guestUserID)
-				}
-				if _, err := tx.ExecContext(ctx, `UPDATE users SET account_type = 'email', email = $1, email_verified = true, email_verified_at = $2, updated_at = $2 WHERE id = $3`, email, now, guestUserID); err != nil {
-					return AuthResponse{}, err
-				}
-				if _, err := tx.ExecContext(ctx, `UPDATE user_profiles SET nickname = $1, level = $2, updated_at = $3 WHERE user_id = $4`, targetNickname, targetLevel, now, guestUserID); err != nil {
-					return AuthResponse{}, err
-				}
-				user = User{
-					ID:              guestUserID,
-					Username:        guestUsername,
-					Nickname:        targetNickname,
-					Level:           targetLevel,
-					Status:          "active",
-					AccountType:     "email",
-					Email:           email,
-					EmailVerified:   true,
-					EmailVerifiedAt: &now,
-				}
-				upgraded = true
-			}
-		}
-
-		if !upgraded {
-			user = User{ID: newID("usr"), Username: "email_" + newID("acct")[5:17], Nickname: strings.TrimSpace(nickname), Level: 1, Status: "active", AccountType: "email", Email: email, EmailVerified: true, EmailVerifiedAt: &now}
-			if user.Nickname == "" || strings.EqualFold(user.Nickname, email) {
-				user.Nickname = generatedNickname(user.ID)
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
-				return AuthResponse{}, err
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, experience, created_at, updated_at) VALUES ($1, $2, 1, 0, $3, $3)`, user.ID, user.Nickname, now); err != nil {
-				return AuthResponse{}, err
-			}
-		}
-	} else if err != nil {
-		return AuthResponse{}, err
-	} else {
-		if verifiedAt.Valid {
-			user.EmailVerifiedAt = &verifiedAt.Time
-		}
-		if user.AccountType == "" {
-			user.AccountType = "email"
-		}
-		if strings.TrimSpace(user.Nickname) == "" || strings.EqualFold(strings.TrimSpace(user.Nickname), email) {
-			user.Nickname = generatedNickname(user.ID)
-			if _, err := tx.ExecContext(ctx, `UPDATE user_profiles SET nickname = $1, updated_at = $2 WHERE user_id = $3`, user.Nickname, s.clock().UTC(), user.ID); err != nil {
-				return AuthResponse{}, err
-			}
-		}
-		if user.Status != "active" {
-			return AuthResponse{}, ErrUserDisabled
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE users SET email_verified = true, email_verified_at = COALESCE(email_verified_at, $1), updated_at = $1 WHERE id = $2`, s.clock().UTC(), user.ID); err != nil {
-			return AuthResponse{}, err
-		}
-		user.EmailVerified = true
-		user.Email = email
+		return AuthResponse{}, ErrEmailNotRegistered
 	}
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	if user.Status != "active" {
+		return AuthResponse{}, ErrUserDisabled
+	}
+	if verifiedAt.Valid {
+		user.EmailVerifiedAt = &verifiedAt.Time
+	}
+	user.Experience = exp
+	user.EmailVerified = true
+	user.Email = email
 	now := s.clock().UTC()
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET email_verified = true, email_verified_at = COALESCE(email_verified_at, $1), updated_at = $1 WHERE id = $2`, now, user.ID); err != nil {
+		return AuthResponse{}, err
+	}
 	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
 	if err != nil {
 		return AuthResponse{}, err
@@ -255,6 +225,215 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID
 		return AuthResponse{}, err
 	}
 	return AuthResponse{TokenPair: pair, User: user}, nil
+}
+
+// EmailPasswordLogin 使用邮箱 + 密码登录已有账号。
+func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string, metadata SessionMetadata) (AuthResponse, error) {
+	email = normalizeEmail(email)
+	if !validEmail(email) {
+		return AuthResponse{}, ErrInvalidEmail
+	}
+	if strings.TrimSpace(password) == "" {
+		return AuthResponse{}, ErrInvalidCredentials
+	}
+	if s == nil || s.db == nil {
+		return AuthResponse{}, sql.ErrConnDone
+	}
+	var (
+		user           User
+		authMethodID   string
+		credentialHash string
+		verifiedAt     sql.NullTime
+		exp            int64
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.experience, 0),
+		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at,
+		       a.id, a.credential_hash
+		FROM users u
+		JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password'
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL`, email).Scan(
+		&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &exp,
+		&user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt,
+		&authMethodID, &credentialHash,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AuthResponse{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	if s.hasher.Compare(credentialHash, password) != nil {
+		return AuthResponse{}, ErrInvalidCredentials
+	}
+	if user.Status != "active" {
+		return AuthResponse{}, ErrUserDisabled
+	}
+	if verifiedAt.Valid {
+		user.EmailVerifiedAt = &verifiedAt.Time
+	}
+	user.Experience = exp
+	user.EmailVerified = true
+	user.Email = email
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	defer tx.Rollback()
+	now := s.clock().UTC()
+	if _, err := tx.ExecContext(ctx, `UPDATE user_auth_methods SET last_used_at = $1 WHERE id = $2`, now, authMethodID); err != nil {
+		return AuthResponse{}, err
+	}
+	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthResponse{}, err
+	}
+	return AuthResponse{TokenPair: pair, User: user}, nil
+}
+
+// RegisterWithEmail 为用户注册正式账号。若有 guestUserID 且为有效活跃游客，则原地升级并继承经验；否则新建用户。
+func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInput, metadata SessionMetadata) (AuthResponse, error) {
+	email := normalizeEmail(input.Email)
+	if !validEmail(email) {
+		return AuthResponse{}, ErrInvalidEmail
+	}
+	if len([]rune(input.Password)) < 8 {
+		return AuthResponse{}, ErrPasswordTooShort
+	}
+	if s == nil || s.db == nil {
+		return AuthResponse{}, sql.ErrConnDone
+	}
+	hash, err := s.hasher.Hash(input.Password)
+	if err != nil {
+		return AuthResponse{}, fmt.Errorf("hash password: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	defer tx.Rollback()
+
+	var existingID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM users WHERE lower(email) = $1 AND account_type != 'guest' AND deleted_at IS NULL FOR UPDATE`, email).Scan(&existingID)
+	if err == nil {
+		return AuthResponse{}, ErrEmailAlreadyRegistered
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return AuthResponse{}, err
+	}
+
+	now := s.clock().UTC()
+	var user User
+	upgraded := false
+
+	if guestID := strings.TrimSpace(input.GuestUserID); guestID != "" {
+		var guestUsername, guestNickname, guestStatus string
+		var guestExp int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.experience, 0)
+			FROM users u
+			LEFT JOIN user_profiles up ON up.user_id = u.id
+			WHERE u.id = $1 AND u.account_type = 'guest' AND u.deleted_at IS NULL
+			FOR UPDATE OF u`, guestID).Scan(&guestUsername, &guestStatus, &guestNickname, &guestExp)
+		if err == nil && guestStatus == "active" {
+			targetLevel := levelForExperience(guestExp)
+			targetNickname := strings.TrimSpace(input.Nickname)
+			if targetNickname == "" || targetNickname == "游客" || strings.EqualFold(targetNickname, email) {
+				targetNickname = guestNickname
+			}
+			if targetNickname == "" || targetNickname == "游客" {
+				targetNickname = generatedNickname(guestID)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE users SET account_type = 'email', email = $1, email_verified = true, email_verified_at = $2, updated_at = $2 WHERE id = $3`, email, now, guestID); err != nil {
+				return AuthResponse{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE user_profiles SET nickname = $1, level = $2, updated_at = $3 WHERE user_id = $4`, targetNickname, targetLevel, now, guestID); err != nil {
+				return AuthResponse{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO user_auth_methods (id, user_id, provider, identifier, credential_hash, created_at) VALUES ($1, $2, 'password', $3, $4, $5)`, newID("uam"), guestID, email, hash, now); err != nil {
+				return AuthResponse{}, err
+			}
+			user = User{
+				ID:              guestID,
+				Username:        guestUsername,
+				Nickname:        targetNickname,
+				Level:           targetLevel,
+				Experience:      guestExp,
+				Status:          "active",
+				AccountType:     "email",
+				Email:           email,
+				EmailVerified:   true,
+				EmailVerifiedAt: &now,
+			}
+			upgraded = true
+		}
+	}
+
+	if !upgraded {
+		userID := newID("usr")
+		username := "usr_" + newID("acct")[5:17]
+		nickname := strings.TrimSpace(input.Nickname)
+		if nickname == "" || strings.EqualFold(nickname, email) {
+			nickname = generatedNickname(userID)
+		}
+		user = User{
+			ID:              userID,
+			Username:        username,
+			Nickname:        nickname,
+			Level:           1,
+			Experience:      0,
+			Status:          "active",
+			AccountType:     "email",
+			Email:           email,
+			EmailVerified:   true,
+			EmailVerifiedAt: &now,
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
+			return AuthResponse{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, experience, created_at, updated_at) VALUES ($1, $2, 1, 0, $3, $3)`, user.ID, user.Nickname, now); err != nil {
+			return AuthResponse{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_auth_methods (id, user_id, provider, identifier, credential_hash, created_at) VALUES ($1, $2, 'password', $3, $4, $5)`, newID("uam"), user.ID, email, hash, now); err != nil {
+			return AuthResponse{}, err
+		}
+	}
+
+	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthResponse{}, err
+	}
+	return AuthResponse{TokenPair: pair, User: user}, nil
+}
+
+// LoginByEmail 保持兼容旧调用的登录/转正方法。
+func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID string, metadata SessionMetadata) (AuthResponse, error) {
+	// 尝试以验证码方式登录已有账号
+	res, err := s.EmailCodeLogin(ctx, email, metadata)
+	if err == nil {
+		return res, nil
+	}
+	if !errors.Is(err, ErrEmailNotRegistered) {
+		return AuthResponse{}, err
+	}
+	// 若未注册，通过默认密码占位创建新账号或升级游客
+	return s.RegisterWithEmail(ctx, EmailRegisterInput{
+		Email:       email,
+		Password:    "DefaultPassword123!",
+		Nickname:    nickname,
+		GuestUserID: guestUserID,
+	}, metadata)
 }
 
 // CreateGuest 为游客模式创建可追踪的后台身份。游客仍然使用统一 users/sessions

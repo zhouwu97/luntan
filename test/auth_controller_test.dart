@@ -9,7 +9,7 @@ import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/auth_repository.dart';
 
 const _userJson =
-    '{"id":"u1","username":"user","nickname":"User","level":1,"status":"active"}';
+    '{"id":"u1","username":"user","nickname":"User","level":1,"status":"active","email":"user@test.com","account_type":"email"}';
 const _sessionJson =
     '{"access_token":"access-1","refresh_token":"refresh-1","token_type":"Bearer","expires_in":900,"user":$_userJson}';
 
@@ -146,20 +146,20 @@ void main() {
     expect(controller.error?.message, '登录状态初始化失败，请稍后重试');
   });
 
-  test('login 成功进入已登录并保存会话', () async {
+  test('loginWithPassword 成功进入已登录并保存会话', () async {
     final store = MemoryTokenStore();
     final controller = _controller(
       store: store,
       client: MockClient((request) async {
-        if (request.url.path == '/api/v1/auth/login') {
+        if (request.url.path == '/api/v1/auth/login/password') {
           return http.Response(_sessionJson, 200);
         }
         return http.Response('{}', 404);
       }),
     );
 
-    final ok = await controller.login(
-      username: 'user',
+    final ok = await controller.loginWithPassword(
+      email: 'user@test.com',
       password: 'password123',
     );
     expect(ok, isTrue);
@@ -168,19 +168,65 @@ void main() {
     expect(await store.readAccessToken(), 'access-1');
   });
 
+  test('loginWithEmailCode 成功进入已登录并保存会话', () async {
+    final store = MemoryTokenStore();
+    final controller = _controller(
+      store: store,
+      client: MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/login/code') {
+          return http.Response(_sessionJson, 200);
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    final ok = await controller.loginWithEmailCode(
+      email: 'user@test.com',
+      code: '123456',
+    );
+    expect(ok, isTrue);
+    expect(controller.status, AuthStatus.authenticated);
+    expect(controller.user?.id, 'u1');
+  });
+
+  test('register 成功进入已登录', () async {
+    final store = MemoryTokenStore();
+    final controller = _controller(
+      store: store,
+      client: MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/register') {
+          return http.Response(_sessionJson, 201);
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    final ok = await controller.register(
+      email: 'user@test.com',
+      code: '123456',
+      password: 'password123',
+      nickname: '新用户',
+    );
+    expect(ok, isTrue);
+    expect(controller.status, AuthStatus.authenticated);
+  });
+
   test('login 失败进入错误态且不保留用户', () async {
     final store = MemoryTokenStore();
     final controller = _controller(
       store: store,
       client: MockClient((request) async {
         return http.Response(
-          '{"code":"INVALID_CREDENTIALS","message":"用户名或密码错误"}',
+          '{"code":"INVALID_CREDENTIALS","message":"邮箱或密码错误"}',
           401,
         );
       }),
     );
 
-    final ok = await controller.login(username: 'user', password: 'wrong');
+    final ok = await controller.loginWithPassword(
+      email: 'user@test.com',
+      password: 'wrong',
+    );
     expect(ok, isFalse);
     expect(controller.status, AuthStatus.error);
     expect(controller.user, isNull);

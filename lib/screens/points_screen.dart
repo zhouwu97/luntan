@@ -73,9 +73,8 @@ class _PointsCenterScreenState extends State<PointsCenterScreen> {
     if (widget.apiRepository != null) {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => ExchangeStoreScreen(
-            apiRepository: widget.apiRepository!,
-          ),
+          builder: (_) =>
+              ExchangeStoreScreen(apiRepository: widget.apiRepository!),
         ),
       );
       if (mounted) {

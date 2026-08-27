@@ -21,11 +21,8 @@ class NotificationSkeleton extends StatelessWidget {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: itemCount,
-          separatorBuilder: (context, index) => const Divider(
-            height: 1,
-            thickness: 1,
-            color: Color(0xFFEDF2F6),
-          ),
+          separatorBuilder: (context, index) =>
+              const Divider(height: 1, thickness: 1, color: Color(0xFFEDF2F6)),
           itemBuilder: (context, index) => Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             child: Row(

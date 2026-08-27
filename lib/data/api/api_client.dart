@@ -50,6 +50,14 @@ String userFacingApiMessage(Object error, {String fallback = '操作失败，请
       return '验证码已过期，请重新获取';
     case 'EMAIL_CODE_RATE_LIMITED':
       return '验证码发送太频繁，请稍后再试';
+    case 'EMAIL_ALREADY_REGISTERED':
+      return '该邮箱已注册，请直接登录';
+    case 'EMAIL_NOT_REGISTERED':
+      return '该邮箱尚未注册，请先注册';
+    case 'INVALID_CREDENTIALS':
+      return '邮箱或密码错误';
+    case 'INVALID_PASSWORD':
+      return '密码长度不能少于 8 位';
     case 'MAIL_UNAVAILABLE':
       return '邮件服务暂时不可用，请稍后再试';
     case 'REGISTERED_ACCOUNT_REQUIRED':

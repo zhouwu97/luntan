@@ -229,8 +229,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         profile.growth?.levelLocked == true
                             ? 'Lv.0 · 累计经验 ${profile.experience} · 注册后解锁等级'
                             : (profile.growth?.nextLevelExperience == null
-                                ? 'Lv.${profile.level} (最高级) · 经验 ${profile.experience}'
-                                : 'Lv.${profile.level} · 经验 ${profile.growth?.experienceInLevel ?? 0}/${profile.growth?.experienceRequiredInLevel ?? 100}'),
+                                  ? 'Lv.${profile.level} (最高级) · 经验 ${profile.experience}'
+                                  : 'Lv.${profile.level} · 经验 ${profile.growth?.experienceInLevel ?? 0}/${profile.growth?.experienceRequiredInLevel ?? 100}'),
                         style: const TextStyle(
                           color: AppTheme.primary,
                           fontSize: 12,

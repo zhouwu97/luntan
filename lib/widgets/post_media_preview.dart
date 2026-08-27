@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
-import '../theme/app_motion.dart';
-import '../theme/app_theme.dart';
 
 /// 帖子媒体预览的使用场景。
 enum PostMediaPreviewMode { feed, detail }
 
 /// 帖子媒体预览。
 ///
-/// Feed 使用稳定尺寸的缩略图，详情使用 detail 变体并允许更高的单图区域。
-/// 图片始终保持源文件比例，不用拉伸填充；Feed 缩略图只做居中裁切，
-/// 详情页则完整显示图片，不裁切内容。
+/// Feed 按真实比例自适应展示大图与垂直多图，极长图增加展开提示；
+/// 详情页则按顺序纵向完整展开所有图片，自然向下滚动，不加固定高度限制与蓝边。
 class PostMediaPreview extends StatelessWidget {
   const PostMediaPreview({
     super.key,
@@ -29,185 +26,258 @@ class PostMediaPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (images.isEmpty) return const SizedBox.shrink();
-    final shown = images.length > 4 ? images.take(4).toList() : images;
-    final more = images.length > 4 ? images.length - 4 : 0;
-    final layout = _layout(shown, more);
+    if (mode == PostMediaPreviewMode.detail) {
+      return _buildDetailStream(context);
+    }
+    return _buildFeedStream(context);
+  }
+
+  Widget _buildDetailStream(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 11),
-      child: onImageTap != null || onTap == null
-          ? layout
-          : GestureDetector(onTap: onTap, child: layout),
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(images.length, (index) {
+          final image = images[index];
+          final ratio = _naturalRatio(image, fallback: 4 / 3);
+          return Padding(
+            padding: EdgeInsets.only(bottom: index < images.length - 1 ? 10.0 : 0.0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final height = width / ratio;
+                return SizedBox(
+                  width: width,
+                  height: height,
+                  child: _tile(
+                    context,
+                    image,
+                    index: index,
+                    mode: PostMediaPreviewMode.detail,
+                  ),
+                );
+              },
+            ),
+          );
+        }),
+      ),
     );
   }
 
-  Widget _layout(List<PostMedia> shown, int more) {
-    switch (shown.length) {
-      case 1:
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final height = mode == PostMediaPreviewMode.detail
-                ? (constraints.maxWidth / _ratio(shown.first))
-                      .clamp(180.0, 600.0)
-                      .toDouble()
-                : (constraints.maxWidth * .62).clamp(180.0, 240.0).toDouble();
-            return SizedBox(
-              width: constraints.maxWidth,
-              height: height,
-              child: _tile(shown.first, index: 0),
-            );
-          },
-        );
-      case 2:
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final height = ((constraints.maxWidth - 5) / 2)
-                .clamp(132.0, 190.0)
-                .toDouble();
-            return SizedBox(
-              height: height,
-              child: Row(
-                children: [
-                  Expanded(child: _tile(shown[0], index: 0)),
-                  const SizedBox(width: 5),
-                  Expanded(child: _tile(shown[1], index: 1)),
-                ],
-              ),
-            );
-          },
-        );
-      case 3:
-        return SizedBox(
-          height: 194,
-          child: Row(
-            children: [
-              Expanded(flex: 16, child: _tile(shown[0], index: 0)),
-              const SizedBox(width: 5),
-              Expanded(
-                flex: 10,
-                child: Column(
-                  children: [
-                    Expanded(child: _tile(shown[1], index: 1)),
-                    const SizedBox(height: 5),
-                    Expanded(child: _tile(shown[2], index: 2)),
-                  ],
-                ),
-              ),
-            ],
+  Widget _buildFeedStream(BuildContext context) {
+    final shown = images.length > 3 ? images.take(3).toList() : images;
+    final totalCount = images.length;
+
+    Widget content;
+    if (shown.length == 1) {
+      content = LayoutBuilder(
+        builder: (context, constraints) {
+          final media = shown.first;
+          final rawRatio = _rawRatio(media);
+          final isExtremeLong = rawRatio != null && rawRatio < 0.45;
+          final ratio = (rawRatio ?? (4.0 / 3.0)).clamp(0.55, 2.2).toDouble();
+          final width = constraints.maxWidth;
+          final height = width / ratio;
+
+          return SizedBox(
+            width: width,
+            height: height,
+            child: _tile(
+              context,
+              media,
+              index: 0,
+              mode: PostMediaPreviewMode.feed,
+              isExtremeLong: isExtremeLong,
+            ),
+          );
+        },
+      );
+    } else if (shown.length == 2) {
+      content = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildFeedItem(context, shown[0], index: 0),
+          const SizedBox(height: 8),
+          _buildFeedItem(context, shown[1], index: 1),
+        ],
+      );
+    } else {
+      content = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildFeedItem(context, shown[0], index: 0),
+          const SizedBox(height: 8),
+          _buildFeedItem(context, shown[1], index: 1),
+          const SizedBox(height: 8),
+          _buildFeedItem(
+            context,
+            shown[2],
+            index: 2,
+            countBadge: totalCount > 3 ? '共 $totalCount 张' : null,
           ),
-        );
-      default:
-        return AspectRatio(
-          aspectRatio: 1,
-          child: Column(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Expanded(child: _tile(shown[0], index: 0)),
-                    const SizedBox(width: 5),
-                    Expanded(child: _tile(shown[1], index: 1)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 5),
-              Expanded(
-                child: Row(
-                  children: [
-                    Expanded(child: _tile(shown[2], index: 2)),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: _tile(
-                        shown[3],
-                        index: 3,
-                        overlay: more > 0 ? '+$more' : null,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
+        ],
+      );
     }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: content,
+    );
   }
 
-  double _ratio(PostMedia media) {
+  Widget _buildFeedItem(
+    BuildContext context,
+    PostMedia media, {
+    required int index,
+    String? countBadge,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final rawRatio = _rawRatio(media);
+        final isExtremeLong = rawRatio != null && rawRatio < 0.45;
+        final ratio = (rawRatio ?? (16.0 / 10.0)).clamp(0.75, 2.2).toDouble();
+        final width = constraints.maxWidth;
+        final height = width / ratio;
+
+        return SizedBox(
+          width: width,
+          height: height,
+          child: _tile(
+            context,
+            media,
+            index: index,
+            mode: PostMediaPreviewMode.feed,
+            countBadge: countBadge,
+            isExtremeLong: isExtremeLong,
+          ),
+        );
+      },
+    );
+  }
+
+  double? _rawRatio(PostMedia media) {
     final width = media.width?.toDouble();
     final height = media.height?.toDouble();
-    if (width == null ||
-        height == null ||
-        !width.isFinite ||
-        !height.isFinite) {
-      return 4.0 / 3.0;
+    if (width == null || height == null || !width.isFinite || !height.isFinite) {
+      return null;
     }
-    if (width <= 0 || height <= 0) return 4.0 / 3.0;
-    // 仅限制极端/恶意元数据，正常图片的真实比例不做截断。
-    return (width / height).clamp(.35, 3.0).toDouble();
+    if (width <= 0 || height <= 0) return null;
+    return width / height;
   }
 
-  Widget _tile(PostMedia media, {required int index, String? overlay}) {
-    final content = LayoutBuilder(
+  double _naturalRatio(PostMedia media, {double fallback = 4.0 / 3.0}) {
+    final raw = _rawRatio(media);
+    if (raw == null) return fallback;
+    return raw.clamp(0.2, 3.5).toDouble();
+  }
+
+  Widget _tile(
+    BuildContext context,
+    PostMedia media, {
+    required int index,
+    required PostMediaPreviewMode mode,
+    String? countBadge,
+    bool isExtremeLong = false,
+  }) {
+    final imageUrl = mode == PostMediaPreviewMode.detail
+        ? media.detailUrl
+        : media.previewUrl;
+
+    final tile = LayoutBuilder(
       builder: (context, constraints) {
         final dpr = MediaQuery.devicePixelRatioOf(context);
-        final cacheWidth =
-            constraints.maxWidth.isFinite && constraints.maxWidth > 0
+        final cacheWidth = constraints.maxWidth.isFinite && constraints.maxWidth > 0
             ? (constraints.maxWidth * dpr).round()
             : null;
-        // 只指定解码宽度，Flutter 会按原图比例计算高度；不能把卡片的
-        // 横向容器高度作为 cacheHeight，否则竖图会在解码阶段被压扁。
+
         return ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (_imageUrl(media) != null)
+              if (imageUrl != null && imageUrl.isNotEmpty)
                 Image.network(
-                  _imageUrl(media)!,
-                  // Feed 缩略图使用 cover 做居中裁切；详情页必须 contain，
-                  // 让用户看到完整图片。两种模式都不会拉伸原图。
-                  fit: mode == PostMediaPreviewMode.detail
-                      ? BoxFit.contain
-                      : BoxFit.cover,
+                  imageUrl,
+                  fit: BoxFit.cover,
                   filterQuality: FilterQuality.low,
                   cacheWidth: cacheWidth,
-                  frameBuilder:
-                      (context, child, frame, wasSynchronouslyLoaded) {
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            const ColoredBox(color: AppTheme.surfaceBlue),
-                            AnimatedOpacity(
-                              opacity: frame == null && !wasSynchronouslyLoaded
-                                  ? 0
-                                  : 1,
-                              duration: AppMotion.duration(
-                                context,
-                                AppMotion.fast,
-                              ),
-                              curve: AppMotion.standard,
-                              child: child,
-                            ),
-                          ],
-                        );
-                      },
-                  errorBuilder: (context, error, stackTrace) =>
-                      _fallback(media),
+                  frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        const ColoredBox(color: Color(0xFFF4F6F9)),
+                        AnimatedOpacity(
+                          opacity: frame != null || wasSynchronouslyLoaded ? 1 : 0,
+                          duration: const Duration(milliseconds: 160),
+                          curve: Curves.easeOut,
+                          child: child,
+                        ),
+                      ],
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) => _fallback(media),
                 )
               else
                 _fallback(media),
-              if (overlay != null)
-                const DecoratedBox(
-                  decoration: BoxDecoration(color: Color(0x990E2037)),
-                  child: Center(),
+
+              // 极长图底部提示
+              if (isExtremeLong && mode == PostMediaPreviewMode.feed)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.transparent, Color(0xB30B1726)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.unfold_more_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          '长图 · 点击查看完整图片',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              if (overlay != null)
-                Center(
-                  child: Text(
-                    overlay,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
+
+              // 多图数量角标
+              if (countBadge != null)
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC0B1726),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      countBadge,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
@@ -216,18 +286,23 @@ class PostMediaPreview extends StatelessWidget {
         );
       },
     );
+
     if (onImageTap != null) {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => onImageTap!(index),
-        child: content,
+        child: tile,
       );
     }
-    return content;
+    if (onTap != null) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: tile,
+      );
+    }
+    return tile;
   }
-
-  String? _imageUrl(PostMedia media) =>
-      mode == PostMediaPreviewMode.detail ? media.detailUrl : media.previewUrl;
 
   Widget _fallback(PostMedia media) {
     return DecoratedBox(
@@ -245,9 +320,9 @@ class PostMediaPreview extends StatelessWidget {
             Icon(
               Icons.image_outlined,
               color: Colors.white.withValues(alpha: .9),
-              size: 30,
+              size: 28,
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 4),
             Text(
               media.label,
               style: const TextStyle(

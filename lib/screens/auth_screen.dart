@@ -8,9 +8,11 @@ import '../data/api/api_client.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 
-enum _AuthStep { email, code }
+enum AuthMode { login, register }
 
-/// 现代化多步骤认证入口：邮箱 → 验证码分格校验 → 完善资料与登录。
+enum LoginMethod { code, password }
+
+/// 统一登录/注册认证中心：支持验证码登录、密码登录与新用户注册/游客转正。
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
     super.key,
@@ -28,20 +30,29 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
+  AuthMode _mode = AuthMode.login;
+  LoginMethod _loginMethod = LoginMethod.code;
+
   final emailController = TextEditingController();
   final codeController = TextEditingController();
+  final passwordController = TextEditingController();
+  final confirmPasswordController = TextEditingController();
   final nicknameController = TextEditingController();
 
   final emailFocusNode = FocusNode();
   final codeFocusNode = FocusNode();
+  final passwordFocusNode = FocusNode();
+  final confirmPasswordFocusNode = FocusNode();
+  final nicknameFocusNode = FocusNode();
 
-  _AuthStep _currentStep = _AuthStep.email;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
   Timer? countdownTimer;
   int retryAfter = 0;
   String? devCode;
   bool isRequestingCode = false;
-  bool isLoggingIn = false;
-  bool _showNicknameField = false;
+  bool isSubmitting = false;
 
   static const List<String> _suggestedDomains = [
     '@qq.com',
@@ -55,35 +66,75 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void initState() {
     super.initState();
-    emailController.addListener(_onEmailChanged);
+    emailController.addListener(_onFieldChanged);
+    codeController.addListener(_onFieldChanged);
+    passwordController.addListener(_onFieldChanged);
+    confirmPasswordController.addListener(_onFieldChanged);
   }
 
   @override
   void dispose() {
     countdownTimer?.cancel();
-    emailController.removeListener(_onEmailChanged);
+    emailController.removeListener(_onFieldChanged);
+    codeController.removeListener(_onFieldChanged);
+    passwordController.removeListener(_onFieldChanged);
+    confirmPasswordController.removeListener(_onFieldChanged);
+
     emailController.dispose();
     codeController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
     nicknameController.dispose();
+
     emailFocusNode.dispose();
     codeFocusNode.dispose();
+    passwordFocusNode.dispose();
+    confirmPasswordFocusNode.dispose();
+    nicknameFocusNode.dispose();
     super.dispose();
   }
 
-  void _onEmailChanged() {
+  void _onFieldChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _switchMode(AuthMode newMode) {
+    if (_mode == newMode) return;
+    setState(() {
+      _mode = newMode;
+      codeController.clear();
+      passwordController.clear();
+      confirmPasswordController.clear();
+      devCode = null;
+    });
+  }
+
+  void _switchLoginMethod(LoginMethod newMethod) {
+    if (_loginMethod == newMethod) return;
+    setState(() {
+      _loginMethod = newMethod;
+      codeController.clear();
+      passwordController.clear();
+      devCode = null;
+    });
   }
 
   Future<void> requestCode() async {
     final email = emailController.text.trim();
     if (!_looksLikeEmail(email)) {
       _feedback('请输入有效的邮箱地址');
+      emailFocusNode.requestFocus();
       return;
     }
 
+    final scene = _mode == AuthMode.register ? 'register' : 'login';
+
     setState(() => isRequestingCode = true);
     try {
-      final challenge = await widget.controller.requestEmailCode(email);
+      final challenge = await widget.controller.requestEmailCode(
+        email,
+        scene: scene,
+      );
       if (!mounted) return;
 
       setState(() {
@@ -92,77 +143,150 @@ class _AuthScreenState extends State<AuthScreen> {
           retryAfter = challenge.retryAfter;
           devCode = challenge.devCode;
         }
-        _currentStep = _AuthStep.code;
       });
       _startCountdown();
-      // 切换到第二步后自动聚焦验证码
-      Future.delayed(const Duration(milliseconds: 200), () {
-        if (mounted) codeFocusNode.requestFocus();
-      });
+      _feedback('验证码已发送至你的邮箱');
+      codeFocusNode.requestFocus();
     } catch (error) {
-      if (mounted) {
-        setState(() => isRequestingCode = false);
-        _feedback(userFacingApiMessage(error, fallback: '验证码发送失败，请稍后重试'));
-      }
+      if (!mounted) return;
+      setState(() => isRequestingCode = false);
+      _handleAuthError(error);
     }
   }
 
   Future<void> submit() async {
-    if (_currentStep == _AuthStep.email) {
-      await requestCode();
-      return;
-    }
-
     final email = emailController.text.trim();
-    final code = codeController.text.trim();
-    if (code.length != 6) {
-      _feedback('请输入 6 位验证码');
+    if (!_looksLikeEmail(email)) {
+      _feedback('请输入有效的邮箱地址');
+      emailFocusNode.requestFocus();
       return;
     }
 
-    setState(() => isLoggingIn = true);
-    try {
-      final success = await widget.controller.loginWithEmailCode(
-        email: email,
-        code: code,
-        nickname: nicknameController.text.trim(),
-      );
+    if (_mode == AuthMode.login) {
+      if (_loginMethod == LoginMethod.code) {
+        final code = codeController.text.trim();
+        if (code.length != 6) {
+          _feedback('请输入 6 位数字验证码');
+          codeFocusNode.requestFocus();
+          return;
+        }
 
-      if (!mounted) return;
-      setState(() => isLoggingIn = false);
+        setState(() => isSubmitting = true);
+        try {
+          final success = await widget.controller.loginWithEmailCode(
+            email: email,
+            code: code,
+          );
+          if (!mounted) return;
+          setState(() => isSubmitting = false);
+          if (success) {
+            _onAuthSuccess();
+          } else {
+            _handleAuthError(widget.controller.error ?? StateError('login'));
+          }
+        } catch (error) {
+          if (!mounted) return;
+          setState(() => isSubmitting = false);
+          _handleAuthError(error);
+        }
+      } else {
+        // 密码登录
+        final password = passwordController.text;
+        if (password.isEmpty) {
+          _feedback('请输入密码');
+          passwordFocusNode.requestFocus();
+          return;
+        }
 
-      if (success && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
+        setState(() => isSubmitting = true);
+        try {
+          final success = await widget.controller.loginWithPassword(
+            email: email,
+            password: password,
+          );
+          if (!mounted) return;
+          setState(() => isSubmitting = false);
+          if (success) {
+            _onAuthSuccess();
+          } else {
+            _handleAuthError(widget.controller.error ?? StateError('login'));
+          }
+        } catch (error) {
+          if (!mounted) return;
+          setState(() => isSubmitting = false);
+          _handleAuthError(error);
+        }
+      }
+    } else {
+      // 注册流程
+      final code = codeController.text.trim();
+      if (code.length != 6) {
+        _feedback('请输入 6 位数字验证码');
+        codeFocusNode.requestFocus();
+        return;
+      }
+      final password = passwordController.text;
+      if (password.length < 8) {
+        _feedback('密码长度不能少于 8 位');
+        passwordFocusNode.requestFocus();
+        return;
+      }
+      final confirmPassword = confirmPasswordController.text;
+      if (password != confirmPassword) {
+        _feedback('两次输入的密码不一致，请重新输入');
+        confirmPasswordFocusNode.requestFocus();
         return;
       }
 
-      if (!success) {
-        _feedback(
-          userFacingApiMessage(
-            widget.controller.error ?? StateError('auth'),
-            fallback: '登录失败，请重试',
-          ),
+      setState(() => isSubmitting = true);
+      try {
+        final success = await widget.controller.register(
+          email: email,
+          code: code,
+          password: password,
+          nickname: nicknameController.text.trim(),
         );
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() => isLoggingIn = false);
-        _feedback(userFacingApiMessage(error, fallback: '登录失败，请重试'));
+        if (!mounted) return;
+        setState(() => isSubmitting = false);
+        if (success) {
+          _onAuthSuccess();
+        } else {
+          _handleAuthError(widget.controller.error ?? StateError('register'));
+        }
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => isSubmitting = false);
+        _handleAuthError(error);
       }
     }
   }
 
-  void _backToEmailStep() {
-    countdownTimer?.cancel();
-    setState(() {
-      _currentStep = _AuthStep.email;
-      codeController.clear();
-      devCode = null;
-      retryAfter = 0;
-    });
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) emailFocusNode.requestFocus();
-    });
+  void _onAuthSuccess() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _handleAuthError(Object error) {
+    if (error is ApiException) {
+      if (error.code == 'EMAIL_NOT_REGISTERED') {
+        _feedbackWithAction(
+          '该邮箱尚未注册，请先注册',
+          actionLabel: '去注册',
+          onAction: () => _switchMode(AuthMode.register),
+        );
+        return;
+      }
+      if (error.code == 'EMAIL_ALREADY_REGISTERED') {
+        _feedbackWithAction(
+          '该邮箱已注册，请直接登录',
+          actionLabel: '去登录',
+          onAction: () => _switchMode(AuthMode.login),
+        );
+        return;
+      }
+    }
+    _feedback(userFacingApiMessage(error, fallback: '操作失败，请稍后重试'));
   }
 
   Future<void> enterGuest() async {
@@ -199,6 +323,26 @@ class _AuthScreenState extends State<AuthScreen> {
         content: Text(message),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _feedbackWithAction(
+    String message, {
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: actionLabel,
+          textColor: AppTheme.sky,
+          onPressed: onAction,
+        ),
       ),
     );
   }
@@ -254,7 +398,7 @@ class _AuthScreenState extends State<AuthScreen> {
               _buildPrivilegeRow(
                 icon: Icons.check_circle_rounded,
                 iconColor: AppTheme.mint,
-                title: '邮箱账号登录（完整体验）',
+                title: '正式邮箱账号（完整体验）',
                 desc: '发布帖子、参与投票、收藏精华、关注作者、积分与等级成长。',
               ),
               const SizedBox(height: 12),
@@ -262,7 +406,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 icon: Icons.visibility_rounded,
                 iconColor: AppTheme.primary,
                 title: '游客模式体验',
-                desc: '快速浏览社区所有公开内容，发表即时评论与内容举报。',
+                desc: '快速浏览社区所有公开内容，发表即时评论与内容举报；经验正常累计，注册后一键原地转正。',
               ),
               const SizedBox(height: 20),
               SizedBox(
@@ -278,7 +422,10 @@ class _AuthScreenState extends State<AuthScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text('我知道了', style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    '我知道了',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],
@@ -335,18 +482,13 @@ class _AuthScreenState extends State<AuthScreen> {
     final busy =
         widget.controller.status == AuthStatus.authenticating ||
         isRequestingCode ||
-        isLoggingIn;
-    final authError = widget.controller.error;
-    final canBrowseAsGuest =
-        authError is ApiException &&
-        (authError.type == ApiErrorType.networkUnavailable ||
-            authError.type == ApiErrorType.timeout);
+        isSubmitting;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Stack(
         children: [
-          // 背景微晕影渐变装饰
+          // 背景装饰微光
           Positioned(
             top: -100,
             right: -80,
@@ -394,37 +536,35 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // 顶部返回/退出操作栏
+                      // 顶部导航栏
                       Row(
                         children: [
-                          if (_currentStep == _AuthStep.code)
-                            IconButton(
-                              onPressed: busy ? null : _backToEmailStep,
-                              icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                              color: AppTheme.textPrimary,
-                              tooltip: '修改邮箱',
-                            )
-                          else
-                            IconButton(
-                              onPressed: busy ? null : widget.onBrowse,
-                              icon: const Icon(Icons.close_rounded),
-                              color: AppTheme.textSecondary,
-                              tooltip: '返回浏览',
-                            ),
+                          IconButton(
+                            onPressed: busy ? null : widget.onBrowse,
+                            icon: const Icon(Icons.close_rounded),
+                            color: AppTheme.textSecondary,
+                            tooltip: '返回浏览',
+                          ),
                           const Spacer(),
                           TextButton.icon(
                             onPressed: _showPrivilegeDetails,
-                            icon: const Icon(Icons.info_outline_rounded, size: 16),
-                            label: const Text('权限说明', style: TextStyle(fontSize: 13)),
+                            icon: const Icon(
+                              Icons.info_outline_rounded,
+                              size: 16,
+                            ),
+                            label: const Text(
+                              '权限说明',
+                              style: TextStyle(fontSize: 13),
+                            ),
                             style: TextButton.styleFrom(
                               foregroundColor: AppTheme.textSecondary,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
-                      // 主卡片容器
+                      // 主认证卡片
                       Container(
                         decoration: BoxDecoration(
                           color: AppTheme.surface,
@@ -434,71 +574,77 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF182A3D).withValues(alpha: 0.06),
+                              color: const Color(
+                                0xFF182A3D,
+                              ).withValues(alpha: 0.06),
                               blurRadius: 30,
                               offset: const Offset(0, 10),
                             ),
                           ],
                         ),
                         padding: const EdgeInsets.all(28),
-                        child: AnimatedSwitcher(
-                          duration: AppMotion.page,
-                          switchInCurve: AppMotion.standard,
-                          switchOutCurve: AppMotion.standard,
-                          transitionBuilder: (child, animation) {
-                            final isCodeStep = child.key == const ValueKey('step_code');
-                            final beginOffset = isCodeStep
-                                ? const Offset(0.12, 0.0)
-                                : const Offset(-0.12, 0.0);
-                            return FadeTransition(
-                              opacity: animation,
-                              child: SlideTransition(
-                                position: Tween<Offset>(
-                                  begin: beginOffset,
-                                  end: Offset.zero,
-                                ).animate(animation),
-                                child: child,
-                              ),
-                            );
-                          },
-                          child: _currentStep == _AuthStep.email
-                              ? _buildEmailStep(busy, canBrowseAsGuest)
-                              : _buildCodeStep(busy),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 标题与品牌标
+                            _buildHeader(),
+                            const SizedBox(height: 20),
+
+                            // 主 Tab: 登录 / 注册
+                            _buildPrimaryTabs(busy),
+                            const SizedBox(height: 18),
+
+                            // 登录模式下的二级 Switcher：验证码登录 / 密码登录
+                            if (_mode == AuthMode.login) ...[
+                              _buildLoginMethodSwitcher(busy),
+                              const SizedBox(height: 18),
+                            ],
+
+                            // 表单内容
+                            AnimatedSwitcher(
+                              duration: AppMotion.page,
+                              switchInCurve: AppMotion.standard,
+                              switchOutCurve: AppMotion.standard,
+                              child: _mode == AuthMode.login
+                                  ? (_loginMethod == LoginMethod.code
+                                      ? _buildCodeLoginForm(busy)
+                                      : _buildPasswordLoginForm(busy))
+                                  : _buildRegisterForm(busy),
+                            ),
+                          ],
                         ),
                       ),
 
                       const SizedBox(height: 20),
 
                       // 底部辅助入口
-                      if (_currentStep == _AuthStep.email) ...[
-                        OutlinedButton.icon(
-                          onPressed: busy ? null : enterGuest,
-                          icon: const Icon(Icons.visibility_outlined, size: 18),
-                          label: const Text(
-                            '暂不登录，以游客身份体验',
-                            style: TextStyle(fontWeight: FontWeight.w600),
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : enterGuest,
+                        icon: const Icon(Icons.visibility_outlined, size: 18),
+                        label: const Text(
+                          '暂不登录，以游客身份体验',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.textPrimary,
+                          side: BorderSide(
+                            color: AppTheme.border.withValues(alpha: 0.8),
                           ),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.textPrimary,
-                            side: BorderSide(
-                              color: AppTheme.border.withValues(alpha: 0.8),
-                            ),
-                            backgroundColor: Colors.white.withValues(alpha: 0.8),
-                            minimumSize: const Size(double.infinity, 46),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
+                          backgroundColor: Colors.white.withValues(alpha: 0.8),
+                          minimumSize: const Size(double.infinity, 46),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        TextButton(
-                          onPressed: widget.onBrowse,
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppTheme.textSecondary,
-                          ),
-                          child: const Text('返回浏览公开帖子'),
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: widget.onBrowse,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.textSecondary,
                         ),
-                      ],
+                        child: const Text('返回浏览公开帖子'),
+                      ),
                     ],
                   ),
                 ),
@@ -510,112 +656,219 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  /// Step 1: 邮箱输入页面
-  Widget _buildEmailStep(bool busy, bool canBrowseAsGuest) {
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            gradient: AppTheme.primaryGradient,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primary.withValues(alpha: 0.35),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Icon(
+            Icons.forum_rounded,
+            color: Colors.white,
+            size: 26,
+          ),
+        ),
+        const SizedBox(width: 14),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '欢迎来到校园论坛',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w900,
+                  color: AppTheme.textPrimary,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              SizedBox(height: 2),
+              Text(
+                '登录账号或创建新的账号',
+                style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPrimaryTabs(bool busy) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceBlue.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildTabItem(
+              title: '登录',
+              isActive: _mode == AuthMode.login,
+              onTap: busy ? null : () => _switchMode(AuthMode.login),
+            ),
+          ),
+          Expanded(
+            child: _buildTabItem(
+              title: '注册',
+              isActive: _mode == AuthMode.register,
+              onTap: busy ? null : () => _switchMode(AuthMode.register),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabItem({
+    required String title,
+    required bool isActive,
+    required VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          title,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+            color: isActive ? AppTheme.primary : AppTheme.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoginMethodSwitcher(bool busy) {
+    return Row(
+      children: [
+        _buildSubTabButton(
+          title: '验证码登录',
+          isActive: _loginMethod == LoginMethod.code,
+          onTap: busy ? null : () => _switchLoginMethod(LoginMethod.code),
+        ),
+        const SizedBox(width: 8),
+        _buildSubTabButton(
+          title: '密码登录',
+          isActive: _loginMethod == LoginMethod.password,
+          onTap: busy ? null : () => _switchLoginMethod(LoginMethod.password),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubTabButton({
+    required String title,
+    required bool isActive,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive
+              ? AppTheme.primary.withValues(alpha: 0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          title,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+            color: isActive ? AppTheme.primary : AppTheme.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmailField(bool busy) {
     final emailText = emailController.text.trim();
     final showSuffixChips = emailText.isNotEmpty && !emailText.contains('@');
 
     return Column(
-      key: const ValueKey('step_email'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 品牌与欢迎徽标
-        Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primary.withValues(alpha: 0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.forum_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '欢迎登录校园论坛',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      color: AppTheme.textPrimary,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    canBrowseAsGuest
-                        ? '网络连接异常，建议重试或以游客体验'
-                        : '免密验证码登录，快捷安全',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 28),
-
-        // 邮箱输入框
         const Text(
-          '邮箱地址',
+          '邮箱',
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w700,
             color: AppTheme.textPrimary,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         TextField(
           controller: emailController,
           focusNode: emailFocusNode,
           enabled: !busy,
           keyboardType: TextInputType.emailAddress,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => requestCode(),
+          textInputAction: TextInputAction.next,
           style: const TextStyle(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             color: AppTheme.textPrimary,
           ),
           decoration: InputDecoration(
-            hintText: '请输入你的邮箱',
+            hintText: '请输入邮箱地址',
             hintStyle: const TextStyle(
               color: AppTheme.textSecondary,
               fontWeight: FontWeight.normal,
               fontSize: 14,
             ),
-            prefixIcon: const Icon(Icons.mail_outline_rounded, color: AppTheme.primary),
+            prefixIcon: const Icon(
+              Icons.mail_outline_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
             suffixIcon: emailText.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.cancel_rounded, size: 18, color: AppTheme.textSecondary),
+                    icon: const Icon(
+                      Icons.cancel_rounded,
+                      size: 18,
+                      color: AppTheme.textSecondary,
+                    ),
                     onPressed: busy ? null : () => emailController.clear(),
                   )
                 : null,
           ),
         ),
-
-        // 快捷邮箱后缀选择标签
         if (showSuffixChips) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -634,9 +887,12 @@ class _AuthScreenState extends State<AuthScreen> {
                     backgroundColor: AppTheme.surfaceBlue,
                     side: BorderSide.none,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 0,
+                    ),
                     onPressed: busy ? null : () => _applyDomainSuffix(domain),
                   ),
                 );
@@ -644,140 +900,108 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
           ),
         ],
-
-        const SizedBox(height: 24),
-
-        // 获取验证码按钮
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: FilledButton(
-            onPressed: busy ? null : requestCode,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              elevation: 2,
-              shadowColor: AppTheme.primary.withValues(alpha: 0.4),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: busy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        '获取验证码',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      SizedBox(width: 6),
-                      Icon(Icons.arrow_forward_rounded, size: 18),
-                    ],
-                  ),
-          ),
-        ),
       ],
     );
   }
 
-  /// Step 2: 验证码与完善资料页面
-  Widget _buildCodeStep(bool busy) {
-    final email = emailController.text.trim();
-    final code = codeController.text.trim();
-
+  Widget _buildCodeField(bool busy) {
     return Column(
-      key: const ValueKey('step_code'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 标题与接收邮箱
         const Text(
-          '输入 6 位验证码',
+          '验证码',
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w900,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
             color: AppTheme.textPrimary,
           ),
         ),
         const SizedBox(height: 6),
-        Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            const Text(
-              '已发送至 ',
-              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+        TextField(
+          controller: codeController,
+          focusNode: codeFocusNode,
+          enabled: !busy,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => submit(),
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2.0,
+            color: AppTheme.textPrimary,
+          ),
+          decoration: InputDecoration(
+            counterText: '',
+            hintText: '请输入 6 位验证码',
+            hintStyle: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.normal,
+              fontSize: 14,
+              letterSpacing: 0,
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceBlue,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                email,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.highlight,
+            prefixIcon: const Icon(
+              Icons.dialpad_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+            suffixIcon: Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: TextButton(
+                onPressed: busy || retryAfter > 0 ? null : requestCode,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primary,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
+                child: isRequestingCode
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(
+                        retryAfter > 0 ? '${retryAfter}s 后重发' : '获取验证码',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: retryAfter > 0
+                              ? AppTheme.textSecondary
+                              : AppTheme.primary,
+                        ),
+                      ),
               ),
             ),
-            const SizedBox(width: 4),
-            InkWell(
-              onTap: busy ? null : _backToEmailStep,
-              borderRadius: BorderRadius.circular(4),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Text(
-                  '修改',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
-
-        const SizedBox(height: 24),
-
-        // 开发环境便捷测试码胶囊
         if (devCode != null && devCode!.isNotEmpty) ...[
+          const SizedBox(height: 8),
           InkWell(
             onTap: busy
                 ? null
                 : () {
                     codeController.text = devCode!;
                     setState(() {});
-                    submit();
                   },
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: AppTheme.levelBg,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: AppTheme.mint.withValues(alpha: 0.4)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.bolt_rounded, size: 16, color: AppTheme.levelText),
+                  const Icon(
+                    Icons.bolt_rounded,
+                    size: 15,
+                    color: AppTheme.levelText,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '开发环境验证码: $devCode (点击自动填入)',
+                      '开发环境验证码: $devCode (点击填入)',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -789,83 +1013,26 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
         ],
+      ],
+    );
+  }
 
-        // 六位分格验证码输入框
-        _PinCodeInput(
-          controller: codeController,
-          focusNode: codeFocusNode,
-          enabled: !busy,
-          onCompleted: (val) => submit(),
-          onChanged: (val) => setState(() {}),
-        ),
-
-        const SizedBox(height: 14),
-
-        // 重新获取倒计时
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            TextButton(
-              onPressed: busy || retryAfter > 0 ? null : requestCode,
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                foregroundColor: AppTheme.primary,
-              ),
-              child: Text(
-                retryAfter > 0 ? '${retryAfter}s 后可重新获取' : '重新发送验证码',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: retryAfter > 0 ? AppTheme.textSecondary : AppTheme.primary,
-                ),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () {
-                setState(() => _showNicknameField = !_showNicknameField);
-              },
-              icon: Icon(
-                _showNicknameField ? Icons.expand_less_rounded : Icons.add_circle_outline_rounded,
-                size: 15,
-              ),
-              label: Text(
-                _showNicknameField ? '收起昵称' : '设置昵称(选填)',
-                style: const TextStyle(fontSize: 13),
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.textSecondary,
-                padding: EdgeInsets.zero,
-              ),
-            ),
-          ],
-        ),
-
-        // 可选昵称展开输入
-        if (_showNicknameField) ...[
-          const SizedBox(height: 10),
-          TextField(
-            controller: nicknameController,
-            enabled: !busy,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              hintText: '起一个独特的昵称吧',
-              labelText: '用户昵称 (可选)',
-              prefixIcon: Icon(Icons.badge_outlined, color: AppTheme.primary),
-              contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            ),
-          ),
-        ],
-
-        const SizedBox(height: 22),
-
-        // 确认登录按钮
+  /// 1. 验证码登录表单
+  Widget _buildCodeLoginForm(bool busy) {
+    return Column(
+      key: const ValueKey('form_code_login'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildEmailField(busy),
+        const SizedBox(height: 16),
+        _buildCodeField(busy),
+        const SizedBox(height: 24),
         SizedBox(
           width: double.infinity,
           height: 48,
           child: FilledButton(
-            onPressed: busy || code.length != 6 ? null : submit,
+            onPressed: busy ? null : submit,
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primary,
               elevation: 2,
@@ -874,7 +1041,7 @@ class _AuthScreenState extends State<AuthScreen> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: busy
+            child: isSubmitting
                 ? const SizedBox(
                     width: 20,
                     height: 20,
@@ -884,116 +1051,287 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   )
                 : const Text(
-                    '验证并进入论坛',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
+                    '登录并进入论坛',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
           ),
         ),
       ],
     );
   }
-}
 
-/// 现代化 6 位分格验证码输入组件
-class _PinCodeInput extends StatelessWidget {
-  const _PinCodeInput({
-    required this.controller,
-    required this.focusNode,
-    required this.enabled,
-    required this.onCompleted,
-    required this.onChanged,
-  });
-
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final bool enabled;
-  final ValueChanged<String> onCompleted;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
+  /// 2. 密码登录表单
+  Widget _buildPasswordLoginForm(bool busy) {
+    return Column(
+      key: const ValueKey('form_password_login'),
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 隐藏的真实输入框，负责接收键盘输入、粘贴与数字限制
-        Opacity(
-          opacity: 0.0,
-          child: TextField(
-            controller: controller,
-            focusNode: focusNode,
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onChanged: (val) {
-              onChanged(val);
-              if (val.length == 6) {
-                onCompleted(val);
-              }
-            },
+        _buildEmailField(busy),
+        const SizedBox(height: 16),
+        const Text(
+          '密码',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
           ),
         ),
-
-        // 视觉呈现的 6 个独立分格方块
-        GestureDetector(
-          onTap: () {
-            if (enabled) {
-              focusNode.requestFocus();
-            }
-          },
-          behavior: HitTestBehavior.opaque,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(6, (index) {
-              final text = controller.text;
-              final hasChar = index < text.length;
-              final char = hasChar ? text[index] : '';
-              final isCurrent = index == text.length && focusNode.hasFocus;
-
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                width: 46,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: isCurrent
-                      ? Colors.white
-                      : hasChar
-                      ? AppTheme.surfaceBlue.withValues(alpha: 0.6)
-                      : AppTheme.surfaceBlue,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isCurrent
-                        ? AppTheme.primary
-                        : hasChar
-                        ? AppTheme.highlight.withValues(alpha: 0.5)
-                        : AppTheme.border.withValues(alpha: 0.8),
-                    width: isCurrent ? 2.0 : 1.2,
+        const SizedBox(height: 6),
+        TextField(
+          controller: passwordController,
+          focusNode: passwordFocusNode,
+          enabled: !busy,
+          obscureText: _obscurePassword,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => submit(),
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+          ),
+          decoration: InputDecoration(
+            hintText: '请输入密码',
+            hintStyle: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.normal,
+              fontSize: 14,
+            ),
+            prefixIcon: const Icon(
+              Icons.lock_outline_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed: () {
+                setState(() => _obscurePassword = !_obscurePassword);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: busy
+                ? null
+                : () => _switchLoginMethod(LoginMethod.code),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.textSecondary,
+              padding: EdgeInsets.zero,
+            ),
+            child: const Text(
+              '忘记密码？使用验证码登录',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: FilledButton(
+            onPressed: busy ? null : submit,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              elevation: 2,
+              shadowColor: AppTheme.primary.withValues(alpha: 0.4),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: isSubmitting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Text(
+                    '登录',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
-                  boxShadow: isCurrent
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.primary.withValues(alpha: 0.2),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  char,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 3. 注册表单
+  Widget _buildRegisterForm(bool busy) {
+    return Column(
+      key: const ValueKey('form_register'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildEmailField(busy),
+        const SizedBox(height: 14),
+        _buildCodeField(busy),
+        const SizedBox(height: 14),
+        const Text(
+          '设置密码',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: passwordController,
+          focusNode: passwordFocusNode,
+          enabled: !busy,
+          obscureText: _obscurePassword,
+          textInputAction: TextInputAction.next,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+          ),
+          decoration: InputDecoration(
+            hintText: '至少 8 位密码',
+            hintStyle: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.normal,
+              fontSize: 14,
+            ),
+            prefixIcon: const Icon(
+              Icons.lock_outline_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed: () {
+                setState(() => _obscurePassword = !_obscurePassword);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          '确认密码',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: confirmPasswordController,
+          focusNode: confirmPasswordFocusNode,
+          enabled: !busy,
+          obscureText: _obscureConfirmPassword,
+          textInputAction: TextInputAction.next,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+          ),
+          decoration: InputDecoration(
+            hintText: '再次输入密码',
+            hintStyle: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.normal,
+              fontSize: 14,
+            ),
+            prefixIcon: const Icon(
+              Icons.lock_reset_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureConfirmPassword
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+                size: 20,
+                color: AppTheme.textSecondary,
+              ),
+              onPressed: () {
+                setState(
+                  () => _obscureConfirmPassword = !_obscureConfirmPassword,
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          '昵称（选填）',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: nicknameController,
+          focusNode: nicknameFocusNode,
+          enabled: !busy,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => submit(),
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.textPrimary,
+          ),
+          decoration: const InputDecoration(
+            hintText: '给自己起一个昵称',
+            hintStyle: TextStyle(
+              color: AppTheme.textSecondary,
+              fontWeight: FontWeight.normal,
+              fontSize: 14,
+            ),
+            prefixIcon: Icon(
+              Icons.badge_outlined,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: FilledButton(
+            onPressed: busy ? null : submit,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              elevation: 2,
+              shadowColor: AppTheme.primary.withValues(alpha: 0.4),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            child: isSubmitting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Text(
+                    '注册并进入论坛',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
-                ),
-              );
-            }),
           ),
         ),
       ],

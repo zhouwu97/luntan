@@ -87,10 +87,7 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isApiMode && currentUser == null) {
-      return _GuestProfileScreen(onRequireAuth: onRequireAuth);
-    }
-    if (isApiMode && profileRepository != null) {
+    if (isApiMode && currentUser != null && currentUser!.accountType != 'guest' && profileRepository != null) {
       return _ApiProfileScreen(
         repository: profileRepository!,
         onOpenPost: onOpenPost,
@@ -111,8 +108,35 @@ class ProfileScreen extends StatelessWidget {
         onOpenAdmins: onOpenAdmins,
         onOpenGovernance: onOpenGovernance,
         onOpenRelations: onOpenRelations,
-        isGuest: currentUser?.accountType == 'guest',
+        isGuest: false,
         accountSubtitle: currentUser?.email ?? '邮箱账号已登录',
+        onRequireAuth: onRequireAuth,
+        refreshToken: refreshToken,
+      );
+    }
+    if (isApiMode && currentUser != null && currentUser!.accountType == 'guest' && profileRepository != null) {
+      return _ApiProfileScreen(
+        repository: profileRepository!,
+        onOpenPost: onOpenPost,
+        onOpenMessages: onOpenMessages,
+        onFeedback: onFeedback,
+        onLogout: onLogout,
+        onDeleteAccount: onDeleteAccount,
+        storeRepository: storeRepository,
+        bookmarkRepository: bookmarkRepository,
+        publishRepository: publishRepository,
+        canManageProfile: canManageProfile,
+        onOpenPostId: onOpenPostId,
+        onOpenPostById: onOpenPostById,
+        onOpenModeration: onOpenModeration,
+        onOpenRecommendations: onOpenRecommendations,
+        onOpenAppeals: onOpenAppeals,
+        onOpenAccountStatus: onOpenAccountStatus,
+        onOpenAdmins: onOpenAdmins,
+        onOpenGovernance: onOpenGovernance,
+        onOpenRelations: onOpenRelations,
+        isGuest: true,
+        accountSubtitle: '游客模式',
         onRequireAuth: onRequireAuth,
         refreshToken: refreshToken,
       );
@@ -123,6 +147,7 @@ class ProfileScreen extends StatelessWidget {
         body: SafeArea(
           bottom: false,
           child: ListView(
+            cacheExtent: 1000,
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
             children: [
               _ProfileTopbar(
@@ -130,7 +155,15 @@ class ProfileScreen extends StatelessWidget {
                 onSettings: () => _showSettings(context),
               ),
               const SizedBox(height: 16),
-              _ProfileHero(user: currentUser, isApiMode: isApiMode),
+              _ProfileHero(
+                user: currentUser,
+                isApiMode: isApiMode,
+                onRequireAuth: onRequireAuth,
+              ),
+              if (isApiMode && (currentUser == null || currentUser?.accountType == 'guest')) ...[
+                const SizedBox(height: 14),
+                _GuestAccountBanner(onRequireAuth: onRequireAuth),
+              ],
               const SizedBox(height: 16),
               _StatsStrip(
                 store: store,
@@ -139,7 +172,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               _PointsBalanceCard(
-                balance: store.points,
+                balance: isApiMode ? 0 : store.points,
                 onOpenPoints: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => PointsCenterScreen(store: store),
@@ -147,7 +180,9 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 onOpenStore: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
-                    builder: (_) => ExchangeStoreScreen(store: store),
+                    builder: (_) => isApiMode && storeRepository != null
+                        ? ExchangeStoreScreen(apiRepository: storeRepository!)
+                        : ExchangeStoreScreen(store: store),
                   ),
                 ),
               ),
@@ -236,10 +271,17 @@ class ProfileScreen extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SettingsCenterScreen(
+          isGuest: currentUser == null || currentUser?.accountType == 'guest',
+          accountSubtitle: currentUser?.email ?? (isApiMode ? '未登录 · 游客体验' : null),
+          onRequireAuth: onRequireAuth,
           onOpenMessages: onOpenMessages,
           onFeedback: onFeedback,
+          onOpenGovernance: onOpenGovernance,
+          onOpenAppeals: onOpenAppeals,
+          onOpenAccountStatus: onOpenAccountStatus,
           onClearHistory: () async => store.clearHistory(),
           onLogout: onLogout,
+          onDeleteAccount: onDeleteAccount,
         ),
       ),
     );
@@ -410,63 +452,6 @@ class ProfileScreen extends StatelessWidget {
     final success = store.redeem(product);
     onFeedback(success ? '已兑换${product.name}，请留意领取通知' : '积分不足，再攒一攒就可以兑换啦');
   }
-}
-
-class _GuestProfileScreen extends StatelessWidget {
-  const _GuestProfileScreen({this.onRequireAuth});
-
-  final VoidCallback? onRequireAuth;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircleAvatar(
-                radius: 34,
-                backgroundColor: AppTheme.surfaceBlue,
-                child: Icon(
-                  Icons.person_outline_rounded,
-                  size: 36,
-                  color: AppTheme.primary,
-                ),
-              ),
-              const SizedBox(height: 18),
-              const Text(
-                '登录后查看我的内容',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '收藏、历史、评论和积分都将在这里汇总',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textSecondary),
-              ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: onRequireAuth,
-                child: const Text('登录 / 注册'),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: onRequireAuth,
-                icon: const Icon(Icons.mail_outline_rounded),
-                label: const Text('绑定邮箱账号'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 /// 正式模式的个人中心只依赖服务器返回的聚合数据和列表，不读取 ForumStore。
@@ -642,8 +627,8 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                         profile.growth?.levelLocked == true
                             ? '@${profile.username} · Lv.0 · 累计经验 ${profile.experience} · 注册后解锁等级'
                             : (profile.growth?.nextLevelExperience == null
-                                ? '@${profile.username} · Lv.${profile.level} (最高级) · 经验 ${profile.experience} · 信任${profile.trustLevel}'
-                                : '@${profile.username} · Lv.${profile.level} · 经验 ${profile.growth?.experienceInLevel ?? 0}/${profile.growth?.experienceRequiredInLevel ?? 100} · 信任${profile.trustLevel}'),
+                                  ? '@${profile.username} · Lv.${profile.level} (最高级) · 经验 ${profile.experience} · 信任${profile.trustLevel}'
+                                  : '@${profile.username} · Lv.${profile.level} · 经验 ${profile.growth?.experienceInLevel ?? 0}/${profile.growth?.experienceRequiredInLevel ?? 100} · 信任${profile.trustLevel}'),
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: 12,
@@ -900,7 +885,7 @@ class _GuestAccountBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+    padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
     decoration: BoxDecoration(
       color: AppTheme.surfaceBlue,
       borderRadius: BorderRadius.circular(AppTheme.cardRadius),
@@ -908,7 +893,15 @@ class _GuestAccountBanner extends StatelessWidget {
     ),
     child: Row(
       children: [
-        const Icon(Icons.person_outline_rounded, color: AppTheme.primary),
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.person_outline_rounded, color: AppTheme.primary, size: 20),
+        ),
         const SizedBox(width: 10),
         const Expanded(
           child: Column(
@@ -919,17 +912,32 @@ class _GuestAccountBanner extends StatelessWidget {
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontWeight: FontWeight.w800,
+                  fontSize: 13,
                 ),
               ),
-              SizedBox(height: 3),
+              SizedBox(height: 2),
               Text(
-                '登录或绑定邮箱后保存个人数据',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                '登录或绑定邮箱后保存个人数据与经验',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
               ),
             ],
           ),
         ),
-        TextButton(onPressed: onRequireAuth, child: const Text('去登录')),
+        const SizedBox(width: 8),
+        FilledButton(
+          onPressed: onRequireAuth,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: const Text('去登录', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        ),
       ],
     ),
   );
@@ -1509,25 +1517,27 @@ class _ProfileTopbar extends StatelessWidget {
 }
 
 class _ProfileHero extends StatelessWidget {
-  const _ProfileHero({this.user, required this.isApiMode});
+  const _ProfileHero({this.user, required this.isApiMode, this.onRequireAuth});
 
   final AuthUser? user;
   final bool isApiMode;
+  final VoidCallback? onRequireAuth;
 
   @override
   Widget build(BuildContext context) {
+    final isGuest = user == null || user?.accountType == 'guest';
     final nickname = user?.nickname.isNotEmpty == true
         ? user!.nickname
-        : '小理不理';
-    final level = user?.level ?? 8;
+        : (isGuest ? '游客用户' : '小理不理');
+    final level = user?.level ?? 0;
     return Row(
       children: [
-        const CircleAvatar(
+        CircleAvatar(
           radius: 32,
           backgroundColor: AppTheme.surfaceBlue,
           child: Text(
-            '理',
-            style: TextStyle(
+            isGuest ? '游' : (nickname.isNotEmpty ? nickname.characters.first : '理'),
+            style: const TextStyle(
               color: AppTheme.primary,
               fontSize: 23,
               fontWeight: FontWeight.w900,
@@ -1545,7 +1555,7 @@ class _ProfileHero extends StatelessWidget {
                     child: Text(
                       nickname,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
@@ -1553,34 +1563,56 @@ class _ProfileHero extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Container(
-                    width: 18,
-                    height: 18,
-                    decoration: const BoxDecoration(
-                      color: AppTheme.primary,
-                      shape: BoxShape.circle,
+                  if (isGuest)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceBlue,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        '游客',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.highlight,
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: 18,
+                      height: 18,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check_rounded,
+                        color: Colors.white,
+                        size: 13,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.check_rounded,
-                      color: Colors.white,
-                      size: 13,
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 6),
               Text(
-                isApiMode ? '@${user?.username ?? '未登录'}' : '关注 15 · 粉丝 59',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                isGuest ? '@guest · 游客模式' : (isApiMode ? '@${user?.username ?? '未登录'}' : '关注 15 · 粉丝 59'),
+                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 4),
               Text(
-                user?.growth?.levelLocked == true
-                    ? 'Lv.0 · 累计经验 ${user?.experience ?? 0} · 注册后解锁等级'
-                    : (user?.growth?.nextLevelExperience == null
-                        ? '等级 Lv.$level (最高级) · 经验 ${user?.experience ?? 0}'
-                        : '等级 Lv.$level · 经验 ${user?.growth?.experienceInLevel ?? 0}/${user?.growth?.experienceRequiredInLevel ?? 100}'),
-                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                isGuest
+                    ? 'Lv.0 · 游客模式 · 登录后解锁等级与发帖'
+                    : (user?.growth?.levelLocked == true
+                        ? 'Lv.0 · 累计经验 ${user?.experience ?? 0} · 注册后解锁等级'
+                        : (user?.growth?.nextLevelExperience == null
+                              ? '等级 Lv.$level (最高级) · 经验 ${user?.experience ?? 0}'
+                              : '等级 Lv.$level · 经验 ${user?.growth?.experienceInLevel ?? 0}/${user?.growth?.experienceRequiredInLevel ?? 100}')),
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
@@ -1604,7 +1636,7 @@ class _StatsStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stats = isApiMode
-        ? [('—', '我的发布'), ('—', '我的评论'), ('—', '关注的吧')]
+        ? [('0', '我的发布'), ('0', '我的评论'), ('0', '关注的吧')]
         : [
             (store.publishedCount.toString(), '我的发布'),
             (store.replyCount.toString(), '我的评论'),

@@ -188,6 +188,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     TextEditingController(),
     TextEditingController(),
   ];
+  bool allowMultiple = false;
+  DateTime? pollEndsAt;
+  String? topic;
   ForumSection section = ForumSection.daily;
   String? communityId;
   late final List<Community> _availableCommunities = [
@@ -279,10 +282,14 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         )
         ? draft.communityId
         : draft.communityId ?? _defaultCommunityId(_availableCommunities);
-    for (var index = 0; index < pollOptionControllers.length; index++) {
-      if (index < draft.pollOptions.length) {
-        pollOptionControllers[index].text = draft.pollOptions[index];
-      }
+    allowMultiple = draft.allowMultiple;
+    pollEndsAt = draft.pollEndsAt;
+    topic = draft.topic;
+    while (pollOptionControllers.length < draft.pollOptions.length) {
+      pollOptionControllers.add(TextEditingController());
+    }
+    for (var index = 0; index < draft.pollOptions.length; index++) {
+      pollOptionControllers[index].text = draft.pollOptions[index];
     }
     _restoredMediaIds.addAll(draft.uploadedMediaIds);
     for (var index = 0; index < draft.localImagePaths.length; index++) {
@@ -300,6 +307,41 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         if (image.status != _DraftImageStatus.done) _enqueueUpload(image);
       }
     }
+  }
+
+  void _addPollOption() {
+    if (pollOptionControllers.length >= 10) return;
+    setState(() => pollOptionControllers.add(TextEditingController()));
+    _scheduleDraftSave();
+  }
+
+  void _removePollOption(int index) {
+    if (pollOptionControllers.length <= 2) return;
+    final controller = pollOptionControllers.removeAt(index);
+    controller.dispose();
+    setState(() {});
+    _scheduleDraftSave();
+  }
+
+  Future<void> _choosePollDeadline() async {
+    final initialDate =
+        pollEndsAt ?? DateTime.now().add(const Duration(days: 7));
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDate: initialDate.isBefore(DateTime.now())
+          ? DateTime.now()
+          : initialDate,
+      helpText: '选择投票截止日期',
+      cancelText: '取消',
+      confirmText: '确定',
+    );
+    if (!mounted || picked == null) return;
+    setState(() {
+      pollEndsAt = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
+    });
+    _scheduleDraftSave();
   }
 
   Future<void> _loadCommunities() async {
@@ -439,6 +481,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
     sectionName: section.name,
     communityId: communityId,
     pollOptions: pollOptionControllers.map((item) => item.text).toList(),
+    allowMultiple: allowMultiple,
+    pollEndsAt: pollEndsAt,
+    topic: topic,
     localImagePaths: images.map((item) => item.file.path).toList(),
     uploadedMediaIds: <String>{
       ..._restoredMediaIds,
@@ -538,6 +583,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
         media: selectedMedia,
         mediaIds: mediaIds,
         pollOptions: pollOptions,
+        allowMultiple: allowMultiple,
+        pollEndsAt: pollEndsAt,
+        topic: topic,
       );
       await widget.onPublish(draft);
       if (!mounted) return;
@@ -837,6 +885,26 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                     hintText: '分享你的真实体验、问题或发现…',
                   ),
                 ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: topic,
+                  decoration: const InputDecoration(
+                    labelText: '内容主题（可选）',
+                    helperText: '选择后，内容会进入对应主题页；不再按是否有图片猜测',
+                  ),
+                  items: const [
+                    DropdownMenuItem<String?>(value: null, child: Text('不设置')),
+                    DropdownMenuItem<String?>(value: 'outfit', child: Text('穿搭分享')),
+                    DropdownMenuItem<String?>(value: 'activity', child: Text('活动')),
+                    DropdownMenuItem<String?>(value: 'game_share', child: Text('玩法分享')),
+                  ],
+                  onChanged: submitting
+                      ? null
+                      : (value) {
+                          setState(() => topic = value);
+                          _scheduleDraftSave();
+                        },
+                ),
                 if (widget.isPoll) ...[
                   const SizedBox(height: 12),
                   const Text(
@@ -851,18 +919,95 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                   ...pollOptionControllers.asMap().entries.map(
                     (entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: TextField(
-                        controller: entry.value,
-                        enabled: !submitting,
-                        onChanged: (_) => _scheduleDraftSave(),
-                        decoration: InputDecoration(
-                          labelText: '选项 ${entry.key + 1}',
-                          prefixIcon: const Icon(
-                            Icons.radio_button_unchecked_rounded,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: entry.value,
+                              enabled: !submitting,
+                              onChanged: (_) => _scheduleDraftSave(),
+                              decoration: InputDecoration(
+                                labelText: '选项 ${entry.key + 1}',
+                                prefixIcon: const Icon(
+                                  Icons.radio_button_unchecked_rounded,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (pollOptionControllers.length > 2)
+                            IconButton(
+                              tooltip: '删除选项',
+                              onPressed: submitting
+                                  ? null
+                                  : () => _removePollOption(entry.key),
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed:
+                            submitting || pollOptionControllers.length >= 10
+                            ? null
+                            : _addPollOption,
+                        icon: const Icon(Icons.add),
+                        label: const Text('添加选项'),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text('允许多选'),
+                          value: allowMultiple,
+                          onChanged: submitting
+                              ? null
+                              : (value) {
+                                  setState(() => allowMultiple = value);
+                                  _scheduleDraftSave();
+                                },
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.event_outlined,
+                        size: 19,
+                        color: AppTheme.textSecondary,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          pollEndsAt == null
+                              ? '投票截止：不限时间'
+                              : '投票截止：${pollEndsAt!.year}-${pollEndsAt!.month.toString().padLeft(2, '0')}-${pollEndsAt!.day.toString().padLeft(2, '0')}',
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
                           ),
                         ),
                       ),
-                    ),
+                      TextButton(
+                        onPressed: submitting ? null : _choosePollDeadline,
+                        child: Text(pollEndsAt == null ? '设置' : '修改'),
+                      ),
+                      if (pollEndsAt != null)
+                        IconButton(
+                          tooltip: '清除截止时间',
+                          onPressed: submitting
+                              ? null
+                              : () {
+                                  setState(() => pollEndsAt = null);
+                                  _scheduleDraftSave();
+                                },
+                          icon: const Icon(Icons.close, size: 18),
+                        ),
+                    ],
                   ),
                 ],
                 const SizedBox(height: 12),

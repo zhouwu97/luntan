@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/media"
@@ -56,88 +58,86 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 	}
 
 	if h.DB == nil {
-		return nil
+		return fmt.Errorf("media database unavailable: cannot process %s", payload.MediaID)
 	}
 
-	// 幂等性检查：如果该媒体的所有核心变体都已就绪且完整，则安全跳过或刷新
+	isVideo := strings.EqualFold(strings.TrimSpace(payload.MimeType), "video/mp4")
+	readyVariants := "'source', 'original', 'detail', 'thumb'"
+	readyTarget := 4
+	if isVideo {
+		// 视频当前只登记源对象，图片衍生图不能由视频处理链路伪造。
+		readyVariants = "'source'"
+		readyTarget = 1
+	}
+
+	// 幂等性检查：只有真实存在的核心变体才允许跳过处理。
 	var readyCount int
-	if err := h.DB.QueryRowContext(ctx, `
+	readyQuery := fmt.Sprintf(`
 		SELECT COUNT(*) FROM media_variants
-		WHERE media_id = $1 AND status = 'ready' AND variant IN ('source', 'original', 'detail', 'thumb')
-	`, payload.MediaID).Scan(&readyCount); err == nil && readyCount == 4 {
+		WHERE media_id = $1 AND status = 'ready' AND variant IN (%s)
+	`, readyVariants)
+	if err := h.DB.QueryRowContext(ctx, readyQuery, payload.MediaID).Scan(&readyCount); err != nil {
+		return fmt.Errorf("check media variants: %w", err)
+	} else if readyCount == readyTarget {
 		// 已完全就绪，保证幂等执行
 		return nil
 	}
 
-	now := time.Now().UTC()
-
-	// 变体默认值（以防无 storage 或非图片媒体时保持基础元数据）
-	origKey := payload.ObjectKey + "_original.jpg"
-	origW, origH := payload.Width, payload.Height
-	origSize := payload.SizeBytes
-	origSHA := payload.SHA256
-
-	detailKey := payload.ObjectKey + "_detail.jpg"
-	detailW, detailH := payload.Width, payload.Height
-	if detailW > 1440 || detailH > 1440 {
-		maxSide := detailW
-		if detailH > maxSide {
-			maxSide = detailH
-		}
-		scale := 1440.0 / float64(maxSide)
-		detailW = int(float64(detailW) * scale)
-		detailH = int(float64(detailH) * scale)
+	if h.Storage == nil {
+		return fmt.Errorf("media storage unavailable: cannot process %s", payload.ObjectKey)
 	}
-	detailSize := payload.SizeBytes / 2
-	detailSHA := payload.SHA256
 
-	thumbKey := payload.ObjectKey + "_thumb.jpg"
-	thumbW, thumbH := payload.Width, payload.Height
-	if thumbW > 640 || thumbH > 640 {
-		maxSide := thumbW
-		if thumbH > maxSide {
-			maxSide = thumbH
-		}
-		scale := 640.0 / float64(maxSide)
-		thumbW = int(float64(thumbW) * scale)
-		thumbH = int(float64(thumbH) * scale)
+	rc, _, _, err := h.Storage.Get(ctx, payload.ObjectKey)
+	if err != nil {
+		return fmt.Errorf("get source media: %w", err)
 	}
-	thumbSize := payload.SizeBytes / 4
-	thumbSHA := payload.SHA256
+	if rc == nil {
+		return fmt.Errorf("get source media: empty reader")
+	}
 
-	// 如果配置了对象存储，则真实下载源文件、解码、剥离 EXIF/GPS 并按比例生成各分辨率真实图片上传
-	if h.Storage != nil {
-		rc, _, _, err := h.Storage.Get(ctx, payload.ObjectKey)
-		if err == nil && rc != nil {
-			procRes, err := media.ProcessImage(rc)
+	var procRes *media.ProcessResult
+	if isVideo {
+		// 完整读取视频流，确保网络存储在标记 ready 前已经返回成功。
+		if _, err := io.Copy(io.Discard, rc); err != nil {
 			_ = rc.Close()
-			if err == nil && procRes != nil {
-				// 上传 original (去 EXIF 后的全分辨率图)
-				if err := h.Storage.Put(ctx, origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes); err != nil {
-					return fmt.Errorf("upload original variant: %w", err)
-				}
-				origW, origH = procRes.Original.Width, procRes.Original.Height
-				origSize = procRes.Original.SizeBytes
-				origSHA = procRes.Original.SHA256
+			return fmt.Errorf("read source video: %w", err)
+		}
+		if err := rc.Close(); err != nil {
+			return fmt.Errorf("close source video: %w", err)
+		}
+	} else {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(payload.MimeType)), "image/") {
+			_ = rc.Close()
+			return fmt.Errorf("unsupported media mime type: %q", payload.MimeType)
+		}
+		procRes, err = media.ProcessImage(rc)
+		closeErr := rc.Close()
+		if err != nil {
+			return fmt.Errorf("process image: %w", err)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close source image: %w", closeErr)
+		}
+		if procRes == nil {
+			return fmt.Errorf("process image: empty result")
+		}
 
-				// 上传 detail (长边 <= 1440px)
-				if err := h.Storage.Put(ctx, detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes); err != nil {
-					return fmt.Errorf("upload detail variant: %w", err)
-				}
-				detailW, detailH = procRes.Detail.Width, procRes.Detail.Height
-				detailSize = procRes.Detail.SizeBytes
-				detailSHA = procRes.Detail.SHA256
-
-				// 上传 thumb (长边 <= 640px)
-				if err := h.Storage.Put(ctx, thumbKey, procRes.Thumb.MimeType, bytes.NewReader(procRes.Thumb.Data), procRes.Thumb.SizeBytes); err != nil {
-					return fmt.Errorf("upload thumb variant: %w", err)
-				}
-				thumbW, thumbH = procRes.Thumb.Width, procRes.Thumb.Height
-				thumbSize = procRes.Thumb.SizeBytes
-				thumbSHA = procRes.Thumb.SHA256
-			}
+		origKey := payload.ObjectKey + "_original.jpg"
+		detailKey := payload.ObjectKey + "_detail.jpg"
+		thumbKey := payload.ObjectKey + "_thumb.jpg"
+		// 只有三个真实对象全部上传成功后，下面的数据库事务才会写 ready。
+		if err := h.Storage.Put(ctx, origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes); err != nil {
+			return fmt.Errorf("upload original variant: %w", err)
+		}
+		if err := h.Storage.Put(ctx, detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes); err != nil {
+			return fmt.Errorf("upload detail variant: %w", err)
+		}
+		if err := h.Storage.Put(ctx, thumbKey, procRes.Thumb.MimeType, bytes.NewReader(procRes.Thumb.Data), procRes.Thumb.SizeBytes); err != nil {
+			return fmt.Errorf("upload thumb variant: %w", err)
 		}
 	}
+
+	now := time.Now().UTC()
 
 	tx, err := h.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -161,7 +161,12 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 		return fmt.Errorf("save source variant: %w", err)
 	}
 
+	if isVideo {
+		return tx.Commit()
+	}
+
 	// 2. original 变体（剥离元数据的高画质展示图）
+	origKey := payload.ObjectKey + "_original.jpg"
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
 		VALUES ($1, 'original', $2, 'image/jpeg', $3, $4, $5, $6, 'ready', $7, $7)
@@ -173,11 +178,12 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 			sha256 = EXCLUDED.sha256,
 			status = 'ready',
 			updated_at = EXCLUDED.updated_at
-	`, payload.MediaID, origKey, origW, origH, origSize, origSHA, now); err != nil {
+	`, payload.MediaID, origKey, procRes.Original.Width, procRes.Original.Height, procRes.Original.SizeBytes, procRes.Original.SHA256, now); err != nil {
 		return fmt.Errorf("save original variant: %w", err)
 	}
 
 	// 3. detail 变体（长边 <= 1440px）
+	detailKey := payload.ObjectKey + "_detail.jpg"
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
 		VALUES ($1, 'detail', $2, 'image/jpeg', $3, $4, $5, $6, 'ready', $7, $7)
@@ -189,11 +195,12 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 			sha256 = EXCLUDED.sha256,
 			status = 'ready',
 			updated_at = EXCLUDED.updated_at
-	`, payload.MediaID, detailKey, detailW, detailH, detailSize, detailSHA, now); err != nil {
+	`, payload.MediaID, detailKey, procRes.Detail.Width, procRes.Detail.Height, procRes.Detail.SizeBytes, procRes.Detail.SHA256, now); err != nil {
 		return fmt.Errorf("save detail variant: %w", err)
 	}
 
 	// 4. thumb 变体（长边 <= 640px）
+	thumbKey := payload.ObjectKey + "_thumb.jpg"
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
 		VALUES ($1, 'thumb', $2, 'image/jpeg', $3, $4, $5, $6, 'ready', $7, $7)
@@ -205,7 +212,7 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 			sha256 = EXCLUDED.sha256,
 			status = 'ready',
 			updated_at = EXCLUDED.updated_at
-	`, payload.MediaID, thumbKey, thumbW, thumbH, thumbSize, thumbSHA, now); err != nil {
+	`, payload.MediaID, thumbKey, procRes.Thumb.Width, procRes.Thumb.Height, procRes.Thumb.SizeBytes, procRes.Thumb.SHA256, now); err != nil {
 		return fmt.Errorf("save thumb variant: %w", err)
 	}
 

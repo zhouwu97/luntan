@@ -29,6 +29,7 @@ const (
 	capManageAdmins    = "can_manage_admins"
 	capBanIP           = "can_ban_ip"
 	capViewAdminLogs   = "can_view_admin_logs"
+	capManageUsers     = "can_manage_users"
 )
 
 // capabilitiesForUser 是未查询角色权限前的基础能力集合。
@@ -53,6 +54,7 @@ func capabilitiesForUser(user auth.User) map[string]bool {
 			capManageAdmins:    false,
 			capBanIP:           false,
 			capViewAdminLogs:   false,
+			capManageUsers:     false,
 		}
 	}
 	registered := user.AccountType != "guest"
@@ -74,6 +76,7 @@ func capabilitiesForUser(user auth.User) map[string]bool {
 		capManageAdmins:  false,
 		capBanIP:         false,
 		capViewAdminLogs: false,
+		capManageUsers:   false,
 	}
 }
 
@@ -89,6 +92,8 @@ func applyPermissionCapability(caps map[string]bool, role, permission string) {
 		if role == "super_admin" {
 			caps[capBanIP] = true
 		}
+	case "user.manage":
+		caps[capManageUsers] = role == "platform_admin" || role == "super_admin"
 	}
 	if role == "super_admin" {
 		caps[capManageAdmins] = true

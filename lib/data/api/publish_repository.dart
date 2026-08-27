@@ -8,6 +8,7 @@ abstract interface class PublishRepository {
     required String content,
     required String idempotencyKey,
     List<String> mediaIds,
+    String? topic,
   });
 
   Future<MediaUploadTicket> requestMediaUpload({
@@ -57,6 +58,7 @@ abstract interface class AtomicPollPublishRepository {
     bool allowMultiple,
     DateTime? endsAt,
     List<String> mediaIds,
+    String? topic,
   });
 }
 
@@ -102,6 +104,7 @@ class ApiPublishRepository
     required String content,
     required String idempotencyKey,
     List<String> mediaIds = const [],
+    String? topic,
   }) {
     return _client.postJson(
       '/api/v1/posts',
@@ -111,6 +114,7 @@ class ApiPublishRepository
         'type': type,
         'title': title,
         'content': content,
+        if (topic != null) 'topic': topic,
         if (mediaIds.isNotEmpty) 'media_ids': mediaIds,
       },
     );
@@ -143,6 +147,7 @@ class ApiPublishRepository
     bool allowMultiple = false,
     DateTime? endsAt,
     List<String> mediaIds = const [],
+    String? topic,
   }) => _client.postJson(
     '/api/v1/posts',
     headers: {'Idempotency-Key': idempotencyKey},
@@ -151,6 +156,7 @@ class ApiPublishRepository
       'type': 'poll',
       'title': title,
       'content': content,
+      if (topic != null) 'topic': topic,
       if (mediaIds.isNotEmpty) 'media_ids': mediaIds,
       'poll': {
         'question': title,

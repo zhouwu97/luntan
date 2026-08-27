@@ -109,27 +109,30 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var nickname, bio, trustLevel, avatarObjectKey string
+	var nickname, bio, trustLevel, avatarObjectKey, accountType string
 	var avatarMediaID sql.NullString
 	var level int
+	var exp int64
 	if err := s.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.avatar_media_id, ''),
-		       COALESCE(ma.object_key, ''), COALESCE(up.level, 1), COALESCE(up.trust_level, 'new')
+		       COALESCE(ma.object_key, ''), CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.trust_level, 'new'), COALESCE(up.experience, 0), COALESCE(u.account_type, 'email')
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
 		WHERE u.id = $1`, user.ID).
-		Scan(&nickname, &bio, &avatarMediaID, &avatarObjectKey, &level, &trustLevel); err != nil {
+		Scan(&nickname, &bio, &avatarMediaID, &avatarObjectKey, &level, &trustLevel, &exp, &accountType); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
+	growth := growthState(accountType, exp)
 	var posts, comments, receivedLikes, followers, following int64
 	queries := []struct {
 		target *int64
 		query  string
 	}{
 		{&posts, `SELECT count(*) FROM posts WHERE author_id = $1 AND publication_status = 'published' AND type <> 'market' AND deleted_at IS NULL`},
-		{&comments, `SELECT count(*) FROM comments c JOIN posts p ON p.id = c.post_id WHERE p.author_id = $1 AND p.type <> 'market' AND p.publication_status = 'published' AND p.deleted_at IS NULL AND c.publication_status = 'published' AND c.deleted_at IS NULL`},
+		{&comments, `SELECT count(*) FROM comments WHERE author_id = $1 AND publication_status = 'published' AND deleted_at IS NULL`},
 		{&receivedLikes, `SELECT count(*) FROM post_reactions pr JOIN posts p ON p.id = pr.post_id WHERE p.author_id = $1 AND p.type <> 'market' AND p.deleted_at IS NULL`},
 		{&followers, `SELECT count(*) FROM user_follows WHERE followee_id = $1`},
 		{&following, `SELECT count(*) FROM user_follows WHERE follower_id = $1`},
@@ -143,7 +146,8 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
 		"avatar_media_id": nullableProfileString(avatarMediaID),
-		"level":           level, "trust_level": trustLevel, "signature": bio, "post_count": posts,
+		"level":           growth.Level, "experience": growth.Experience, "growth": growth,
+		"trust_level": trustLevel, "signature": bio, "post_count": posts,
 		"comment_count": comments, "like_received_count": receivedLikes,
 		"follower_count": followers, "following_count": following,
 	}

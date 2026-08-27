@@ -12,6 +12,8 @@ import (
 	"image/png"
 	"io"
 	"math"
+
+	_ "golang.org/x/image/webp"
 )
 
 type ProcessedVariant struct {
@@ -116,7 +118,9 @@ func calcScaledDimensions(w, h, maxDimension int) (int, int) {
 
 func encodeVariant(img image.Image, targetW, targetH int, variantName string, quality int) (ProcessedVariant, error) {
 	var buf bytes.Buffer
-	err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality})
+	// JPEG 没有 alpha 通道。先铺白底再合成，避免 PNG/WebP 的透明区域在
+	// 重新编码后变成黑块或未定义颜色。
+	err := jpeg.Encode(&buf, flattenAlpha(img), &jpeg.Options{Quality: quality})
 	if err != nil {
 		return ProcessedVariant{}, err
 	}
@@ -136,6 +140,14 @@ func encodeVariant(img image.Image, targetW, targetH int, variantName string, qu
 	}, nil
 }
 
+func flattenAlpha(src image.Image) image.Image {
+	bounds := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+	draw.Draw(dst, dst.Bounds(), src, bounds.Min, draw.Over)
+	return dst
+}
+
 // ResizeBilinear 纯 Go 高质量双线性插值缩放算法，无 CGo 依赖
 func ResizeBilinear(src image.Image, dstW, dstH int) *image.RGBA {
 	srcBounds := src.Bounds()
@@ -151,7 +163,7 @@ func ResizeBilinear(src image.Image, dstW, dstH int) *image.RGBA {
 	yRatio := float64(srcH) / float64(dstH)
 
 	for y := 0; y < dstH; y++ {
-		srcY := (float64(y) + 0.5) * yRatio - 0.5
+		srcY := (float64(y)+0.5)*yRatio - 0.5
 		y0 := int(math.Floor(srcY))
 		y1 := y0 + 1
 		yWeight := srcY - float64(y0)
@@ -164,7 +176,7 @@ func ResizeBilinear(src image.Image, dstW, dstH int) *image.RGBA {
 		}
 
 		for x := 0; x < dstW; x++ {
-			srcX := (float64(x) + 0.5) * xRatio - 0.5
+			srcX := (float64(x)+0.5)*xRatio - 0.5
 			x0 := int(math.Floor(srcX))
 			x1 := x0 + 1
 			xWeight := srcX - float64(x0)

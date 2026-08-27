@@ -71,6 +71,11 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
       !apiMode || authController?.status == AuthStatus.authenticated;
   bool get canModerate => currentUser?.canModerate == true;
   bool get canManageAdmins => currentUser?.canManageAdmins == true;
+  bool get canManageUsers => currentUser?.canManageUsers == true;
+  bool get canViewAdminLogs => currentUser?.canViewAdminLogs == true;
+  bool get canBanIP => currentUser?.canBanIP == true;
+  bool get canAccessGovernance =>
+      canModerate || canManageAdmins || canManageUsers || canViewAdminLogs || canBanIP;
 
   bool get canManageBookmarks =>
       !apiMode || currentUser?.canManageBookmarks == true;
@@ -165,15 +170,22 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   void _openLogin() {
     final auth = authController;
     if (auth == null) return;
-    navigatorKey.currentState!.push(
-      MaterialPageRoute<void>(
-        builder: (_) => AuthScreen(
-          controller: auth,
-          onBrowse: () => navigatorKey.currentState!.pop(),
-          onGuest: _enterGuest,
-        ),
-      ),
-    );
+    navigatorKey.currentState!
+        .push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => AuthScreen(
+              controller: auth,
+              onBrowse: () => navigatorKey.currentState!.pop(),
+              onGuest: _enterGuest,
+            ),
+          ),
+        )
+        .then((_) {
+          // 登录/游客切换后个人中心仍可能复用原有 State；认证页关闭时
+          // 主动刷新资料、积分和最近内容，避免返回页面仍停留在游客快照。
+          if (!mounted) return;
+          setState(() => profileRefreshToken++);
+        });
   }
 
   Future<void> _enterGuest() async {
@@ -297,6 +309,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               allowMultiple: result.allowMultiple,
               endsAt: result.pollEndsAt,
               mediaIds: result.mediaIds,
+              topic: result.topic,
             )
           : publishController.publish(
               communityId: communityId,
@@ -304,6 +317,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               title: result.title,
               content: result.body,
               mediaIds: result.mediaIds,
+              topic: result.topic,
             ));
       await feedController.setQuery(communityId: communityId, sort: 'latest');
       if (!mounted) return;
@@ -596,6 +610,44 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
   }
 
+  void openModerationAppeals() {
+    final repository = repositories.appeals;
+    if (repository == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ModerationAppealsScreen(
+          repository: repository,
+          onFeedback: _showQuickFeedback,
+        ),
+      ),
+    );
+  }
+
+  void openGovernance() {
+    if (apiMode && !canAccessGovernance) {
+      _showQuickFeedback('你暂时没有访问治理中心的权限');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => GovernanceCenterScreen(
+          onOpenModeration: canModerate ? openModeration : null,
+          onOpenAppeals: canModerate && repositories.appeals != null
+              ? openModerationAppeals
+              : null,
+          onOpenRecommendations: canModerate ? openHomeRecommendations : null,
+          onOpenAdmins: canManageAdmins ? openAdmins : null,
+          onOpenUsers: canManageUsers ? openUserManagement : null,
+          onOpenRisk: canViewAdminLogs ? openRiskCenter : null,
+          onOpenIPRestrictions: canBanIP ? openIPRestrictions : null,
+          onOpenLogs: canViewAdminLogs ? openAdminLogs : null,
+        ),
+      ),
+    );
+  }
+
   void openHomeRecommendations() {
     if (apiMode && !canModerate) {
       _showQuickFeedback('你暂时没有管理首页推荐的权限');
@@ -683,10 +735,24 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         builder: (_) => AdminListScreen(
           repository: platform,
           onOpenAdmin: openAdminDetail,
-          onOpenRisk: openRiskCenter,
-          onOpenRecommendations: openHomeRecommendations,
+          onOpenRisk: canViewAdminLogs ? openRiskCenter : null,
+          onOpenRecommendations: canModerate ? openHomeRecommendations : null,
           communityRepository: repositories.community,
         ),
+      ),
+    );
+  }
+
+  void openUserManagement() {
+    if (apiMode && !canManageUsers) {
+      _showQuickFeedback('你暂时没有访问用户管理的权限');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ManagedUserListScreen(repository: platform),
       ),
     );
   }
@@ -706,22 +772,47 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   }
 
   void openRiskCenter() {
+    if (apiMode && !canViewAdminLogs) {
+      _showQuickFeedback('你暂时没有访问风控中心的权限');
+      return;
+    }
     final platform = repositories.platform;
     if (platform == null) return;
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            RiskCenterScreen(repository: platform, onOpenLogs: openAdminLogs),
+        builder: (_) => RiskCenterScreen(
+          repository: platform,
+          onOpenLogs: canViewAdminLogs ? openAdminLogs : null,
+          canBanIP: canBanIP,
+        ),
       ),
     );
   }
 
   void openAdminLogs() {
+    if (apiMode && !canViewAdminLogs) {
+      _showQuickFeedback('你暂时没有查看操作日志的权限');
+      return;
+    }
     final platform = repositories.platform;
     if (platform == null) return;
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
         builder: (_) => AdminLogsScreen(repository: platform),
+      ),
+    );
+  }
+
+  void openIPRestrictions() {
+    if (apiMode && !canBanIP) {
+      _showQuickFeedback('只有具备 IP 封禁权限的管理员可以管理 IP 限制');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => IPRestrictionsScreen(repository: platform),
       ),
     );
   }
@@ -906,6 +997,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
                 ? openAccountStatus
                 : null,
             onOpenAdmins: apiMode && canManageAdmins ? openAdmins : null,
+            onOpenUsers: apiMode && canManageUsers ? openUserManagement : null,
+            onOpenGovernance: apiMode && canAccessGovernance
+                ? openGovernance
+                : null,
             onLogout: _logout,
             onDeleteAccount: apiMode ? _deleteAccount : null,
             onRequireAuth: _openLogin,

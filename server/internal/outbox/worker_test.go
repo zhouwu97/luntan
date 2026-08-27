@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -192,6 +193,103 @@ func TestMediaHandlerProcessIdempotency(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestMediaHandlerProcessReturnsErrorWhenSourceIsMissing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := MediaHandler{DB: db, Storage: storage.NewMemoryStorage()}
+	payload, _ := json.Marshal(MediaProcessPayload{
+		MediaID:   "m_missing_source",
+		ObjectKey: "media/u1/missing",
+		MimeType:  "image/jpeg",
+	})
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM media_variants WHERE media_id = \$1 AND status = 'ready'`).
+		WithArgs("m_missing_source").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	err = handler.Handle(context.Background(), Event{EventType: "media.process", Payload: payload})
+	if err == nil || !strings.Contains(err.Error(), "get source media") {
+		t.Fatalf("expected source download error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database interaction after source failure: %v", err)
+	}
+}
+
+func TestMediaHandlerProcessReturnsErrorWhenSourceCannotBeDecoded(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store := storage.NewMemoryStorage()
+	if err := store.Put(context.Background(), "media/u1/corrupt", "image/jpeg", bytes.NewReader([]byte("not an image")), 12); err != nil {
+		t.Fatal(err)
+	}
+	handler := MediaHandler{DB: db, Storage: store}
+	payload, _ := json.Marshal(MediaProcessPayload{
+		MediaID:   "m_corrupt_source",
+		ObjectKey: "media/u1/corrupt",
+		MimeType:  "image/jpeg",
+	})
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM media_variants WHERE media_id = \$1 AND status = 'ready'`).
+		WithArgs("m_corrupt_source").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	err = handler.Handle(context.Background(), Event{EventType: "media.process", Payload: payload})
+	if err == nil || !strings.Contains(err.Error(), "process image") {
+		t.Fatalf("expected image processing error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database interaction after processing failure: %v", err)
+	}
+}
+
+func TestMediaHandlerVideoPersistsOnlyVerifiedSourceVariant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	store := storage.NewMemoryStorage()
+	const sourceKey = "media/u1/video"
+	videoBytes := []byte("valid video bytes")
+	if err := store.Put(ctx, sourceKey, "video/mp4", bytes.NewReader(videoBytes), int64(len(videoBytes))); err != nil {
+		t.Fatal(err)
+	}
+	handler := MediaHandler{DB: db, Storage: store}
+	payload, _ := json.Marshal(MediaProcessPayload{
+		MediaID:   "m_video",
+		ObjectKey: sourceKey,
+		MimeType:  "video/mp4",
+		Width:     1920,
+		Height:    1080,
+		SizeBytes: int64(len(videoBytes)),
+	})
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM media_variants WHERE media_id = \$1 AND status = 'ready' AND variant IN \('source'\)`).
+		WithArgs("m_video").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'source'`).
+		WithArgs("m_video", sourceKey, "video/mp4", 1920, 1080, int64(len(videoBytes)), "", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := handler.Handle(ctx, Event{EventType: "media.process", Payload: payload}); err != nil {
+		t.Fatalf("Handle video media.process failed: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
 	}
 }
 

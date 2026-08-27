@@ -31,6 +31,76 @@ enum CommentPublicationStatus { published, deleted }
 
 enum LatestOrder { comment, post }
 
+class GrowthState {
+  const GrowthState({
+    required this.level,
+    required this.experience,
+    required this.levelStartExperience,
+    this.nextLevelExperience,
+    required this.experienceInLevel,
+    this.experienceRequiredInLevel,
+    this.progress,
+    this.levelLocked = false,
+  });
+
+  final int level;
+  final int experience;
+  final int levelStartExperience;
+  final int? nextLevelExperience;
+  final int experienceInLevel;
+  final int? experienceRequiredInLevel;
+  final double? progress;
+  final bool levelLocked;
+
+  factory GrowthState.fromJson(
+    Map<String, dynamic>? json, {
+    int fallbackLevel = 1,
+    String accountType = 'email',
+  }) {
+    if (json == null) {
+      final isGuest = accountType == 'guest';
+      return GrowthState(
+        level: isGuest ? 0 : fallbackLevel,
+        experience: 0,
+        levelStartExperience: 0,
+        nextLevelExperience: isGuest ? null : 100,
+        experienceInLevel: 0,
+        experienceRequiredInLevel: isGuest ? null : 100,
+        progress: isGuest ? null : 0.0,
+        levelLocked: isGuest,
+      );
+    }
+    final isGuest = accountType == 'guest';
+    final parsedLevel = json['level'] is num
+        ? (json['level'] as num).toInt()
+        : (isGuest ? 0 : fallbackLevel);
+    return GrowthState(
+      level: parsedLevel,
+      experience: json['experience'] is num
+          ? (json['experience'] as num).toInt()
+          : 0,
+      levelStartExperience: json['level_start_experience'] is num
+          ? (json['level_start_experience'] as num).toInt()
+          : 0,
+      nextLevelExperience: json['next_level_experience'] is num
+          ? (json['next_level_experience'] as num).toInt()
+          : null,
+      experienceInLevel: json['experience_in_level'] is num
+          ? (json['experience_in_level'] as num).toInt()
+          : 0,
+      experienceRequiredInLevel: json['experience_required_in_level'] is num
+          ? (json['experience_required_in_level'] as num).toInt()
+          : null,
+      progress: json['level_progress'] is num
+          ? (json['level_progress'] as num).toDouble()
+          : null,
+      levelLocked: json['level_locked'] is bool
+          ? json['level_locked'] as bool
+          : isGuest,
+    );
+  }
+}
+
 class User {
   const User({
     required this.id,
@@ -283,6 +353,7 @@ class Comment {
     this.rootId,
     this.parentId,
     this.replyToUserId,
+    this.replyToUser,
     required this.content,
     this.likeCount = 0,
     this.isLiked = false,
@@ -300,6 +371,9 @@ class Comment {
   final String? rootId;
   final String? parentId;
   final String? replyToUserId;
+
+  /// 服务端返回的回复目标快照，避免客户端用“用户”占位或猜测昵称。
+  final User? replyToUser;
   final String content;
   int likeCount;
   bool isLiked;

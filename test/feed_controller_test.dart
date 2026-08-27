@@ -26,6 +26,7 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) {
     calls.add((cursor: cursor, communityId: communityId, sort: sort, latestOrder: latestOrder));
     final page = pages[index < pages.length ? index : pages.length - 1];
@@ -58,6 +59,7 @@ class _PendingFeed implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) {
     final request = _PendingFeedRequest(
       communityId: communityId,
@@ -84,6 +86,7 @@ class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) {
     cursors.add(cursor);
     if (cursor == null) {

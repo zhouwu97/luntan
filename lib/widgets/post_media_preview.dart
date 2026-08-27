@@ -4,22 +4,27 @@ import '../data/mock_forum_data.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 
+/// 帖子媒体预览的使用场景。
+enum PostMediaPreviewMode { feed, detail }
+
 /// 帖子媒体预览。
 ///
-/// 列表只使用稳定尺寸的缩略图，详情页通过 [MediaGalleryScreen] 查看原图，
-/// 避免原图解码把长列表撑开或造成明显跳动。图片始终保持源文件比例，
-/// 不用拉伸填充；网格中如果比例不同会留白，但不会裁切或压扁内容。
+/// Feed 使用稳定尺寸的缩略图，详情使用 detail 变体并允许更高的单图区域。
+/// 图片始终保持源文件比例，不用拉伸填充；Feed 缩略图只做居中裁切，
+/// 详情页则完整显示图片，不裁切内容。
 class PostMediaPreview extends StatelessWidget {
   const PostMediaPreview({
     super.key,
     required this.images,
     this.onTap,
     this.onImageTap,
+    this.mode = PostMediaPreviewMode.feed,
   });
 
   final List<PostMedia> images;
   final VoidCallback? onTap;
   final ValueChanged<int>? onImageTap;
+  final PostMediaPreviewMode mode;
 
   @override
   Widget build(BuildContext context) {
@@ -40,9 +45,11 @@ class PostMediaPreview extends StatelessWidget {
       case 1:
         return LayoutBuilder(
           builder: (context, constraints) {
-            final height = (constraints.maxWidth / _ratio(shown.first))
-                .clamp(132.0, 240.0)
-                .toDouble();
+            final height = mode == PostMediaPreviewMode.detail
+                ? (constraints.maxWidth / _ratio(shown.first))
+                      .clamp(180.0, 600.0)
+                      .toDouble()
+                : (constraints.maxWidth * .62).clamp(180.0, 240.0).toDouble();
             return SizedBox(
               width: constraints.maxWidth,
               height: height,
@@ -146,22 +153,23 @@ class PostMediaPreview extends StatelessWidget {
             constraints.maxWidth.isFinite && constraints.maxWidth > 0
             ? (constraints.maxWidth * dpr).round()
             : null;
-        final cacheHeight =
-            constraints.maxHeight.isFinite && constraints.maxHeight > 0
-            ? (constraints.maxHeight * dpr).round()
-            : null;
+        // 只指定解码宽度，Flutter 会按原图比例计算高度；不能把卡片的
+        // 横向容器高度作为 cacheHeight，否则竖图会在解码阶段被压扁。
         return ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (media.previewUrl != null)
+              if (_imageUrl(media) != null)
                 Image.network(
-                  media.previewUrl!,
-                  fit: BoxFit.contain,
+                  _imageUrl(media)!,
+                  // Feed 缩略图使用 cover 做居中裁切；详情页必须 contain，
+                  // 让用户看到完整图片。两种模式都不会拉伸原图。
+                  fit: mode == PostMediaPreviewMode.detail
+                      ? BoxFit.contain
+                      : BoxFit.cover,
                   filterQuality: FilterQuality.low,
                   cacheWidth: cacheWidth,
-                  cacheHeight: cacheHeight,
                   frameBuilder:
                       (context, child, frame, wasSynchronouslyLoaded) {
                         return Stack(
@@ -218,6 +226,9 @@ class PostMediaPreview extends StatelessWidget {
     return content;
   }
 
+  String? _imageUrl(PostMedia media) =>
+      mode == PostMediaPreviewMode.detail ? media.detailUrl : media.previewUrl;
+
   Widget _fallback(PostMedia media) {
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -269,6 +280,7 @@ class MediaGalleryScreen extends StatefulWidget {
 class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
   late final PageController pageController;
   late int index;
+  bool showingOriginal = false;
 
   @override
   void initState() {
@@ -292,48 +304,82 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
         foregroundColor: Colors.white,
         title: Text('${index + 1} / ${widget.images.length}'),
       ),
-      body: PageView.builder(
-        controller: pageController,
-        itemCount: widget.images.length,
-        onPageChanged: (value) => setState(() => index = value),
-        itemBuilder: (context, itemIndex) {
-          final image = widget.images[itemIndex];
-          final imageUrl = image.detailUrl;
-          return InteractiveViewer(
-            minScale: 1,
-            maxScale: 3,
-            child: Center(
-              child: imageUrl == null
-                  ? _fallback(image)
-                  : LayoutBuilder(
-                      builder: (context, constraints) {
-                        final dpr = MediaQuery.devicePixelRatioOf(context);
-                        final cacheWidth =
-                            constraints.maxWidth.isFinite &&
-                                constraints.maxWidth > 0
-                            ? (constraints.maxWidth * dpr * 2).round()
-                            : null;
-                        final cacheHeight =
-                            constraints.maxHeight.isFinite &&
-                                constraints.maxHeight > 0
-                            ? (constraints.maxHeight * dpr * 2).round()
-                            : null;
-                        return Image.network(
-                          imageUrl,
-                          fit: BoxFit.contain,
-                          filterQuality: FilterQuality.medium,
-                          cacheWidth: cacheWidth,
-                          cacheHeight: cacheHeight,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _fallback(image),
-                        );
-                      },
-                    ),
+      body: Column(
+        children: [
+          Expanded(
+            child: PageView.builder(
+              controller: pageController,
+              itemCount: widget.images.length,
+              onPageChanged: (value) => setState(() {
+                index = value;
+                // 每张图默认先展示详情图，避免滑到下一张时意外加载原图。
+                showingOriginal = false;
+              }),
+              itemBuilder: (context, itemIndex) {
+                final image = widget.images[itemIndex];
+                final imageUrl = showingOriginal
+                    ? image.original?.url ?? image.detailUrl
+                    : image.detailUrl;
+                return InteractiveViewer(
+                  key: ValueKey(imageUrl),
+                  minScale: 1,
+                  maxScale: 3,
+                  child: Center(
+                    child: imageUrl == null
+                        ? _fallback(image)
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              final dpr = MediaQuery.devicePixelRatioOf(
+                                context,
+                              );
+                              final cacheWidth =
+                                  constraints.maxWidth.isFinite &&
+                                      constraints.maxWidth > 0
+                                  ? (constraints.maxWidth * dpr * 2).round()
+                                  : null;
+                              return Image.network(
+                                imageUrl,
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.medium,
+                                cacheWidth: cacheWidth,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    _fallback(image),
+                              );
+                            },
+                          ),
+                  ),
+                );
+              },
             ),
-          );
-        },
+          ),
+          if (_hasOriginalImage)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(() => showingOriginal = true),
+                  icon: const Icon(Icons.high_quality_outlined),
+                  label: const Text('查看原图'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.white.withValues(alpha: .6)),
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  bool get _hasOriginalImage {
+    final originalUrl = widget.images[index].original?.url;
+    return originalUrl != null &&
+        originalUrl.isNotEmpty &&
+        originalUrl != widget.images[index].detailUrl &&
+        !showingOriginal;
   }
 
   Widget _fallback(PostMedia media) {

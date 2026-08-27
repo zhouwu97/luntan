@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -119,5 +121,24 @@ func TestProcessImage_SmallImage_NoUpscale(t *testing.T) {
 	}
 	if res.Original.Width != 400 || res.Original.Height != 300 {
 		t.Errorf("expected original 400x300, got %dx%d", res.Original.Width, res.Original.Height)
+	}
+}
+
+func TestProcessImage_WebP(t *testing.T) {
+	fixturePath := filepath.Join("..", "..", "..", "assets", "ranking", "hero.webp")
+	sourceBytes, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read WebP fixture: %v", err)
+	}
+
+	res, err := ProcessImage(bytes.NewReader(sourceBytes))
+	if err != nil {
+		t.Fatalf("ProcessImage WebP failed: %v", err)
+	}
+	if res.SourceMimeType != "image/webp" {
+		t.Fatalf("source mime type = %q, want image/webp", res.SourceMimeType)
+	}
+	if res.Original.Width <= 0 || res.Original.Height <= 0 {
+		t.Fatalf("invalid WebP dimensions: %dx%d", res.Original.Width, res.Original.Height)
 	}
 }

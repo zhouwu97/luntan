@@ -82,6 +82,7 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) async {
     final payload = await _client.getJson(
       '/api/v1/feed/latest',
@@ -93,6 +94,7 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
         'latest_by': latestOrder.name,
         'post_type': ?postType,
         if (hasMedia != null) 'has_media': '$hasMedia',
+        'topic': ?topic,
         'include_details': '1',
       },
     );

@@ -82,6 +82,7 @@ class PostDraft {
     this.allowMultiple = false,
     this.pollEndsAt,
     this.communityId,
+    this.topic,
   });
 
   final String title;
@@ -95,6 +96,7 @@ class PostDraft {
   final bool allowMultiple;
   final DateTime? pollEndsAt;
   final String? communityId;
+  final String? topic;
 }
 
 class StoreProduct {
@@ -273,6 +275,12 @@ class ForumStore extends ChangeNotifier {
     history.removeWhere((item) => item.id == post.id);
     history.insert(0, post);
     if (history.length > 20) history.removeLast();
+    notifyListeners();
+  }
+
+  void clearHistory() {
+    if (history.isEmpty) return;
+    history.clear();
     notifyListeners();
   }
 

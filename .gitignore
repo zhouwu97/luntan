@@ -50,3 +50,7 @@ app.*.map.json
 # QA artifacts: local verification outputs (server binaries, source zips),
 # never source; commit anything produced here only if it becomes a script.
 .qa/
+
+# Go 构建产物：部署时从源码构建，避免仓库中的二进制与源码版本漂移。
+/bin/
+/server/build/

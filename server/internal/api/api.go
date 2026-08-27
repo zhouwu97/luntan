@@ -15,12 +15,13 @@ import (
 )
 
 type Server struct {
-	db           *sql.DB
-	authService  *auth.Service
-	mediaStorage mediaStorage
-	pointRewards PointRewardRules
-	mailSender   mailSender
-	appEnv       string
+	db                *sql.DB
+	authService       *auth.Service
+	mediaStorage      mediaStorage
+	pointRewards      PointRewardRules
+	experienceRewards ExperienceRewardRules
+	mailSender        mailSender
+	appEnv            string
 }
 
 // ReadinessCheck 将业务依赖检查接入统一 /ready 端点。保持构造函数返回
@@ -51,7 +52,7 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 	if len(authServices) > 0 && authServices[0] != nil {
 		authService = authServices[0]
 	}
-	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
+	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
 }
 
 // NewHandlerWithMail 供正式服务注入 SMTP sender；保留 NewHandler 以兼容测试和本地无 SMTP 场景。
@@ -73,13 +74,20 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 	if storage == nil {
 		storage = unavailableMediaStorage{}
 	}
-	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
+	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
 }
 
 // NewHandlerWithPointRewards 供集成测试和灰度环境显式注入奖励配置。
 func NewHandlerWithPointRewards(db *sql.DB, rules PointRewardRules) http.Handler {
 	server := NewHandler(db).(*Server)
 	server.pointRewards = rules
+	return server
+}
+
+// NewHandlerWithExperienceRewards 供集成测试显式注入经验奖励配置。
+func NewHandlerWithExperienceRewards(db *sql.DB, rules ExperienceRewardRules) http.Handler {
+	server := NewHandler(db).(*Server)
+	server.experienceRewards = rules
 	return server
 }
 
@@ -128,6 +136,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodGet && path == "/api/v1/admins/candidates":
 		s.listAdminCandidates(w, r)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/users":
+		s.listManagedUsers(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/users/"):
+		s.getManagedUser(w, r, strings.TrimPrefix(path, "/api/v1/admin/users/"))
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/users/") && strings.HasSuffix(path, "/actions"):
+		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/users/"), "/actions")
+		s.manageUserAction(w, r, userID)
 		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admins/") && strings.HasSuffix(path, "/roles"):
 		adminID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admins/"), "/roles")

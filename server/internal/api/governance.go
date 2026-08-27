@@ -300,6 +300,15 @@ func (s *Server) requireAdminRoleManager(w http.ResponseWriter, r *http.Request)
 		writeAuthError(w, r, ErrAdminRoleManageDenied)
 		return auth.User{}, false
 	}
+	var isSuperAdmin bool
+	if err := s.db.QueryRowContext(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1 FROM user_roles ur JOIN roles rl ON rl.id = ur.role_id
+			WHERE ur.user_id = $1 AND rl.name = 'super_admin'
+		)`, user.ID).Scan(&isSuperAdmin); err != nil || !isSuperAdmin {
+		writeAuthError(w, r, ErrAdminRoleManageDenied)
+		return auth.User{}, false
+	}
 	return user, true
 }
 

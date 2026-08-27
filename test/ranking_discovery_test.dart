@@ -9,6 +9,7 @@ import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/screens/ranking_page.dart';
 import 'package:luntan/screens/search_screen.dart';
 import 'package:luntan/widgets/search/search_post_row.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeApiClient extends ApiClient {
   _FakeApiClient() : super(baseUri: Uri.parse('http://127.0.0.1:8080'));
@@ -235,6 +236,10 @@ void main() {
   });
 
   group('RankingPage UI & Search Tests', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+    });
+
     testWidgets('RankingPage performs local search and filters list', (
       tester,
     ) async {

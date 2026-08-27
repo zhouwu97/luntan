@@ -40,6 +40,10 @@ class ForumPostCard extends StatelessWidget {
   }
 
   Widget _buildCard(BuildContext context) {
+    // “回复”只负责进入已有评论；没有评论时保持当前页面，不把用户带到空评论区。
+    final openComments = post.commentCount > 0
+        ? (onOpenComments ?? onOpen)
+        : () {};
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
@@ -120,7 +124,7 @@ class ForumPostCard extends StatelessWidget {
                   _ActionStat(
                     icon: Icons.chat_bubble_outline_rounded,
                     text: '${post.comments}',
-                    onTap: onOpenComments ?? onOpen,
+                    onTap: openComments,
                   ),
                   const SizedBox(width: 14),
                   _ActionStat(

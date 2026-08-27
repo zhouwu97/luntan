@@ -123,7 +123,7 @@ class _FeaturePageState extends State<FeaturePage> {
               FeatureType.gameShare => 'game_share',
               _ => null,
             },
-            hasMedia: type == FeatureType.outfit ? true : null,
+            topic: type == FeatureType.outfit ? 'outfit' : null,
           )
         : await repository.getLatestFeed(limit: 50);
     final items = page.items;
@@ -143,10 +143,7 @@ class _FeaturePageState extends State<FeaturePage> {
       return store.posts.where((post) => post.tag == '玩法分享').toList();
     }
     if (type == FeatureType.outfit) {
-      return store.posts
-          .where((post) => post.tag == '穿搭分享' || post.media.isNotEmpty)
-          .take(6)
-          .toList();
+      return store.posts.where((post) => post.tag == '穿搭分享').take(6).toList();
     }
     if (type == FeatureType.activity) {
       return store.posts

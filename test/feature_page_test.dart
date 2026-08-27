@@ -25,6 +25,7 @@ class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) async {
     calls += 1;
     if (calls == 1) throw StateError('temporary failure');

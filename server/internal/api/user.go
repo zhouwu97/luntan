@@ -16,6 +16,8 @@ type userProfileResponse struct {
 	AvatarMediaID  string         `json:"avatar_media_id,omitempty"`
 	Bio            string         `json:"bio"`
 	Level          int            `json:"level"`
+	Experience     int64          `json:"experience"`
+	Growth         GrowthState    `json:"growth"`
 	TrustLevel     string         `json:"trust_level"`
 	Status         string         `json:"status"`
 	PostCount      int64          `json:"post_count"`
@@ -31,7 +33,9 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	}
 	var item userProfileResponse
 	var createdAt sql.NullTime
-	var viewerID string
+	var viewerID, accountType string
+	var exp int64
+	var rawLevel int
 	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
 	if hasViewer {
 		viewerID = viewer.ID
@@ -39,7 +43,9 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT u.id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.avatar_media_id, ''), COALESCE(up.bio, ''),
-		       COALESCE(up.level, 1), COALESCE(up.trust_level, 'new'), u.status, u.created_at,
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.trust_level, 'new'), u.status, u.created_at,
+		       COALESCE(up.experience, 0), COALESCE(u.account_type, 'email'),
 		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market'),
 		       (SELECT count(*) FROM user_follows f WHERE f.followee_id = u.id),
 		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
@@ -47,7 +53,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE u.id = $1 AND u.deleted_at IS NULL`, id).
 		Scan(&item.ID, &item.Username, &item.Nickname, &item.AvatarMediaID, &item.Bio,
-			&item.Level, &item.TrustLevel, &item.Status, &createdAt, &item.PostCount, &item.FollowerCount, &item.FollowingCount)
+			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.FollowerCount, &item.FollowingCount)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "用户不存在"})
 		return
@@ -56,6 +62,10 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		writeInternalError(w, r, err)
 		return
 	}
+	growth := growthState(accountType, exp)
+	item.Level = growth.Level
+	item.Experience = growth.Experience
+	item.Growth = growth
 	if createdAt.Valid {
 		item.CreatedAt = createdAt.Time.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
 	}

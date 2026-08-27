@@ -25,6 +25,7 @@ type commentResponse struct {
 	ID            string              `json:"id"`
 	PostID        string              `json:"post_id"`
 	Author        userSummary         `json:"author"`
+	ReplyToUser   *userSummary        `json:"reply_to_user,omitempty"`
 	RootID        *string             `json:"root_id,omitempty"`
 	ParentID      *string             `json:"parent_id,omitempty"`
 	ReplyToUserID *string             `json:"reply_to_user_id,omitempty"`
@@ -133,6 +134,10 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		}
 		item.Author.ID = authorID
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rootID), optionalString(parentID), optionalString(replyTo)
+		if err := enrichReplyToUser(r.Context(), s.db, &item); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 		if hasViewer {
 			item.ViewerState = &viewerCommentState{HasLiked: viewerHasLiked}
 		}
@@ -238,6 +243,10 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		}
 		item.Author.ID = authorID
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rowRootID), optionalString(parentID), optionalString(replyTo)
+		if err := enrichReplyToUser(r.Context(), s.db, &item); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 		if hasViewer {
 			item.ViewerState = &viewerCommentState{HasLiked: viewerHasLiked}
 		}
@@ -432,11 +441,19 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeInternalError(w, r, err)
 		return
 	}
+	if err := awardExperienceTx(r.Context(), tx, user.ID, "comment", "参与回复", "comment:create:"+commentID, s.experienceRewards.CommentCreate, s.experienceRewards.CommentCreateDailyLimit); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	response := commentResponse{ID: commentID, PostID: postID, Author: userSummary{ID: user.ID, Username: user.Username, Nickname: user.Nickname}, RootID: optionalString(rootID), ParentID: optionalString(parentID), ReplyToUserID: optionalString(strings.TrimSpace(input.ReplyToUserID)), Content: input.Content, Publication: "published", Moderation: "normal", CreatedAt: now, UpdatedAt: now, ViewerState: &viewerCommentState{}}
+	if err := enrichReplyToUser(r.Context(), s.db, &response); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 
@@ -463,8 +480,54 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID string) (c
 	response.RootID = optionalString(rootID)
 	response.ParentID = optionalString(parentID)
 	response.ReplyToUserID = optionalString(replyTo)
+	if err := enrichReplyToUser(ctx, tx, &response); err != nil {
+		return commentResponse{}, err
+	}
 	response.ViewerState = &viewerCommentState{}
 	return response, nil
+}
+
+type userSummaryQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// enrichReplyToUser 返回回复目标的稳定快照，前端可以直接渲染真实昵称。
+// 目标用户被删除时保留 reply_to_user_id，但不阻断整条评论返回。
+func enrichReplyToUser(ctx context.Context, queryer userSummaryQueryer, item *commentResponse) error {
+	if item == nil || item.ReplyToUserID == nil || *item.ReplyToUserID == "" {
+		return nil
+	}
+	summary, err := loadUserSummary(ctx, queryer, *item.ReplyToUserID)
+	if err != nil {
+		return err
+	}
+	item.ReplyToUser = summary
+	return nil
+}
+
+func loadUserSummary(ctx context.Context, queryer userSummaryQueryer, userID string) (*userSummary, error) {
+	var summary userSummary
+	var objectKey string
+	err := queryer.QueryRowContext(ctx, `
+		SELECT u.id, u.username, COALESCE(up.nickname, u.username),
+		       COALESCE(up.level, 1), COALESCE(up.avatar_media_id, ''),
+		       COALESCE(ma.object_key, '')
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id
+		WHERE u.id = $1 AND u.deleted_at IS NULL`, userID).Scan(
+		&summary.ID, &summary.Username, &summary.Nickname, &summary.Level, &summary.AvatarMediaID, &objectKey,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if objectKey != "" {
+		summary.AvatarURL = publicMediaURL(objectKey)
+	}
+	return &summary, nil
 }
 
 func (s *Server) updateComment(w http.ResponseWriter, r *http.Request, commentID string) {

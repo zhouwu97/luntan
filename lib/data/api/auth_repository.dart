@@ -1,3 +1,4 @@
+import '../../domain/models.dart';
 import 'api_client.dart';
 
 class AuthUser {
@@ -6,6 +7,8 @@ class AuthUser {
     required this.username,
     required this.nickname,
     required this.level,
+    this.experience = 0,
+    this.growth,
     required this.status,
     this.accountType = 'email',
     this.email,
@@ -20,6 +23,8 @@ class AuthUser {
   final String username;
   final String nickname;
   final int level;
+  final int experience;
+  final GrowthState? growth;
   final String status;
   final String accountType;
   final String? email;
@@ -66,6 +71,8 @@ class AuthUser {
 
   bool get canManageAdmins => capability('can_manage_admins');
 
+  bool get canManageUsers => capability('can_manage_users');
+
   bool get canViewAdminLogs => capability('can_view_admin_logs');
 
   bool get canBanIP => capability('can_ban_ip');
@@ -84,6 +91,7 @@ class AuthUser {
     'can_manage_profile' => canManageProfile,
     'can_moderate' => canModerate,
     'can_manage_admins' => canManageAdmins,
+    'can_manage_users' => canManageUsers,
     'can_ban_ip' => canBanIP,
     'can_view_admin_logs' => canViewAdminLogs,
     _ => capability(name),
@@ -244,15 +252,33 @@ class AuthRepository {
   }
 
   AuthUser _userFromJson(Map<String, dynamic> json) {
+    final accountType = _string(json['account_type']).isEmpty
+        ? 'email'
+        : _string(json['account_type']);
+    final fallbackLevel = accountType == 'guest' ? 0 : 1;
+    final level = _int(json['level'], fallback: fallbackLevel);
+    final experience = _int(json['experience'], fallback: 0);
+    final growth = json['growth'] is Map<String, dynamic>
+        ? GrowthState.fromJson(
+            json['growth'] as Map<String, dynamic>,
+            fallbackLevel: level,
+            accountType: accountType,
+          )
+        : GrowthState.fromJson(
+            null,
+            fallbackLevel: level,
+            accountType: accountType,
+          );
+
     return AuthUser(
       id: _string(json['id']),
       username: _string(json['username']),
       nickname: _string(json['nickname']),
-      level: _int(json['level'], fallback: 1),
+      level: level,
+      experience: experience,
+      growth: growth,
       status: _string(json['status']),
-      accountType: _string(json['account_type']).isEmpty
-          ? 'email'
-          : _string(json['account_type']),
+      accountType: accountType,
       email: json['email'] is String && (json['email'] as String).isNotEmpty
           ? json['email'] as String
           : null,

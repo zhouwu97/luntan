@@ -18,6 +18,7 @@ class PublishController extends ChangeNotifier {
     required String title,
     required String content,
     List<String> mediaIds = const [],
+    String? topic,
   }) {
     final running = _inFlight;
     if (running != null) return running;
@@ -33,6 +34,7 @@ class PublishController extends ChangeNotifier {
           title: title,
           content: content,
           mediaIds: mediaIds,
+          topic: topic,
           idempotencyKey: idempotencyKey,
         ).whenComplete(() {
           if (identical(_inFlight, future)) _inFlight = null;
@@ -98,6 +100,7 @@ class PublishController extends ChangeNotifier {
     bool allowMultiple = false,
     DateTime? endsAt,
     List<String> mediaIds = const [],
+    String? topic,
   }) {
     final running = _inFlight;
     if (running != null) return running;
@@ -123,6 +126,7 @@ class PublishController extends ChangeNotifier {
           allowMultiple: allowMultiple,
           endsAt: endsAt,
           mediaIds: mediaIds,
+          topic: topic,
         )
         .then((response) {
           _pendingIdempotencyKey = null;

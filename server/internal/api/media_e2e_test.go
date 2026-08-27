@@ -69,8 +69,8 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 	// 鉴权查询 auth token
 	mock.ExpectQuery(`SELECT u\.id, u\.username, u\.status, COALESCE\(up\.nickname.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).
-			AddRow(testUser.ID, testUser.Username, testUser.Status, "Author", 1, testUser.AccountType, "test@example.com", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).
+			AddRow(testUser.ID, testUser.Username, testUser.Status, "Author", 1, 0, testUser.AccountType, "test@example.com", false, nil))
 
 	// 查询 media_assets
 	mock.ExpectQuery(`SELECT id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, created_at, updated_at, completed_at FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
@@ -182,7 +182,7 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes))))
 
 	// Query user profile level
-	mock.ExpectQuery(`SELECT COALESCE\(level, 1\) FROM user_profiles WHERE user_id = \$1`).
+	mock.ExpectQuery(`SELECT CASE WHEN u\.account_type = 'guest' THEN 0 ELSE COALESCE\(up\.level, 1\) END`).
 		WithArgs(testUser.ID).
 		WillReturnRows(sqlmock.NewRows([]string{"level"}).AddRow(1))
 

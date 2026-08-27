@@ -42,8 +42,11 @@ class CommentReplyPreview extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: previewItems.map((reply) {
                   final author = reply.author?.nickname ?? '用户';
-                  final replyTo =
-                      reply.replyToUserId != null ? '用户' : null;
+                  final replyTo = reply.replyToUserId == null
+                      ? null
+                      : (reply.replyToUser?.nickname ??
+                            reply.replyToUser?.username ??
+                            '用户');
 
                   return InkWell(
                     onTap: () {

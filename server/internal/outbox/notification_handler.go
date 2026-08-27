@@ -30,9 +30,12 @@ func (h NotificationHandler) Handle(ctx context.Context, event Event) error {
 		return nil
 	}
 	var payload struct {
-		RecipientID string `json:"recipient_id"`
-		Type        string `json:"type"`
-		TargetID    string `json:"target_id"`
+		RecipientID string         `json:"recipient_id"`
+		ActorID     string         `json:"actor_id"`
+		Type        string         `json:"type"`
+		TargetType  string         `json:"target_type"`
+		TargetID    string         `json:"target_id"`
+		TargetData  map[string]any `json:"target_data"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("decode notification event: %w", err)
@@ -52,13 +55,23 @@ func (h NotificationHandler) Handle(ctx context.Context, event Event) error {
 	if strings.TrimSpace(h.WebhookURL) == "" {
 		return nil
 	}
+	pushBodyText := notificationPushBody(payload.TargetData)
 	body, err := json.Marshal(map[string]any{
 		"event_id":        event.ID,
 		"event_type":      event.EventType,
 		"notification_id": event.AggregateID,
 		"recipient_id":    payload.RecipientID,
-		"type":            payload.Type,
-		"target_id":       payload.TargetID,
+		"locale":          "zh-CN",
+		"title":           notificationPushTitle(payload.Type, payload.TargetData),
+		"body":            pushBodyText,
+		"data": map[string]any{
+			"notification_id": event.AggregateID,
+			"type":            payload.Type,
+			"actor_id":        payload.ActorID,
+			"target_type":     payload.TargetType,
+			"target_id":       payload.TargetID,
+			"target_data":     payload.TargetData,
+		},
 	})
 	if err != nil {
 		return err
@@ -67,7 +80,8 @@ func (h NotificationHandler) Handle(ctx context.Context, event Event) error {
 	if err != nil {
 		return fmt.Errorf("create notification webhook request: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	// 明确声明 UTF-8，避免部分推送网关按默认字符集解码中文标题和正文。
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	request.Header.Set("X-Event-ID", event.ID)
 	if strings.TrimSpace(h.Secret) != "" {
 		mac := hmac.New(sha256.New, []byte(h.Secret))
@@ -87,4 +101,65 @@ func (h NotificationHandler) Handle(ctx context.Context, event Event) error {
 		return fmt.Errorf("notification webhook returned status %d", response.StatusCode)
 	}
 	return nil
+}
+
+func notificationPushTitle(notificationType string, targetData map[string]any) string {
+	if customTitle := notificationDataString(targetData, "title"); customTitle != "" {
+		return customTitle
+	}
+	switch notificationType {
+	case "like", "post.liked":
+		return "收到新的点赞"
+	case "bookmark", "post.bookmarked":
+		return "收到新的收藏"
+	case "comment.created", "comment.replied", "reply":
+		return "收到新的评论回复"
+	case "follow", "user.followed":
+		return "收到新的关注"
+	case "moderation.action":
+		switch notificationDataString(targetData, "action") {
+		case "mute":
+			return "账号禁言通知"
+		case "ban":
+			return "账号封禁通知"
+		case "delete":
+			return "帖子处理通知"
+		case "hide":
+			return "内容处理通知"
+		default:
+			return "内容处理通知"
+		}
+	case "appeal.result":
+		switch notificationDataString(targetData, "status") {
+		case "approved":
+			return "申诉已通过"
+		case "rejected":
+			return "申诉未通过"
+		default:
+			return "申诉结果通知"
+		}
+	case "announcement", "community.announcement":
+		return "社区公告"
+	case "event", "community.event":
+		return "活动通知"
+	default:
+		return "你有一条新通知"
+	}
+}
+
+func notificationPushBody(targetData map[string]any) string {
+	for _, key := range []string{"content", "snippet", "message", "body", "reason", "post_title", "description"} {
+		if value := notificationDataString(targetData, key); value != "" {
+			return value
+		}
+	}
+	return "打开杯友酱查看详情"
+}
+
+func notificationDataString(data map[string]any, key string) string {
+	value, ok := data[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }

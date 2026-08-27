@@ -51,6 +51,19 @@ class _CountingProfileRepository extends ProfileRepository {
   }
 }
 
+class _FailingProfileRepository extends ProfileRepository {
+  _FailingProfileRepository()
+    : super(ApiClient(baseUri: Uri.parse('https://example.com')));
+
+  int calls = 0;
+
+  @override
+  Future<ProfileSummary> getProfile() async {
+    calls++;
+    throw StateError('未登录不应请求个人资料接口');
+  }
+}
+
 void main() {
   testWidgets('首页展示论坛骨架并可以切换我的页面', (tester) async {
     await tester.pumpWidget(const LuntanApp());
@@ -331,6 +344,33 @@ void main() {
     expect(find.text('登录 / 注册').first, findsOneWidget);
     await tester.tap(find.text('登录 / 注册').first);
     expect(opened, 1);
+  });
+
+  testWidgets('未登录 API 模式的个人中心不请求需要会话的资料接口', (tester) async {
+    final repository = _FailingProfileRepository();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProfileScreen(
+          store: ForumStore.uiOnly(),
+          currentUser: null,
+          currentUserId: null,
+          isApiMode: true,
+          profileRepository: repository,
+          onOpenPost: (_) {},
+          onOpenHome: () {},
+          onOpenComposer: () {},
+          onOpenMessages: () {},
+          onFeedback: (_) {},
+          onRequireAuth: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repository.calls, 0);
+    expect(find.text('游客模式 · 当前累计 0 EXP'), findsOneWidget);
+    expect(find.text('个人资料加载失败'), findsNothing);
   });
 
   testWidgets('认证页返回后个人中心会重新请求资料', (tester) async {

@@ -89,7 +89,10 @@ class ProfileScreen extends StatelessWidget {
   final int refreshToken;
 
   void _openHomepage(BuildContext context) {
-    if (isApiMode && profileRepository != null) {
+    // /me/profile 和 /me/posts 都要求 Bearer 会话；退出登录或会话失效后，
+    // 仍保留 API 模式时不能拿匿名请求去渲染个人中心，否则会稳定得到 401
+    // 并把游客页面错误地展示成“个人资料加载失败”。
+    if (isApiMode && profileRepository != null && currentUser != null) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => UserProfileScreen(
@@ -148,7 +151,10 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isApiMode && profileRepository != null) {
+    // /me/profile 和 /me/posts 都要求 Bearer 会话；退出登录或会话失效后，
+    // 仍保留 API 模式时不能拿匿名请求去渲染个人中心，否则会稳定得到 401
+    // 并把游客页面错误地展示成“个人资料加载失败”。
+    if (isApiMode && profileRepository != null && currentUser != null) {
       final isGuest = currentUser == null || currentUser!.accountType == 'guest';
       return _ApiProfileScreen(
         repository: profileRepository!,
@@ -2599,5 +2605,3 @@ class _ProductMini extends StatelessWidget {
     ),
   );
 }
-
-

@@ -14,6 +14,7 @@ type Config struct {
 	LogLevel                   string
 	RedisURL                   string
 	ObjectStorageUploadBaseURL string
+	ObjectStoragePublicBaseURL string
 	ObjectStorageSigningSecret string
 	RateLimitEnabled           bool
 	TrustedProxyCIDRs          []string
@@ -27,6 +28,7 @@ func Load() Config {
 		LogLevel:                   valueOrDefault("LOG_LEVEL", "info"),
 		RedisURL:                   os.Getenv("REDIS_URL"),
 		ObjectStorageUploadBaseURL: os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"),
+		ObjectStoragePublicBaseURL: os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL"),
 		ObjectStorageSigningSecret: os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
 		RateLimitEnabled:           valueOrDefault("RATE_LIMIT_ENABLED", "false") == "true",
 		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
@@ -51,6 +53,22 @@ func (c Config) Validate() error {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("OBJECT_STORAGE_UPLOAD_BASE_URL must be a complete HTTP(S) URL")
+	}
+	publicURL := strings.TrimSpace(c.ObjectStoragePublicBaseURL)
+	if publicURL == "" {
+		return fmt.Errorf("production requires OBJECT_STORAGE_PUBLIC_BASE_URL")
+	}
+	parsedPublic, err := url.Parse(publicURL)
+	if err != nil || parsedPublic.Scheme == "" || parsedPublic.Host == "" ||
+		(parsedPublic.Scheme != "http" && parsedPublic.Scheme != "https") {
+		return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must be a complete HTTP(S) URL")
+	}
+	if internalURL := strings.TrimSpace(os.Getenv("STORAGE_INTERNAL_BASE_URL")); internalURL != "" {
+		parsedInternal, err := url.Parse(internalURL)
+		if err != nil || parsedInternal.Scheme == "" || parsedInternal.Host == "" ||
+			(parsedInternal.Scheme != "http" && parsedInternal.Scheme != "https") {
+			return fmt.Errorf("STORAGE_INTERNAL_BASE_URL must be a complete HTTP(S) URL")
+		}
 	}
 	return nil
 }

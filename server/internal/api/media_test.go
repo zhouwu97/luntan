@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+
+	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
 
 func TestMediaStorageRejectsMissingUploadedObject(t *testing.T) {
@@ -20,11 +22,8 @@ func TestMediaStorageRejectsMissingUploadedObject(t *testing.T) {
 	}))
 	defer storageServer.Close()
 
-	storage := hmacMediaStorage{
-		baseURL: storageServer.URL,
-		secret:  []byte("test-secret"),
-	}
-	err := storage.VerifyUploaded(context.Background(), mediaAsset{
+	store := storage.NewHTTPMediaStorage(storageServer.URL, "", "test-secret", "")
+	err := store.VerifyUploaded(context.Background(), &storage.MediaAsset{
 		ID:        "media-1",
 		ObjectKey: "media/user-1/media-1",
 		MimeType:  "image/png",
@@ -45,11 +44,8 @@ func TestMediaStorageRejectsUploadedObjectWithWrongSize(t *testing.T) {
 	}))
 	defer storageServer.Close()
 
-	storage := hmacMediaStorage{
-		baseURL: storageServer.URL,
-		secret:  []byte("test-secret"),
-	}
-	err := storage.VerifyUploaded(context.Background(), mediaAsset{
+	store := storage.NewHTTPMediaStorage(storageServer.URL, "", "test-secret", "")
+	err := store.VerifyUploaded(context.Background(), &storage.MediaAsset{
 		ID:        "media-1",
 		ObjectKey: "media/user-1/media-1",
 		MimeType:  "image/png",
@@ -70,11 +66,8 @@ func TestMediaStorageRejectsUploadedObjectWithWrongMIMEType(t *testing.T) {
 	}))
 	defer storageServer.Close()
 
-	storage := hmacMediaStorage{
-		baseURL: storageServer.URL,
-		secret:  []byte("test-secret"),
-	}
-	err := storage.VerifyUploaded(context.Background(), mediaAsset{
+	store := storage.NewHTTPMediaStorage(storageServer.URL, "", "test-secret", "")
+	err := store.VerifyUploaded(context.Background(), &storage.MediaAsset{
 		ID:        "media-1",
 		ObjectKey: "media/user-1/media-1",
 		MimeType:  "image/png",
@@ -99,11 +92,8 @@ func TestMediaStorageRejectsUploadedObjectWithWrongChecksum(t *testing.T) {
 	}))
 	defer storageServer.Close()
 
-	storage := hmacMediaStorage{
-		baseURL: storageServer.URL,
-		secret:  []byte("test-secret"),
-	}
-	err := storage.VerifyUploaded(context.Background(), mediaAsset{
+	store := storage.NewHTTPMediaStorage(storageServer.URL, "", "test-secret", "")
+	err := store.VerifyUploaded(context.Background(), &storage.MediaAsset{
 		ID:        "media-1",
 		ObjectKey: "media/user-1/media-1",
 		MimeType:  "image/png",
@@ -141,11 +131,8 @@ func TestMediaStorageVerifiesUploadedImageBytes(t *testing.T) {
 	}))
 	defer storageServer.Close()
 
-	storage := hmacMediaStorage{
-		baseURL: storageServer.URL,
-		secret:  []byte("test-secret"),
-	}
-	err := storage.VerifyUploaded(context.Background(), mediaAsset{
+	store := storage.NewHTTPMediaStorage(storageServer.URL, "", "test-secret", "")
+	err := store.VerifyUploaded(context.Background(), &storage.MediaAsset{
 		ID:        "media-1",
 		ObjectKey: "media/user-1/media-1",
 		MimeType:  "image/png",
@@ -170,5 +157,48 @@ func TestMediaUploadRequiresSHA256(t *testing.T) {
 		Size:     10,
 	}) {
 		t.Fatal("media upload without SHA-256 must be rejected")
+	}
+}
+
+func TestNewMediaID(t *testing.T) {
+	id, err := newMediaID()
+	if err != nil {
+		t.Fatalf("newMediaID failed: %v", err)
+	}
+	if len(id) != 38 || id[:6] != "media_" {
+		t.Fatalf("invalid media id: %s", id)
+	}
+}
+
+func TestMediaInputLimits(t *testing.T) {
+	checksum := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	// Image <= 15MB allowed
+	if !validMediaInput(mediaUploadInput{
+		FileName: "test.png",
+		MimeType: "image/png",
+		Size:     15 * 1024 * 1024,
+		SHA256:   checksum,
+	}) {
+		t.Fatal("expected 15MB image to be valid")
+	}
+	// Image > 15MB rejected
+	if validMediaInput(mediaUploadInput{
+		FileName: "test.png",
+		MimeType: "image/png",
+		Size:     15*1024*1024 + 1,
+		SHA256:   checksum,
+	}) {
+		t.Fatal("expected >15MB image to be rejected")
+	}
+	// Pixel area > 40MP rejected
+	if validMediaInput(mediaUploadInput{
+		FileName: "test.png",
+		MimeType: "image/png",
+		Size:     1024,
+		Width:    7000,
+		Height:   6000, // 42 MP
+		SHA256:   checksum,
+	}) {
+		t.Fatal("expected >40MP image to be rejected")
 	}
 }

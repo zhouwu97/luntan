@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
 
 func TestAPIWithoutDatabaseReturns503(t *testing.T) {
@@ -156,13 +157,15 @@ func TestMediaUploadTokenRequiresBearerToken(t *testing.T) {
 	}
 }
 
-type testMediaStorage struct{}
+type testMediaStorage struct {
+	storage.UnavailableMediaStorage
+}
 
 func (testMediaStorage) SignUpload(_ context.Context, assetID, _ string, _ string, _ time.Time) (string, error) {
 	return "https://upload.example/" + assetID, nil
 }
 
-func (testMediaStorage) VerifyUploaded(context.Context, mediaAsset) error { return nil }
+func (testMediaStorage) VerifyUploaded(context.Context, *storage.MediaAsset) error { return nil }
 
 func TestMediaUploadTokenCreatesPendingAssetWithSignedURL(t *testing.T) {
 	db, mock, err := sqlmock.New()

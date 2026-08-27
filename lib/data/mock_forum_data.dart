@@ -136,7 +136,7 @@ class ForumStore extends ChangeNotifier {
   final Set<String> likedCommentIds = <String>{};
   final List<Post> history = [];
   ForumSection selectedSection = ForumSection.unboxing;
-  // 首页默认推荐流（人工精选），最新/精华/热门可通过筛选主动切换。
+  // Mock 仅用于离线测试；真实运行时由 HomeScreen 显式请求最新流。
   FeedSort selectedSort = FeedSort.recommended;
   bool isRefreshing = false;
   int points = 3980;

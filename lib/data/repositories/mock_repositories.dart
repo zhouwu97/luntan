@@ -868,5 +868,12 @@ class MockPublishRepository
   }) => throw const PublishException('Mock 模式不需要上传媒体');
 
   @override
+  Future<Map<String, dynamic>> completeMedia({
+    required String mediaId,
+    required int size,
+    required String sha256,
+  }) => throw const PublishException('Mock 模式不需要确认媒体');
+
+  @override
   Future<void> deleteMedia(String mediaId) async {}
 }

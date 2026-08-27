@@ -113,5 +113,12 @@ class _FakePublishRepository implements PublishRepository {
   }) => throw UnimplementedError();
 
   @override
+  Future<Map<String, dynamic>> completeMedia({
+    required String mediaId,
+    required int size,
+    required String sha256,
+  }) => throw UnimplementedError();
+
+  @override
   Future<void> deleteMedia(String mediaId) async {}
 }

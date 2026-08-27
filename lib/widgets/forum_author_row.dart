@@ -16,6 +16,11 @@ class ForumAuthorRow extends StatelessWidget {
     return AppTheme.textSecondary;
   }
 
+  String get communityLabel {
+    final name = post.community?.name.trim();
+    return name == null || name.isEmpty ? post.section.label : name;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -55,7 +60,7 @@ class ForumAuthorRow extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${post.section.label} · ${post.time}',
+                '$communityLabel · ${post.time}',
                 style: const TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: 10.5,

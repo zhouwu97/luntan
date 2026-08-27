@@ -1,237 +1,32 @@
 package api
 
 import (
-	"bytes"
-	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
-	"io"
-	"mime"
 	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
+	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
 
 var (
-	ErrInvalidMedia       = errors.New("invalid media")
+	ErrInvalidMedia       = storage.ErrInvalidMedia
 	ErrMediaNotFound      = errors.New("media not found")
-	ErrStorageUnavailable = errors.New("media storage unavailable")
+	ErrStorageUnavailable = storage.ErrStorageUnavailable
 	ErrMediaNotOwned      = errors.New("media is not owned by user")
 	ErrMediaInUse         = errors.New("media is attached to a post")
 )
 
-type mediaStorage interface {
-	SignUpload(context.Context, string, string, string, time.Time) (string, error)
-	VerifyUploaded(context.Context, mediaAsset) error
-}
-
-type unavailableMediaStorage struct{}
-
-func (unavailableMediaStorage) SignUpload(context.Context, string, string, string, time.Time) (string, error) {
-	return "", ErrStorageUnavailable
-}
-
-func (unavailableMediaStorage) VerifyUploaded(context.Context, mediaAsset) error {
-	return ErrStorageUnavailable
-}
-
-type hmacMediaStorage struct {
-	baseURL string
-	secret  []byte
-}
+type mediaStorage = storage.ObjectStorage
+type unavailableMediaStorage = storage.UnavailableMediaStorage
 
 func newObjectStorageFromEnv() mediaStorage {
-	baseURL := strings.TrimSpace(os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"))
-	secret := strings.TrimSpace(os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"))
-	if baseURL == "" || secret == "" {
-		return unavailableMediaStorage{}
-	}
-	return hmacMediaStorage{baseURL: strings.TrimRight(baseURL, "/"), secret: []byte(secret)}
-}
-
-func (s hmacMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, expiresAt time.Time) (string, error) {
-	if s.baseURL == "" || len(s.secret) == 0 {
-		return "", ErrStorageUnavailable
-	}
-	expires := strconv.FormatInt(expiresAt.Unix(), 10)
-	message := assetID + "|" + objectKey + "|" + expires
-	hash := hmac.New(sha256.New, s.secret)
-	_, _ = hash.Write([]byte(message))
-	signature := hex.EncodeToString(hash.Sum(nil))
-	return s.baseURL + "?" + url.Values{
-		"asset_id":   {assetID},
-		"object_key": {objectKey},
-		"mime_type":  {mimeType},
-		"expires":    {expires},
-		"signature":  {signature},
-	}.Encode(), nil
-}
-
-func (s hmacMediaStorage) VerifyUploaded(ctx context.Context, asset mediaAsset) error {
-	if s.baseURL == "" || len(s.secret) == 0 {
-		return ErrStorageUnavailable
-	}
-	if asset.Status == "deleted" {
-		return ErrInvalidMedia
-	}
-	verificationURL, err := s.SignUpload(
-		ctx,
-		asset.ID,
-		asset.ObjectKey,
-		asset.MimeType,
-		time.Now().UTC().Add(5*time.Minute),
-	)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, verificationURL, nil)
-	if err != nil {
-		return ErrStorageUnavailable
-	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	response, err := client.Do(req)
-	if err != nil {
-		return ErrStorageUnavailable
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound {
-		return ErrInvalidMedia
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return ErrStorageUnavailable
-	}
-	if response.ContentLength < 0 || response.ContentLength != asset.Size {
-		return ErrInvalidMedia
-	}
-	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || !strings.EqualFold(contentType, asset.MimeType) {
-		return ErrInvalidMedia
-	}
-	if checksum := strings.TrimSpace(response.Header.Get("X-Checksum-Sha256")); checksum != "" && (len(checksum) != 64 || !isHex(checksum) || !strings.EqualFold(checksum, asset.SHA256)) {
-		return ErrInvalidMedia
-	}
-	_ = response.Body.Close()
-
-	getRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, verificationURL, nil)
-	if err != nil {
-		return ErrStorageUnavailable
-	}
-	getResponse, err := client.Do(getRequest)
-	if err != nil {
-		return ErrStorageUnavailable
-	}
-	defer getResponse.Body.Close()
-	if getResponse.StatusCode == http.StatusNotFound {
-		return ErrInvalidMedia
-	}
-	if getResponse.StatusCode < http.StatusOK || getResponse.StatusCode >= http.StatusMultipleChoices {
-		return ErrStorageUnavailable
-	}
-
-	hasher := sha256.New()
-	prefix := &limitedPrefixWriter{remaining: 1 << 20}
-	written, err := io.Copy(
-		io.MultiWriter(hasher, prefix),
-		io.LimitReader(getResponse.Body, asset.Size+1),
-	)
-	if err != nil {
-		return ErrStorageUnavailable
-	}
-	if written != asset.Size || !strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), asset.SHA256) {
-		return ErrInvalidMedia
-	}
-	if err := verifyMediaContent(prefix.Bytes(), asset); err != nil {
-		return err
-	}
-	return nil
-}
-
-type limitedPrefixWriter struct {
-	buffer    bytes.Buffer
-	remaining int
-}
-
-func (w *limitedPrefixWriter) Write(value []byte) (int, error) {
-	length := len(value)
-	if w.remaining <= 0 {
-		return length, nil
-	}
-	toWrite := value
-	if len(toWrite) > w.remaining {
-		toWrite = toWrite[:w.remaining]
-	}
-	_, _ = w.buffer.Write(toWrite)
-	w.remaining -= len(toWrite)
-	return length, nil
-}
-
-func (w *limitedPrefixWriter) Bytes() []byte { return w.buffer.Bytes() }
-
-func verifyMediaContent(prefix []byte, asset mediaAsset) error {
-	detected, _, err := mime.ParseMediaType(http.DetectContentType(prefix))
-	if err != nil || !strings.EqualFold(detected, asset.MimeType) {
-		return ErrInvalidMedia
-	}
-	if !strings.HasPrefix(asset.MimeType, "image/") {
-		return nil
-	}
-
-	var width, height int
-	if asset.MimeType == "image/webp" {
-		width, height, err = webPDimensions(prefix)
-	} else {
-		var config image.Config
-		config, _, err = image.DecodeConfig(bytes.NewReader(prefix))
-		width, height = config.Width, config.Height
-	}
-	if err != nil || width <= 0 || height <= 0 {
-		return ErrInvalidMedia
-	}
-	if (asset.Width > 0 && asset.Width != width) || (asset.Height > 0 && asset.Height != height) {
-		return ErrInvalidMedia
-	}
-	return nil
-}
-
-func webPDimensions(value []byte) (int, int, error) {
-	if len(value) < 30 || string(value[:4]) != "RIFF" || string(value[8:12]) != "WEBP" {
-		return 0, 0, ErrInvalidMedia
-	}
-	switch string(value[12:16]) {
-	case "VP8X":
-		width := 1 + int(value[24]) + int(value[25])<<8 + int(value[26])<<16
-		height := 1 + int(value[27]) + int(value[28])<<8 + int(value[29])<<16
-		return width, height, nil
-	case "VP8L":
-		if len(value) < 25 || value[20] != 0x2f {
-			return 0, 0, ErrInvalidMedia
-		}
-		width := 1 + int(value[21]) + int(value[22]&0x3f)<<8
-		height := 1 + int(value[22]>>6) + int(value[23])<<2 + int(value[24]&0x0f)<<10
-		return width, height, nil
-	case "VP8 ":
-		if len(value) < 30 || value[23] != 0x9d || value[24] != 0x01 || value[25] != 0x2a {
-			return 0, 0, ErrInvalidMedia
-		}
-		width := int(value[26]) | int(value[27]&0x3f)<<8
-		height := int(value[28]) | int(value[29]&0x3f)<<8
-		return width, height, nil
-	default:
-		return 0, 0, ErrInvalidMedia
-	}
+	return storage.NewObjectStorageFromEnv()
 }
 
 type mediaAsset struct {
@@ -280,14 +75,18 @@ func (s *Server) createMediaUploadToken(w http.ResponseWriter, r *http.Request) 
 		writeAuthError(w, r, ErrInvalidMedia)
 		return
 	}
-	mediaID := newMediaID()
+	mediaID, err := newMediaID()
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	objectKey := "media/" + user.ID + "/" + mediaID
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
-	storage := s.mediaStorage
-	if storage == nil {
-		storage = unavailableMediaStorage{}
+	storageBackend := s.mediaStorage
+	if storageBackend == nil {
+		storageBackend = unavailableMediaStorage{}
 	}
-	uploadURL, err := storage.SignUpload(r.Context(), mediaID, objectKey, input.MimeType, expiresAt)
+	uploadURL, err := storageBackend.SignUpload(r.Context(), mediaID, objectKey, input.MimeType, expiresAt)
 	if err != nil {
 		writeAuthError(w, r, err)
 		return
@@ -348,16 +147,51 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		writeAuthError(w, r, ErrInvalidMedia)
 		return
 	}
-	storage := s.mediaStorage
-	if storage == nil {
-		storage = unavailableMediaStorage{}
+	storageBackend := s.mediaStorage
+	if storageBackend == nil {
+		storageBackend = unavailableMediaStorage{}
 	}
-	if err := storage.VerifyUploaded(r.Context(), asset); err != nil {
+	storageAsset := &storage.MediaAsset{
+		ID:        asset.ID,
+		ObjectKey: asset.ObjectKey,
+		MimeType:  asset.MimeType,
+		Width:     asset.Width,
+		Height:    asset.Height,
+		Size:      asset.Size,
+		SHA256:    asset.SHA256,
+		Status:    asset.Status,
+	}
+	if err := storageBackend.VerifyUploaded(r.Context(), storageAsset); err != nil {
 		writeAuthError(w, r, err)
 		return
 	}
+	asset.Width = storageAsset.Width
+	asset.Height = storageAsset.Height
+
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(r.Context(), `UPDATE media_assets SET status = 'ready', completed_at = $1, updated_at = $1 WHERE id = $2 AND owner_id = $3 AND status = 'pending'`, now, mediaID, user.ID); err != nil {
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE media_assets SET status = 'ready', width = $1, height = $2, completed_at = $3, updated_at = $3 WHERE id = $4 AND owner_id = $5 AND status = 'pending'`, asset.Width, asset.Height, now, mediaID, user.ID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := enqueueOutboxTx(tx, "media.process", "media", mediaID, map[string]any{
+		"media_id":   mediaID,
+		"object_key": asset.ObjectKey,
+		"mime_type":  asset.MimeType,
+		"width":      asset.Width,
+		"height":     asset.Height,
+		"size_bytes": asset.Size,
+		"sha256":     asset.SHA256,
+	}, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -428,6 +262,12 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID str
 		writeAuthError(w, r, ErrMediaInUse)
 		return
 	}
+	if err := enqueueOutboxTx(tx, "media.delete", "media", mediaID, map[string]any{
+		"media_id": mediaID,
+	}, time.Now().UTC()); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -447,15 +287,25 @@ func nullableTime(value sql.NullTime) any {
 }
 
 func validMediaInput(input mediaUploadInput) bool {
-	if input.Size <= 0 || input.Size > 100*1024*1024 || strings.TrimSpace(input.FileName) == "" {
+	if input.Size <= 0 || strings.TrimSpace(input.FileName) == "" {
+		return false
+	}
+	switch input.MimeType {
+	case "image/jpeg", "image/png", "image/webp":
+		if input.Size > 15*1024*1024 {
+			return false
+		}
+	case "video/mp4":
+		if input.Size > 100*1024*1024 {
+			return false
+		}
+	default:
 		return false
 	}
 	if input.Width < 0 || input.Height < 0 || input.Width > 10000 || input.Height > 10000 {
 		return false
 	}
-	switch input.MimeType {
-	case "image/jpeg", "image/png", "image/webp", "video/mp4":
-	default:
+	if input.Width > 0 && input.Height > 0 && int64(input.Width)*int64(input.Height) > 40_000_000 {
 		return false
 	}
 	if len(input.SHA256) != 64 || !isHex(input.SHA256) {
@@ -469,10 +319,10 @@ func isHex(value string) bool {
 	return err == nil
 }
 
-func newMediaID() string {
+func newMediaID() (string, error) {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return "media_fallback"
+		return "", errors.New("generate media id failed")
 	}
-	return "media_" + hex.EncodeToString(raw[:])
+	return "media_" + hex.EncodeToString(raw[:]), nil
 }

@@ -224,6 +224,9 @@ class ProfileRepository {
               width: _nullableInt(item['width']),
               height: _nullableInt(item['height']),
               altText: _nullableString(item['alt_text']),
+              thumb: _parseVariant(item['thumb']),
+              detail: _parseVariant(item['detail']),
+              original: _parseVariant(item['original']),
             );
           }).toList()
         : const <MediaAsset>[];
@@ -291,5 +294,19 @@ class ProfileRepository {
       }
     }
     return fallback;
+  }
+
+  MediaVariant? _parseVariant(dynamic raw) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    final url = _nullableString(map['url']);
+    if (url == null || url.isEmpty) return null;
+    return MediaVariant(
+      url: url,
+      width: _int(map['width']),
+      height: _int(map['height']),
+      sizeBytes: _nullableInt(map['size']),
+      mimeType: _nullableString(map['mime_type']),
+    );
   }
 }

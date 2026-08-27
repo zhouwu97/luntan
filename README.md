@@ -6,11 +6,11 @@
 
 - Flutter 客户端：Android / iOS / Web
 - Go HTTP API：认证、板块、信息流、帖子、媒体、回复和互动接口
-- 本地 mock 数据层：无需后端即可运行和验证 UI
+- 本地 mock 数据层：仅用于离线测试和 UI 验证
 
 ## 当前状态
 
-所有平台不传 `API_BASE_URL` 时统一使用本地 `ForumStore` mock 数据；只有显式传入 `API_BASE_URL` 才进入真实 API 模式，避免 Android、Web、桌面端行为不一致。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建必须显式设置 `APP_ENV=production` 和 HTTPS API 地址；服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
+正式客户端默认连接自己的 Go API（开发默认地址为 `http://101.42.27.44`），首页默认请求最新帖子并按发帖时间排序；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建必须显式设置 `APP_ENV=production` 和 HTTPS API 地址；服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
 
 已覆盖的主要功能：
 
@@ -37,14 +37,18 @@
 
 ## 快速开始
 
-### 仅运行 Flutter mock 模式
+### 运行 Flutter 客户端（默认真实 API）
 
 ```bash
 flutter pub get
 flutter run
 ```
 
-不传 `API_BASE_URL` 时，应用默认使用本地 mock 仓储，不要求启动 Go 服务或 PostgreSQL。真实 API 必须显式传入 `--dart-define=API_BASE_URL=...`。
+开发构建不传 `API_BASE_URL` 时默认使用 `http://101.42.27.44`，需要改后端地址时再传入 `--dart-define=API_BASE_URL=...`。客户端只请求自己的 API 和媒体地址，不直接依赖源站页面。
+
+### 离线 Mock / 测试模式
+
+单元测试和离线 UI 预览可以显式构造 `ForumRepositories.mock()`；这条路径不会代表正式客户端运行时的数据来源。服务端导入脚本可以在没有客户端参与的情况下，把源站公开内容、图片和安全清洗后的作者/评论数据写入 PostgreSQL 与媒体目录。
 
 ### 运行 Web
 
@@ -105,9 +109,9 @@ flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:8080
 
 Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为电脑在局域网中的 IP，并确认服务监听和防火墙规则允许访问。
 
-### 远端占位展示数据
+### 远端导入数据与 QA 环境
 
-QA 服务器通过 `http://101.42.27.44/api/v1` 提供客户端 API。远端导入了约 100 条帖子、随机化占位用户和帖子图片；图片通过 `/imported-media/` 公开读取。该 HTTP 地址只用于 QA，API、图片媒体和 Web 正式发布必须统一使用 HTTPS。API 模式必须显式传入地址，启动示例：
+QA 服务器通过 `http://101.42.27.44/api/v1` 提供客户端 API。服务端已经把源站公开内容导入本地数据库，并把帖子图片下载到自己的媒体目录；作者标识经过脱敏处理，帖子和评论正文来自导入快照。客户端运行时只访问该 API，不直接请求源站。图片通过 `/imported-media/` 公开读取。该 HTTP 地址只用于 QA，API、图片媒体和 Web 正式发布必须统一使用 HTTPS。启动示例：
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://101.42.27.44
@@ -127,7 +131,7 @@ flutter build apk --release \
 
 正式域名还需要由 HTTPS 反向代理统一承载 API、媒体和 Web，并配置证书续期；不要在生产构建中复用 QA 的 `http://101.42.27.44` 地址。
 
-如需重新生成占位数据，使用 `scripts/import_placeholder_content.py`。脚本只写入占位用户名，不会保存源站作者用户名；数据库连接应通过远端进程环境中的 `DATABASE_URL` 提供，不要把连接凭据写入仓库。
+如需重新同步导入快照，使用 `scripts/import_placeholder_content.py`（脚本文件名保留用于兼容已有部署命令）。脚本只写入脱敏后的作者标识，不会保存源站作者用户名；数据库连接应通过远端进程环境中的 `DATABASE_URL` 提供，不要把连接凭据写入仓库。
 
 ## 常用验证命令
 
@@ -215,7 +219,7 @@ test/                                   # Flutter 单元测试和 Widget Test
 - 治理：`/me/account-status`、`/admins`、`/admins/{id}/roles`、`/admin/risk`、`/admin/logs`、`/admin/ip-restrictions`；自动规则识别微信群 / QQ 群 / 手机号 / 淘宝链接 / 外链并进入待审核
 - 增长功能：投票、排行榜、积分商品和事务兑换；历史市场表仅保留用于数据兼容，不再创建或展示市场帖子
 
-客户端 API 仓储位于 `lib/data/api/`，默认 mock / API 切换逻辑位于 `lib/data/repository_provider.dart`。
+客户端 API 仓储位于 `lib/data/api/`，运行时默认 API、测试时 Mock 的切换逻辑位于 `lib/data/repository_provider.dart`。
 
 ## 真实用户旅程与能力边界
 

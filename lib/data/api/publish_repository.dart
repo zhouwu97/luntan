@@ -26,6 +26,12 @@ abstract interface class PublishRepository {
     required String sha256,
   });
 
+  Future<Map<String, dynamic>> completeMedia({
+    required String mediaId,
+    required int size,
+    required String sha256,
+  });
+
   /// 清理尚未关联帖子的已上传媒体（放弃发布或单图删除）。
   Future<void> deleteMedia(String mediaId);
 }
@@ -207,16 +213,12 @@ class ApiPublishRepository
     if (ticket.uploadMethod.toUpperCase() != 'PUT') {
       throw const PublishException('暂不支持该媒体上传方式');
     }
+    // 1. PUT 上传源文件
     try {
       await _client.uploadBytes(
         ticket.uploadUrl,
         bytes,
         contentType: ticket.mimeType,
-      );
-      return await _client.postJson(
-        '/api/v1/media/${ticket.mediaId}/complete',
-        body: {'size': size, 'sha256': sha256},
-        requestTimeout: _client.uploadTimeout,
       );
     } on ApiException {
       await _deleteMediaSilently(ticket.mediaId);
@@ -225,6 +227,37 @@ class ApiPublishRepository
       await _deleteMediaSilently(ticket.mediaId);
       throw PublishException('媒体上传失败：$error');
     }
+
+    // 2. POST /complete 完成校验与状态流转（支持幂等重试）
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await _client.postJson(
+          '/api/v1/media/${ticket.mediaId}/complete',
+          body: {'size': size, 'sha256': sha256},
+          requestTimeout: _client.uploadTimeout,
+        );
+      } on ApiException catch (error) {
+        final code = error.statusCode;
+        final isDeterministicClientError = code != null && code >= 400 && code < 500;
+        if (isDeterministicClientError) {
+          // 4xx 参数/权限/校验明确失败，可安全清理 pending 媒体
+          await _deleteMediaSilently(ticket.mediaId);
+          rethrow;
+        }
+        // 5xx 或网络异常：可能服务端已经成功或短暂过载，禁止直接 DELETE
+        if (attempt == maxAttempts) {
+          rethrow;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 100 * attempt));
+      } catch (error) {
+        if (attempt == maxAttempts) {
+          throw PublishException('媒体上传确认失败：$error');
+        }
+        await Future<void>.delayed(Duration(milliseconds: 100 * attempt));
+      }
+    }
+    throw const PublishException('媒体上传确认重试耗尽');
   }
 
   Future<void> _deleteMediaSilently(String mediaId) async {
@@ -234,6 +267,19 @@ class ApiPublishRepository
       // 完成请求可能已经成功但响应丢失，此时服务端会拒绝删除已挂帖媒体。
       // 清理失败不能覆盖原始上传错误，后续由媒体回收任务兜底。
     }
+  }
+
+  @override
+  Future<Map<String, dynamic>> completeMedia({
+    required String mediaId,
+    required int size,
+    required String sha256,
+  }) {
+    return _client.postJson(
+      '/api/v1/media/$mediaId/complete',
+      body: {'size': size, 'sha256': sha256},
+      requestTimeout: _client.uploadTimeout,
+    );
   }
 
   @override

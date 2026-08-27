@@ -29,16 +29,52 @@ const homeCommunityIds = <String>[
 ];
 
 List<Community> selectHomeCommunities(Iterable<Community> source) {
-  final byId = <String, Community>{};
-  for (final community in source) {
-    if (homeCommunityIds.contains(community.id)) {
-      byId.putIfAbsent(community.id, () => community);
-    }
-  }
+  final candidates = source
+      .where((community) => community.status == CommunityStatus.active)
+      .where(_isHomeCommunity)
+      .toList();
+  candidates.sort((a, b) {
+    final byPriority = _homeCommunityPriority(
+      a,
+    ).compareTo(_homeCommunityPriority(b));
+    if (byPriority != 0) return byPriority;
+    final byOrder = a.sortOrder.compareTo(b.sortOrder);
+    if (byOrder != 0) return byOrder;
+    final byPosts = b.postCount.compareTo(a.postCount);
+    return byPosts == 0 ? a.id.compareTo(b.id) : byPosts;
+  });
+
+  // 同一板块可能同时存在旧 ID 和导入 ID，优先保留排序靠前的那一个，
+  // 避免用户看到两个同名 Tab 但点击后请求不同数据。
+  final seenNames = <String>{};
+  final seenIds = <String>{};
   return [
-    for (final id in homeCommunityIds)
-      if (byId[id] != null) byId[id]!,
+    for (final community in candidates)
+      if (seenIds.add(community.id) && seenNames.add(community.name.trim()))
+        community,
   ];
+}
+
+bool _isHomeCommunity(Community community) {
+  if (community.id == 'community_qa' ||
+      community.slug == 'qa' ||
+      community.name.trim() == 'QA测试板块') {
+    return false;
+  }
+  return homeCommunityIds.contains(community.id) ||
+      community.id.startsWith('community-import-') ||
+      const {'大型拆箱', '杂鱼日常', '酱紫社区'}.contains(community.name.trim());
+}
+
+int _homeCommunityPriority(Community community) {
+  final knownIdIndex = homeCommunityIds.indexOf(community.id);
+  if (knownIdIndex >= 0) return knownIdIndex;
+  return switch (community.name.trim()) {
+    '大型拆箱' => 0,
+    '杂鱼日常' => 1,
+    '酱紫社区' => 2,
+    _ => 1000 + community.sortOrder,
+  };
 }
 
 class HomeScreen extends StatefulWidget {
@@ -115,11 +151,12 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Community> communities = const [];
   String? selectedCommunityId;
   late FeedSort selectedSort;
-  LatestOrder latestOrder = LatestOrder.comment;
+  LatestOrder latestOrder = LatestOrder.post;
   final feedToolbarKey = GlobalKey();
   bool _autoFillingViewport = false;
   int _viewportFillAttempts = 0;
   bool _showBackToTop = false;
+  bool _loadingCommunities = false;
 
   bool get isApiMode => widget.feedRepository != null;
 
@@ -128,7 +165,8 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     // 首页默认展示杂鱼日常，浏览和发布的默认板块保持一致。
     selectedCommunityId = 'community-daily';
-    selectedSort = widget.store.selectedSort;
+    selectedSort = isApiMode ? FeedSort.latest : widget.store.selectedSort;
+    latestOrder = isApiMode ? LatestOrder.post : LatestOrder.comment;
     communities = widget.communityRepository == null
         ? selectHomeCommunities(widget.store.communities)
         : const [];
@@ -253,6 +291,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadCommunities() async {
+    if (mounted) setState(() => _loadingCommunities = true);
     try {
       final result = await widget.communityRepository!.getCommunities(
         status: CommunityStatus.active,
@@ -261,20 +300,25 @@ class _HomeScreenState extends State<HomeScreen> {
       final visibleCommunities = selectHomeCommunities(result);
       setState(() {
         communities = visibleCommunities;
-        selectedCommunityId = visibleCommunities
-            .map((item) => item.id)
-            .firstWhere(
-              (id) => id == 'community-daily',
-              orElse: () => visibleCommunities.isEmpty
-                  ? 'community-daily'
-                  : visibleCommunities.first.id,
-            );
+        final preferred = visibleCommunities
+            .where(
+              (item) =>
+                  item.id == 'community-daily' || item.name.trim() == '杂鱼日常',
+            )
+            .toList();
+        selectedCommunityId = preferred.isNotEmpty
+            ? preferred.first.id
+            : visibleCommunities.isEmpty
+            ? 'community-daily'
+            : visibleCommunities.first.id;
       });
       _resetViewportFillAttempts();
       _loadFeed();
     } catch (_) {
       if (!mounted) return;
       widget.onFeedback('板块加载失败，稍后可重试');
+    } finally {
+      if (mounted) setState(() => _loadingCommunities = false);
     }
   }
 
@@ -451,8 +495,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final showInitialSkeleton =
             activeStatus == FeedStatus.initial ||
             (activeStatus == FeedStatus.loading && posts.isEmpty);
-        final showTopProgress =
-            activeStatus == FeedStatus.loading && posts.isNotEmpty;
+        final showTopProgress = activeStatus == FeedStatus.loading;
         final loadMoreFailed =
             activeError != null &&
             posts.isNotEmpty &&
@@ -484,6 +527,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           communities: communities,
                           selectedCommunityId: selectedCommunityId,
                           onChanged: _selectCommunity,
+                          loading: _loadingCommunities,
                         ),
                       ),
                       SliverToBoxAdapter(
@@ -799,11 +843,13 @@ class _SectionTabs extends StatelessWidget {
     required this.communities,
     required this.selectedCommunityId,
     required this.onChanged,
+    this.loading = false,
   });
 
   final List<Community> communities;
   final String? selectedCommunityId;
   final ValueChanged<String> onChanged;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -818,19 +864,37 @@ class _SectionTabs extends StatelessWidget {
           borderRadius: BorderRadius.circular(15),
           border: Border.all(color: AppTheme.border),
         ),
-        child: Row(
-          children: tabs
-              .map(
-                (community) => Expanded(
-                  child: _CommunityTab(
-                    label: community.name,
-                    active: selectedCommunityId == community.id,
-                    onTap: () => onChanged(community.id),
-                  ),
-                ),
-              )
-              .toList(),
-        ),
+        child: tabs.isEmpty
+            ? loading
+                  ? const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : const Center(
+                      child: Text(
+                        '暂无可用板块',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    )
+            : Row(
+                children: tabs
+                    .map(
+                      (community) => Expanded(
+                        child: _CommunityTab(
+                          label: community.name,
+                          active: selectedCommunityId == community.id,
+                          onTap: () => onChanged(community.id),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
       ),
     );
   }

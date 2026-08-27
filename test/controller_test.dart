@@ -14,7 +14,7 @@ void main() {
       repository: MockFeedRepository(store: store),
     );
 
-    // 默认推荐流（人工精选）
+    // Mock 默认推荐流；正式首页会显式请求最新流。
     await controller.initialLoad();
     expect(controller.state.status, FeedStatus.success);
     expect(controller.state.items, hasLength(3));

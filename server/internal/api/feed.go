@@ -13,10 +13,12 @@ import (
 )
 
 type userSummary struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Nickname string `json:"nickname"`
-	Level    int    `json:"level,omitempty"`
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Nickname      string `json:"nickname"`
+	Level         int    `json:"level,omitempty"`
+	AvatarMediaID string `json:"avatar_media_id,omitempty"`
+	AvatarURL     string `json:"avatar_url,omitempty"`
 }
 
 type communitySummary struct {
@@ -98,7 +100,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
 		return
 	}
-	filter, err := parseFeedFilter(r.URL.Query().Get("post_type"), r.URL.Query().Get("has_media"))
+	filter, err := parseFeedFilter(r.URL.Query().Get("post_type"), r.URL.Query().Get("has_media"), r.URL.Query().Get("topic"))
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_FILTER", Message: "Feed 筛选条件无效"})
 		return
@@ -258,6 +260,10 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if filter.HasMedia {
 		query += " AND EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id)"
 	}
+	if filter.Topic != "" {
+		query += fmt.Sprintf(" AND p.topic = $%d", len(args)+1)
+		args = append(args, filter.Topic)
+	}
 	// 双向过滤：被屏蔽者不能继续看到屏蔽方的公开内容，屏蔽方也不再看到被屏蔽者。
 	if viewer, ok := resolveOptionalViewer(s, r); ok {
 		pViewer := len(args) + 1
@@ -390,9 +396,10 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 type feedFilter struct {
 	PostType string
 	HasMedia bool
+	Topic    string
 }
 
-func parseFeedFilter(postType, hasMedia string) (feedFilter, error) {
+func parseFeedFilter(postType, hasMedia string, topics ...string) (feedFilter, error) {
 	filter := feedFilter{PostType: strings.TrimSpace(postType)}
 	switch filter.PostType {
 	case "", "normal", "guide", "question", "game_share", "poll", "activity":
@@ -405,6 +412,16 @@ func parseFeedFilter(postType, hasMedia string) (feedFilter, error) {
 		filter.HasMedia = true
 	default:
 		return feedFilter{}, fmt.Errorf("invalid has_media")
+	}
+	topic := ""
+	if len(topics) > 0 {
+		topic = topics[0]
+	}
+	filter.Topic = strings.TrimSpace(topic)
+	switch filter.Topic {
+	case "", "outfit", "activity", "game_share":
+	default:
+		return feedFilter{}, fmt.Errorf("invalid topic")
 	}
 	return filter, nil
 }

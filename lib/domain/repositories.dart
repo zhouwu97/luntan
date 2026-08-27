@@ -34,6 +34,7 @@ abstract interface class QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   });
 }
 

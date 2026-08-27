@@ -31,6 +31,7 @@ type User struct {
 	Username               string          `json:"username"`
 	Nickname               string          `json:"nickname"`
 	Level                  int             `json:"level"`
+	Experience             int64           `json:"experience"`
 	Status                 string          `json:"status"`
 	AccountType            string          `json:"account_type"`
 	Email                  string          `json:"email,omitempty"`
@@ -128,9 +129,23 @@ func (s *Service) Register(ctx context.Context, input RegisterInput, metadata Se
 	return AuthResponse{TokenPair: pair, User: user}, nil
 }
 
+// levelForExperience 计算累计经验对应的正式等级（1~8 级）。
+func levelForExperience(exp int64) int {
+	if exp <= 0 {
+		return 1
+	}
+	for lvl := 8; lvl >= 1; lvl-- {
+		if exp >= int64(50*lvl*(lvl-1)) {
+			return lvl
+		}
+	}
+	return 1
+}
+
 // LoginByEmail 为邮箱验证码登录完成会话创建。验证码的校验由 API 层完成，
-// 这里只负责查找或创建正式邮箱账号并签发会话，避免认证与邮件投递耦合。
-func (s *Service) LoginByEmail(ctx context.Context, email, nickname string, metadata SessionMetadata) (AuthResponse, error) {
+// 这里负责查找或创建正式邮箱账号并签发会话。若当前会话为游客且邮箱尚未被注册，
+// 则原地将游客账号升级为正式账号，无缝保留全部历史数据与经验。
+func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID string, metadata SessionMetadata) (AuthResponse, error) {
 	email = normalizeEmail(email)
 	if !validEmail(email) {
 		return AuthResponse{}, ErrInvalidEmail
@@ -145,23 +160,67 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname string, meta
 	defer tx.Rollback()
 	var user User
 	var verifiedAt sql.NullTime
+	var exp int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
-		       COALESCE(u.account_type, 'email'), u.email, u.email_verified, u.email_verified_at
+		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(u.account_type, 'email'), u.email, u.email_verified, u.email_verified_at,
+		       COALESCE(up.experience, 0)
 		FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE lower(u.email) = $1 AND u.deleted_at IS NULL
-		FOR UPDATE OF u`, email).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt)
+		FOR UPDATE OF u`, email).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &exp)
 	if errors.Is(err, sql.ErrNoRows) {
 		now := s.clock().UTC()
-		user = User{ID: newID("usr"), Username: "email_" + newID("acct")[5:17], Nickname: strings.TrimSpace(nickname), Level: 1, Status: "active", AccountType: "email", Email: email, EmailVerified: true, EmailVerifiedAt: &now}
-		if user.Nickname == "" || strings.EqualFold(user.Nickname, email) {
-			user.Nickname = generatedNickname(user.ID)
+		upgraded := false
+		if strings.TrimSpace(guestUserID) != "" {
+			var guestUsername, guestNickname, guestStatus string
+			var guestExp int64
+			err := tx.QueryRowContext(ctx, `
+				SELECT u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.experience, 0)
+				FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
+				WHERE u.id = $1 AND u.account_type = 'guest' AND u.deleted_at IS NULL
+				FOR UPDATE OF u`, guestUserID).Scan(&guestUsername, &guestStatus, &guestNickname, &guestExp)
+			if err == nil && guestStatus == "active" {
+				targetLevel := levelForExperience(guestExp)
+				targetNickname := strings.TrimSpace(nickname)
+				if targetNickname == "" || targetNickname == "游客" || strings.EqualFold(targetNickname, email) {
+					targetNickname = guestNickname
+				}
+				if targetNickname == "" || targetNickname == "游客" {
+					targetNickname = generatedNickname(guestUserID)
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE users SET account_type = 'email', email = $1, email_verified = true, email_verified_at = $2, updated_at = $2 WHERE id = $3`, email, now, guestUserID); err != nil {
+					return AuthResponse{}, err
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE user_profiles SET nickname = $1, level = $2, updated_at = $3 WHERE user_id = $4`, targetNickname, targetLevel, now, guestUserID); err != nil {
+					return AuthResponse{}, err
+				}
+				user = User{
+					ID:              guestUserID,
+					Username:        guestUsername,
+					Nickname:        targetNickname,
+					Level:           targetLevel,
+					Status:          "active",
+					AccountType:     "email",
+					Email:           email,
+					EmailVerified:   true,
+					EmailVerifiedAt: &now,
+				}
+				upgraded = true
+			}
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
-			return AuthResponse{}, err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, created_at, updated_at) VALUES ($1, $2, 1, $3, $3)`, user.ID, user.Nickname, now); err != nil {
-			return AuthResponse{}, err
+
+		if !upgraded {
+			user = User{ID: newID("usr"), Username: "email_" + newID("acct")[5:17], Nickname: strings.TrimSpace(nickname), Level: 1, Status: "active", AccountType: "email", Email: email, EmailVerified: true, EmailVerifiedAt: &now}
+			if user.Nickname == "" || strings.EqualFold(user.Nickname, email) {
+				user.Nickname = generatedNickname(user.ID)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
+				return AuthResponse{}, err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, experience, created_at, updated_at) VALUES ($1, $2, 1, 0, $3, $3)`, user.ID, user.Nickname, now); err != nil {
+				return AuthResponse{}, err
+			}
 		}
 	} else if err != nil {
 		return AuthResponse{}, err
@@ -199,7 +258,7 @@ func (s *Service) LoginByEmail(ctx context.Context, email, nickname string, meta
 }
 
 // CreateGuest 为游客模式创建可追踪的后台身份。游客仍然使用统一 users/sessions
-// 体系，只是 account_type=guest 且不绑定邮箱。
+// 体系，account_type=guest 且等级固定为 Lv.0。
 func (s *Service) CreateGuest(ctx context.Context, metadata SessionMetadata) (AuthResponse, error) {
 	if s == nil || s.db == nil {
 		return AuthResponse{}, sql.ErrConnDone
@@ -210,11 +269,11 @@ func (s *Service) CreateGuest(ctx context.Context, metadata SessionMetadata) (Au
 	}
 	defer tx.Rollback()
 	now := s.clock().UTC()
-	user := User{ID: newID("usr"), Username: "guest_" + newID("acct")[5:17], Nickname: "游客", Level: 1, Status: "active", AccountType: "guest"}
+	user := User{ID: newID("usr"), Username: "guest_" + newID("acct")[5:17], Nickname: "游客", Level: 0, Status: "active", AccountType: "guest"}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, account_type, created_at, updated_at) VALUES ($1, $2, 'active', 'guest', $3, $3)`, user.ID, user.Username, now); err != nil {
 		return AuthResponse{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, created_at, updated_at) VALUES ($1, '游客', 1, $2, $2)`, user.ID, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, experience, created_at, updated_at) VALUES ($1, '游客', 0, 0, $2, $2)`, user.ID, now); err != nil {
 		return AuthResponse{}, err
 	}
 	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
@@ -244,11 +303,13 @@ func (s *Service) Login(ctx context.Context, input LoginInput, metadata SessionM
 		credential string
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1), a.id, a.credential_hash
+		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.experience, 0), a.id, a.credential_hash
 		FROM users u
 		JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password' AND a.identifier = $1
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE u.deleted_at IS NULL`, username).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &authMethod, &credential)
+		WHERE u.deleted_at IS NULL`, username).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.Experience, &authMethod, &credential)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidCredentials
 	}
@@ -302,13 +363,15 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 		verifiedAt   sql.NullTime
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+		SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.experience, 0),
 		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at, rt.expires_at
 		FROM refresh_tokens rt
 		JOIN users u ON u.id = rt.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND u.deleted_at IS NULL
-		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &expiresAt)
+		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.Experience, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidToken
 	}
@@ -385,7 +448,9 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 	var user User
 	var verifiedAt sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.experience, 0),
 		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
@@ -396,6 +461,7 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 		&user.Status,
 		&user.Nickname,
 		&user.Level,
+		&user.Experience,
 		&user.AccountType,
 		&user.Email,
 		&user.EmailVerified,

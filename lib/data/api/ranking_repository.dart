@@ -53,6 +53,7 @@ class RankingToyComment {
     this.rootId,
     this.parentId,
     this.replyToUserId,
+    this.replyToUserNickname,
     this.replyCount = 0,
   });
 
@@ -69,6 +70,7 @@ class RankingToyComment {
   final String? rootId;
   final String? parentId;
   final String? replyToUserId;
+  final String? replyToUserNickname;
   int replyCount;
 
   RankingToyComment copyWith({
@@ -85,6 +87,7 @@ class RankingToyComment {
     String? rootId,
     String? parentId,
     String? replyToUserId,
+    String? replyToUserNickname,
     int? replyCount,
   }) {
     return RankingToyComment(
@@ -101,6 +104,7 @@ class RankingToyComment {
       rootId: rootId ?? this.rootId,
       parentId: parentId ?? this.parentId,
       replyToUserId: replyToUserId ?? this.replyToUserId,
+      replyToUserNickname: replyToUserNickname ?? this.replyToUserNickname,
       replyCount: replyCount ?? this.replyCount,
     );
   }
@@ -373,8 +377,16 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
     rootId: _nullableString(json['root_id']),
     parentId: _nullableString(json['parent_id']),
     replyToUserId: _nullableString(json['reply_to_user_id']),
+    replyToUserNickname: _replyToUserNickname(json['reply_to_user']),
     replyCount: _int(json['reply_count']),
   );
+}
+
+String? _replyToUserNickname(dynamic raw) {
+  if (raw is! Map) return null;
+  final value = Map<String, dynamic>.from(raw);
+  final nickname = _nullableString(value['nickname']);
+  return nickname ?? _nullableString(value['username']);
 }
 
 String _string(dynamic value, {String fallback = ''}) =>

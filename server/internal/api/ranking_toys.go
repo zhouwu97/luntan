@@ -59,6 +59,7 @@ type rankingToyComment struct {
 	RootID         sql.NullString
 	ParentID       sql.NullString
 	ReplyToUserID  sql.NullString
+	ReplyToUser    *userSummary
 	ReplyCount     int64
 	AuthorRating   sql.NullInt64
 }
@@ -382,6 +383,12 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 		); err != nil {
 			return rankingToyCommentPage{}, err
 		}
+		if item.ReplyToUserID.Valid && item.ReplyToUserID.String != "" {
+			item.ReplyToUser, err = loadUserSummary(ctx, s.db, item.ReplyToUserID.String)
+			if err != nil {
+				return rankingToyCommentPage{}, err
+			}
+		}
 		if len(items) < limit {
 			last = item
 		}
@@ -490,6 +497,12 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 		); err != nil {
 			return rankingToyCommentPage{}, err
 		}
+		if item.ReplyToUserID.Valid && item.ReplyToUserID.String != "" {
+			item.ReplyToUser, err = loadUserSummary(ctx, s.db, item.ReplyToUserID.String)
+			if err != nil {
+				return rankingToyCommentPage{}, err
+			}
+		}
 		if len(items) < limit {
 			last = item
 		}
@@ -516,7 +529,7 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 }
 
 func (item rankingToyComment) response() map[string]any {
-	return map[string]any{
+	response := map[string]any{
 		"id":               item.ID,
 		"content":          item.Content,
 		"like_count":       item.LikeCount,
@@ -535,6 +548,10 @@ func (item rankingToyComment) response() map[string]any {
 		},
 		"viewer_state": map[string]any{"has_liked": item.ViewerHasLiked},
 	}
+	if item.ReplyToUser != nil {
+		response["reply_to_user"] = item.ReplyToUser
+	}
+	return response
 }
 
 func rankingNullableString(value sql.NullString) any {
@@ -849,6 +866,15 @@ func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID stri
 		&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
 		&item.AuthorRating,
 	)
+	if err != nil {
+		return item, err
+	}
+	if item.ReplyToUserID.Valid && item.ReplyToUserID.String != "" {
+		item.ReplyToUser, err = loadUserSummary(r.Context(), s.db, item.ReplyToUserID.String)
+		if err != nil {
+			return item, err
+		}
+	}
 	return item, err
 }
 

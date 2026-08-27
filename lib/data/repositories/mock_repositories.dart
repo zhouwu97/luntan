@@ -285,6 +285,7 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) async {
     final normalizedLimit = limit.clamp(1, _pageSize).toInt();
     final posts = [..._store.posts]
@@ -367,6 +368,7 @@ class MockPostRepository implements PostRepository, PostMutationRepository {
     required String title,
     required String content,
     List<String> mediaIds = const [],
+    String? topic,
   }) async {
     final post = _store.posts.firstWhere((item) => item.id == postId);
     post.title = title;
@@ -806,6 +808,7 @@ class MockPublishRepository
         section: section,
         isGameShare: type == 'game_share',
         isPoll: type == 'poll',
+        topic: topic,
       ),
     );
     return {'id': _store.posts.first.id, 'idempotency_key': idempotencyKey};
@@ -830,6 +833,7 @@ class MockPublishRepository
     bool allowMultiple = false,
     DateTime? endsAt,
     List<String> mediaIds = const [],
+    String? topic,
   }) async {
     final response = await createPost(
       communityId: communityId,
@@ -838,6 +842,7 @@ class MockPublishRepository
       content: content,
       idempotencyKey: idempotencyKey,
       mediaIds: mediaIds,
+      topic: topic,
     );
     return {
       ...response,

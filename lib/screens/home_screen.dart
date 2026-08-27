@@ -24,8 +24,8 @@ import 'search_screen.dart';
 /// 意外暴露给用户。
 const homeCommunityIds = <String>[
   'community-unboxing',
-  'community-daily',
   'community-campus',
+  'community-daily',
 ];
 
 List<Community> selectHomeCommunities(Iterable<Community> source) {
@@ -71,8 +71,8 @@ int _homeCommunityPriority(Community community) {
   if (knownIdIndex >= 0) return knownIdIndex;
   return switch (community.name.trim()) {
     '大型拆箱' => 0,
-    '杂鱼日常' => 1,
-    '酱紫社区' => 2,
+    '酱紫社区' => 1,
+    '杂鱼日常' => 2,
     _ => 1000 + community.sortOrder,
   };
 }
@@ -163,8 +163,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // 首页默认展示杂鱼日常，浏览和发布的默认板块保持一致。
-    selectedCommunityId = 'community-daily';
+    // 首页默认展示酱紫社区，作为中间主 Tab；发布默认板块也与首页保持一致。
+    selectedCommunityId = 'community-campus';
     selectedSort = isApiMode ? FeedSort.latest : widget.store.selectedSort;
     latestOrder = isApiMode ? LatestOrder.post : LatestOrder.comment;
     communities = widget.communityRepository == null
@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widget.communityRepository != null) {
       _loadCommunities();
     }
-    // 有板块仓储时，先加载标签再请求默认的杂鱼日常流，避免标签和列表状态短暂不同步。
+    // 有板块仓储时，先加载标签再请求默认的酱紫社区流，避免标签和列表状态短暂不同步。
     if (widget.communityRepository == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -303,13 +303,13 @@ class _HomeScreenState extends State<HomeScreen> {
         final preferred = visibleCommunities
             .where(
               (item) =>
-                  item.id == 'community-daily' || item.name.trim() == '杂鱼日常',
+                  item.id == 'community-campus' || item.name.trim() == '酱紫社区',
             )
             .toList();
         selectedCommunityId = preferred.isNotEmpty
             ? preferred.first.id
             : visibleCommunities.isEmpty
-            ? 'community-daily'
+            ? 'community-campus'
             : visibleCommunities.first.id;
       });
       _resetViewportFillAttempts();

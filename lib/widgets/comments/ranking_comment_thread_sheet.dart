@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/api/ranking_repository.dart';
@@ -5,6 +6,8 @@ import '../../domain/models.dart' show relativeTimeLabel;
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import 'comment_skeleton.dart';
+
+enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
 /// 榜单评论楼中楼。
 ///
@@ -56,6 +59,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   bool loadingMore = false;
   bool sending = false;
   bool hasMore = true;
+  _ReplyLoadState loadState = _ReplyLoadState.loading;
 
   @override
   void initState() {
@@ -84,6 +88,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     if (loading) return;
     setState(() {
       loading = true;
+      loadState = _ReplyLoadState.loading;
       errorMessage = null;
       loadMoreError = null;
       replies.clear();
@@ -100,12 +105,22 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         nextCursor = page.nextCursor;
         hasMore = page.hasMore && page.nextCursor != null;
         loading = false;
+        loadState = replies.isEmpty
+            ? _ReplyLoadState.loadedEmpty
+            : _ReplyLoadState.loaded;
       });
     } catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          'Ranking replies request failed: '
+          'GET /api/v1/ranking/toy-comments/${widget.rootComment.id}/replies; $error',
+        );
+      }
       if (!mounted) return;
       setState(() {
         errorMessage = '回复加载失败，请重试';
         loading = false;
+        loadState = _ReplyLoadState.error;
       });
     }
   }
@@ -163,6 +178,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
           replies.add(comment);
         }
         widget.rootComment.replyCount += 1;
+        loadState = _ReplyLoadState.loaded;
         sending = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -199,7 +215,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     for (final item in replies) {
       if (item.authorId == targetId) return _name(item);
     }
-    return '用户';
+    return comment.replyToUserNickname ?? '用户';
   }
 
   Widget _rating(int? rating) {
@@ -259,7 +275,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                     Row(
                       children: [
                         Text(
-                          '${widget.rootComment.replyCount} 条回复',
+                          _replyTitle(),
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
@@ -354,13 +370,13 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   }
 
   Widget _buildReplyList() {
-    if (loading && replies.isEmpty) {
+    if (loadState == _ReplyLoadState.loading && replies.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: 16),
         child: CommentSkeleton(itemCount: 3),
       );
     }
-    if (errorMessage != null && replies.isEmpty) {
+    if (loadState == _ReplyLoadState.error && replies.isEmpty) {
       return Center(
         child: TextButton(
           onPressed: _loadFirstPage,
@@ -408,6 +424,12 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
       },
     );
   }
+
+  String _replyTitle() => switch (loadState) {
+    _ReplyLoadState.loading || _ReplyLoadState.error => '回复',
+    _ReplyLoadState.loadedEmpty => '0 条回复',
+    _ReplyLoadState.loaded => '${widget.rootComment.replyCount} 条回复',
+  };
 
   Widget _buildReplyItem(RankingToyComment reply) {
     final name = _name(reply);

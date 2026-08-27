@@ -29,6 +29,7 @@ type postWriteInput struct {
 	Content     string     `json:"content"`
 	MediaIDs    []string   `json:"media_ids"`
 	Poll        *pollInput `json:"poll"`
+	Topic       string     `json:"topic"`
 }
 
 type postMutationResponse struct {
@@ -124,6 +125,12 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	if input.Topic != "" {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET topic = $1 WHERE id = $2`, input.Topic, postID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	if err := insertPostRevision(r.Context(), tx, postID, user.ID, input, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -143,6 +150,10 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := awardPointsTx(r.Context(), tx, user.ID, "post", "发布帖子", "post:create:"+postID, s.pointRewards.PostCreate); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := awardExperienceTx(r.Context(), tx, user.ID, "post", "发布帖子", "post:create:"+postID, s.experienceRewards.PostCreate, s.experienceRewards.PostCreateDailyLimit); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -221,6 +232,12 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID strin
 		writeInternalError(w, r, err)
 		return
 	}
+	if input.Topic != "" {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET topic = $1 WHERE id = $2`, input.Topic, postID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	if err := insertPostRevision(r.Context(), tx, postID, user.ID, input, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -285,6 +302,9 @@ func validPostInput(input postWriteInput) bool {
 		return false
 	}
 	if len([]rune(input.Title)) > 200 || len([]rune(input.Content)) > 200000 {
+		return false
+	}
+	if input.Topic != "" && input.Topic != "outfit" && input.Topic != "activity" && input.Topic != "game_share" {
 		return false
 	}
 	switch input.Type {

@@ -15,6 +15,7 @@ import '../theme/app_theme.dart';
 import 'exchange_store_screen.dart';
 import 'bookmark_folders_screen.dart';
 import 'points_screen.dart';
+import 'settings_screen.dart';
 
 typedef OpenPostById = void Function(String postId, {String? focusCommentId});
 
@@ -51,6 +52,7 @@ class ProfileScreen extends StatelessWidget {
     this.onOpenAppeals,
     this.onOpenAccountStatus,
     this.onOpenAdmins,
+    this.onOpenGovernance,
     this.onOpenRelations,
     this.refreshToken = 0,
   });
@@ -79,6 +81,7 @@ class ProfileScreen extends StatelessWidget {
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenAccountStatus;
   final VoidCallback? onOpenAdmins;
+  final VoidCallback? onOpenGovernance;
   final void Function(String userId, bool followers)? onOpenRelations;
   final int refreshToken;
 
@@ -106,7 +109,11 @@ class ProfileScreen extends StatelessWidget {
         onOpenAppeals: onOpenAppeals,
         onOpenAccountStatus: onOpenAccountStatus,
         onOpenAdmins: onOpenAdmins,
+        onOpenGovernance: onOpenGovernance,
         onOpenRelations: onOpenRelations,
+        isGuest: currentUser?.accountType == 'guest',
+        accountSubtitle: currentUser?.email ?? '邮箱账号已登录',
+        onRequireAuth: onRequireAuth,
         refreshToken: refreshToken,
       );
     }
@@ -226,38 +233,13 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showSettings(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.shield_outlined),
-              title: const Text('隐私与安全'),
-              onTap: () {
-                Navigator.pop(context);
-                onFeedback('隐私设置已打开');
-              },
-            ),
-            if (onLogout != null)
-              ListTile(
-                leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
-                title: const Text('退出登录'),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await onLogout!();
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.info_outline_rounded),
-              title: const Text('关于杯友酱'),
-              onTap: () {
-                Navigator.pop(context);
-                onFeedback('当前版本 v1.0.0');
-              },
-            ),
-          ],
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsCenterScreen(
+          onOpenMessages: onOpenMessages,
+          onFeedback: onFeedback,
+          onClearHistory: () async => store.clearHistory(),
+          onLogout: onLogout,
         ),
       ),
     );
@@ -473,6 +455,12 @@ class _GuestProfileScreen extends StatelessWidget {
                 onPressed: onRequireAuth,
                 child: const Text('登录 / 注册'),
               ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onRequireAuth,
+                icon: const Icon(Icons.mail_outline_rounded),
+                label: const Text('绑定邮箱账号'),
+              ),
             ],
           ),
         ),
@@ -499,7 +487,11 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onOpenAppeals,
     this.onOpenAccountStatus,
     this.onOpenAdmins,
+    this.onOpenGovernance,
     this.onOpenRelations,
+    this.isGuest = false,
+    this.accountSubtitle,
+    this.onRequireAuth,
     this.publishRepository,
     this.canManageProfile = true,
     required this.refreshToken,
@@ -516,7 +508,11 @@ class _ApiProfileScreen extends StatefulWidget {
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenAccountStatus;
   final VoidCallback? onOpenAdmins;
+  final VoidCallback? onOpenGovernance;
   final void Function(String userId, bool followers)? onOpenRelations;
+  final bool isGuest;
+  final String? accountSubtitle;
+  final VoidCallback? onRequireAuth;
   final int refreshToken;
   final StoreRepository? storeRepository;
   final BookmarkRepository? bookmarkRepository;
@@ -643,7 +639,11 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '@${profile.username} · Lv.${profile.level} · 信任${profile.trustLevel}',
+                        profile.growth?.levelLocked == true
+                            ? '@${profile.username} · Lv.0 · 累计经验 ${profile.experience} · 注册后解锁等级'
+                            : (profile.growth?.nextLevelExperience == null
+                                ? '@${profile.username} · Lv.${profile.level} (最高级) · 经验 ${profile.experience} · 信任${profile.trustLevel}'
+                                : '@${profile.username} · Lv.${profile.level} · 经验 ${profile.growth?.experienceInLevel ?? 0}/${profile.growth?.experienceRequiredInLevel ?? 100} · 信任${profile.trustLevel}'),
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: 12,
@@ -672,6 +672,10 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                   ),
               ],
             ),
+            if (widget.isGuest) ...[
+              const SizedBox(height: 14),
+              _GuestAccountBanner(onRequireAuth: widget.onRequireAuth),
+            ],
             if (widget.storeRepository != null) ...[
               const SizedBox(height: 14),
               FutureBuilder<PointsOverview>(
@@ -869,124 +873,66 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   }
 
   void _showSettings(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Wrap(
-          children: [
-            if (widget.onLogout != null)
-              ListTile(
-                leading: const Icon(Icons.logout_rounded, color: AppTheme.pink),
-                title: const Text('退出登录'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  await widget.onLogout!();
-                },
-              ),
-            if (widget.onDeleteAccount != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.person_off_outlined,
-                  color: AppTheme.pink,
-                ),
-                title: const Text('注销账号'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  final confirmed =
-                      await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('确认注销账号？'),
-                          content: const Text(
-                            '账号、认证信息、互动和通知将被清理，且无法恢复。请确认你已备份需要保留的内容。',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('取消'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('继续注销'),
-                            ),
-                          ],
-                        ),
-                      ) ??
-                      false;
-                  if (!confirmed || !mounted) return;
-                  try {
-                    await widget.onDeleteAccount!();
-                  } catch (error) {
-                    if (mounted) {
-                      widget.onFeedback(
-                        userFacingApiMessage(error, fallback: '注销失败，请稍后重试'),
-                      );
-                    }
-                  }
-                },
-              ),
-            if (widget.onOpenModeration != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.gavel_outlined,
-                  color: AppTheme.primary,
-                ),
-                title: const Text('审核中心'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  widget.onOpenModeration!();
-                },
-              ),
-            if (widget.onOpenRecommendations != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.push_pin_outlined,
-                  color: AppTheme.primary,
-                ),
-                title: const Text('首页推荐'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  widget.onOpenRecommendations!();
-                },
-              ),
-            if (widget.onOpenAccountStatus != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.account_balance_outlined,
-                  color: AppTheme.primary,
-                ),
-                title: const Text('账号处罚详情'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  widget.onOpenAccountStatus!();
-                },
-              ),
-            if (widget.onOpenAdmins != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.admin_panel_settings_outlined,
-                  color: AppTheme.primary,
-                ),
-                title: const Text('管理员管理'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  widget.onOpenAdmins!();
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.info_outline_rounded),
-              title: const Text('关于杯友酱'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                widget.onFeedback('当前版本 v1.0.0');
-              },
-            ),
-          ],
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsCenterScreen(
+          isGuest: widget.isGuest,
+          accountSubtitle: widget.accountSubtitle,
+          onRequireAuth: widget.onRequireAuth,
+          onOpenMessages: widget.onOpenMessages,
+          onFeedback: widget.onFeedback,
+          onOpenGovernance: widget.onOpenGovernance,
+          onOpenAppeals: widget.onOpenAppeals,
+          onOpenAccountStatus: widget.onOpenAccountStatus,
+          onClearHistory: () => widget.repository.clearHistory(),
+          onLogout: widget.onLogout,
+          onDeleteAccount: widget.onDeleteAccount,
         ),
       ),
     );
   }
+}
+
+class _GuestAccountBanner extends StatelessWidget {
+  const _GuestAccountBanner({this.onRequireAuth});
+
+  final VoidCallback? onRequireAuth;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+    decoration: BoxDecoration(
+      color: AppTheme.surfaceBlue,
+      borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+      border: Border.all(color: AppTheme.border),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.person_outline_rounded, color: AppTheme.primary),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '当前为游客模式',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              SizedBox(height: 3),
+              Text(
+                '登录或绑定邮箱后保存个人数据',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        TextButton(onPressed: onRequireAuth, child: const Text('去登录')),
+      ],
+    ),
+  );
 }
 
 class _EditProfileScreen extends StatefulWidget {
@@ -1629,8 +1575,12 @@ class _ProfileHero extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '等级 Lv.$level · 活跃用户',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                user?.growth?.levelLocked == true
+                    ? 'Lv.0 · 累计经验 ${user?.experience ?? 0} · 注册后解锁等级'
+                    : (user?.growth?.nextLevelExperience == null
+                        ? '等级 Lv.$level (最高级) · 经验 ${user?.experience ?? 0}'
+                        : '等级 Lv.$level · 经验 ${user?.growth?.experienceInLevel ?? 0}/${user?.growth?.experienceRequiredInLevel ?? 100}'),
+                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
               ),
             ],
           ),

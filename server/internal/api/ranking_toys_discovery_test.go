@@ -221,6 +221,10 @@ func TestListRankingToyRepliesReturnsNestedRepliesFlatAndPaginated(t *testing.T)
 	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*COALESCE\(c.root_id, c.id\) = \$2.*LIMIT \$4`).
 		WithArgs("toy-1", "root-1", "", 2).
 		WillReturnRows(replyRows)
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM users u`).WithArgs("u-3").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "nickname", "level", "avatar_media_id", "object_key"}).AddRow("u-3", "u3", "用户3", 1, "", ""))
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM users u`).WithArgs("u-2").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "nickname", "level", "avatar_media_id", "object_key"}).AddRow("u-2", "u2", "用户2", 3, "", ""))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ranking/toy-comments/root-1/replies?limit=1", nil)
 	res := httptest.NewRecorder()

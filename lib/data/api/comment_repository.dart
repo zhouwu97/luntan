@@ -216,6 +216,9 @@ Comment _commentFromJson(Map<String, dynamic> json) {
   final authorJson = json['author'] is Map
       ? Map<String, dynamic>.from(json['author'] as Map)
       : <String, dynamic>{};
+  final replyToJson = json['reply_to_user'] is Map
+      ? Map<String, dynamic>.from(json['reply_to_user'] as Map)
+      : <String, dynamic>{};
   final now = DateTime.now().toUtc();
   final createdAt = _date(json['created_at'], now);
   final updatedAt = _date(json['updated_at'], createdAt);
@@ -232,6 +235,9 @@ Comment _commentFromJson(Map<String, dynamic> json) {
             id: _string(authorJson['id']),
             username: _string(authorJson['username']),
             nickname: _string(authorJson['nickname']),
+            avatar: _nullableString(
+              authorJson['avatar'] ?? authorJson['avatar_url'],
+            ),
             level: _int(authorJson['level']),
             createdAt: now,
             updatedAt: now,
@@ -239,6 +245,19 @@ Comment _commentFromJson(Map<String, dynamic> json) {
     rootId: _nullableString(json['root_id']),
     parentId: _nullableString(json['parent_id']),
     replyToUserId: _nullableString(json['reply_to_user_id']),
+    replyToUser: replyToJson.isEmpty
+        ? null
+        : User(
+            id: _string(replyToJson['id']),
+            username: _string(replyToJson['username']),
+            nickname: _string(replyToJson['nickname']),
+            avatar: _nullableString(
+              replyToJson['avatar'] ?? replyToJson['avatar_url'],
+            ),
+            level: _int(replyToJson['level']),
+            createdAt: now,
+            updatedAt: now,
+          ),
     content: _string(json['content']),
     likeCount: _int(json['like_count']),
     isLiked: viewerState['has_liked'] == true,

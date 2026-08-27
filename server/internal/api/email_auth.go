@@ -189,7 +189,13 @@ func (s *Server) verifyEmailCode(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	response, err := s.authService.LoginByEmail(r.Context(), email, input.Nickname, requestMetadata(r))
+	var guestUserID string
+	if token, hasToken := bearerToken(r.Header.Get("Authorization")); hasToken {
+		if u, err := s.authService.Me(r.Context(), token); err == nil && u.AccountType == "guest" {
+			guestUserID = u.ID
+		}
+	}
+	response, err := s.authService.LoginByEmail(r.Context(), email, input.Nickname, guestUserID, requestMetadata(r))
 	if err != nil {
 		writeAuthError(w, r, err)
 		return

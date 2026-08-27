@@ -388,14 +388,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               const SizedBox(height: 10),
                               PostMediaPreview(
                                 images: post.images,
-                                onImageTap: (index) => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => MediaGalleryScreen(
-                                      images: post.images,
-                                      initialIndex: index,
+                                mode: PostMediaPreviewMode.detail,
+                                onImageTap: (index) =>
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => MediaGalleryScreen(
+                                          images: post.images,
+                                          initialIndex: index,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
                               ),
                             ],
                             const SizedBox(height: 14),

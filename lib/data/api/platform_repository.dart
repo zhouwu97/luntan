@@ -403,6 +403,52 @@ class AdminCandidate {
   final String email;
 }
 
+class ManagedUserSummary {
+  const ManagedUserSummary({
+    required this.id,
+    required this.username,
+    required this.nickname,
+    required this.email,
+    required this.status,
+    required this.accountType,
+    required this.createdAt,
+    required this.roles,
+    required this.banned,
+    required this.muted,
+  });
+
+  final String id;
+  final String username;
+  final String nickname;
+  final String email;
+  final String status;
+  final String accountType;
+  final DateTime createdAt;
+  final List<String> roles;
+  final bool banned;
+  final bool muted;
+}
+
+class ManagedUserDetail extends ManagedUserSummary {
+  const ManagedUserDetail({
+    required super.id,
+    required super.username,
+    required super.nickname,
+    required super.email,
+    required super.status,
+    required super.accountType,
+    required super.createdAt,
+    required super.roles,
+    required super.banned,
+    required super.muted,
+    required this.punishments,
+    required this.recentPosts,
+  });
+
+  final List<Map<String, dynamic>> punishments;
+  final List<Map<String, dynamic>> recentPosts;
+}
+
 class AdminRoleAssignment {
   const AdminRoleAssignment({required this.name, this.communityId});
 
@@ -922,6 +968,79 @@ class PlatformRepository {
       );
     }).toList();
   }
+
+  Future<List<ManagedUserSummary>> listManagedUsers({
+    String query = '',
+    String? status,
+    String? cursor,
+    int limit = 30,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/admin/users',
+      queryParameters: {
+        'limit': '$limit',
+        if (query.trim().isNotEmpty) 'q': query.trim(),
+        if (status != null && status.isNotEmpty) 'status': status,
+        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      },
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <ManagedUserSummary>[];
+    return raw.whereType<Map>().map(_managedUserSummaryFromJson).toList();
+  }
+
+  Future<ManagedUserDetail> getManagedUser(String userId) async {
+    final value = await _client.getJson('/api/v1/admin/users/$userId');
+    final summary = _managedUserSummaryFromJson(value);
+    return ManagedUserDetail(
+      id: summary.id,
+      username: summary.username,
+      nickname: summary.nickname,
+      email: summary.email,
+      status: summary.status,
+      accountType: summary.accountType,
+      createdAt: summary.createdAt,
+      roles: summary.roles,
+      banned: summary.banned,
+      muted: summary.muted,
+      punishments: _searchList(value['punishments']),
+      recentPosts: _searchList(value['recent_posts']),
+    );
+  }
+
+  Future<void> applyManagedUserAction({
+    required String userId,
+    required String action,
+    required String reason,
+    int durationDays = 0,
+    bool permanent = false,
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/users/$userId/actions',
+      body: {
+        'action': action,
+        'reason': reason,
+        'duration_days': durationDays,
+        'permanent': permanent,
+      },
+    );
+  }
+
+  ManagedUserSummary _managedUserSummaryFromJson(Map value) =>
+      ManagedUserSummary(
+        id: _string(value['id']),
+        username: _string(value['username']),
+        nickname: _string(value['nickname']),
+        email: _string(value['email']),
+        status: _string(value['status']),
+        accountType: _string(value['account_type'], fallback: 'email'),
+        createdAt: _date(value['created_at']),
+        roles: value['roles'] is List
+            ? (value['roles'] as List).map((item) => '$item').toList()
+            : const <String>[],
+        banned: value['banned'] == true,
+        muted: value['muted'] == true,
+      );
 
   Future<void> updateAdminRoles({
     required String adminId,

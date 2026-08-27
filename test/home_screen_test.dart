@@ -38,6 +38,7 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
     LatestOrder latestOrder = LatestOrder.comment,
     String? postType,
     bool? hasMedia,
+    String? topic,
   }) async {
     calls.add((
       cursor: cursor,
@@ -155,7 +156,7 @@ void main() {
 
     final visible = selectHomeCommunities(communities);
 
-    expect(visible.map((item) => item.name), ['大型拆箱', '杂鱼日常', '酱紫社区']);
+    expect(visible.map((item) => item.name), ['大型拆箱', '酱紫社区', '杂鱼日常']);
     expect(visible, isNot(contains(communities.first)));
   });
 
@@ -200,8 +201,8 @@ void main() {
 
     expect(visible.map((item) => item.id), [
       'community-import-unboxing',
-      'community-import-daily',
       'community-import-forum',
+      'community-import-daily',
     ]);
     expect(visible.map((item) => item.id), isNot(contains('community_qa')));
   });
@@ -224,12 +225,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('综合'), findsNothing);
-    expect(find.text('杂鱼日常'), findsOneWidget);
+    expect(find.text('酱紫社区'), findsOneWidget);
     expect(repository.calls.first.sort, 'latest');
     expect(repository.calls.first.latestOrder, LatestOrder.post);
     expect(repository.calls, hasLength(5));
     expect(
-      repository.calls.every((call) => call.communityId == 'community-daily'),
+      repository.calls.every((call) => call.communityId == 'community-campus'),
       isTrue,
     );
     expect(repository.calls.skip(1).map((call) => call.cursor), [

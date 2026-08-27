@@ -142,7 +142,11 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	}
 
 	response.Author.Level = 1
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(level, 1) FROM user_profiles WHERE user_id = $1`, response.Author.ID).Scan(&response.Author.Level); err != nil && err != sql.ErrNoRows {
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE u.id = $1`, response.Author.ID).Scan(&response.Author.Level); err != nil && err != sql.ErrNoRows {
 		return err
 	}
 	if !includeViewer {

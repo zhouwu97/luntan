@@ -1,3 +1,4 @@
+import '../../domain/models.dart';
 import 'api_client.dart';
 
 class UserProfile {
@@ -7,6 +8,8 @@ class UserProfile {
     required this.nickname,
     required this.bio,
     required this.level,
+    this.experience = 0,
+    this.growth,
     required this.trustLevel,
     required this.status,
     required this.postCount,
@@ -24,6 +27,8 @@ class UserProfile {
   final String nickname;
   final String bio;
   final int level;
+  final int experience;
+  final GrowthState? growth;
   final String trustLevel;
   final String status;
   final int postCount;
@@ -136,12 +141,19 @@ class ApiUserRepository implements UserRepository {
       final viewer = value['viewer_state'] is Map
           ? Map<String, dynamic>.from(value['viewer_state'] as Map)
           : const <String, dynamic>{};
+      final level = _int(value['level'], fallback: 1);
+      final exp = _int(value['experience'], fallback: 0);
+      final growth = value['growth'] is Map<String, dynamic>
+          ? GrowthState.fromJson(value['growth'] as Map<String, dynamic>, fallbackLevel: level)
+          : GrowthState.fromJson(null, fallbackLevel: level);
       return UserProfile(
         id: _string(value['id']),
         username: _string(value['username']),
         nickname: _string(value['nickname']),
         bio: _string(value['bio']),
-        level: _int(value['level'], fallback: 1),
+        level: level,
+        experience: exp,
+        growth: growth,
         trustLevel: _string(value['trust_level']),
         status: _string(value['status']),
         postCount: _int(value['post_count']),

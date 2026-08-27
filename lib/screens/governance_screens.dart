@@ -6,6 +6,445 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../theme/app_theme.dart';
 
+/// 按服务端 capability 汇总治理入口，避免把低权限管理员困在超级管理员
+/// 才能访问的“管理员管理 -> 风控中心”路径中。
+class GovernanceCenterScreen extends StatelessWidget {
+  const GovernanceCenterScreen({
+    super.key,
+    this.onOpenModeration,
+    this.onOpenAppeals,
+    this.onOpenRecommendations,
+    this.onOpenAdmins,
+    this.onOpenUsers,
+    this.onOpenRisk,
+    this.onOpenIPRestrictions,
+    this.onOpenLogs,
+  });
+
+  final VoidCallback? onOpenModeration;
+  final VoidCallback? onOpenAppeals;
+  final VoidCallback? onOpenRecommendations;
+  final VoidCallback? onOpenAdmins;
+  final VoidCallback? onOpenUsers;
+  final VoidCallback? onOpenRisk;
+  final VoidCallback? onOpenIPRestrictions;
+  final VoidCallback? onOpenLogs;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <Widget>[
+      if (onOpenModeration != null)
+        _entry(
+          icon: Icons.gavel_outlined,
+          title: '审核与用户处罚',
+          subtitle: '待审核、举报案件、隐藏恢复、禁言与封禁',
+          onTap: onOpenModeration!,
+        ),
+      if (onOpenAppeals != null)
+        _entry(
+          icon: Icons.assignment_return_outlined,
+          title: '申诉处理',
+          subtitle: '查看并处理用户对处罚的申诉',
+          onTap: onOpenAppeals!,
+        ),
+      if (onOpenRecommendations != null)
+        _entry(
+          icon: Icons.push_pin_outlined,
+          title: '首页推荐',
+          subtitle: '管理首页人工推荐内容',
+          onTap: onOpenRecommendations!,
+        ),
+      if (onOpenAdmins != null)
+        _entry(
+          icon: Icons.admin_panel_settings_outlined,
+          title: '管理员管理',
+          subtitle: '授权角色与社区范围',
+          onTap: onOpenAdmins!,
+        ),
+      if (onOpenUsers != null)
+        _entry(
+          icon: Icons.manage_accounts_outlined,
+          title: '用户管理',
+          subtitle: '查询账号、查看内容记录并执行禁言/封禁/恢复',
+          onTap: onOpenUsers!,
+        ),
+      if (onOpenRisk != null)
+        _entry(
+          icon: Icons.shield_outlined,
+          title: '风控中心',
+          subtitle: '查看验证码、异常 IP 与自动限制事件',
+          onTap: onOpenRisk!,
+        ),
+      if (onOpenIPRestrictions != null)
+        _entry(
+          icon: Icons.public_off_outlined,
+          title: 'IP 限制',
+          subtitle: '管理网络范围封禁',
+          onTap: onOpenIPRestrictions!,
+        ),
+      if (onOpenLogs != null)
+        _entry(
+          icon: Icons.fact_check_outlined,
+          title: '操作日志',
+          subtitle: '查看不可篡改的管理员审计链',
+          onTap: onOpenLogs!,
+        ),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('治理中心')),
+      body: entries.isEmpty
+          ? const Center(child: Text('当前账号没有可用的治理权限'))
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: entries.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (_, index) => entries[index],
+            ),
+    );
+  }
+
+  Widget _entry({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) => Card(
+    child: ListTile(
+      leading: Icon(icon, color: AppTheme.primary),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
+    ),
+  );
+}
+
+class ManagedUserListScreen extends StatefulWidget {
+  const ManagedUserListScreen({super.key, required this.repository});
+
+  final PlatformRepository repository;
+
+  @override
+  State<ManagedUserListScreen> createState() => _ManagedUserListScreenState();
+}
+
+class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
+  final searchController = TextEditingController();
+  late Future<List<ManagedUserSummary>> future;
+
+  @override
+  void initState() {
+    super.initState();
+    future = widget.repository.listManagedUsers();
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
+  void _search() {
+    setState(
+      () => future = widget.repository.listManagedUsers(
+        query: searchController.text,
+      ),
+    );
+  }
+
+  Future<void> _open(ManagedUserSummary user) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ManagedUserDetailScreen(
+          repository: widget.repository,
+          userId: user.id,
+        ),
+      ),
+    );
+    if (mounted) _search();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('用户管理')),
+    body: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: TextField(
+            controller: searchController,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _search(),
+            decoration: InputDecoration(
+              labelText: '搜索用户 ID、用户名、昵称或邮箱',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: IconButton(
+                onPressed: _search,
+                icon: const Icon(Icons.arrow_forward),
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: FutureBuilder<List<ManagedUserSummary>>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: TextButton(
+                    onPressed: _search,
+                    child: const Text('加载失败，重试'),
+                  ),
+                );
+              }
+              final items = snapshot.data ?? const <ManagedUserSummary>[];
+              if (items.isEmpty) return const Center(child: Text('没有匹配的用户'));
+              return RefreshIndicator(
+                onRefresh: () async => setState(
+                  () => future = widget.repository.listManagedUsers(
+                    query: searchController.text,
+                  ),
+                ),
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (_, index) {
+                    final user = items[index];
+                    final name = user.nickname.isEmpty
+                        ? user.username
+                        : user.nickname;
+                    return Card(
+                      child: ListTile(
+                        leading: CircleAvatar(child: Text(name.characters.first)),
+                        title: Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          '${user.username} · ${_managedStatusLabel(user.status)}'
+                          '${user.roles.isEmpty ? '' : '\n${user.roles.join('、')}'}',
+                        ),
+                        isThreeLine: user.roles.isNotEmpty,
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _open(user),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class ManagedUserDetailScreen extends StatefulWidget {
+  const ManagedUserDetailScreen({
+    super.key,
+    required this.repository,
+    required this.userId,
+  });
+
+  final PlatformRepository repository;
+  final String userId;
+
+  @override
+  State<ManagedUserDetailScreen> createState() => _ManagedUserDetailScreenState();
+}
+
+class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
+  late Future<ManagedUserDetail> future;
+
+  @override
+  void initState() {
+    super.initState();
+    future = widget.repository.getManagedUser(widget.userId);
+  }
+
+  Future<void> _action(String action) async {
+    final reasonController = TextEditingController();
+    final durationController = TextEditingController(text: '7');
+    final result = await showDialog<({String reason, int duration})>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          action == 'restore' ? '恢复账号' : action == 'ban' ? '封禁账号' : '禁言账号',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: reasonController,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: '处理理由（必填）'),
+            ),
+            if (action != 'restore')
+              TextField(
+                controller: durationController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: '天数（0 表示长期）'),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final reason = reasonController.text.trim();
+              final duration = int.tryParse(durationController.text) ?? -1;
+              if (reason.isEmpty || duration < 0) return;
+              Navigator.pop(context, (reason: reason, duration: duration));
+            },
+            child: const Text('确认'),
+          ),
+        ],
+      ),
+    );
+    reasonController.dispose();
+    durationController.dispose();
+    if (!mounted || result == null) return;
+    try {
+      await widget.repository.applyManagedUserAction(
+        userId: widget.userId,
+        action: action,
+        reason: result.reason,
+        durationDays: result.duration,
+        permanent: action != 'restore' && result.duration == 0,
+      );
+      if (mounted) {
+        setState(() => future = widget.repository.getManagedUser(widget.userId));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('处理已生效')),
+        );
+      }
+    } catch (cause) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(userFacingApiMessage(cause, fallback: '账号处理失败')),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('用户详情')),
+    body: FutureBuilder<ManagedUserDetail>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: TextButton(
+              onPressed: () => setState(
+                () => future = widget.repository.getManagedUser(widget.userId),
+              ),
+              child: const Text('加载失败，重试'),
+            ),
+          );
+        }
+        final user = snapshot.data!;
+        final name = user.nickname.isEmpty ? user.username : user.nickname;
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Card(
+              child: ListTile(
+                leading: CircleAvatar(child: Text(name.characters.first)),
+                title: Text(
+                  name,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text(
+                  '${user.username}\n${user.email.isEmpty ? '未绑定邮箱' : user.email}\n${_managedStatusLabel(user.status)}',
+                ),
+                isThreeLine: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (!user.muted)
+                  FilledButton.tonal(
+                    onPressed: () => _action('mute'),
+                    child: const Text('禁言'),
+                  ),
+                if (!user.banned)
+                  FilledButton.tonal(
+                    onPressed: () => _action('ban'),
+                    child: const Text('封禁'),
+                  ),
+                if (user.muted || user.banned || user.status != 'active')
+                  OutlinedButton(
+                    onPressed: () => _action('restore'),
+                    child: const Text('恢复账号'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '角色：${user.roles.isEmpty ? '普通用户' : user.roles.join('、')}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 16),
+            const Text('处罚记录', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            if (user.punishments.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('暂无处罚记录'),
+              ),
+            ...user.punishments.map(
+              (item) => ListTile(
+                dense: true,
+                leading: const Icon(Icons.warning_amber_outlined),
+                title: Text('${item['type'] ?? '处理'}：${item['reason'] ?? ''}'),
+                subtitle: Text('${item['starts_at'] ?? ''}'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('最近发布', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            if (user.recentPosts.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('暂无帖子记录'),
+              ),
+            ...user.recentPosts.map(
+              (item) => ListTile(
+                dense: true,
+                title: Text('${item['title'] ?? '无标题'}'),
+                subtitle: Text('${item['content'] ?? ''}'),
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+String _managedStatusLabel(String value) => switch (value) {
+  'active' => '正常',
+  'suspended' => '已暂停',
+  'deleted' => '已注销',
+  _ => value.isEmpty ? '未知状态' : value,
+};
+
 class AccountStatusScreen extends StatefulWidget {
   const AccountStatusScreen({
     super.key,
@@ -182,13 +621,13 @@ class AdminListScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.onOpenAdmin,
-    required this.onOpenRisk,
+    this.onOpenRisk,
     this.onOpenRecommendations,
     this.communityRepository,
   });
   final PlatformRepository repository;
   final ValueChanged<String> onOpenAdmin;
-  final VoidCallback onOpenRisk;
+  final VoidCallback? onOpenRisk;
   final VoidCallback? onOpenRecommendations;
   final CommunityRepository? communityRepository;
   @override
@@ -250,11 +689,12 @@ class _AdminListScreenState extends State<AdminListScreen> {
             icon: const Icon(Icons.push_pin_outlined),
             tooltip: '首页推荐',
           ),
-        IconButton(
-          onPressed: widget.onOpenRisk,
-          icon: const Icon(Icons.shield_outlined),
-          tooltip: '风控中心',
-        ),
+        if (widget.onOpenRisk != null)
+          IconButton(
+            onPressed: widget.onOpenRisk,
+            icon: const Icon(Icons.shield_outlined),
+            tooltip: '风控中心',
+          ),
       ],
     ),
     floatingActionButton: FloatingActionButton.extended(
@@ -482,9 +922,12 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
     'platform_moderator',
     'community_owner',
     'community_moderator',
+    'super_admin',
   ];
   String role = 'platform_moderator';
   String? communityId;
+  int? editingIndex;
+  final assignments = <AdminRoleAssignment>[];
   final communityController = TextEditingController();
   final reasonController = TextEditingController();
   late Future<List<Community>> communities;
@@ -493,13 +936,15 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
   @override
   void initState() {
     super.initState();
-    final existing = widget.initialRoles
-        .where((item) => roleOptions.contains(item.name))
-        .firstOrNull;
-    if (existing != null) {
-      role = existing.name;
-      communityId = existing.communityId;
-      communityController.text = existing.communityId ?? '';
+    for (final item in widget.initialRoles) {
+      if (!roleOptions.contains(item.name)) continue;
+      final key = '${item.name}|${item.communityId ?? ''}';
+      if (assignments.any(
+        (existing) => '${existing.name}|${existing.communityId ?? ''}' == key,
+      )) {
+        continue;
+      }
+      assignments.add(item);
     }
     communities =
         widget.communityRepository?.getCommunities(
@@ -518,34 +963,81 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
   bool get isCommunityRole =>
       role == 'community_owner' || role == 'community_moderator';
 
-  Future<void> _save() async {
+  void _editAssignment(int index) {
+    final item = assignments[index];
+    setState(() {
+      editingIndex = index;
+      role = item.name;
+      communityId = item.communityId;
+      communityController.text = item.communityId ?? '';
+    });
+  }
+
+  void _removeAssignment(int index) {
+    setState(() {
+      assignments.removeAt(index);
+      if (editingIndex == index) {
+        editingIndex = null;
+        role = 'platform_moderator';
+        communityId = null;
+        communityController.clear();
+      } else if (editingIndex != null && editingIndex! > index) {
+        editingIndex = editingIndex! - 1;
+      }
+    });
+  }
+
+  void _resetDraft() {
+    setState(() {
+      editingIndex = null;
+      role = 'platform_moderator';
+      communityId = null;
+      communityController.clear();
+    });
+  }
+
+  void _addOrUpdateAssignment() {
     final selectedCommunity = communityController.text.trim();
-    if (reasonController.text.trim().isEmpty) {
-      setState(() {});
-      return;
-    }
     if (isCommunityRole && selectedCommunity.isEmpty) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('社区角色必须填写社区范围')));
       return;
     }
+    final item = AdminRoleAssignment(
+      name: role,
+      communityId: isCommunityRole ? selectedCommunity : null,
+    );
+    final duplicate = assignments.indexWhere(
+      (existing) =>
+          existing.name == item.name &&
+          existing.communityId == item.communityId,
+    );
+    setState(() {
+      if (editingIndex != null) {
+        assignments[editingIndex!] = item;
+      } else if (duplicate >= 0) {
+        assignments[duplicate] = item;
+      } else {
+        assignments.add(item);
+      }
+      editingIndex = null;
+      role = 'platform_moderator';
+      communityId = null;
+      communityController.clear();
+    });
+  }
+
+  Future<void> _save() async {
+    if (reasonController.text.trim().isEmpty) {
+      setState(() {});
+      return;
+    }
     setState(() => saving = true);
     try {
-      // 角色接口是“全量替换”，编辑单个角色时要保留目标用户的其他
-      // 角色，避免一次调整误撤销平台/社区的并行授权。
-      final roles = widget.initialRoles
-          .where((item) => item.name != role)
-          .toList();
-      roles.add(
-        AdminRoleAssignment(
-          name: role,
-          communityId: isCommunityRole ? selectedCommunity : null,
-        ),
-      );
       await widget.repository.updateAdminRoles(
         adminId: widget.adminId,
-        roles: roles,
+        roles: List.unmodifiable(assignments),
         reason: reasonController.text.trim(),
       );
       widget.onSaved?.call();
@@ -573,6 +1065,48 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
         ),
         const SizedBox(height: 18),
+        if (assignments.isNotEmpty) ...[
+          const Text(
+            '当前角色（提交时将完整替换）',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ...assignments.asMap().entries.map(
+            (entry) => Card(
+              child: ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: Text(_roleLabel(entry.value.name)),
+                subtitle: entry.value.communityId == null
+                    ? null
+                    : Text('社区范围：${entry.value.communityId}'),
+                trailing: Wrap(
+                  children: [
+                    IconButton(
+                      tooltip: '编辑角色',
+                      onPressed: saving
+                          ? null
+                          : () => _editAssignment(entry.key),
+                      icon: const Icon(Icons.edit_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '移除角色',
+                      onPressed: saving
+                          ? null
+                          : () => _removeAssignment(entry.key),
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        Text(
+          editingIndex == null ? '添加角色' : '编辑角色',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: role,
           decoration: const InputDecoration(labelText: '角色'),
@@ -586,7 +1120,16 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
               .toList(),
           onChanged: saving
               ? null
-              : (value) => setState(() => role = value ?? role),
+              : (value) {
+                  if (value == null) return;
+                  setState(() {
+                    role = value;
+                    if (!isCommunityRole) {
+                      communityId = null;
+                      communityController.clear();
+                    }
+                  });
+                },
         ),
         if (isCommunityRole) ...[
           const SizedBox(height: 12),
@@ -617,13 +1160,35 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
                     .toList(),
                 onChanged: saving
                     ? null
-                    : (value) => setState(
-                        () => communityController.text = value ?? '',
-                      ),
+                    : (value) => setState(() {
+                        communityId = value;
+                        communityController.text = value ?? '';
+                      }),
               );
             },
           ),
         ],
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: saving ? null : _addOrUpdateAssignment,
+                icon: Icon(
+                  editingIndex == null ? Icons.add : Icons.save_outlined,
+                ),
+                label: Text(editingIndex == null ? '添加角色' : '保存角色'),
+              ),
+            ),
+            if (editingIndex != null) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: saving ? null : _resetDraft,
+                child: const Text('取消编辑'),
+              ),
+            ],
+          ],
+        ),
         const SizedBox(height: 12),
         TextField(
           controller: reasonController,
@@ -704,6 +1269,7 @@ class _AdminRoleEditorScreenState extends State<AdminRoleEditorScreen> {
     'platform_moderator' => '平台审核员',
     'community_owner' => '社区管理员',
     'community_moderator' => '社区版主',
+    'super_admin' => '超级管理员',
     _ => value,
   };
 }
@@ -906,9 +1472,11 @@ class RiskCenterScreen extends StatefulWidget {
     super.key,
     required this.repository,
     this.onOpenLogs,
+    this.canBanIP = true,
   });
   final PlatformRepository repository;
   final VoidCallback? onOpenLogs;
+  final bool canBanIP;
   @override
   State<RiskCenterScreen> createState() => _RiskCenterScreenState();
 }
@@ -926,16 +1494,17 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
     appBar: AppBar(
       title: const Text('风控中心'),
       actions: [
-        IconButton(
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) =>
-                  IPRestrictionsScreen(repository: widget.repository),
+        if (widget.canBanIP)
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) =>
+                    IPRestrictionsScreen(repository: widget.repository),
+              ),
             ),
+            icon: const Icon(Icons.public_off_outlined),
+            tooltip: 'IP 限制',
           ),
-          icon: const Icon(Icons.public_off_outlined),
-          tooltip: 'IP 限制',
-        ),
         if (widget.onOpenLogs != null)
           IconButton(
             onPressed: widget.onOpenLogs,

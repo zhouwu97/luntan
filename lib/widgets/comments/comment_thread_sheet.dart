@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/api/api_client.dart';
@@ -9,6 +10,8 @@ import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import 'comment_reply_bar.dart';
 import 'comment_skeleton.dart';
+
+enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
 class CommentThreadSheet extends StatefulWidget {
   const CommentThreadSheet({
@@ -50,6 +53,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
   bool sending = false;
   String? errorMessage;
   String? loadMoreError;
+  _ReplyLoadState loadState = _ReplyLoadState.loading;
   int _generation = 0;
   bool _hasFocusedTarget = false;
   String? highlightedReplyId;
@@ -82,6 +86,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
     final generation = ++_generation;
     setState(() {
       loading = true;
+      loadState = _ReplyLoadState.loading;
       errorMessage = null;
       loadMoreError = null;
       replies.clear();
@@ -101,13 +106,23 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
         nextCursor = page.nextCursor;
         hasMore = page.hasMore && page.nextCursor != null;
         loading = false;
+        loadState = replies.isEmpty
+            ? _ReplyLoadState.loadedEmpty
+            : _ReplyLoadState.loaded;
       });
       _checkAndFocusTarget();
-    } catch (_) {
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          'Comment replies request failed: '
+          'GET /api/v1/comments/${widget.rootComment.id}/replies; $error',
+        );
+      }
       if (mounted && generation == _generation) {
         setState(() {
           errorMessage = '回复加载失败，请重试';
           loading = false;
+          loadState = _ReplyLoadState.error;
         });
       }
     }
@@ -199,6 +214,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
           replies.add(newComment);
         }
         widget.rootComment.replyCount += 1;
+        loadState = _ReplyLoadState.loaded;
         sending = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -214,7 +230,9 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
       if (mounted) {
         setState(() => sending = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(userFacingApiMessage(error, fallback: '回复失败，请重试'))),
+          SnackBar(
+            content: Text(userFacingApiMessage(error, fallback: '回复失败，请重试')),
+          ),
         );
       }
     }
@@ -257,7 +275,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      '${root.replyCount} 条回复',
+                      _replyTitle(root),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -376,9 +394,9 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
             canComment: widget.canComment,
             onRequireAuth: widget.onRequireAuth,
             blockedMessage: widget.blockedMessage,
-            onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(msg)),
-            ),
+            onFeedback: (msg) => ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(msg))),
             onCancelTarget: () => setState(() => currentReplyTarget = null),
             onSubmit: _sendReply,
           ),
@@ -388,13 +406,13 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
   }
 
   Widget _buildReplyList() {
-    if (loading && replies.isEmpty) {
+    if (loadState == _ReplyLoadState.loading && replies.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(horizontal: 16),
         child: CommentSkeleton(itemCount: 3),
       );
     }
-    if (errorMessage != null && replies.isEmpty) {
+    if (loadState == _ReplyLoadState.error && replies.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -407,10 +425,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
               ),
             ),
             const SizedBox(height: 8),
-            TextButton(
-              onPressed: _loadFirstPage,
-              child: const Text('点击重试'),
-            ),
+            TextButton(onPressed: _loadFirstPage, child: const Text('点击重试')),
           ],
         ),
       );
@@ -428,11 +443,8 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
       controller: scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       itemCount: replies.length + 1,
-      separatorBuilder: (context, index) => const Divider(
-        height: 16,
-        thickness: 1,
-        color: Color(0xFFEFF3F6),
-      ),
+      separatorBuilder: (context, index) =>
+          const Divider(height: 16, thickness: 1, color: Color(0xFFEFF3F6)),
       itemBuilder: (context, index) {
         if (index == replies.length) {
           if (loadingMore) {
@@ -467,7 +479,11 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
         final reply = replies[index];
         final isHighlighted = highlightedReplyId == reply.id;
         final author = reply.author?.nickname ?? '用户';
-        final replyTo = reply.replyToUserId != null ? '用户' : null;
+        final replyTo = reply.replyToUserId == null
+            ? null
+            : (reply.replyToUser?.nickname ??
+                  reply.replyToUser?.username ??
+                  '用户');
 
         return Container(
           key: GlobalObjectKey('reply:${reply.id}'),
@@ -544,7 +560,8 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
                     Row(
                       children: [
                         GestureDetector(
-                          onTap: () => setState(() => currentReplyTarget = reply),
+                          onTap: () =>
+                              setState(() => currentReplyTarget = reply),
                           child: const Text(
                             '回复',
                             style: TextStyle(
@@ -595,4 +612,10 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
       },
     );
   }
+
+  String _replyTitle(Comment root) => switch (loadState) {
+    _ReplyLoadState.loading || _ReplyLoadState.error => '回复',
+    _ReplyLoadState.loadedEmpty => '0 条回复',
+    _ReplyLoadState.loaded => '${root.replyCount} 条回复',
+  };
 }

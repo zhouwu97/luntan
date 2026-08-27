@@ -55,7 +55,7 @@ func TestUnreadNotificationCountUsesAuthenticatedUserID(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, "email", "", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, 0, "email", "", false, nil))
 	mock.ExpectQuery(`(?s)SELECT count\(\*\) FROM notifications n WHERE n\.user_id = \$1 AND n\.is_read = false.*FROM blocks b`).
 		WithArgs("user-a").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(3)))
@@ -81,7 +81,7 @@ func TestMarkNotificationReadUsesPatchReadRouteAndRejectsOtherUsers(t *testing.T
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, "email", "", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, 0, "email", "", false, nil))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2`)).
 		WithArgs("notification-b", "user-a").
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -124,7 +124,7 @@ func TestMarkNotificationReadUpdatesRows(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, "email", "", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("user-a", "a", "active", "A", 1, 0, "email", "", false, nil))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE notifications SET is_read = true, read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2`)).
 		WithArgs("notification-a", "user-a").
 		WillReturnResult(sqlmock.NewResult(0, 1))

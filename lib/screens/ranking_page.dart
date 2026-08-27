@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
+import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
 import '../widgets/comments/comment_skeleton.dart';
@@ -41,6 +42,59 @@ class RankingItem {
   final String category;
   final List<String> segments;
   final Map<int, int> ratingDistribution;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'rank': rank,
+    'name': name,
+    'hot': hot,
+    'tags': tags,
+    'ratings': ratings,
+    'score': score,
+    'asset': asset,
+    'merchant': merchant,
+    'release_year': releaseYear,
+    'description': description,
+    'category': category,
+    'segments': segments,
+    'rating_distribution': ratingDistribution.map(
+      (key, value) => MapEntry('$key', value),
+    ),
+  };
+
+  factory RankingItem.fromJson(Map<String, dynamic> json) {
+    final rawDistribution = json['rating_distribution'];
+    final distribution = <int, int>{};
+    if (rawDistribution is Map) {
+      for (final entry in rawDistribution.entries) {
+        final key = int.tryParse('${entry.key}');
+        final value = entry.value is num
+            ? (entry.value as num).toInt()
+            : int.tryParse('${entry.value}');
+        if (key != null && value != null) distribution[key] = value;
+      }
+    }
+    List<String> strings(dynamic value) =>
+        value is List ? value.whereType<String>().toList() : const <String>[];
+    return RankingItem(
+      id: '${json['id'] ?? ''}',
+      rank: json['rank'] is num ? (json['rank'] as num).toInt() : 0,
+      name: '${json['name'] ?? ''}',
+      hot: '${json['hot'] ?? ''}',
+      tags: strings(json['tags']),
+      ratings: '${json['ratings'] ?? ''}',
+      score: '${json['score'] ?? ''}',
+      asset: '${json['asset'] ?? ''}',
+      merchant: '${json['merchant'] ?? 'TMT'}',
+      releaseYear: json['release_year'] is num
+          ? (json['release_year'] as num).toInt()
+          : 2026,
+      description: '${json['description'] ?? ''}',
+      category: '${json['category'] ?? 'cup'}',
+      segments: strings(json['segments']),
+      ratingDistribution: distribution,
+    );
+  }
 }
 
 const _mainRankingItems = <RankingItem>[
@@ -306,6 +360,7 @@ class RankingPage extends StatefulWidget {
     this.canLike = false,
     this.canVote = false,
     this.onRequireAuth,
+    this.cache,
   });
 
   final RankingRepository? repository;
@@ -314,6 +369,7 @@ class RankingPage extends StatefulWidget {
   final bool canLike;
   final bool canVote;
   final VoidCallback? onRequireAuth;
+  final RankingCacheStore? cache;
 
   @override
   State<RankingPage> createState() => _RankingPageState();
@@ -325,6 +381,9 @@ class _RankingPageState extends State<RankingPage> {
   int _selectedTab = 0;
   int _selectedCategory = 0;
   List<RankingItem>? _remoteItems;
+  DateTime? _remoteUpdatedAt;
+  Object? _remoteError;
+  bool _loadingRemote = false;
 
   @override
   void initState() {
@@ -339,14 +398,34 @@ class _RankingPageState extends State<RankingPage> {
   }
 
   Future<void> _loadRemoteRanking() async {
+    if (_loadingRemote) return;
+    _loadingRemote = true;
+    final cache = widget.cache ?? await RankingCache.create();
+    final cached = await cache.read();
+    if (mounted && cached != null) {
+      setState(() {
+        _remoteItems = cached.items;
+        _remoteUpdatedAt = cached.updatedAt;
+      });
+    }
     try {
       final products = await widget.repository!.list();
-      if (!mounted || products.isEmpty) return;
+      final items = products.map(_itemFromRemote).toList();
+      if (items.isNotEmpty) {
+        await cache.write(items, updatedAt: DateTime.now().toUtc());
+      }
+      if (!mounted) return;
       setState(() {
-        _remoteItems = products.map(_itemFromRemote).toList();
+        _remoteItems = items;
+        _remoteUpdatedAt = DateTime.now().toUtc();
+        _remoteError = null;
       });
-    } catch (_) {
-      // 服务端暂时不可用时保留已缓存的视觉结构，进入详情仍会提示重试。
+    } catch (error) {
+      if (mounted) {
+        setState(() => _remoteError = error);
+      }
+    } finally {
+      _loadingRemote = false;
     }
   }
 
@@ -375,9 +454,7 @@ class _RankingPageState extends State<RankingPage> {
   }
 
   List<RankingItem> get _allSourceItems {
-    if (_remoteItems != null && _remoteItems!.isNotEmpty) {
-      return _remoteItems!;
-    }
+    if (widget.repository != null) return _remoteItems ?? const [];
     return [_topRankingItem, ..._mainRankingItems];
   }
 
@@ -474,6 +551,14 @@ class _RankingPageState extends State<RankingPage> {
   );
 
   Widget _rankingScrollView() {
+    if (widget.repository != null &&
+        _remoteError != null &&
+        _remoteItems == null) {
+      return _RankingLoadError(onRetry: _loadRemoteRanking);
+    }
+    if (widget.repository != null && _remoteItems == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
     final query = _searchQuery.trim();
     final items = _filteredItems;
 
@@ -523,6 +608,11 @@ class _RankingPageState extends State<RankingPage> {
 
     return ListView(
       children: [
+        if (_remoteError != null && _remoteItems != null)
+          _RankingStaleBanner(
+            updatedAt: _remoteUpdatedAt,
+            onRetry: _loadRemoteRanking,
+          ),
         _RankingTabs(
           selectedIndex: _selectedTab,
           onTap: (index) => setState(() => _selectedTab = index),
@@ -566,6 +656,63 @@ class _RankingPageState extends State<RankingPage> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _RankingLoadError extends StatelessWidget {
+  const _RankingLoadError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text('排行榜暂时无法加载', style: TextStyle(color: Color(0xFF6B7280))),
+        const SizedBox(height: 10),
+        OutlinedButton(onPressed: onRetry, child: const Text('重试')),
+      ],
+    ),
+  );
+}
+
+class _RankingStaleBanner extends StatelessWidget {
+  const _RankingStaleBanner({required this.updatedAt, required this.onRetry});
+
+  final DateTime? updatedAt;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final time = updatedAt == null
+        ? ''
+        : '（${updatedAt!.toLocal().month}月${updatedAt!.toLocal().day}日更新）';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7E8),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.cloud_off_rounded,
+            size: 17,
+            color: Color(0xFFB7791F),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              '数据更新失败，当前展示缓存$time',
+              style: const TextStyle(color: Color(0xFF8A5A13), fontSize: 12),
+            ),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('重试')),
+        ],
+      ),
     );
   }
 }

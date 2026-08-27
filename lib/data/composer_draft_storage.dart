@@ -14,6 +14,7 @@ class ComposerDraftSnapshot {
     required this.body,
     required this.sectionName,
     this.communityId,
+    this.topic,
     this.pollOptions = const [],
     this.allowMultiple = false,
     this.pollEndsAt,
@@ -28,6 +29,7 @@ class ComposerDraftSnapshot {
   final String body;
   final String sectionName;
   final String? communityId;
+  final String? topic;
   final List<String> pollOptions;
   final bool allowMultiple;
   final DateTime? pollEndsAt;
@@ -49,6 +51,7 @@ class ComposerDraftSnapshot {
     'body': body,
     'section_name': sectionName,
     if (communityId != null) 'community_id': communityId,
+    if (topic != null) 'topic': topic,
     'poll_options': pollOptions,
     'allow_multiple': allowMultiple,
     if (pollEndsAt != null)
@@ -81,6 +84,7 @@ class ComposerDraftSnapshot {
       communityId: value['community_id'] is String
           ? value['community_id'] as String
           : null,
+      topic: value['topic'] is String ? value['topic'] as String : null,
       pollOptions: readStrings(value['poll_options']),
       allowMultiple: value['allow_multiple'] == true,
       pollEndsAt: pollEndsAt,

@@ -54,7 +54,9 @@ func TestLoginDoesNotRevealWhetherUsernameExistsWhenPasswordIsWrong(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username), COALESCE(up.level, 1), a.id, a.credential_hash`)).WithArgs("new_user").WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "auth_id", "credential_hash"}).AddRow("u1", "new_user", "active", "新用户", 1, "uam1", hash))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.experience, 0), a.id, a.credential_hash`)).WithArgs("new_user").WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "auth_id", "credential_hash"}).AddRow("u1", "new_user", "active", "新用户", 1, 0, "uam1", hash))
 
 	_, err = NewService(db).Login(context.Background(), LoginInput{Username: "new_user", Password: "错误密码123"}, SessionMetadata{})
 	if err != ErrInvalidCredentials {

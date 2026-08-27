@@ -84,6 +84,7 @@ class _FakePublishRepository implements PublishRepository {
     required String content,
     required String idempotencyKey,
     List<String> mediaIds = const [],
+    String? topic,
   }) async {
     createCalls++;
     await Future<void>.delayed(const Duration(milliseconds: 5));

@@ -86,6 +86,9 @@ class PublishController extends ChangeNotifier {
     required String content,
     required List<String> mediaIds,
     String? topic,
+    List<String> pollOptions = const [],
+    bool allowMultiple = false,
+    DateTime? pollEndsAt,
     required String idempotencyKey,
   }) async {
     try {

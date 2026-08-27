@@ -291,9 +291,6 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         content: result.body,
         mediaIds: result.mediaIds,
         topic: result.topic,
-        pollOptions: result.pollOptions,
-        allowMultiple: result.allowMultiple,
-        pollEndsAt: result.pollEndsAt,
       );
       await feedController.setQuery(communityId: communityId, sort: 'latest');
       if (!mounted) return;

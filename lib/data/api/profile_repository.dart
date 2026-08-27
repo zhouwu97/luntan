@@ -122,12 +122,18 @@ class ProfileRepository {
     final value = await _client.getJson('/api/v1/me/profile');
     final rawLevel = _int(value['level'], fallback: 0);
     final exp = _int(value['experience'], fallback: 0);
+    final accountType = _string(value['account_type']);
     final growth = value['growth'] is Map<String, dynamic>
         ? GrowthState.fromJson(
             value['growth'] as Map<String, dynamic>,
             fallbackLevel: rawLevel,
+            accountType: accountType,
           )
-        : GrowthState.fromJson(null, fallbackLevel: rawLevel);
+        : GrowthState.fromJson(
+            null,
+            fallbackLevel: rawLevel,
+            accountType: accountType,
+          );
     final level = growth.level;
     return ProfileSummary(
       id: _string(value['id']),

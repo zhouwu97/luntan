@@ -5,6 +5,7 @@ import 'package:luntan/app.dart';
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/auth_repository.dart';
 import 'package:luntan/data/api/profile_repository.dart';
+import 'package:luntan/data/api/store_repository.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/domain/models.dart';
 import 'package:luntan/screens/post_detail_screen.dart';
@@ -62,6 +63,15 @@ class _FailingProfileRepository extends ProfileRepository {
     calls++;
     throw StateError('未登录不应请求个人资料接口');
   }
+}
+
+class _FixedPointsRepository extends StoreRepository {
+  _FixedPointsRepository()
+    : super(ApiClient(baseUri: Uri.parse('https://example.com')));
+
+  @override
+  Future<PointsOverview> overview() async =>
+      const PointsOverview(balance: 3980, transactions: <PointTransaction>[]);
 }
 
 void main() {
@@ -357,6 +367,7 @@ void main() {
           currentUserId: null,
           isApiMode: true,
           profileRepository: repository,
+          storeRepository: _FixedPointsRepository(),
           onOpenPost: (_) {},
           onOpenHome: () {},
           onOpenComposer: () {},
@@ -370,6 +381,8 @@ void main() {
 
     expect(repository.calls, 0);
     expect(find.text('游客模式 · 当前累计 0 EXP'), findsOneWidget);
+    expect(find.text('3980 积分'), findsNothing);
+    expect(find.text('兑换商店'), findsNothing);
     expect(find.text('个人资料加载失败'), findsNothing);
   });
 

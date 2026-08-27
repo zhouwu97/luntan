@@ -145,6 +145,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
+		"account_type":    accountType,
 		"avatar_media_id": nullableProfileString(avatarMediaID),
 		"level":           growth.Level, "experience": growth.Experience, "growth": growth,
 		"trust_level": trustLevel, "signature": bio, "post_count": posts,

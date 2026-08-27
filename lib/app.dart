@@ -91,14 +91,18 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // API 模式只创建空的 UI 状态容器；业务数据全部来自 Repository。
-    final baseUrl = apiBaseUrlFromEnvironment();
-    store = baseUrl.trim().isEmpty ? ForumStore.seeded() : ForumStore.uiOnly();
+    // main.dart 会给正式运行时注入 API 仓储，测试/离线预览才直接构造 Mock。
+    final configuredBaseUrl = apiBaseUrlFromEnvironment();
+    final bootstrapStore = configuredBaseUrl.trim().isEmpty
+        ? ForumStore.seeded()
+        : ForumStore.uiOnly();
     repositories =
         widget.repositories ??
         ForumRepositories.fromEnvironment(
-          store: store,
+          store: bootstrapStore,
           tokenStore: widget.tokenStore,
         );
+    store = repositories.isApiMode ? ForumStore.uiOnly() : bootstrapStore;
     feedController = FeedController(repository: repositories.feed);
     personalFeedController = HomePersonalFeedController(
       repository: repositories.profile,

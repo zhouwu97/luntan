@@ -12,6 +12,7 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/platform/config"
 	"github.com/zhouwu97/luntan/server/internal/platform/database"
 	"github.com/zhouwu97/luntan/server/internal/platform/logging"
+	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
 
 func main() {
@@ -26,13 +27,23 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	router := outbox.NewRouterHandler()
+	router.Register("notification.created", outbox.NotificationHandler{
+		DB:         db,
+		WebhookURL: os.Getenv("PUSH_WEBHOOK_URL"),
+		Secret:     os.Getenv("PUSH_WEBHOOK_SECRET"),
+	})
+	objStorage := storage.NewObjectStorageFromEnv()
+	mediaHandler := outbox.MediaHandler{
+		DB:      db,
+		Storage: objStorage,
+	}
+	router.Register("media.process", mediaHandler)
+	router.Register("media.delete", mediaHandler)
+
 	worker := outbox.Worker{
-		DB: db,
-		Handler: outbox.NotificationHandler{
-			DB:         db,
-			WebhookURL: os.Getenv("PUSH_WEBHOOK_URL"),
-			Secret:     os.Getenv("PUSH_WEBHOOK_SECRET"),
-		},
+		DB:          db,
+		Handler:     router,
 		BatchSize:   50,
 		MaxAttempts: 8,
 	}

@@ -145,6 +145,22 @@ class ViewerPostState {
 
 enum MediaType { image, video }
 
+class MediaVariant {
+  const MediaVariant({
+    required this.url,
+    required this.width,
+    required this.height,
+    this.sizeBytes,
+    this.mimeType,
+  });
+
+  final String url;
+  final int width;
+  final int height;
+  final int? sizeBytes;
+  final String? mimeType;
+}
+
 class MediaAsset {
   const MediaAsset({
     required this.id,
@@ -153,6 +169,9 @@ class MediaAsset {
     this.width,
     this.height,
     this.altText,
+    this.thumb,
+    this.detail,
+    this.original,
     this.emoji = '🖼️',
     this.label = '图片',
     this.colors = const [0xFFB7D9FF, 0xFF6D9CDE],
@@ -164,6 +183,13 @@ class MediaAsset {
   final int? width;
   final int? height;
   final String? altText;
+  final MediaVariant? thumb;
+  final MediaVariant? detail;
+  final MediaVariant? original;
+
+  String? get previewUrl => thumb?.url ?? detail?.url ?? original?.url ?? url;
+  String? get detailUrl => detail?.url ?? original?.url ?? thumb?.url ?? url;
+  String? get originalUrl => original?.url ?? detail?.url ?? thumb?.url ?? url;
 
   // Mock/占位图片的视觉字段，接入真实媒体服务后由 url 和元数据替代。
   final String emoji;

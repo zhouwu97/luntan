@@ -10,14 +10,25 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/auth"
 )
 
+type mediaVariantResponse struct {
+	URL       string `json:"url"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	SizeBytes int64  `json:"size,omitempty"`
+	MimeType  string `json:"mime_type,omitempty"`
+}
+
 type postMediaResponse struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	URL      string `json:"url,omitempty"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	AltText  string `json:"alt_text,omitempty"`
-	MimeType string `json:"mime_type,omitempty"`
+	ID       string                `json:"id"`
+	Type     string                `json:"type"`
+	URL      string                `json:"url,omitempty"`
+	Width    int                   `json:"width"`
+	Height   int                   `json:"height"`
+	AltText  string                `json:"alt_text,omitempty"`
+	MimeType string                `json:"mime_type,omitempty"`
+	Thumb    *mediaVariantResponse `json:"thumb,omitempty"`
+	Detail   *mediaVariantResponse `json:"detail,omitempty"`
+	Original *mediaVariantResponse `json:"original,omitempty"`
 }
 
 type viewerPostState struct {
@@ -45,22 +56,89 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		return err
 	}
 	defer rows.Close()
+	type mediaItemWithKey struct {
+		item      postMediaResponse
+		objectKey string
+	}
+	items := make([]mediaItemWithKey, 0)
 	for rows.Next() {
-		var item postMediaResponse
-		var objectKey string
-		if err := rows.Scan(&item.ID, &item.MimeType, &item.Width, &item.Height, &item.AltText, &objectKey); err != nil {
+		var it mediaItemWithKey
+		if err := rows.Scan(&it.item.ID, &it.item.MimeType, &it.item.Width, &it.item.Height, &it.item.AltText, &it.objectKey); err != nil {
 			return err
 		}
-		if strings.HasPrefix(item.MimeType, "video/") {
-			item.Type = "video"
+		if strings.HasPrefix(it.item.MimeType, "video/") {
+			it.item.Type = "video"
 		} else {
-			item.Type = "image"
+			it.item.Type = "image"
 		}
-		item.URL = publicMediaURL(objectKey)
-		response.Media = append(response.Media, item)
+		it.item.URL = publicMediaURL(it.objectKey)
+		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	_ = rows.Close()
+
+	if len(items) > 0 {
+		variantsMap := make(map[string]map[string]*mediaVariantResponse)
+		vRows, err := s.db.QueryContext(ctx, `
+			SELECT mv.media_id, mv.variant, mv.object_key, mv.mime_type, mv.width, mv.height, mv.size_bytes
+			FROM media_variants mv
+			JOIN post_media pm ON pm.media_id = mv.media_id
+			WHERE pm.post_id = $1 AND mv.status = 'ready'`, response.ID)
+		if err == nil {
+			for vRows.Next() {
+				var mid, variant, objKey, mimeType string
+				var width, height int
+				var sizeBytes int64
+				if err := vRows.Scan(&mid, &variant, &objKey, &mimeType, &width, &height, &sizeBytes); err == nil {
+					if variantsMap[mid] == nil {
+						variantsMap[mid] = make(map[string]*mediaVariantResponse)
+					}
+					variantsMap[mid][variant] = &mediaVariantResponse{
+						URL:       publicMediaURL(objKey),
+						Width:     width,
+						Height:    height,
+						SizeBytes: sizeBytes,
+						MimeType:  mimeType,
+					}
+				}
+			}
+			vRows.Close()
+		}
+		for _, it := range items {
+			item := it.item
+			if vmap, ok := variantsMap[item.ID]; ok {
+				item.Thumb = vmap["thumb"]
+				item.Detail = vmap["detail"]
+				item.Original = vmap["original"]
+			}
+			if item.Thumb == nil && item.URL != "" {
+				item.Thumb = &mediaVariantResponse{
+					URL:      item.URL,
+					Width:    item.Width,
+					Height:   item.Height,
+					MimeType: item.MimeType,
+				}
+			}
+			if item.Detail == nil && item.URL != "" {
+				item.Detail = &mediaVariantResponse{
+					URL:      item.URL,
+					Width:    item.Width,
+					Height:   item.Height,
+					MimeType: item.MimeType,
+				}
+			}
+			if item.Original == nil && item.URL != "" {
+				item.Original = &mediaVariantResponse{
+					URL:      item.URL,
+					Width:    item.Width,
+					Height:   item.Height,
+					MimeType: item.MimeType,
+				}
+			}
+			response.Media = append(response.Media, item)
+		}
 	}
 
 	response.Author.Level = 1

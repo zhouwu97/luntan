@@ -227,6 +227,9 @@ Post _postFromJson(Map<String, dynamic> json) {
             width: _nullableInt(value['width']),
             height: _nullableInt(value['height']),
             altText: _nullableString(value['alt_text']),
+            thumb: _parseVariant(value['thumb']),
+            detail: _parseVariant(value['detail']),
+            original: _parseVariant(value['original']),
           );
         }).toList()
       : const <MediaAsset>[];
@@ -317,3 +320,17 @@ int _int(dynamic value, {int fallback = 0}) =>
     value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
 DateTime _date(dynamic value, DateTime fallback) =>
     value is String ? DateTime.tryParse(value) ?? fallback : fallback;
+
+MediaVariant? _parseVariant(dynamic raw) {
+  if (raw is! Map) return null;
+  final map = Map<String, dynamic>.from(raw);
+  final url = _nullableString(map['url']);
+  if (url == null || url.isEmpty) return null;
+  return MediaVariant(
+    url: url,
+    width: _int(map['width']),
+    height: _int(map['height']),
+    sizeBytes: _nullableInt(map['size']),
+    mimeType: _nullableString(map['mime_type']),
+  );
+}

@@ -895,7 +895,7 @@ class _TopRankingCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.asset('assets/ranking/hero.webp', fit: BoxFit.cover),
+                  Image.asset('assets/ranking/hero.webp', fit: BoxFit.contain),
                   Positioned(
                     top: 0,
                     left: 0,
@@ -2374,7 +2374,7 @@ class _RankingCard extends StatelessWidget {
                 item.asset,
                 width: 64,
                 height: 64,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
               ),
             ),
             const SizedBox(width: 10),

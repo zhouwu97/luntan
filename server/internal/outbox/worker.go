@@ -26,6 +26,33 @@ type NoopHandler struct{}
 
 func (NoopHandler) Handle(context.Context, Event) error { return nil }
 
+type RouterHandler struct {
+	handlers map[string]Handler
+	fallback Handler
+}
+
+func NewRouterHandler() *RouterHandler {
+	return &RouterHandler{handlers: make(map[string]Handler)}
+}
+
+func (r *RouterHandler) Register(eventType string, handler Handler) {
+	r.handlers[eventType] = handler
+}
+
+func (r *RouterHandler) SetFallback(handler Handler) {
+	r.fallback = handler
+}
+
+func (r *RouterHandler) Handle(ctx context.Context, event Event) error {
+	if h, ok := r.handlers[event.EventType]; ok {
+		return h.Handle(ctx, event)
+	}
+	if r.fallback != nil {
+		return r.fallback.Handle(ctx, event)
+	}
+	return fmt.Errorf("unhandled outbox event type: %s", event.EventType)
+}
+
 type Worker struct {
 	DB          *sql.DB
 	Handler     Handler

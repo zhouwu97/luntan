@@ -159,7 +159,54 @@ void main() {
     expect(visible, isNot(contains(communities.first)));
   });
 
-  testWidgets('API 首页默认杂鱼日常并在首屏不足时最多自动补四页', (tester) async {
+  test('首页识别服务端导入板块并排除 QA 板块', () {
+    final visible = selectHomeCommunities([
+      const Community(
+        id: 'community_qa',
+        slug: 'qa',
+        name: 'QA测试板块',
+        description: '测试数据',
+        categoryId: 'cat-qa',
+        sortOrder: 0,
+      ),
+      const Community(
+        id: 'community-import-forum',
+        slug: 'import-forum',
+        name: '酱紫社区',
+        description: '源站导入',
+        categoryId: 'cat-import',
+        sortOrder: 11,
+        postCount: 100,
+      ),
+      const Community(
+        id: 'community-import-daily',
+        slug: 'import-daily',
+        name: '杂鱼日常',
+        description: '源站导入',
+        categoryId: 'cat-import',
+        sortOrder: 12,
+        postCount: 3,
+      ),
+      const Community(
+        id: 'community-import-unboxing',
+        slug: 'import-unboxing',
+        name: '大型拆箱',
+        description: '源站导入',
+        categoryId: 'cat-import',
+        sortOrder: 10,
+        postCount: 7,
+      ),
+    ]);
+
+    expect(visible.map((item) => item.id), [
+      'community-import-unboxing',
+      'community-import-daily',
+      'community-import-forum',
+    ]);
+    expect(visible.map((item) => item.id), isNot(contains('community_qa')));
+  });
+
+  testWidgets('API 首页默认最新并在首屏不足时最多自动补四页', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final pages = List<FeedPage>.generate(
@@ -178,6 +225,8 @@ void main() {
 
     expect(find.text('综合'), findsNothing);
     expect(find.text('杂鱼日常'), findsOneWidget);
+    expect(repository.calls.first.sort, 'latest');
+    expect(repository.calls.first.latestOrder, LatestOrder.post);
     expect(repository.calls, hasLength(5));
     expect(
       repository.calls.every((call) => call.communityId == 'community-daily'),
@@ -219,20 +268,19 @@ void main() {
     await tester.pumpWidget(_homeFor(controller, repository));
     await tester.pumpAndSettle();
 
-    // 默认在推荐 Tab，不显示右侧最新排序胶囊
-    expect(find.text('按回复'), findsNothing);
-    expect(find.text('按发帖'), findsNothing);
-
-    // 点击「最新」Tab
-    await tester.tap(find.text('最新'));
-    await tester.pumpAndSettle();
-
-    // 显示右侧胶囊，默认按回复
+    // 首页默认就是最新，并默认按发帖时间排序。
     expect(find.text('按回复'), findsOneWidget);
     expect(find.text('按发帖'), findsOneWidget);
+    expect(find.textContaining('最近回复'), findsNothing);
+
+    // 切换到按回复后，服务端查询条件也随之变化。
+    await tester.tap(find.text('按回复'));
+    await tester.pumpAndSettle();
+    expect(repository.calls.last.sort, 'latest');
+    expect(repository.calls.last.latestOrder, LatestOrder.comment);
     expect(find.textContaining('最近回复'), findsOneWidget);
 
-    // 点击「按发帖」
+    // 再切回按发帖。
     await tester.tap(find.text('按发帖'));
     await tester.pumpAndSettle();
 

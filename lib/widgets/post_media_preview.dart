@@ -7,12 +7,19 @@ import '../theme/app_theme.dart';
 /// 帖子媒体预览。
 ///
 /// 列表只使用稳定尺寸的缩略图，详情页通过 [MediaGalleryScreen] 查看原图，
-/// 避免原图解码把长列表撑开或造成明显跳动。
+/// 避免原图解码把长列表撑开或造成明显跳动。图片始终保持源文件比例，
+/// 不用拉伸填充；网格中如果比例不同会留白，但不会裁切或压扁内容。
 class PostMediaPreview extends StatelessWidget {
-  const PostMediaPreview({super.key, required this.images, this.onTap});
+  const PostMediaPreview({
+    super.key,
+    required this.images,
+    this.onTap,
+    this.onImageTap,
+  });
 
   final List<PostMedia> images;
   final VoidCallback? onTap;
+  final ValueChanged<int>? onImageTap;
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +29,7 @@ class PostMediaPreview extends StatelessWidget {
     final layout = _layout(shown, more);
     return Padding(
       padding: const EdgeInsets.only(top: 11),
-      child: onTap == null
+      child: onImageTap != null || onTap == null
           ? layout
           : GestureDetector(onTap: onTap, child: layout),
     );
@@ -39,7 +46,7 @@ class PostMediaPreview extends StatelessWidget {
             return SizedBox(
               width: constraints.maxWidth,
               height: height,
-              child: _tile(shown.first),
+              child: _tile(shown.first, index: 0),
             );
           },
         );
@@ -53,9 +60,9 @@ class PostMediaPreview extends StatelessWidget {
               height: height,
               child: Row(
                 children: [
-                  Expanded(child: _tile(shown[0])),
+                  Expanded(child: _tile(shown[0], index: 0)),
                   const SizedBox(width: 5),
-                  Expanded(child: _tile(shown[1])),
+                  Expanded(child: _tile(shown[1], index: 1)),
                 ],
               ),
             );
@@ -66,15 +73,15 @@ class PostMediaPreview extends StatelessWidget {
           height: 194,
           child: Row(
             children: [
-              Expanded(flex: 16, child: _tile(shown[0])),
+              Expanded(flex: 16, child: _tile(shown[0], index: 0)),
               const SizedBox(width: 5),
               Expanded(
                 flex: 10,
                 child: Column(
                   children: [
-                    Expanded(child: _tile(shown[1])),
+                    Expanded(child: _tile(shown[1], index: 1)),
                     const SizedBox(height: 5),
-                    Expanded(child: _tile(shown[2])),
+                    Expanded(child: _tile(shown[2], index: 2)),
                   ],
                 ),
               ),
@@ -89,9 +96,9 @@ class PostMediaPreview extends StatelessWidget {
               Expanded(
                 child: Row(
                   children: [
-                    Expanded(child: _tile(shown[0])),
+                    Expanded(child: _tile(shown[0], index: 0)),
                     const SizedBox(width: 5),
-                    Expanded(child: _tile(shown[1])),
+                    Expanded(child: _tile(shown[1], index: 1)),
                   ],
                 ),
               ),
@@ -99,11 +106,12 @@ class PostMediaPreview extends StatelessWidget {
               Expanded(
                 child: Row(
                   children: [
-                    Expanded(child: _tile(shown[2])),
+                    Expanded(child: _tile(shown[2], index: 2)),
                     const SizedBox(width: 5),
                     Expanded(
                       child: _tile(
                         shown[3],
+                        index: 3,
                         overlay: more > 0 ? '+$more' : null,
                       ),
                     ),
@@ -117,13 +125,21 @@ class PostMediaPreview extends StatelessWidget {
   }
 
   double _ratio(PostMedia media) {
-    final width = media.width?.toDouble() ?? 4;
-    final height = media.height?.toDouble() ?? 3;
-    return (width / height).clamp(.72, 1.78);
+    final width = media.width?.toDouble();
+    final height = media.height?.toDouble();
+    if (width == null ||
+        height == null ||
+        !width.isFinite ||
+        !height.isFinite) {
+      return 4.0 / 3.0;
+    }
+    if (width <= 0 || height <= 0) return 4.0 / 3.0;
+    // 仅限制极端/恶意元数据，正常图片的真实比例不做截断。
+    return (width / height).clamp(.35, 3.0).toDouble();
   }
 
-  Widget _tile(PostMedia media, {String? overlay}) {
-    return LayoutBuilder(
+  Widget _tile(PostMedia media, {required int index, String? overlay}) {
+    final content = LayoutBuilder(
       builder: (context, constraints) {
         final dpr = MediaQuery.devicePixelRatioOf(context);
         final cacheWidth =
@@ -139,10 +155,10 @@ class PostMediaPreview extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (media.url != null)
+              if (media.previewUrl != null)
                 Image.network(
-                  media.url!,
-                  fit: BoxFit.cover,
+                  media.previewUrl!,
+                  fit: BoxFit.contain,
                   filterQuality: FilterQuality.low,
                   cacheWidth: cacheWidth,
                   cacheHeight: cacheHeight,
@@ -192,6 +208,14 @@ class PostMediaPreview extends StatelessWidget {
         );
       },
     );
+    if (onImageTap != null) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => onImageTap!(index),
+        child: content,
+      );
+    }
+    return content;
   }
 
   Widget _fallback(PostMedia media) {
@@ -274,11 +298,12 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
         onPageChanged: (value) => setState(() => index = value),
         itemBuilder: (context, itemIndex) {
           final image = widget.images[itemIndex];
+          final imageUrl = image.detailUrl;
           return InteractiveViewer(
             minScale: 1,
             maxScale: 3,
             child: Center(
-              child: image.url == null
+              child: imageUrl == null
                   ? _fallback(image)
                   : LayoutBuilder(
                       builder: (context, constraints) {
@@ -294,7 +319,7 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
                             ? (constraints.maxHeight * dpr * 2).round()
                             : null;
                         return Image.network(
-                          image.url!,
+                          imageUrl,
                           fit: BoxFit.contain,
                           filterQuality: FilterQuality.medium,
                           cacheWidth: cacheWidth,

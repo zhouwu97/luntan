@@ -17,10 +17,20 @@ import 'mock_forum_data.dart';
 import 'repositories/mock_repositories.dart';
 import '../domain/repositories.dart';
 
-String apiBaseUrlFromEnvironment() {
+/// 开发构建的默认 API 地址。
+///
+/// 真实客户端默认连接自己的 Go 服务，不再因为忘记传 Dart define 而静默
+/// 展示本地演示数据。部署到其他环境时仍可通过 API_BASE_URL 覆盖；生产环境
+/// 必须显式使用 HTTPS 地址。
+const defaultDevelopmentApiBaseUrl = 'http://101.42.27.44';
+
+String apiBaseUrlFromEnvironment({String? defaultBaseUrl}) {
   const configured = String.fromEnvironment('API_BASE_URL');
   const appEnv = String.fromEnvironment('APP_ENV', defaultValue: 'development');
-  return resolveApiBaseUrl(configured: configured, appEnv: appEnv);
+  final effective = configured.trim().isEmpty
+      ? (requiresConfiguredApi(appEnv) ? '' : (defaultBaseUrl ?? ''))
+      : configured;
+  return resolveApiBaseUrl(configured: effective, appEnv: appEnv);
 }
 
 bool requiresConfiguredApi(String appEnv) {
@@ -119,8 +129,9 @@ class ForumRepositories {
   factory ForumRepositories.fromEnvironment({
     ForumStore? store,
     TokenStore? tokenStore,
+    String? defaultBaseUrl,
   }) {
-    final baseUrl = apiBaseUrlFromEnvironment();
+    final baseUrl = apiBaseUrlFromEnvironment(defaultBaseUrl: defaultBaseUrl);
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
     // API 模式下未显式注入令牌存储时默认使用平台安全存储，避免进程重启后
     // 会话丢失；MemoryTokenStore 只应出现在测试注入路径。
@@ -161,13 +172,15 @@ class ForumRepositories {
   static Future<ForumRepositories> create({
     ForumStore? store,
     TokenStore? tokenStore,
+    String? defaultBaseUrl,
   }) async {
-    final baseUrl = apiBaseUrlFromEnvironment();
+    final baseUrl = apiBaseUrlFromEnvironment(defaultBaseUrl: defaultBaseUrl);
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
     final actualTokenStore = tokenStore ?? await SecureTokenStore.create();
     return ForumRepositories.fromEnvironment(
       store: store,
       tokenStore: actualTokenStore,
+      defaultBaseUrl: defaultBaseUrl,
     );
   }
 

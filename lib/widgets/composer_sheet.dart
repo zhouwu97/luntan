@@ -195,6 +195,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   ];
   ComposerDraftStorage? _draftStorage;
   bool _loadingCommunities = false;
+  bool _restoringDraft = false;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
   final List<String> _restoredMediaIds = <String>[];
@@ -213,6 +214,9 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   static const int maxTotalBytes = 30 * 1024 * 1024;
 
   bool get _usesRealUpload => widget.publishController != null;
+  bool get _isApiMode =>
+      widget.availableCommunitiesFuture != null ||
+      widget.publishController != null;
 
   Community? get _selectedCommunity {
     final id = communityId;
@@ -246,6 +250,8 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
   void initState() {
     super.initState();
     _draftStorage = widget.draftStorage;
+    _restoringDraft =
+        widget.initialDraft == null && widget.draftStorageFuture != null;
     communityId = _defaultCommunityId(_availableCommunities);
     final draft = widget.initialDraft;
     if (draft != null) _applyDraft(draft);
@@ -356,6 +362,8 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
       }
     } catch (_) {
       // 草稿存储不可用时不阻塞编辑器，发布失败仍会保留当前页面内容。
+    } finally {
+      if (mounted) setState(() => _restoringDraft = false);
     }
   }
 
@@ -738,25 +746,54 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                     padding: EdgeInsets.only(bottom: 12),
                     child: LinearProgressIndicator(minHeight: 2),
                   ),
-                if (_availableCommunities.isNotEmpty)
-                  DropdownButtonFormField<String>(
-                    initialValue: communityId,
-                    decoration: const InputDecoration(labelText: '发布社区'),
-                    items: _availableCommunities
-                        .map(
-                          (item) => DropdownMenuItem(
-                            value: item.id,
-                            child: Text(item.name),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: submitting
-                        ? null
-                        : (value) {
-                            setState(() => communityId = value);
-                            _scheduleDraftSave();
-                          },
-                  )
+                if (_isApiMode)
+                  if (_availableCommunities.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      initialValue: communityId,
+                      decoration: const InputDecoration(labelText: '发布社区'),
+                      items: _availableCommunities
+                          .map(
+                            (item) => DropdownMenuItem(
+                              value: item.id,
+                              child: Text(item.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: submitting || _restoringDraft
+                          ? null
+                          : (value) {
+                              setState(() => communityId = value);
+                              _scheduleDraftSave();
+                            },
+                    )
+                  else
+                    InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: '发布社区',
+                        suffixIcon: _loadingCommunities
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        _loadingCommunities ? '正在加载社区…' : '暂无可用社区',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    )
                 else
                   DropdownButtonFormField<ForumSection>(
                     initialValue: section,
@@ -769,7 +806,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                           ),
                         )
                         .toList(),
-                    onChanged: submitting
+                    onChanged: submitting || _restoringDraft
                         ? null
                         : (value) {
                             setState(() => section = value ?? section);
@@ -779,7 +816,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: titleController,
-                  enabled: !submitting,
+                  enabled: !submitting && !_restoringDraft,
                   maxLength: 40,
                   onChanged: (_) => _scheduleDraftSave(),
                   decoration: const InputDecoration(
@@ -790,7 +827,7 @@ class _PostEditorDialogState extends State<PostEditorDialog> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: bodyController,
-                  enabled: !submitting,
+                  enabled: !submitting && !_restoringDraft,
                   maxLength: 2000,
                   minLines: 8,
                   maxLines: 12,

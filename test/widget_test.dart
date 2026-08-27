@@ -104,6 +104,32 @@ void main() {
     expect(opened, isTrue);
   });
 
+  testWidgets('帖子媒体预览保持源比例且不裁切', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Padding(
+            padding: EdgeInsets.all(16),
+            child: PostMediaPreview(
+              images: [
+                MediaAsset(
+                  id: 'tall-image',
+                  type: MediaType.image,
+                  url: 'https://example.com/tall.webp',
+                  width: 800,
+                  height: 1600,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final image = tester.widget<Image>(find.byType(Image));
+    expect(image.fit, BoxFit.contain);
+  });
+
   testWidgets('搜索结果点击打开帖子详情', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     await tester.pumpAndSettle();

@@ -793,9 +793,6 @@ class MockPublishRepository implements PublishRepository {
     required String idempotencyKey,
     List<String> mediaIds = const [],
     String? topic,
-    List<String> pollOptions = const [],
-    bool allowMultiple = false,
-    DateTime? pollEndsAt,
   }) async {
     final section = ForumSection.values.firstWhere(
       (item) => item.communityId == communityId,
@@ -808,9 +805,6 @@ class MockPublishRepository implements PublishRepository {
         section: section,
         topic: topic,
         isPoll: type == 'poll',
-        pollOptions: pollOptions,
-        allowMultiple: allowMultiple,
-        pollEndsAt: pollEndsAt,
       ),
     );
     return {'id': _store.posts.first.id, 'idempotency_key': idempotencyKey};

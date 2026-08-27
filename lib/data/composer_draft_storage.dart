@@ -12,12 +12,12 @@ class ComposerDraftSnapshot {
     required this.body,
     this.communityId,
     this.topic,
-    this.isPoll = false,
-    this.pollOptions = const [],
-    this.allowMultiple = false,
-    this.pollEndsAt,
     this.localImagePaths = const [],
     this.uploadedMediaIds = const [],
+    this.isPoll = false,
+    this.allowMultiple = false,
+    this.pollEndsAt,
+    this.pollOptions = const [],
     required this.updatedAt,
   });
 
@@ -25,39 +25,39 @@ class ComposerDraftSnapshot {
   final String body;
   final String? communityId;
   final String? topic;
-  final bool isPoll;
-  final List<String> pollOptions;
-  final bool allowMultiple;
-  final DateTime? pollEndsAt;
   final List<String> localImagePaths;
   final List<String> uploadedMediaIds;
+  final bool isPoll;
+  final bool allowMultiple;
+  final DateTime? pollEndsAt;
+  final List<String> pollOptions;
   final DateTime updatedAt;
 
   bool get hasContent =>
       title.trim().isNotEmpty ||
       body.trim().isNotEmpty ||
-      pollOptions.any((item) => item.trim().isNotEmpty) ||
       localImagePaths.isNotEmpty ||
-      uploadedMediaIds.isNotEmpty;
+      uploadedMediaIds.isNotEmpty ||
+      pollOptions.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
     'title': title,
     'body': body,
     if (communityId != null) 'community_id': communityId,
     if (topic != null) 'topic': topic,
-    'is_poll': isPoll,
-    'poll_options': pollOptions,
-    'allow_multiple': allowMultiple,
-    if (pollEndsAt != null)
-      'poll_ends_at': pollEndsAt!.toUtc().toIso8601String(),
     'local_image_paths': localImagePaths,
     'uploaded_media_ids': uploadedMediaIds,
+    'is_poll': isPoll,
+    'allow_multiple': allowMultiple,
+    if (pollEndsAt != null) 'poll_ends_at': pollEndsAt!.toUtc().toIso8601String(),
+    'poll_options': pollOptions,
     'updated_at': updatedAt.toUtc().toIso8601String(),
   };
 
   static ComposerDraftSnapshot? fromJson(Map<String, dynamic> value) {
     final updatedAt = DateTime.tryParse('${value['updated_at'] ?? ''}');
     if (updatedAt == null) return null;
+    final pollEndsAt = DateTime.tryParse('${value['poll_ends_at'] ?? ''}');
     List<String> readStrings(dynamic raw) => raw is List
         ? raw
               .whereType<String>()
@@ -71,14 +71,13 @@ class ComposerDraftSnapshot {
           ? value['community_id'] as String
           : null,
       topic: value['topic'] is String ? value['topic'] as String : null,
-      isPoll: value['is_poll'] == true,
-      pollOptions: readStrings(value['poll_options']),
-      allowMultiple: value['allow_multiple'] == true,
-      pollEndsAt: value['poll_ends_at'] is String
-          ? DateTime.tryParse(value['poll_ends_at'] as String)
-          : null,
       localImagePaths: readStrings(value['local_image_paths']),
       uploadedMediaIds: readStrings(value['uploaded_media_ids']),
+      isPoll: value['is_poll'] is bool ? value['is_poll'] as bool : false,
+      allowMultiple:
+          value['allow_multiple'] is bool ? value['allow_multiple'] as bool : false,
+      pollEndsAt: pollEndsAt,
+      pollOptions: readStrings(value['poll_options']),
       updatedAt: updatedAt,
     );
   }

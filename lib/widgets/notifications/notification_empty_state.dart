@@ -45,7 +45,7 @@ class NotificationEmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             const Text(
-              '回复、点赞和社区消息\n都会出现在这里',
+              '回复、点赞和社区通知\n都会出现在这里',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12.5,

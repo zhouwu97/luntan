@@ -37,31 +37,6 @@ abstract interface class PublishRepository {
   Future<void> deleteMedia(String mediaId);
 }
 
-abstract interface class PollPublishRepository {
-  Future<Map<String, dynamic>> createPoll({
-    required String postId,
-    required String question,
-    required List<String> options,
-    bool allowMultiple,
-    DateTime? endsAt,
-  });
-}
-
-/// 投票帖子必须在一次服务端事务中完成帖子、投票和选项写入。
-abstract interface class AtomicPollPublishRepository {
-  Future<Map<String, dynamic>> createPollPost({
-    required String communityId,
-    required String title,
-    required String content,
-    required String idempotencyKey,
-    required List<String> options,
-    bool allowMultiple,
-    DateTime? endsAt,
-    List<String> mediaIds,
-    String? topic,
-  });
-}
-
 class PublishException implements Exception {
   const PublishException(this.message);
 
@@ -87,11 +62,7 @@ class MediaUploadTicket {
   final DateTime expiresAt;
 }
 
-class ApiPublishRepository
-    implements
-        PublishRepository,
-        PollPublishRepository,
-        AtomicPollPublishRepository {
+class ApiPublishRepository implements PublishRepository {
   ApiPublishRepository(this._client);
 
   final ApiClient _client;
@@ -114,58 +85,11 @@ class ApiPublishRepository
         'type': type,
         'title': title,
         'content': content,
-        if (topic != null) 'topic': topic,
+        ...?topic == null ? null : {'topic': topic},
         if (mediaIds.isNotEmpty) 'media_ids': mediaIds,
       },
     );
   }
-
-  @override
-  Future<Map<String, dynamic>> createPoll({
-    required String postId,
-    required String question,
-    required List<String> options,
-    bool allowMultiple = false,
-    DateTime? endsAt,
-  }) => _client.postJson(
-    '/api/v1/posts/$postId/poll',
-    body: {
-      'question': question,
-      'options': options,
-      'allow_multiple': allowMultiple,
-      if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
-    },
-  );
-
-  @override
-  Future<Map<String, dynamic>> createPollPost({
-    required String communityId,
-    required String title,
-    required String content,
-    required String idempotencyKey,
-    required List<String> options,
-    bool allowMultiple = false,
-    DateTime? endsAt,
-    List<String> mediaIds = const [],
-    String? topic,
-  }) => _client.postJson(
-    '/api/v1/posts',
-    headers: {'Idempotency-Key': idempotencyKey},
-    body: {
-      'community_id': communityId,
-      'type': 'poll',
-      'title': title,
-      'content': content,
-      if (topic != null) 'topic': topic,
-      if (mediaIds.isNotEmpty) 'media_ids': mediaIds,
-      'poll': {
-        'question': title,
-        'options': options,
-        'allow_multiple': allowMultiple,
-        if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
-      },
-    },
-  );
 
   @override
   Future<MediaUploadTicket> requestMediaUpload({
@@ -245,7 +169,8 @@ class ApiPublishRepository
         );
       } on ApiException catch (error) {
         final code = error.statusCode;
-        final isDeterministicClientError = code != null && code >= 400 && code < 500;
+        final isDeterministicClientError =
+            code != null && code >= 400 && code < 500;
         if (isDeterministicClientError) {
           // 4xx 参数/权限/校验明确失败，可安全清理 pending 媒体
           await _deleteMediaSilently(ticket.mediaId);

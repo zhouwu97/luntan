@@ -241,8 +241,10 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
   @override
   Widget build(BuildContext context) {
     final root = widget.rootComment;
-    final rootAuthor = root.author?.nickname ?? '用户';
-    final rootLevel = root.author?.level ?? 1;
+    final rootAuthor = root.author?.nickname ??
+        (root.authorId.startsWith('guest') ? '游客' : '匿名用户');
+    final rootLevel = root.author?.level ??
+        (root.authorId.startsWith('guest') || root.authorId.isEmpty ? 0 : 1);
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.8,
@@ -304,25 +306,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircleAvatar(
-                        radius: 13,
-                        backgroundColor: AppTheme.surfaceBlue,
-                        backgroundImage: root.author?.avatar != null
-                            ? NetworkImage(root.author!.avatar!)
-                            : null,
-                        child: root.author?.avatar == null
-                            ? Text(
-                                rootAuthor.isNotEmpty
-                                    ? rootAuthor.characters.first
-                                    : '友',
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.primary,
-                                ),
-                              )
-                            : null,
-                      ),
+                      _buildSmallAvatar(root.author?.avatar?.trim(), rootAuthor, size: 26),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
@@ -394,6 +378,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
             canComment: widget.canComment,
             onRequireAuth: widget.onRequireAuth,
             blockedMessage: widget.blockedMessage,
+            isSheetMode: true,
             onFeedback: (msg) => ScaffoldMessenger.of(
               context,
             ).showSnackBar(SnackBar(content: Text(msg))),
@@ -478,7 +463,8 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
 
         final reply = replies[index];
         final isHighlighted = highlightedReplyId == reply.id;
-        final author = reply.author?.nickname ?? '用户';
+        final author = reply.author?.nickname ??
+            (reply.authorId.startsWith('guest') ? '游客' : '匿名用户');
         final replyTo = reply.replyToUserId == null
             ? null
             : (reply.replyToUser?.nickname ??
@@ -495,23 +481,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 15,
-                backgroundColor: AppTheme.surfaceBlue,
-                backgroundImage: reply.author?.avatar != null
-                    ? NetworkImage(reply.author!.avatar!)
-                    : null,
-                child: reply.author?.avatar == null
-                    ? Text(
-                        author.isNotEmpty ? author.characters.first : '友',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.primary,
-                        ),
-                      )
-                    : null,
-              ),
+              _buildSmallAvatar(reply.author?.avatar?.trim(), author, size: 30),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -618,4 +588,50 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
     _ReplyLoadState.loadedEmpty => '0 条回复',
     _ReplyLoadState.loaded => '${root.replyCount} 条回复',
   };
+
+  Widget _buildSmallAvatar(String? avatarUrl, String author, {required double size}) {
+    final initial = author.isNotEmpty ? author.characters.first : '友';
+    final placeholder = Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: TextStyle(
+          fontSize: size * 0.42,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.primary,
+        ),
+      ),
+    );
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return placeholder;
+    }
+
+    return ClipOval(
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Image.network(
+          avatarUrl,
+          fit: BoxFit.cover,
+          width: size,
+          height: size,
+          cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded || frame != null) {
+              return child;
+            }
+            return placeholder;
+          },
+          errorBuilder: (context, error, stackTrace) => placeholder,
+        ),
+      ),
+    );
+  }
 }

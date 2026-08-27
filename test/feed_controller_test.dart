@@ -10,7 +10,15 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
   _RecordingFeed(this.pages);
 
   final List<FeedPage> pages;
-  final List<({String? cursor, String? communityId, String sort, LatestOrder latestOrder})> calls = [];
+  final List<
+    ({
+      String? cursor,
+      String? communityId,
+      String sort,
+      LatestOrder latestOrder,
+    })
+  >
+  calls = [];
   int index = 0;
 
   @override
@@ -28,7 +36,12 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
     bool? hasMedia,
     String? topic,
   }) {
-    calls.add((cursor: cursor, communityId: communityId, sort: sort, latestOrder: latestOrder));
+    calls.add((
+      cursor: cursor,
+      communityId: communityId,
+      sort: sort,
+      latestOrder: latestOrder,
+    ));
     final page = pages[index < pages.length ? index : pages.length - 1];
     index += 1;
     return Future.value(page);
@@ -124,7 +137,11 @@ void main() {
     await controller.initialLoad();
     expect(controller.state.items.map((post) => post.id), ['a']);
 
-    await controller.setQuery(communityId: 'gaming', sort: 'latest', latestOrder: LatestOrder.comment);
+    await controller.setQuery(
+      communityId: 'gaming',
+      sort: 'latest',
+      latestOrder: LatestOrder.comment,
+    );
     expect(feed.calls.last.communityId, 'gaming');
     expect(feed.calls.last.sort, 'latest');
     expect(feed.calls.last.latestOrder, LatestOrder.comment);
@@ -144,7 +161,11 @@ void main() {
     final controller = FeedController(repository: feed);
 
     await controller.initialLoad();
-    await controller.setQuery(communityId: null, sort: 'recommended', latestOrder: LatestOrder.comment);
+    await controller.setQuery(
+      communityId: null,
+      sort: 'recommended',
+      latestOrder: LatestOrder.comment,
+    );
 
     expect(feed.calls, hasLength(1));
   });

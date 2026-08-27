@@ -135,37 +135,62 @@ class AuthRepository {
   }
 
   Future<AuthSession> register({
-    required String username,
+    required String email,
+    required String code,
     required String password,
     String? nickname,
   }) async {
     final payload = await _client.postJson(
       '/api/v1/auth/register',
       body: {
-        'username': username,
+        'email': email.trim(),
+        'code': code.trim(),
         'password': password,
         if (nickname != null && nickname.trim().isNotEmpty)
-          'nickname': nickname,
+          'nickname': nickname.trim(),
       },
     );
     return _saveSession(payload);
   }
 
-  Future<AuthSession> login({
-    required String username,
+  Future<AuthSession> loginWithPassword({
+    required String email,
     required String password,
   }) async {
     final payload = await _client.postJson(
-      '/api/v1/auth/login',
-      body: {'username': username, 'password': password},
+      '/api/v1/auth/login/password',
+      body: {'email': email.trim(), 'password': password},
     );
     return _saveSession(payload);
   }
 
-  Future<EmailCodeChallenge> requestEmailCode(String email) async {
+  Future<AuthSession> login({
+    String? username,
+    String? email,
+    required String password,
+  }) async {
+    final targetEmail = email?.trim();
+    if (targetEmail != null && targetEmail.isNotEmpty) {
+      return loginWithPassword(email: targetEmail, password: password);
+    }
+    final targetUsername = username?.trim() ?? '';
+    if (targetUsername.contains('@')) {
+      return loginWithPassword(email: targetUsername, password: password);
+    }
     final payload = await _client.postJson(
-      '/api/v1/auth/email/request',
-      body: {'email': email.trim()},
+      '/api/v1/auth/login',
+      body: {'username': targetUsername, 'password': password},
+    );
+    return _saveSession(payload);
+  }
+
+  Future<EmailCodeChallenge> requestEmailCode(
+    String email, {
+    String scene = 'login',
+  }) async {
+    final payload = await _client.postJson(
+      '/api/v1/auth/code/request',
+      body: {'email': email.trim(), 'scene': scene},
     );
     return EmailCodeChallenge(
       expiresIn: _int(payload['expires_in'], fallback: 600),
@@ -183,7 +208,7 @@ class AuthRepository {
     String? nickname,
   }) async {
     final payload = await _client.postJson(
-      '/api/v1/auth/email/verify',
+      '/api/v1/auth/login/code',
       body: {
         'email': email.trim(),
         'code': code.trim(),

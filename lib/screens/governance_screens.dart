@@ -220,7 +220,9 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                         : user.nickname;
                     return Card(
                       child: ListTile(
-                        leading: CircleAvatar(child: Text(name.characters.first)),
+                        leading: CircleAvatar(
+                          child: Text(name.characters.first),
+                        ),
                         title: Text(
                           name,
                           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -256,7 +258,8 @@ class ManagedUserDetailScreen extends StatefulWidget {
   final String userId;
 
   @override
-  State<ManagedUserDetailScreen> createState() => _ManagedUserDetailScreenState();
+  State<ManagedUserDetailScreen> createState() =>
+      _ManagedUserDetailScreenState();
 }
 
 class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
@@ -275,7 +278,11 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          action == 'restore' ? '恢复账号' : action == 'ban' ? '封禁账号' : '禁言账号',
+          action == 'restore'
+              ? '恢复账号'
+              : action == 'ban'
+              ? '封禁账号'
+              : '禁言账号',
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -322,10 +329,12 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
         permanent: action != 'restore' && result.duration == 0,
       );
       if (mounted) {
-        setState(() => future = widget.repository.getManagedUser(widget.userId));
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('处理已生效')),
+        setState(
+          () => future = widget.repository.getManagedUser(widget.userId),
         );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('处理已生效')));
       }
     } catch (cause) {
       if (mounted) {
@@ -367,7 +376,10 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
                 leading: CircleAvatar(child: Text(name.characters.first)),
                 title: Text(
                   name,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 subtitle: Text(
                   '${user.username}\n${user.email.isEmpty ? '未绑定邮箱' : user.email}\n${_managedStatusLabel(user.status)}',
@@ -403,7 +415,10 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
-            const Text('处罚记录', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            const Text(
+              '处罚记录',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+            ),
             if (user.punishments.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
@@ -418,7 +433,10 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            const Text('最近发布', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            const Text(
+              '最近发布',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+            ),
             if (user.recentPosts.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),

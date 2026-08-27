@@ -45,15 +45,16 @@ class _CommentItemState extends State<CommentItem>
       vsync: this,
       duration: AppMotion.highlightFade,
     );
-    _highlightAnimation = ColorTween(
-      begin: const Color(0xFFEDF6FF),
-      end: Colors.transparent,
-    ).animate(
-      CurvedAnimation(
-        parent: _highlightController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _highlightAnimation =
+        ColorTween(
+          begin: const Color(0xFFEDF6FF),
+          end: Colors.transparent,
+        ).animate(
+          CurvedAnimation(
+            parent: _highlightController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
 
     if (widget.isHighlighted) {
       _highlightController.forward();
@@ -77,9 +78,11 @@ class _CommentItemState extends State<CommentItem>
   @override
   Widget build(BuildContext context) {
     final comment = widget.comment;
-    final author = comment.author?.nickname ?? '用户';
-    final level = comment.author?.level ?? 1;
-    final avatar = comment.author?.avatar;
+    final author = comment.author?.nickname ??
+        (comment.authorId.startsWith('guest') ? '游客' : '匿名用户');
+    final level = comment.author?.level ??
+        (comment.authorId.startsWith('guest') || comment.authorId.isEmpty ? 0 : 1);
+    final avatar = comment.author?.avatar?.trim();
 
     return AnimatedBuilder(
       animation: _highlightAnimation,
@@ -100,21 +103,7 @@ class _CommentItemState extends State<CommentItem>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 用户头像
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: AppTheme.surfaceBlue,
-                backgroundImage: avatar != null ? NetworkImage(avatar) : null,
-                child: avatar == null
-                    ? Text(
-                        author.isNotEmpty ? author.characters.first : '友',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.primary,
-                        ),
-                      )
-                    : null,
-              ),
+              _buildCommentAvatar(context, avatar, author),
               const SizedBox(width: 10),
 
               // 用户名、等级、时间与楼层
@@ -274,6 +263,57 @@ class _CommentItemState extends State<CommentItem>
               onReplyTo: widget.onReplyTo,
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCommentAvatar(
+    BuildContext context,
+    String? avatarUrl,
+    String author,
+  ) {
+    const diameter = 34.0;
+    final initial = author.isNotEmpty ? author.characters.first : '友';
+    final placeholder = Container(
+      width: diameter,
+      height: diameter,
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.primary,
+        ),
+      ),
+    );
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return placeholder;
+    }
+
+    return ClipOval(
+      child: SizedBox(
+        width: diameter,
+        height: diameter,
+        child: Image.network(
+          avatarUrl,
+          fit: BoxFit.cover,
+          width: diameter,
+          height: diameter,
+          cacheWidth: (diameter * MediaQuery.devicePixelRatioOf(context)).round(),
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded || frame != null) {
+              return child;
+            }
+            return placeholder;
+          },
+          errorBuilder: (context, error, stackTrace) => placeholder,
+        ),
       ),
     );
   }

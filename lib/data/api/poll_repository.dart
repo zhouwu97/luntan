@@ -14,7 +14,13 @@ class PollRepository {
     }
   }
 
-  Future<void> vote({required String pollId, required List<String> optionIds}) async {
-    await _client.putJson('/api/v1/polls/$pollId/vote', body: {'option_ids': optionIds});
+  Future<void> vote({
+    required String pollId,
+    required List<String> optionIds,
+  }) async {
+    await _client.putJson(
+      '/api/v1/polls/$pollId/vote',
+      body: {'option_ids': optionIds},
+    );
   }
 }

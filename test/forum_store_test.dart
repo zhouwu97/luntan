@@ -6,12 +6,20 @@ void main() {
   test('板块和精华筛选使用独立状态', () {
     final store = ForumStore.seeded();
     expect(store.selectedSection, ForumSection.unboxing);
-    expect(store.visiblePosts.every((post) => post.section == ForumSection.unboxing), isTrue);
+    expect(
+      store.visiblePosts.every((post) => post.section == ForumSection.unboxing),
+      isTrue,
+    );
 
     store.selectSection(ForumSection.community);
     store.selectSort(FeedSort.featured);
     expect(store.visiblePosts, isNotEmpty);
-    expect(store.visiblePosts.every((post) => post.section == ForumSection.community && post.isFeatured), isTrue);
+    expect(
+      store.visiblePosts.every(
+        (post) => post.section == ForumSection.community && post.isFeatured,
+      ),
+      isTrue,
+    );
   });
 
   test('点赞只更新点赞状态，收藏和发布仍更新本地状态', () {
@@ -31,7 +39,9 @@ void main() {
     expect(post.likeCount, originalLikes);
     expect(post.isLiked, isFalse);
 
-    store.addPost(const PostDraft(title: '测试帖子', body: '测试正文', section: ForumSection.daily));
+    store.addPost(
+      const PostDraft(title: '测试帖子', body: '测试正文', section: ForumSection.daily),
+    );
     expect(store.posts.first.title, '测试帖子');
     expect(store.selectedSection, ForumSection.daily);
     expect(store.selectedSort, FeedSort.latest);

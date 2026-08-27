@@ -144,7 +144,10 @@ class ApiUserRepository implements UserRepository {
       final level = _int(value['level'], fallback: 1);
       final exp = _int(value['experience'], fallback: 0);
       final growth = value['growth'] is Map<String, dynamic>
-          ? GrowthState.fromJson(value['growth'] as Map<String, dynamic>, fallbackLevel: level)
+          ? GrowthState.fromJson(
+              value['growth'] as Map<String, dynamic>,
+              fallbackLevel: level,
+            )
           : GrowthState.fromJson(null, fallbackLevel: level);
       return UserProfile(
         id: _string(value['id']),

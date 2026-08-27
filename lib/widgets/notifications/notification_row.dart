@@ -5,11 +5,7 @@ import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
 
 class NotificationRow extends StatelessWidget {
-  const NotificationRow({
-    super.key,
-    required this.item,
-    required this.onTap,
-  });
+  const NotificationRow({super.key, required this.item, required this.onTap});
 
   final ForumNotification item;
   final VoidCallback onTap;
@@ -121,11 +117,7 @@ class NotificationRow extends StatelessWidget {
           AppTheme.mint,
         );
       case NotificationCategory.moderation:
-        return (
-          Icons.info_rounded,
-          const Color(0xFFFFF3EA),
-          AppTheme.orange,
-        );
+        return (Icons.info_rounded, const Color(0xFFFFF3EA), AppTheme.orange);
       case NotificationCategory.all:
       case NotificationCategory.system:
         return (

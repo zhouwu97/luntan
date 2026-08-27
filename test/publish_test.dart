@@ -2,8 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/controllers/publish_controller.dart';
 import 'package:luntan/data/api/publish_repository.dart';
-import 'package:luntan/data/mock_forum_data.dart';
-import 'package:luntan/data/repositories/mock_repositories.dart';
 
 void main() {
   test('PublishController locks duplicate submits into one request', () async {
@@ -54,22 +52,6 @@ void main() {
       expect(repository.createCalls, 2);
     },
   );
-
-  test('Mock 仓储支持原子投票发布', () async {
-    final controller = PublishController(
-      repository: MockPublishRepository(store: ForumStore.seeded()),
-    );
-
-    final response = await controller.publishPoll(
-      communityId: 'community-daily',
-      title: '哪种保养方式更方便？',
-      content: '投票正文',
-      options: const ['水洗', '湿巾'],
-    );
-
-    expect(response['id'], isNotEmpty);
-    expect(controller.isSubmitting, isFalse);
-  });
 }
 
 class _FakePublishRepository implements PublishRepository {
@@ -85,6 +67,9 @@ class _FakePublishRepository implements PublishRepository {
     required String idempotencyKey,
     List<String> mediaIds = const [],
     String? topic,
+    List<String> pollOptions = const [],
+    bool allowMultiple = false,
+    DateTime? pollEndsAt,
   }) async {
     createCalls++;
     await Future<void>.delayed(const Duration(milliseconds: 5));

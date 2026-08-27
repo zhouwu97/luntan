@@ -74,29 +74,27 @@ class PostDraft {
     required this.title,
     required this.body,
     required this.section,
-    this.isGameShare = false,
-    this.isPoll = false,
     this.media = const [],
     this.mediaIds = const [],
+    this.communityId,
+    this.topic,
+    this.isPoll = false,
     this.pollOptions = const [],
     this.allowMultiple = false,
     this.pollEndsAt,
-    this.communityId,
-    this.topic,
   });
 
   final String title;
   final String body;
   final ForumSection section;
-  final bool isGameShare;
-  final bool isPoll;
   final List<MediaAsset> media;
   final List<String> mediaIds;
+  final String? communityId;
+  final String? topic;
+  final bool isPoll;
   final List<String> pollOptions;
   final bool allowMultiple;
   final DateTime? pollEndsAt;
-  final String? communityId;
-  final String? topic;
 }
 
 class StoreProduct {
@@ -294,18 +292,14 @@ class ForumStore extends ChangeNotifier {
       community: communities.firstWhere(
         (item) => item.id == draft.section.communityId,
       ),
-      type: draft.isGameShare
-          ? PostType.gameShare
-          : draft.isPoll
-          ? PostType.poll
-          : PostType.normal,
-      title: draft.isGameShare ? '【玩法分享】${draft.title}' : draft.title,
+      type: draft.isPoll ? PostType.poll : PostType.normal,
+      title: draft.title,
       content: draft.body,
       createdAt: now,
       updatedAt: now,
       publishedAt: now,
       viewCount: 1,
-      tags: [draft.isGameShare ? '玩法分享' : draft.section.label],
+      tags: [draft.section.label],
       extraTag: '新发布',
       media: draft.media,
     );

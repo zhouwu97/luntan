@@ -243,7 +243,11 @@ Post _postFromJson(Map<String, dynamic> json) {
       id: _string(authorJson['id']),
       username: _string(authorJson['username']),
       nickname: _string(authorJson['nickname']),
-      level: _int(authorJson['level'], fallback: 1),
+      avatar: _nullableString(
+        authorJson['avatar'] ?? authorJson['avatar_url'],
+      ),
+      level: _nullableInt(authorJson['level']) ??
+          (_string(authorJson['id']).startsWith('guest') ? 0 : 1),
       createdAt: now,
       updatedAt: now,
     ),

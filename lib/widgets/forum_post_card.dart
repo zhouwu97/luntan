@@ -30,128 +30,135 @@ class ForumPostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final card = _buildCard(context);
+    final card = _buildContent(context);
     final listenable = interactionListenable;
     if (listenable == null) return card;
     return AnimatedBuilder(
       animation: listenable,
-      builder: (context, _) => _buildCard(context),
+      builder: (context, _) => _buildContent(context),
     );
   }
 
-  Widget _buildCard(BuildContext context) {
-    // “回复”只负责进入已有评论；没有评论时保持当前页面，不把用户带到空评论区。
-    final openComments = post.commentCount > 0
-        ? (onOpenComments ?? onOpen)
-        : () {};
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-        side: const BorderSide(color: AppTheme.border),
+  Widget _buildContent(BuildContext context) {
+    // 0 评论依然允许点击进入详情并开始第一条评论
+    final openComments = onOpenComments ?? onOpen;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFF0F4F8), width: 6),
+        ),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ForumAuthorRow(post: post, onMenu: onMenu),
-              const SizedBox(height: 10),
-              if (post.isPinned ||
-                  post.isFeatured ||
-                  post.extraTag == '精华') ...[
-                _Tag(
-                  text: post.isPinned ? '置顶' : '精华',
-                  color: post.isPinned ? AppTheme.pink : AppTheme.orange,
-                ),
-                const SizedBox(height: 6),
-              ],
-              if (contextMeta != null) ...[
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 6,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onOpen,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ForumAuthorRow(post: post, onMenu: onMenu),
+                const SizedBox(height: 9),
+                if (post.isPinned ||
+                    post.isFeatured ||
+                    post.extraTag == '精华') ...[
+                  _Tag(
+                    text: post.isPinned ? '置顶' : '精华',
+                    color: post.isPinned ? AppTheme.pink : AppTheme.orange,
                   ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.background,
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Text(
-                    contextMeta!,
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 10.5,
-                      height: 1.35,
+                  const SizedBox(height: 6),
+                ],
+                if (contextMeta != null) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.background,
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(
+                      contextMeta!,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 11,
+                        height: 1.35,
+                      ),
                     ),
                   ),
-                ),
-              ],
-              Text(
-                post.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  height: 1.35,
-                  color: AppTheme.textPrimary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              if (post.body.isNotEmpty) ...[
-                const SizedBox(height: 6),
+                ],
                 Text(
-                  post.body,
+                  post.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 12.5,
-                    height: 1.5,
-                    color: AppTheme.textSecondary,
+                    fontSize: 16.5,
+                    height: 1.36,
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
                   ),
                 ),
-              ],
-              // 图片区域交给整卡 InkWell 处理，避免在卡片内部再嵌套一套手势竞争。
-              PostMediaPreview(images: post.images),
-              const SizedBox(height: 7),
-              Row(
-                children: [
-                  _ActionStat(
-                    icon: Icons.chat_bubble_outline_rounded,
-                    text: '${post.comments}',
-                    onTap: openComments,
-                  ),
-                  const SizedBox(width: 14),
-                  _ActionStat(
-                    icon: Icons.favorite_border_rounded,
-                    activeIcon: Icons.favorite_rounded,
-                    text: '${post.likeCount}',
-                    onTap: onLike,
-                    active: post.isLiked,
-                  ),
-                  const SizedBox(width: 14),
-                  _Stat(icon: Icons.visibility_outlined, text: post.views),
-                  const Spacer(),
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onBookmark,
-                    icon: MotionTapIcon(
-                      active: post.isBookmarked,
-                      activeIcon: Icons.bookmark_rounded,
-                      inactiveIcon: Icons.bookmark_border_rounded,
-                      activeColor: AppTheme.primary,
-                      inactiveColor: AppTheme.textSecondary,
+                if (post.body.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    post.body,
+                    maxLines: post.images.isEmpty ? 5 : 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.58,
+                      color: Color(0xFF334B60),
                     ),
-                    tooltip: '收藏帖子',
                   ),
                 ],
-              ),
-            ],
+                if (post.images.isNotEmpty) ...[
+                  PostMediaPreview(
+                    images: post.images,
+                    onTap: onOpen,
+                    onImageTap: (_) => onOpen(),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _ActionStat(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      text: '${post.comments}',
+                      onTap: openComments,
+                    ),
+                    const SizedBox(width: 14),
+                    _ActionStat(
+                      icon: Icons.favorite_border_rounded,
+                      activeIcon: Icons.favorite_rounded,
+                      text: '${post.likeCount}',
+                      onTap: onLike,
+                      active: post.isLiked,
+                    ),
+                    const SizedBox(width: 14),
+                    _Stat(icon: Icons.visibility_outlined, text: post.views),
+                    const Spacer(),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onBookmark,
+                      icon: MotionTapIcon(
+                        active: post.isBookmarked,
+                        activeIcon: Icons.bookmark_rounded,
+                        inactiveIcon: Icons.bookmark_border_rounded,
+                        activeColor: AppTheme.primary,
+                        inactiveColor: AppTheme.textSecondary,
+                      ),
+                      tooltip: '收藏帖子',
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -168,10 +175,10 @@ class _Tag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: .1),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(5),
       ),
       child: Text(
         text,
@@ -197,7 +204,7 @@ class _Stat extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: AppTheme.textSecondary),
+        Icon(icon, size: 15, color: AppTheme.textSecondary),
         const SizedBox(width: 4),
         Text(
           text,
@@ -243,7 +250,7 @@ class _ActionStat extends StatelessWidget {
               inactiveIcon: icon,
               activeColor: AppTheme.pink,
               inactiveColor: AppTheme.textSecondary,
-              size: 16,
+              size: 15,
             ),
             const SizedBox(width: 4),
             Text(
@@ -251,6 +258,7 @@ class _ActionStat extends StatelessWidget {
               style: TextStyle(
                 color: active ? AppTheme.pink : AppTheme.textSecondary,
                 fontSize: 12,
+                fontWeight: active ? FontWeight.w700 : FontWeight.normal,
               ),
             ),
           ],
@@ -259,3 +267,4 @@ class _ActionStat extends StatelessWidget {
     ),
   );
 }
+

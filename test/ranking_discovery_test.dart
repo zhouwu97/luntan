@@ -5,6 +5,7 @@ import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/platform_repository.dart' hide RankingItem;
 import 'package:luntan/data/api/ranking_repository.dart';
 import 'package:luntan/data/mock_forum_data.dart';
+import 'package:luntan/data/ranking_cache.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/screens/ranking_page.dart';
 import 'package:luntan/screens/search_screen.dart';
@@ -172,6 +173,13 @@ class _FailingRankingRepository extends RankingRepository {
   }
 }
 
+class _FailingListRankingRepository extends RankingRepository {
+  _FailingListRankingRepository() : super(_FakeApiClient());
+
+  @override
+  Future<List<RankingToy>> list() => Future.error(StateError('network down'));
+}
+
 class _SortFailureApiClient extends _FakeApiClient {
   @override
   Future<Map<String, dynamic>> getJson(
@@ -192,6 +200,22 @@ class _SortFailureApiClient extends _FakeApiClient {
 }
 
 void main() {
+  testWidgets('排行榜列表失败时不展示静态演示数据', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RankingPage(
+          repository: _FailingListRankingRepository(),
+          cache: MemoryRankingCache(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('排行榜暂时无法加载'), findsOneWidget);
+    expect(find.text('黄油小姐 二代'), findsNothing);
+    expect(find.text('重试'), findsOneWidget);
+  });
+
   group('Ranking and Search Discovery API Tests', () {
     late RankingRepository rankingRepo;
     late PlatformRepository platformRepo;

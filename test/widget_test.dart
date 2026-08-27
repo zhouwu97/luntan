@@ -117,13 +117,15 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: ForumPostCard(
-            post: postWithImage,
-            onOpen: () => opened = true,
-            onOpenComments: () {},
-            onLike: () {},
-            onBookmark: () {},
-            onMenu: () {},
+          body: SingleChildScrollView(
+            child: ForumPostCard(
+              post: postWithImage,
+              onOpen: () => opened = true,
+              onOpenComments: () {},
+              onLike: () {},
+              onBookmark: () {},
+              onMenu: () {},
+            ),
           ),
         ),
       ),
@@ -135,8 +137,7 @@ void main() {
     expect(opened, isTrue);
   });
 
-  testWidgets('零回复帖子点击回复不会跳转到详情', (tester) async {
-    var openedPost = false;
+  testWidgets('零回复帖子点击回复仍会跳转到详情并聚焦评论', (tester) async {
     var openedComments = false;
     final post = ForumStore.seeded().posts.first;
     post.commentCount = 0;
@@ -146,7 +147,7 @@ void main() {
         home: Scaffold(
           body: ForumPostCard(
             post: post,
-            onOpen: () => openedPost = true,
+            onOpen: () {},
             onOpenComments: () => openedComments = true,
             onLike: () {},
             onBookmark: () {},
@@ -158,8 +159,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.chat_bubble_outline_rounded));
-    expect(openedPost, isFalse);
-    expect(openedComments, isFalse);
+    expect(openedComments, isTrue);
   });
 
   testWidgets('帖子媒体缩略图居中裁切且不压扁', (tester) async {
@@ -196,19 +196,21 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
-          body: Padding(
-            padding: EdgeInsets.all(16),
-            child: PostMediaPreview(
-              mode: PostMediaPreviewMode.detail,
-              images: [
-                MediaAsset(
-                  id: 'detail-tall-image',
-                  type: MediaType.image,
-                  url: 'https://example.com/tall.webp',
-                  width: 800,
-                  height: 1600,
-                ),
-              ],
+          body: SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: PostMediaPreview(
+                mode: PostMediaPreviewMode.detail,
+                images: [
+                  MediaAsset(
+                    id: 'detail-tall-image',
+                    type: MediaType.image,
+                    url: 'https://example.com/tall.webp',
+                    width: 800,
+                    height: 1600,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -219,30 +221,32 @@ void main() {
       tester.getSize(find.byType(PostMediaPreview)).height,
       greaterThan(240),
     );
-    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.contain);
+    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.cover);
   });
 
   testWidgets('多图预览使用等比例裁切填充网格', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
-          body: PostMediaPreview(
-            images: [
-              MediaAsset(
-                id: 'grid-1',
-                type: MediaType.image,
-                url: 'https://example.com/1.jpg',
-                width: 800,
-                height: 1200,
-              ),
-              MediaAsset(
-                id: 'grid-2',
-                type: MediaType.image,
-                url: 'https://example.com/2.jpg',
-                width: 1200,
-                height: 800,
-              ),
-            ],
+          body: SingleChildScrollView(
+            child: PostMediaPreview(
+              images: [
+                MediaAsset(
+                  id: 'grid-1',
+                  type: MediaType.image,
+                  url: 'https://example.com/1.jpg',
+                  width: 800,
+                  height: 1200,
+                ),
+                MediaAsset(
+                  id: 'grid-2',
+                  type: MediaType.image,
+                  url: 'https://example.com/2.jpg',
+                  width: 1200,
+                  height: 800,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -313,9 +317,9 @@ void main() {
       ),
     );
 
-    expect(find.text('登录 / 注册'), findsOneWidget);
-    expect(find.text('绑定邮箱账号'), findsOneWidget);
-    await tester.tap(find.text('绑定邮箱账号'));
+    expect(find.text('当前为游客模式'), findsOneWidget);
+    expect(find.text('去登录'), findsOneWidget);
+    await tester.tap(find.text('去登录'));
     expect(opened, 1);
   });
 

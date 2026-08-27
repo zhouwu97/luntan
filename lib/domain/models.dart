@@ -337,7 +337,8 @@ class Post {
   set isLiked(bool value) => viewerState.hasLiked = value;
   bool get isBookmarked => viewerState.hasBookmarked;
   set isBookmarked(bool value) => viewerState.hasBookmarked = value;
-  int get level => author?.level ?? 1;
+  int get level =>
+      author?.level ?? (authorId.startsWith('guest') || authorId.isEmpty ? 0 : 1);
   List<MediaAsset> get images => media;
   String get tag => tags.isEmpty ? community?.name ?? '' : tags.first;
   String get time => relativeTimeLabel(createdAt);

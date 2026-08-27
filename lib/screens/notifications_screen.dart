@@ -144,7 +144,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       });
     } catch (_) {
       if (mounted && generation == _generation) {
-        setState(() => errorMessage = '消息加载失败，请重试');
+        setState(() => errorMessage = '通知加载失败，请重试');
       }
     } finally {
       if (mounted && generation == _generation) {
@@ -206,14 +206,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           item.isRead = true;
         }
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('全部通知已标为已读')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('全部通知已标为已读')));
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(userFacingApiMessage(error))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
     }
   }
 
@@ -307,10 +307,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           // 分类选择轻量 Segment
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
-            child: _NoticeKindTabs(
-              selected: filter,
-              onChanged: _selectFilter,
-            ),
+            child: _NoticeKindTabs(selected: filter, onChanged: _selectFilter),
           ),
           Expanded(child: _buildBody()),
         ],
@@ -344,9 +341,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: load,
-              style: TextButton.styleFrom(
-                foregroundColor: AppTheme.primary,
-              ),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
               child: const Text('重试'),
             ),
           ],
@@ -366,7 +361,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final earlierItems = <ForumNotification>[];
 
     for (final item in items) {
-      final isToday = item.createdAt.year == today.year &&
+      final isToday =
+          item.createdAt.year == today.year &&
           item.createdAt.month == today.month &&
           item.createdAt.day == today.day;
       if (isToday) {
@@ -384,10 +380,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           _buildDayHeader('今天'),
           _buildGroupContainer(
             children: todayItems
-                .map((item) => NotificationRow(
-                      item: item,
-                      onTap: () => _handleNotificationTap(item),
-                    ))
+                .map(
+                  (item) => NotificationRow(
+                    item: item,
+                    onTap: () => _handleNotificationTap(item),
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -395,10 +393,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           _buildDayHeader('更早'),
           _buildGroupContainer(
             children: earlierItems
-                .map((item) => NotificationRow(
-                      item: item,
-                      onTap: () => _handleNotificationTap(item),
-                    ))
+                .map(
+                  (item) => NotificationRow(
+                    item: item,
+                    onTap: () => _handleNotificationTap(item),
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -457,11 +457,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: children.length,
-          separatorBuilder: (context, index) => const Divider(
-            height: 1,
-            thickness: 1,
-            color: Color(0xFFEDF2F6),
-          ),
+          separatorBuilder: (context, index) =>
+              const Divider(height: 1, thickness: 1, color: Color(0xFFEDF2F6)),
           itemBuilder: (context, index) => children[index],
         ),
       ),
@@ -478,10 +475,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 }
 
 class _NoticeKindTabs extends StatelessWidget {
-  const _NoticeKindTabs({
-    required this.selected,
-    required this.onChanged,
-  });
+  const _NoticeKindTabs({required this.selected, required this.onChanged});
 
   final NotificationCategory selected;
   final ValueChanged<NotificationCategory> onChanged;

@@ -5,7 +5,8 @@ import 'api_client.dart';
 /// access/refresh token 使用平台安全存储；MemoryTokenStore 仍保留给测试，
 /// SharedPreferencesTokenStore 作为旧版本迁移兼容实现。
 class SecureTokenStore implements TokenStore {
-  SecureTokenStore([FlutterSecureStorage? storage]) : _storage = storage ?? const FlutterSecureStorage();
+  SecureTokenStore([FlutterSecureStorage? storage])
+    : _storage = storage ?? const FlutterSecureStorage();
 
   static const _accessTokenKey = 'luntan.auth.access_token';
   static const _refreshTokenKey = 'luntan.auth.refresh_token';

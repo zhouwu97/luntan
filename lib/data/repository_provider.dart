@@ -24,9 +24,20 @@ import '../domain/repositories.dart';
 /// 必须显式使用 HTTPS 地址。
 const defaultDevelopmentApiBaseUrl = 'http://101.42.27.44';
 
-String apiBaseUrlFromEnvironment({String? defaultBaseUrl}) {
+String apiBaseUrlFromEnvironment({String? defaultBaseUrl, bool? releaseBuild}) {
   const configured = String.fromEnvironment('API_BASE_URL');
-  const appEnv = String.fromEnvironment('APP_ENV', defaultValue: 'development');
+  const configuredAppEnv = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'development',
+  );
+  // release 包必须显式走 production 规则，避免漏传 dart-define 时退回到
+  // 开发环境默认 HTTP 地址。测试和 debug 包仍可显式使用 Mock/QA 配置。
+  final isReleaseBuild =
+      releaseBuild ?? const bool.fromEnvironment('dart.vm.product');
+  final appEnv =
+      isReleaseBuild && configuredAppEnv.toLowerCase() == 'development'
+      ? 'production'
+      : configuredAppEnv;
   final effective = configured.trim().isEmpty
       ? (requiresConfiguredApi(appEnv) ? '' : (defaultBaseUrl ?? ''))
       : configured;

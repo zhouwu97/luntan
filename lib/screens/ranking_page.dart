@@ -4,8 +4,9 @@ import 'package:flutter/services.dart';
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
-import '../domain/models.dart' show relativeTimeLabel;
 import 'package:share_plus/share_plus.dart';
+import '../widgets/comments/ranking_comment_thread_sheet.dart';
+import '../widgets/comments/comment_skeleton.dart';
 
 /// `rankingList` 网页上的一条玩具排行数据。
 class RankingItem {
@@ -1020,8 +1021,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   bool _wanted = false;
   bool _owned = false;
   bool _sortByWeight = true;
-  RankingToyComment? _replyTarget;
   RankingToyDetail? _remoteDetail;
+  bool _remoteLoading = false;
+  String? _remoteError;
+  bool _commentsLoadingMore = false;
+  String? _commentsLoadMoreError;
 
   RankingItem get item => widget.item;
 
@@ -1078,19 +1082,37 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _loadRemoteDetail() async {
+    final requestedSort = _sortByWeight;
+    if (_remoteDetail == null) {
+      setState(() {
+        _remoteLoading = true;
+        _remoteError = null;
+      });
+    }
     try {
       final detail = await widget.repository!.detail(
         item.id,
-        commentSort: _sortByWeight ? 'weight' : 'latest',
+        commentSort: requestedSort ? 'weight' : 'latest',
       );
       if (!mounted) return;
       setState(() {
         _remoteDetail = detail;
+        _sortByWeight = detail.commentSort != 'latest';
         _wanted = detail.toy.wanted;
         _owned = detail.toy.owned;
+        _remoteLoading = false;
+        _remoteError = null;
+        _commentsLoadingMore = false;
+        _commentsLoadMoreError = null;
       });
     } catch (error) {
       if (!mounted) return;
+      setState(() {
+        _remoteLoading = false;
+        if (_remoteDetail == null) {
+          _remoteError = userFacingApiMessage(error, fallback: '评价加载失败，请重试');
+        }
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(userFacingApiMessage(error, fallback: '详情加载失败，请重试')),
@@ -1115,11 +1137,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     final detail = _remoteDetail;
     if (detail == null) return;
     setState(() {
-      _remoteDetail = RankingToyDetail(
-        toy: toy,
-        comments: detail.comments,
-        commentSort: detail.commentSort,
-      );
+      _remoteDetail = detail.copyWith(toy: toy);
       _wanted = toy.wanted;
       _owned = toy.owned;
     });
@@ -1176,8 +1194,29 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       setState(() => _sortByWeight = !_sortByWeight);
       return;
     }
-    setState(() => _sortByWeight = !_sortByWeight);
-    await _loadRemoteDetail();
+    final targetSortByWeight = !_sortByWeight;
+    try {
+      final detail = await widget.repository!.detail(
+        item.id,
+        commentSort: targetSortByWeight ? 'weight' : 'latest',
+      );
+      if (!mounted) return;
+      setState(() {
+        _sortByWeight = targetSortByWeight;
+        _remoteDetail = detail;
+        _commentsLoadMoreError = null;
+      });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              userFacingApiMessage(error, fallback: '排序切换失败，已保持原排序'),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _openRatingDialog() async {
@@ -1273,22 +1312,17 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       final comment = await widget.repository!.createComment(
         toyId: item.id,
         content: value.trim(),
-        parentId: _replyTarget?.id,
-        replyToUserId: _replyTarget?.authorId,
       );
       if (!mounted) return;
       final detail = _remoteDetail;
       if (detail != null) {
         setState(() {
-          _remoteDetail = RankingToyDetail(
-            toy: detail.toy,
+          _remoteDetail = detail.copyWith(
             comments: [comment, ...detail.comments],
-            commentSort: detail.commentSort,
           );
         });
       }
       _commentController.clear();
-      setState(() => _replyTarget = null);
       FocusScope.of(context).unfocus();
       ScaffoldMessenger.of(
         context,
@@ -1324,30 +1358,12 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       final comments = _remoteDetail!.comments
           .map(
             (item) => item.id == comment.id
-                ? RankingToyComment(
-                    id: item.id,
-                    authorId: item.authorId,
-                    username: item.username,
-                    nickname: item.nickname,
-                    level: item.level,
-                    content: item.content,
-                    likeCount: nextCount,
-                    isLiked: nextLiked,
-                    createdAt: item.createdAt,
-                    rootId: item.rootId,
-                    parentId: item.parentId,
-                    replyToUserId: item.replyToUserId,
-                    replyCount: item.replyCount,
-                  )
+                ? item.copyWith(likeCount: nextCount, isLiked: nextLiked)
                 : item,
           )
           .toList();
       setState(() {
-        _remoteDetail = RankingToyDetail(
-          toy: _remoteDetail!.toy,
-          comments: comments,
-          commentSort: _remoteDetail!.commentSort,
-        );
+        _remoteDetail = _remoteDetail!.copyWith(comments: comments);
       });
     } catch (error) {
       if (mounted) {
@@ -1356,6 +1372,74 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
       }
     }
+  }
+
+  Future<void> _loadMoreServerComments() async {
+    final detail = _remoteDetail;
+    final cursor = detail?.commentsNextCursor;
+    if (detail == null || cursor == null || _commentsLoadingMore) return;
+    setState(() {
+      _commentsLoadingMore = true;
+      _commentsLoadMoreError = null;
+    });
+    try {
+      final page = await widget.repository!.listComments(
+        toyId: item.id,
+        sort: _sortByWeight ? 'weight' : 'latest',
+        cursor: cursor,
+      );
+      if (!mounted) return;
+      final existing = detail.comments.map((comment) => comment.id).toSet();
+      final comments = [...detail.comments];
+      for (final comment in page.items) {
+        if (comment.parentId == null && existing.add(comment.id)) {
+          comments.add(comment);
+        }
+      }
+      setState(() {
+        _remoteDetail = detail.copyWith(
+          comments: comments,
+          commentsNextCursor: page.nextCursor,
+          commentsHasMore: page.hasMore && page.nextCursor != cursor,
+        );
+        _commentsLoadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _commentsLoadingMore = false;
+        _commentsLoadMoreError = userFacingApiMessage(
+          error,
+          fallback: '更多评价加载失败，点击重试',
+        );
+      });
+    }
+  }
+
+  Future<void> _openRankingThread(RankingToyComment root) async {
+    final repository = widget.repository;
+    if (repository == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => RankingCommentThreadSheet(
+        rootComment: root,
+        repository: repository,
+        isAuthenticated: widget.isAuthenticated,
+        canComment: widget.canComment,
+        canLike: widget.canLike,
+        onRequireAuth: widget.onRequireAuth,
+        onReply: (target, content) => repository.createComment(
+          toyId: item.id,
+          content: content,
+          parentId: target.id,
+          replyToUserId: target.authorId,
+        ),
+        onToggleLike: (comment, active) =>
+            repository.setCommentLike(commentId: comment.id, active: active),
+      ),
+    );
   }
 
   @override
@@ -1433,10 +1517,21 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                         _ReviewSection(
                           sortByWeight: _sortByWeight,
                           comments: _serverComments,
+                          useMock: !_hasServer,
+                          loading: _remoteLoading,
+                          errorMessage: _remoteError,
+                          loadingMore: _commentsLoadingMore,
+                          hasMore: _remoteDetail?.commentsHasMore ?? false,
+                          loadMoreError: _commentsLoadMoreError,
                           onToggleSort: _toggleSort,
+                          onLoadMore: _remoteDetail == null
+                              ? () {
+                                  _loadRemoteDetail();
+                                }
+                              : _loadMoreServerComments,
                           onLike: _toggleServerCommentLike,
-                          onReply: (comment) =>
-                              setState(() => _replyTarget = comment),
+                          onReply: _openRankingThread,
+                          onViewReplies: _openRankingThread,
                         ),
                       ],
                     ),
@@ -1453,8 +1548,6 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
               controller: _commentController,
               reviewCount: _reviewCount,
               wantCount: _wantCount,
-              replyTarget: _replyTarget,
-              onCancelReply: () => setState(() => _replyTarget = null),
               onSubmitted: _submitComment,
             ),
           ),
@@ -1859,15 +1952,31 @@ class _ReviewSection extends StatelessWidget {
     required this.sortByWeight,
     required this.onToggleSort,
     this.comments,
+    this.useMock = false,
+    this.loading = false,
+    this.errorMessage,
+    this.loadingMore = false,
+    this.hasMore = false,
+    this.loadMoreError,
+    this.onLoadMore,
     this.onLike,
     this.onReply,
+    this.onViewReplies,
   });
 
   final bool sortByWeight;
   final VoidCallback onToggleSort;
   final List<RankingToyComment>? comments;
+  final bool useMock;
+  final bool loading;
+  final String? errorMessage;
+  final bool loadingMore;
+  final bool hasMore;
+  final String? loadMoreError;
+  final VoidCallback? onLoadMore;
   final ValueChanged<RankingToyComment>? onLike;
   final ValueChanged<RankingToyComment>? onReply;
+  final ValueChanged<RankingToyComment>? onViewReplies;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1899,7 +2008,7 @@ class _ReviewSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 18),
-        if (comments == null) ...[
+        if (comments == null && useMock) ...[
           const _ReviewCard(
             user: '菜菜M',
             likes: '8',
@@ -1921,7 +2030,26 @@ class _ReviewSection extends StatelessWidget {
             level: 2,
             authorRating: 8,
           ),
-        ] else if (comments!.isEmpty)
+        ] else if (comments == null && loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: CommentSkeleton(itemCount: 2),
+          )
+        else if (comments == null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Column(
+              children: [
+                Text(
+                  errorMessage ?? '评价加载失败，请重试',
+                  style: const TextStyle(color: Color(0xFF8A96A9)),
+                ),
+                const SizedBox(height: 6),
+                TextButton(onPressed: onLoadMore, child: const Text('点击重试')),
+              ],
+            ),
+          )
+        else if (comments!.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 22),
             child: Text(
@@ -1931,6 +2059,27 @@ class _ReviewSection extends StatelessWidget {
           )
         else
           ..._buildServerCards(comments!),
+        if (comments != null && comments!.isNotEmpty && hasMore)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 8),
+            child: Center(
+              child: loadMoreError != null
+                  ? TextButton(
+                      onPressed: onLoadMore,
+                      child: Text(loadMoreError!),
+                    )
+                  : loadingMore
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : TextButton(
+                      onPressed: onLoadMore,
+                      child: const Text('加载更多评价'),
+                    ),
+            ),
+          ),
       ],
     ),
   );
@@ -1952,6 +2101,9 @@ class _ReviewSection extends StatelessWidget {
             onLike: onLike == null ? null : () => onLike!(comment),
             onReply: onReply == null ? null : () => onReply!(comment),
             onReplyTo: onReply,
+            onViewReplies: onViewReplies == null
+                ? null
+                : () => onViewReplies!(comment),
           ),
         )
         .toList();
@@ -1972,7 +2124,9 @@ class _ReviewCard extends StatelessWidget {
        onLike = null,
        replies = const [],
        onReply = null,
-       onReplyTo = null;
+       onReplyTo = null,
+       onViewReplies = null,
+       commentReplyCount = 0;
 
   _ReviewCard.server({
     required RankingToyComment comment,
@@ -1980,6 +2134,7 @@ class _ReviewCard extends StatelessWidget {
     this.replies = const [],
     this.onReply,
     this.onReplyTo,
+    this.onViewReplies,
   }) : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
        likes = '${comment.likeCount}',
        content = comment.content,
@@ -1988,7 +2143,8 @@ class _ReviewCard extends StatelessWidget {
        avatarColor = const Color(0xFFE3EEFF),
        liked = comment.isLiked,
        level = comment.level,
-       authorRating = comment.authorRating;
+       authorRating = comment.authorRating,
+       commentReplyCount = comment.replyCount;
 
   final String user;
   final String likes;
@@ -1999,10 +2155,12 @@ class _ReviewCard extends StatelessWidget {
   final bool liked;
   final int level;
   final int? authorRating;
+  final int commentReplyCount;
   final VoidCallback? onLike;
   final List<RankingToyComment> replies;
   final VoidCallback? onReply;
   final ValueChanged<RankingToyComment>? onReplyTo;
+  final VoidCallback? onViewReplies;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -2145,49 +2303,38 @@ class _ReviewCard extends StatelessWidget {
                   ),
                   child: const Text('回复'),
                 ),
-              if (replies.isNotEmpty)
-                Theme(
-                  data: Theme.of(
-                    context,
-                  ).copyWith(dividerColor: Colors.transparent),
-                  child: ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: const EdgeInsets.only(bottom: 4),
-                    title: Text(
-                      '查看 ${replies.length} 条回复',
-                      style: const TextStyle(
-                        color: Color(0xFF3C70B7),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+              if (onViewReplies != null &&
+                  (commentReplyCount > 0 || replies.isNotEmpty))
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: InkWell(
+                    onTap: onViewReplies,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 5,
+                        horizontal: 2,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '查看 ${commentReplyCount > 0 ? commentReplyCount : replies.length} 条回复',
+                            style: const TextStyle(
+                              color: Color(0xFF3C70B7),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          const Icon(
+                            Icons.chevron_right_rounded,
+                            size: 16,
+                            color: Color(0xFF3C70B7),
+                          ),
+                        ],
                       ),
                     ),
-                    children: replies.map((replyItem) {
-                      final name = replyItem.nickname.isEmpty
-                          ? replyItem.username
-                          : replyItem.nickname;
-                      return ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.only(left: 10),
-                        title: Text(
-                          '$name：${replyItem.content}',
-                          style: const TextStyle(
-                            color: Color(0xFF3C70B7),
-                            fontSize: 12,
-                            height: 1.55,
-                          ),
-                        ),
-                        subtitle: Text(
-                          relativeTimeLabel(replyItem.createdAt),
-                          style: const TextStyle(
-                            color: Color(0xFF9AA5B7),
-                            fontSize: 10,
-                          ),
-                        ),
-                        onTap: onReplyTo == null
-                            ? null
-                            : () => onReplyTo!(replyItem),
-                      );
-                    }).toList(),
                   ),
                 ),
               if (reply != null) ...[
@@ -2235,16 +2382,12 @@ class _DetailCommentBar extends StatelessWidget {
     required this.controller,
     required this.reviewCount,
     required this.wantCount,
-    this.replyTarget,
-    this.onCancelReply,
     required this.onSubmitted,
   });
 
   final TextEditingController controller;
   final String reviewCount;
   final String wantCount;
-  final RankingToyComment? replyTarget;
-  final VoidCallback? onCancelReply;
   final ValueChanged<String> onSubmitted;
 
   @override
@@ -2264,9 +2407,7 @@ class _DetailCommentBar extends StatelessWidget {
                 textInputAction: TextInputAction.send,
                 style: const TextStyle(color: Color(0xFF233B5B), fontSize: 13),
                 decoration: InputDecoration(
-                  hintText: replyTarget == null
-                      ? '来，说点什么吧!'
-                      : '回复 ${replyTarget!.nickname.isEmpty ? replyTarget!.username : replyTarget!.nickname}…',
+                  hintText: '来，说点什么吧!',
                   hintStyle: const TextStyle(
                     color: Color(0xFFAEB8C6),
                     fontSize: 13,
@@ -2285,13 +2426,6 @@ class _DetailCommentBar extends StatelessWidget {
                 ),
               ),
             ),
-            if (replyTarget != null && onCancelReply != null)
-              IconButton(
-                tooltip: '取消回复',
-                onPressed: onCancelReply,
-                icon: const Icon(Icons.close_rounded, size: 18),
-                color: const Color(0xFF8A96A9),
-              ),
             const SizedBox(width: 10),
             Text(
               reviewCount,

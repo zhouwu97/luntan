@@ -17,6 +17,7 @@ type userProfileResponse struct {
 	Bio            string         `json:"bio"`
 	Level          int            `json:"level"`
 	Experience     int64          `json:"experience"`
+	AccountType    string         `json:"account_type"`
 	Growth         GrowthState    `json:"growth"`
 	TrustLevel     string         `json:"trust_level"`
 	Status         string         `json:"status"`
@@ -62,6 +63,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		writeInternalError(w, r, err)
 		return
 	}
+	item.AccountType = accountType
 	growth := growthState(accountType, exp)
 	item.Level = growth.Level
 	item.Experience = growth.Experience

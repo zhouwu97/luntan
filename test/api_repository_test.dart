@@ -82,6 +82,31 @@ void main() {
     client.close();
   });
 
+  test('ApiUserRepository 将游客经验保留但等级永久锁定为 0', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          utf8.encode(
+            '{"id":"guest-1","username":"guest_1","nickname":"游客","bio":"","account_type":"guest","level":1,"experience":860,"growth":{"level":1,"experience":860,"level_start_experience":600,"next_level_experience":1000,"experience_in_level":260,"experience_required_in_level":400,"level_progress":0.65,"level_locked":false},"trust_level":"new","status":"active","post_count":0,"follower_count":0,"following_count":0,"created_at":"2026-08-24T20:00:00Z","viewer_state":{}}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+
+    final profile = await ApiUserRepository(client).getProfile('guest-1');
+
+    expect(profile?.experience, 860);
+    expect(profile?.level, 0);
+    expect(profile?.growth?.level, 0);
+    expect(profile?.growth?.levelLocked, isTrue);
+    expect(profile?.growth?.nextLevelExperience, isNull);
+    expect(profile?.growth?.progress, isNull);
+    client.close();
+  });
+
   test('ProfileRepository 将我的评论解析为收到回复的帖子记录', () async {
     Uri? requestedUri;
     final client = ApiClient(

@@ -71,6 +71,23 @@ class GrowthState {
       );
     }
     final isGuest = accountType == 'guest';
+    if (isGuest) {
+      // 服务端和旧缓存都可能携带正式账号的等级字段；游客只继承经验，
+      // 等级相关字段必须统一由账号类型覆盖，永久保持 0 级且不可升级。
+      final experience = json['experience'] is num
+          ? (json['experience'] as num).toInt()
+          : 0;
+      return GrowthState(
+        level: 0,
+        experience: experience,
+        levelStartExperience: 0,
+        nextLevelExperience: null,
+        experienceInLevel: experience,
+        experienceRequiredInLevel: null,
+        progress: null,
+        levelLocked: true,
+      );
+    }
     final parsedLevel = json['level'] is num
         ? (json['level'] as num).toInt()
         : (isGuest ? 0 : fallbackLevel);
@@ -338,7 +355,8 @@ class Post {
   bool get isBookmarked => viewerState.hasBookmarked;
   set isBookmarked(bool value) => viewerState.hasBookmarked = value;
   int get level =>
-      author?.level ?? (authorId.startsWith('guest') || authorId.isEmpty ? 0 : 1);
+      author?.level ??
+      (authorId.startsWith('guest') || authorId.isEmpty ? 0 : 1);
   List<MediaAsset> get images => media;
   String get tag => tags.isEmpty ? community?.name ?? '' : tags.first;
   String get time => relativeTimeLabel(createdAt);

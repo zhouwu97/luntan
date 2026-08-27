@@ -143,12 +143,18 @@ class ApiUserRepository implements UserRepository {
           : const <String, dynamic>{};
       final rawLevel = _int(value['level'], fallback: 0);
       final exp = _int(value['experience'], fallback: 0);
+      final accountType = _string(value['account_type']);
       final growth = value['growth'] is Map<String, dynamic>
           ? GrowthState.fromJson(
               value['growth'] as Map<String, dynamic>,
               fallbackLevel: rawLevel,
+              accountType: accountType,
             )
-          : GrowthState.fromJson(null, fallbackLevel: rawLevel);
+          : GrowthState.fromJson(
+              null,
+              fallbackLevel: rawLevel,
+              accountType: accountType,
+            );
       final level = growth.level;
       return UserProfile(
         id: _string(value['id']),
@@ -299,9 +305,7 @@ class ApiUserRepository implements UserRepository {
 }
 
 class MockUserRepository implements UserRepository {
-  MockUserRepository({
-    this.postCount = 0,
-  });
+  MockUserRepository({this.postCount = 0});
 
   final int postCount;
 
@@ -343,17 +347,25 @@ class MockUserRepository implements UserRepository {
   }
 
   @override
-  Future<UserRelationPage> listFollowers(String userId, {String? cursor, int limit = 20}) async =>
-      const UserRelationPage(items: []);
+  Future<UserRelationPage> listFollowers(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async => const UserRelationPage(items: []);
 
   @override
-  Future<UserRelationPage> listFollowing(String userId, {String? cursor, int limit = 20}) async =>
-      const UserRelationPage(items: []);
+  Future<UserRelationPage> listFollowing(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async => const UserRelationPage(items: []);
 
   @override
-  Future<void> setFollow({required String userId, required bool active}) async {}
+  Future<void> setFollow({
+    required String userId,
+    required bool active,
+  }) async {}
 
   @override
   Future<void> setBlock({required String userId, required bool active}) async {}
 }
-

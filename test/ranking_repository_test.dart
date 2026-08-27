@@ -96,4 +96,126 @@ void main() {
     ]);
     client.close();
   });
+
+  test('榜单评论和楼中楼使用独立游标分页接口', () async {
+    final requests = <Uri>[];
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient((request) async {
+        requests.add(request.url);
+        if (request.url.path.endsWith('/comments')) {
+          return http.Response(
+            jsonEncode({
+              'items': [
+                {
+                  'id': 'root-1',
+                  'content': '一级评价',
+                  'created_at': '2026-08-27T10:00:00Z',
+                  'author': {'id': 'u1', 'username': 'u1'},
+                  'parent_id': null,
+                  'reply_count': 3,
+                },
+              ],
+              'next_cursor': 'root-cursor',
+              'has_more': true,
+            }),
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'items': [
+              {
+                'id': 'reply-1',
+                'content': '回复二级评论',
+                'created_at': '2026-08-27T10:01:00Z',
+                'root_id': 'root-1',
+                'parent_id': 'reply-0',
+                'reply_to_user_id': 'u2',
+                'author': {'id': 'u3', 'username': 'u3'},
+              },
+            ],
+            'next_cursor': null,
+            'has_more': false,
+          }),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      }),
+    );
+    final repository = RankingRepository(client);
+
+    late final RankingToyCommentPage roots;
+    late final RankingToyCommentPage replies;
+    try {
+      roots = await repository.listComments(
+        toyId: 'toy-1',
+        sort: 'latest',
+        limit: 1,
+      );
+      replies = await repository.listReplies(
+        commentId: 'root-1',
+        cursor: 'reply-cursor',
+        limit: 1,
+      );
+    } catch (error) {
+      if (error is ApiException) {
+        fail('分页请求失败: ${error.cause}');
+      }
+      rethrow;
+    }
+
+    expect(roots.items.single.replyCount, 3);
+    expect(roots.nextCursor, 'root-cursor');
+    expect(replies.items.single.parentId, 'reply-0');
+    expect(requests[0].path, '/api/v1/ranking/toys/toy-1/comments');
+    expect(requests[0].queryParameters['sort'], 'latest');
+    expect(requests[0].queryParameters['limit'], '1');
+    expect(requests[1].path, '/api/v1/ranking/toy-comments/root-1/replies');
+    expect(requests[1].queryParameters['cursor'], 'reply-cursor');
+    client.close();
+  });
+
+  test('榜单对象 copyWith 保留评分分布和作者评分', () {
+    final comment = RankingToyComment(
+      id: 'c1',
+      authorId: 'u1',
+      username: 'u1',
+      nickname: '用户',
+      level: 4,
+      content: '评价',
+      likeCount: 1,
+      isLiked: false,
+      createdAt: DateTime.utc(2026, 8, 27),
+      authorRating: 9,
+    );
+    const toy = RankingToy(
+      id: 'toy-1',
+      rank: 1,
+      name: '玩具',
+      merchant: '店铺',
+      releaseYear: 2026,
+      description: '',
+      tags: [],
+      assetKey: '',
+      wantCount: 1,
+      ratingCount: 1,
+      score: 9,
+      wanted: false,
+      owned: false,
+    );
+    final detail = RankingToyDetail(
+      toy: toy,
+      comments: [comment],
+      commentSort: 'weight',
+      ratingDistribution: {9: 2},
+    );
+
+    final liked = comment.copyWith(likeCount: 2, isLiked: true);
+    final updated = detail.copyWith(toy: toy);
+
+    expect(liked.authorRating, 9);
+    expect(updated.ratingDistribution, {9: 2});
+  });
 }

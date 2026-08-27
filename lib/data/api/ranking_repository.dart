@@ -70,20 +70,92 @@ class RankingToyComment {
   final String? parentId;
   final String? replyToUserId;
   int replyCount;
+
+  RankingToyComment copyWith({
+    String? id,
+    String? authorId,
+    String? username,
+    String? nickname,
+    int? level,
+    String? content,
+    int? likeCount,
+    bool? isLiked,
+    DateTime? createdAt,
+    int? authorRating,
+    String? rootId,
+    String? parentId,
+    String? replyToUserId,
+    int? replyCount,
+  }) {
+    return RankingToyComment(
+      id: id ?? this.id,
+      authorId: authorId ?? this.authorId,
+      username: username ?? this.username,
+      nickname: nickname ?? this.nickname,
+      level: level ?? this.level,
+      content: content ?? this.content,
+      likeCount: likeCount ?? this.likeCount,
+      isLiked: isLiked ?? this.isLiked,
+      createdAt: createdAt ?? this.createdAt,
+      authorRating: authorRating ?? this.authorRating,
+      rootId: rootId ?? this.rootId,
+      parentId: parentId ?? this.parentId,
+      replyToUserId: replyToUserId ?? this.replyToUserId,
+      replyCount: replyCount ?? this.replyCount,
+    );
+  }
+}
+
+class RankingToyCommentPage {
+  const RankingToyCommentPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<RankingToyComment> items;
+  final String? nextCursor;
+  final bool hasMore;
 }
 
 class RankingToyDetail {
+  static const _unspecified = Object();
+
   const RankingToyDetail({
     required this.toy,
     required this.comments,
     required this.commentSort,
     this.ratingDistribution = const {},
+    this.commentsNextCursor,
+    this.commentsHasMore = false,
   });
 
   final RankingToy toy;
   final List<RankingToyComment> comments;
   final String commentSort;
   final Map<int, int> ratingDistribution;
+  final String? commentsNextCursor;
+  final bool commentsHasMore;
+
+  RankingToyDetail copyWith({
+    RankingToy? toy,
+    List<RankingToyComment>? comments,
+    String? commentSort,
+    Map<int, int>? ratingDistribution,
+    Object? commentsNextCursor = _unspecified,
+    bool? commentsHasMore,
+  }) {
+    return RankingToyDetail(
+      toy: toy ?? this.toy,
+      comments: comments ?? this.comments,
+      commentSort: commentSort ?? this.commentSort,
+      ratingDistribution: ratingDistribution ?? this.ratingDistribution,
+      commentsNextCursor: identical(commentsNextCursor, _unspecified)
+          ? this.commentsNextCursor
+          : commentsNextCursor as String?,
+      commentsHasMore: commentsHasMore ?? this.commentsHasMore,
+    );
+  }
 }
 
 class RankingRepository {
@@ -121,7 +193,9 @@ class RankingRepository {
     if (rawDist is Map) {
       for (final entry in rawDist.entries) {
         final key = int.tryParse('${entry.key}');
-        final val = entry.value is num ? (entry.value as num).toInt() : int.tryParse('${entry.value}') ?? 0;
+        final val = entry.value is num
+            ? (entry.value as num).toInt()
+            : int.tryParse('${entry.value}') ?? 0;
         if (key != null) {
           ratingDistribution[key] = val;
         }
@@ -132,7 +206,41 @@ class RankingRepository {
       comments: comments,
       commentSort: _string(payload['comment_sort'], fallback: commentSort),
       ratingDistribution: ratingDistribution,
+      commentsNextCursor: _nullableString(payload['comments_next_cursor']),
+      commentsHasMore: payload['comments_has_more'] == true,
     );
+  }
+
+  Future<RankingToyCommentPage> listComments({
+    required String toyId,
+    String sort = 'weight',
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/ranking/toys/$toyId/comments',
+      queryParameters: {
+        'sort': sort,
+        'limit': '$limit',
+        ...?cursor == null ? null : {'cursor': cursor},
+      },
+    );
+    return _commentPageFromJson(payload);
+  }
+
+  Future<RankingToyCommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/ranking/toy-comments/$commentId/replies',
+      queryParameters: {
+        'limit': '$limit',
+        ...?cursor == null ? null : {'cursor': cursor},
+      },
+    );
+    return _commentPageFromJson(payload);
   }
 
   Future<RankingToy> setWanted({required String toyId, required bool active}) {
@@ -190,6 +298,21 @@ class RankingRepository {
       '$prefix-${DateTime.now().toUtc().microsecondsSinceEpoch}-${identityHashCode(this)}';
 }
 
+RankingToyCommentPage _commentPageFromJson(Map<String, dynamic> payload) {
+  final rawItems = payload['items'];
+  final items = rawItems is List
+      ? rawItems
+            .whereType<Map>()
+            .map((item) => _commentFromJson(Map<String, dynamic>.from(item)))
+            .toList()
+      : <RankingToyComment>[];
+  return RankingToyCommentPage(
+    items: items,
+    nextCursor: _nullableString(payload['next_cursor']),
+    hasMore: payload['has_more'] == true,
+  );
+}
+
 RankingToy _toyFromJson(Map<String, dynamic> json) {
   final viewerState = json['viewer_state'] is Map
       ? Map<String, dynamic>.from(json['viewer_state'] as Map)
@@ -244,7 +367,9 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
         json['viewer_state'] is Map &&
         (json['viewer_state'] as Map)['has_liked'] == true,
     createdAt: _date(json['created_at']),
-    authorRating: _nullableInt(json['author_rating'] ?? author['author_rating']),
+    authorRating: _nullableInt(
+      json['author_rating'] ?? author['author_rating'],
+    ),
     rootId: _nullableString(json['root_id']),
     parentId: _nullableString(json['parent_id']),
     replyToUserId: _nullableString(json['reply_to_user_id']),

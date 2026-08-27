@@ -112,7 +112,7 @@ func TestGetRankingToyReturnsRatingDistribution(t *testing.T) {
 		AddRow("c-1", "u-1", "tester", "评测君", 3, "手感很好", 5, false, time.Now().UTC(), nil, nil, nil, 0, 9)
 
 	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*FROM ranking_toy_comments c.*WHERE c.toy_id = \$1`).
-		WithArgs("toy-butter-2", "").
+		WithArgs("toy-butter-2", "", 21).
 		WillReturnRows(commentRows)
 
 	distCols := []string{"rating", "count"}
@@ -155,6 +155,89 @@ func TestGetRankingToyReturnsRatingDistribution(t *testing.T) {
 		t.Fatalf("unexpected comment author rating: %#v", detail.Comments)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListRankingToyCommentsPaginatesRootsOnly(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`SELECT id FROM ranking_toys WHERE id = \$1 AND active = true`).
+		WithArgs("toy-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("toy-1"))
+	commentRows := sqlmock.NewRows([]string{
+		"id", "author_id", "username", "nickname", "level", "content",
+		"like_count", "has_liked", "created_at", "root_id", "parent_id", "reply_to_user_id", "reply_count", "author_rating",
+	}).
+		AddRow("root-1", "u-1", "u1", "用户1", 2, "root one", 8, false, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC), "root-1", nil, nil, 2, 9).
+		AddRow("root-2", "u-2", "u2", "用户2", 2, "root two", 3, false, time.Date(2026, 8, 27, 9, 0, 0, 0, time.UTC), "root-2", nil, nil, 0, 8)
+	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*c.parent_id IS NULL.*LIMIT \$3`).
+		WithArgs("toy-1", "", 2).
+		WillReturnRows(commentRows)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ranking/toys/toy-1/comments?sort=latest&limit=1", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("comments response code=%d body=%s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Items      []map[string]any `json:"items"`
+		NextCursor string           `json:"next_cursor"`
+		HasMore    bool             `json:"has_more"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || body.Items[0]["id"] != "root-1" || !body.HasMore || body.NextCursor == "" {
+		t.Fatalf("unexpected root page: %#v", body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListRankingToyRepliesReturnsNestedRepliesFlatAndPaginated(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`(?s)SELECT toy_id, COALESCE\(root_id, id\).*FROM ranking_toy_comments`).
+		WithArgs("root-1").
+		WillReturnRows(sqlmock.NewRows([]string{"toy_id", "root_id"}).AddRow("toy-1", "root-1"))
+	replyRows := sqlmock.NewRows([]string{
+		"id", "author_id", "username", "nickname", "level", "content",
+		"like_count", "has_liked", "created_at", "root_id", "parent_id", "reply_to_user_id", "reply_count", "author_rating",
+	}).
+		AddRow("reply-1", "u-2", "u2", "用户2", 3, "回复二级", 2, false, time.Date(2026, 8, 27, 10, 1, 0, 0, time.UTC), "root-1", "reply-0", "u-3", 1, 7).
+		AddRow("reply-2", "u-3", "u3", "用户3", 1, "回复三级", 1, false, time.Date(2026, 8, 27, 10, 2, 0, 0, time.UTC), "root-1", "reply-1", "u-2", 0, 6)
+	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*COALESCE\(c.root_id, c.id\) = \$2.*LIMIT \$4`).
+		WithArgs("toy-1", "root-1", "", 2).
+		WillReturnRows(replyRows)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ranking/toy-comments/root-1/replies?limit=1", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("replies response code=%d body=%s", res.Code, res.Body.String())
+	}
+	var body struct {
+		Items   []map[string]any `json:"items"`
+		HasMore bool             `json:"has_more"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || body.Items[0]["id"] != "reply-1" || body.Items[0]["parent_id"] != "reply-0" || !body.HasMore {
+		t.Fatalf("unexpected reply page: %#v", body)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}

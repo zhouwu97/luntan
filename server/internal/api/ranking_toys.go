@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -126,7 +128,7 @@ func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID str
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_COMMENT_SORT", Message: "评论排序参数无效"})
 		return
 	}
-	comments, err := s.listRankingToyComments(r, toyID, viewerID, sort)
+	comments, err := s.listRankingToyCommentsPage(r.Context(), toyID, viewerID, sort, nil, 20)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -161,8 +163,10 @@ func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID str
 	}
 
 	response := item.response()
-	response["comments"] = comments
+	response["comments"] = comments.Items
 	response["comment_sort"] = sort
+	response["comments_next_cursor"] = comments.NextCursor
+	response["comments_has_more"] = comments.HasMore
 	response["rating_distribution"] = ratingDistribution
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
@@ -260,7 +264,70 @@ func nullableInt(value sql.NullInt64) any {
 	return value.Int64
 }
 
-func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort string) ([]map[string]any, error) {
+type rankingToyCommentPage struct {
+	Items      []map[string]any
+	NextCursor any
+	HasMore    bool
+}
+
+type rankingToyCommentCursor struct {
+	Sort      string    `json:"sort"`
+	LikeCount int64     `json:"like_count,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
+func (s *Server) listRankingToyComments(w http.ResponseWriter, r *http.Request, toyID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	sort := r.URL.Query().Get("sort")
+	if sort == "" {
+		sort = "weight"
+	}
+	if sort != "weight" && sort != "latest" {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_COMMENT_SORT", Message: "评论排序参数无效"})
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
+		return
+	}
+	var exists string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM ranking_toys WHERE id = $1 AND active = true`, toyID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrRankingToyNotFound)
+		return
+	} else if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var cursor *rankingToyCommentCursor
+	if value := r.URL.Query().Get("cursor"); value != "" {
+		decoded, decodeErr := decodeRankingToyCommentCursor(value)
+		if decodeErr != nil || decoded.Sort != sort {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			return
+		}
+		cursor = &decoded
+	}
+	viewerID := ""
+	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		viewerID = viewer.ID
+	}
+	page, err := s.listRankingToyCommentsPage(r.Context(), toyID, viewerID, sort, cursor, limit)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"items":       page.Items,
+		"next_cursor": page.NextCursor,
+		"has_more":    page.HasMore,
+	})
+}
+
+func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID, sort string, cursor *rankingToyCommentCursor, limit int) (rankingToyCommentPage, error) {
 	orderBy := "c.like_count DESC, c.created_at DESC, c.id DESC"
 	if sort == "latest" {
 		orderBy = "c.created_at DESC, c.id DESC"
@@ -274,14 +341,27 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
 	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
-	          WHERE c.toy_id = $1 AND c.deleted_at IS NULL
-	          ORDER BY ` + orderBy + ` LIMIT 100`
-	rows, err := s.db.QueryContext(r.Context(), query, toyID, viewerID)
+		          WHERE c.toy_id = $1 AND c.deleted_at IS NULL AND c.parent_id IS NULL`
+	args := []any{toyID, viewerID}
+	if cursor != nil {
+		if sort == "latest" {
+			query += " AND (c.created_at, c.id) < ($3, $4)"
+			args = append(args, cursor.CreatedAt, cursor.ID)
+		} else {
+			query += " AND (c.like_count, c.created_at, c.id) < ($3, $4, $5)"
+			args = append(args, cursor.LikeCount, cursor.CreatedAt, cursor.ID)
+		}
+	}
+	limitPosition := len(args) + 1
+	query += " ORDER BY " + orderBy + fmt.Sprintf(" LIMIT $%d", limitPosition)
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return rankingToyCommentPage{}, err
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
+	var last rankingToyComment
 	for rows.Next() {
 		var item rankingToyComment
 		if err := rows.Scan(
@@ -300,11 +380,139 @@ func (s *Server) listRankingToyComments(r *http.Request, toyID, viewerID, sort s
 			&item.ReplyCount,
 			&item.AuthorRating,
 		); err != nil {
-			return nil, err
+			return rankingToyCommentPage{}, err
+		}
+		if len(items) < limit {
+			last = item
 		}
 		items = append(items, item.response())
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return rankingToyCommentPage{}, err
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore && len(items) > 0 {
+		encoded, err := encodeRankingToyCommentCursor(rankingToyCommentCursor{
+			Sort: sort, LikeCount: last.LikeCount, CreatedAt: last.CreatedAt, ID: last.ID,
+		})
+		if err != nil {
+			return rankingToyCommentPage{}, err
+		}
+		nextCursor = encoded
+	}
+	return rankingToyCommentPage{Items: items, NextCursor: nextCursor, HasMore: hasMore}, nil
+}
+
+func (s *Server) listRankingToyReplies(w http.ResponseWriter, r *http.Request, commentID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
+		return
+	}
+	var toyID, rootID string
+	err = s.db.QueryRowContext(r.Context(), `
+		SELECT toy_id, COALESCE(root_id, id)
+		FROM ranking_toy_comments
+		WHERE id = $1 AND deleted_at IS NULL`, commentID).Scan(&toyID, &rootID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrRankingCommentNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	var cursor *rankingToyCommentCursor
+	if value := r.URL.Query().Get("cursor"); value != "" {
+		decoded, decodeErr := decodeRankingToyCommentCursor(value)
+		if decodeErr != nil || decoded.Sort != "replies" {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			return
+		}
+		cursor = &decoded
+	}
+	viewerID := ""
+	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
+		viewerID = viewer.ID
+	}
+	page, err := s.listRankingToyRepliesPage(r.Context(), toyID, rootID, viewerID, cursor, limit)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"items":       page.Items,
+		"next_cursor": page.NextCursor,
+		"has_more":    page.HasMore,
+	})
+}
+
+func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, viewerID string, cursor *rankingToyCommentCursor, limit int) (rankingToyCommentPage, error) {
+	query := `SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
+	                 COALESCE(up.level, 1), c.content, c.like_count,
+	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $3),
+	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
+	                 aus.rating
+	          FROM ranking_toy_comments c
+	          JOIN users u ON u.id = c.author_id
+	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
+	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
+	          WHERE c.toy_id = $1 AND COALESCE(c.root_id, c.id) = $2 AND c.id <> $2 AND c.deleted_at IS NULL`
+	args := []any{toyID, rootID, viewerID}
+	if cursor != nil {
+		query += " AND (c.created_at, c.id) > ($4, $5)"
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	query += fmt.Sprintf(" ORDER BY c.created_at ASC, c.id ASC LIMIT $%d", limitPosition)
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return rankingToyCommentPage{}, err
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0, limit+1)
+	var last rankingToyComment
+	for rows.Next() {
+		var item rankingToyComment
+		if err := rows.Scan(
+			&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
+			&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
+			&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
+			&item.AuthorRating,
+		); err != nil {
+			return rankingToyCommentPage{}, err
+		}
+		if len(items) < limit {
+			last = item
+		}
+		items = append(items, item.response())
+	}
+	if err := rows.Err(); err != nil {
+		return rankingToyCommentPage{}, err
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore && len(items) > 0 {
+		encoded, err := encodeRankingToyCommentCursor(rankingToyCommentCursor{
+			Sort: "replies", CreatedAt: last.CreatedAt, ID: last.ID,
+		})
+		if err != nil {
+			return rankingToyCommentPage{}, err
+		}
+		nextCursor = encoded
+	}
+	return rankingToyCommentPage{Items: items, NextCursor: nextCursor, HasMore: hasMore}, nil
 }
 
 func (item rankingToyComment) response() map[string]any {
@@ -602,7 +810,7 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if created && parentID != "" {
-		if _, err := tx.ExecContext(r.Context(), `UPDATE ranking_toy_comments SET reply_count = reply_count + 1, updated_at = now() WHERE id = $1`, parentID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE ranking_toy_comments SET reply_count = reply_count + 1, updated_at = now() WHERE id = $1`, rootID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -715,4 +923,24 @@ func (s *Server) toggleRankingToyCommentLike(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"active": active, "like_count": count})
+}
+
+func encodeRankingToyCommentCursor(cursor rankingToyCommentCursor) (string, error) {
+	data, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeRankingToyCommentCursor(value string) (rankingToyCommentCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return rankingToyCommentCursor{}, err
+	}
+	var cursor rankingToyCommentCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.Sort == "" || cursor.ID == "" || cursor.CreatedAt.IsZero() {
+		return rankingToyCommentCursor{}, errors.New("invalid ranking comment cursor")
+	}
+	return cursor, nil
 }

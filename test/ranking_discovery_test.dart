@@ -89,8 +89,34 @@ class _FakeApiClient extends ApiClient {
             'like_count': 12,
             'created_at': '2026-08-22T10:00:00Z',
             'viewer_state': {'has_liked': true},
+            'root_id': 'c-1',
+            'reply_count': 1,
           },
         ],
+      };
+    }
+
+    if (path == '/api/v1/ranking/toy-comments/c-1/replies') {
+      return {
+        'items': [
+          {
+            'id': 'reply-1',
+            'author': {
+              'id': 'u-2',
+              'username': 'reply-user',
+              'nickname': '回复用户',
+              'level': 2,
+            },
+            'content': '这是楼中楼里的回复',
+            'root_id': 'c-1',
+            'parent_id': 'reply-0',
+            'reply_to_user_id': 'u-1',
+            'like_count': 2,
+            'created_at': '2026-08-22T10:01:00Z',
+            'viewer_state': {'has_liked': false},
+          },
+        ],
+        'has_more': false,
       };
     }
 
@@ -130,6 +156,37 @@ class _FakeApiClient extends ApiClient {
     }
 
     return {};
+  }
+}
+
+class _FailingRankingRepository extends RankingRepository {
+  _FailingRankingRepository() : super(_FakeApiClient());
+
+  @override
+  Future<RankingToyDetail> detail(
+    String toyId, {
+    String commentSort = 'weight',
+  }) async {
+    throw StateError('network down');
+  }
+}
+
+class _SortFailureApiClient extends _FakeApiClient {
+  @override
+  Future<Map<String, dynamic>> getJson(
+    String path, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? queryParameters,
+  }) {
+    if (path == '/api/v1/ranking/toys/toy-butter-2' &&
+        queryParameters?['comment_sort'] == 'latest') {
+      throw StateError('sort unavailable');
+    }
+    return super.getJson(
+      path,
+      headers: headers,
+      queryParameters: queryParameters,
+    );
   }
 }
 
@@ -238,6 +295,97 @@ void main() {
         expect(find.text('手感极佳，软糯适中'), findsOneWidget);
       },
     );
+
+    testWidgets('榜单评价点击回复后打开独立楼中楼并平铺嵌套回复', (tester) async {
+      final rankingRepo = RankingRepository(_FakeApiClient());
+      const item = RankingItem(
+        id: 'toy-butter-2',
+        rank: 1,
+        name: '黄油小姐 二代',
+        hot: '401人想冲',
+        tags: ['奶香'],
+        ratings: '17人评分',
+        score: '8.7',
+        asset: 'assets/ranking/hero.webp',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingItemDetailPage(
+            item: item,
+            repository: rankingRepo,
+            isAuthenticated: true,
+            canComment: true,
+            canLike: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final repliesLink = find.text('查看 1 条回复');
+      await tester.ensureVisible(repliesLink);
+      await tester.tap(repliesLink);
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 条回复'), findsOneWidget);
+      expect(find.text('这是楼中楼里的回复'), findsOneWidget);
+      expect(find.text('回复 @测试酱'), findsOneWidget);
+    });
+
+    testWidgets('榜单评价 API 失败时不展示 Mock 评价', (tester) async {
+      const item = RankingItem(
+        id: 'toy-butter-2',
+        rank: 1,
+        name: '黄油小姐 二代',
+        hot: '401人想冲',
+        tags: ['奶香'],
+        ratings: '17人评分',
+        score: '8.7',
+        asset: 'assets/ranking/hero.webp',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingItemDetailPage(
+            item: item,
+            repository: _FailingRankingRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('菜菜M'), findsNothing);
+      expect(find.text('评价加载失败，请重试'), findsWidgets);
+    });
+
+    testWidgets('榜单排序请求失败时保留原排序标签', (tester) async {
+      const item = RankingItem(
+        id: 'toy-butter-2',
+        rank: 1,
+        name: '黄油小姐 二代',
+        hot: '401人想冲',
+        tags: ['奶香'],
+        ratings: '17人评分',
+        score: '8.7',
+        asset: 'assets/ranking/hero.webp',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingItemDetailPage(
+            item: item,
+            repository: RankingRepository(_SortFailureApiClient()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('按权重排序'), findsOneWidget);
+      await tester.tap(find.text('按权重排序'));
+      await tester.pumpAndSettle();
+      expect(find.text('按权重排序'), findsOneWidget);
+      expect(find.text('按时间排序'), findsNothing);
+    });
   });
 
   group('SearchScreen Toy Integration Tests', () {

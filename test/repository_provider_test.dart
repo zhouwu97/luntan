@@ -51,4 +51,14 @@ void main() {
       'https://forum.example.edu',
     );
   });
+
+  test('release 构建漏传环境参数时拒绝开发默认 HTTP 地址', () {
+    expect(
+      () => apiBaseUrlFromEnvironment(
+        defaultBaseUrl: defaultDevelopmentApiBaseUrl,
+        releaseBuild: true,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
 }

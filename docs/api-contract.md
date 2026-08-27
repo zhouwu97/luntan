@@ -158,6 +158,18 @@
 分页结构与 feed 一致（`{items, next_cursor, has_more}`）。
 评论创建请求必须带 `Idempotency-Key`；服务端按 `(user_id, idempotency_key)` 去重，重试返回首次创建的评论。
 
+### 榜单评价 Ranking Toy Comments
+
+| 方法 | 路径 | 登录 | 说明 |
+|---|---|---|---|
+| GET | `/ranking/toys/{id}/comments?sort=weight\|latest&cursor=&limit=` | 否 | 只分页一级评价 |
+| GET | `/ranking/toy-comments/{id}/replies?cursor=&limit=` | 否 | 按 `root_id` 分页整座楼的扁平回复 |
+| POST | `/ranking/toys/{id}/comments` | 是 | 发布一级评价或指定 `parent_id` 回复 |
+| PUT/DELETE | `/ranking/toy-comments/{id}/like` | 是 | 评价或楼中楼回复点赞/取消 |
+
+榜单根评价的 `reply_count` 表示整座楼的回复总数；回复二级评论时仍保持原始
+`parent_id`，但客户端在独立楼中楼中按 `root_id` 平铺展示。
+
 ### 媒体 Media
 
 | 方法 | 路径 | 登录 | 说明 |

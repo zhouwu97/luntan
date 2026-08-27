@@ -370,6 +370,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/comments")
 		s.createRankingToyComment(w, r, toyID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/comments"):
+		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/comments")
+		s.listRankingToyComments(w, r, toyID)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/ranking/toy-comments/") && strings.HasSuffix(path, "/replies"):
+		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/"), "/replies")
+		s.listRankingToyReplies(w, r, commentID)
+		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/ranking/toy-comments/") && strings.HasSuffix(path, "/like"):
 		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/"), "/like")
 		s.toggleRankingToyCommentLike(w, r, commentID, true)

@@ -141,14 +141,15 @@ class ApiUserRepository implements UserRepository {
       final viewer = value['viewer_state'] is Map
           ? Map<String, dynamic>.from(value['viewer_state'] as Map)
           : const <String, dynamic>{};
-      final level = _int(value['level'], fallback: 1);
+      final rawLevel = _int(value['level'], fallback: 0);
       final exp = _int(value['experience'], fallback: 0);
       final growth = value['growth'] is Map<String, dynamic>
           ? GrowthState.fromJson(
               value['growth'] as Map<String, dynamic>,
-              fallbackLevel: level,
+              fallbackLevel: rawLevel,
             )
-          : GrowthState.fromJson(null, fallbackLevel: level);
+          : GrowthState.fromJson(null, fallbackLevel: rawLevel);
+      final level = growth.level;
       return UserProfile(
         id: _string(value['id']),
         username: _string(value['username']),
@@ -296,3 +297,63 @@ class ApiUserRepository implements UserRepository {
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true)
       : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 }
+
+class MockUserRepository implements UserRepository {
+  MockUserRepository({
+    this.postCount = 0,
+  });
+
+  final int postCount;
+
+  @override
+  Future<UserProfile?> getProfile(String userId) async {
+    return UserProfile(
+      id: userId,
+      username: 'user_${userId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')}',
+      nickname: '社区用户',
+      bio: '这个人很懒，什么都没写',
+      level: 1,
+      experience: 0,
+      growth: const GrowthState(
+        level: 1,
+        experience: 0,
+        levelStartExperience: 0,
+        nextLevelExperience: 1000,
+        experienceInLevel: 0,
+        experienceRequiredInLevel: 1000,
+        progress: 0.0,
+        levelLocked: false,
+      ),
+      trustLevel: 'new',
+      status: 'active',
+      postCount: postCount,
+      followerCount: 0,
+      followingCount: 0,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  @override
+  Future<UserPostPage> listPosts(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async {
+    return const UserPostPage(items: [], hasMore: false);
+  }
+
+  @override
+  Future<UserRelationPage> listFollowers(String userId, {String? cursor, int limit = 20}) async =>
+      const UserRelationPage(items: []);
+
+  @override
+  Future<UserRelationPage> listFollowing(String userId, {String? cursor, int limit = 20}) async =>
+      const UserRelationPage(items: []);
+
+  @override
+  Future<void> setFollow({required String userId, required bool active}) async {}
+
+  @override
+  Future<void> setBlock({required String userId, required bool active}) async {}
+}
+

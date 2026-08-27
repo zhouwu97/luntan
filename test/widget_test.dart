@@ -39,6 +39,16 @@ class _CountingProfileRepository extends ProfileRepository {
       followingCount: 0,
     );
   }
+
+  @override
+  Future<ProfileListPage> list(
+    String kind, {
+    String? cursor,
+    int limit = 20,
+    bool includeDetails = false,
+  }) async {
+    return const ProfileListPage(items: []);
+  }
 }
 
 void main() {
@@ -317,9 +327,9 @@ void main() {
       ),
     );
 
-    expect(find.text('当前为游客模式'), findsOneWidget);
-    expect(find.text('去登录'), findsOneWidget);
-    await tester.tap(find.text('去登录'));
+    expect(find.text('游客模式 · 当前累计 0 EXP'), findsOneWidget);
+    expect(find.text('登录 / 注册').first, findsOneWidget);
+    await tester.tap(find.text('登录 / 注册').first);
     expect(opened, 1);
   });
 

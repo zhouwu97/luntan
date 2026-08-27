@@ -134,6 +134,7 @@ class ForumRepositories {
       appeals: MockAppealRepository(),
       bookmarks: MockBookmarkRepository(store: actualStore),
       publish: MockPublishRepository(store: actualStore),
+      users: MockUserRepository(),
     );
   }
 

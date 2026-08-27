@@ -151,7 +151,7 @@ void main() {
     final controller = _controller(
       store: store,
       client: MockClient((request) async {
-        if (request.url.path == '/api/v1/auth/login/password') {
+        if (request.url.path == '/api/v1/auth/login') {
           return http.Response(_sessionJson, 200);
         }
         return http.Response('{}', 404);
@@ -173,7 +173,7 @@ void main() {
     final controller = _controller(
       store: store,
       client: MockClient((request) async {
-        if (request.url.path == '/api/v1/auth/login/code') {
+        if (request.url.path == '/api/v1/auth/email/verify') {
           return http.Response(_sessionJson, 200);
         }
         return http.Response('{}', 404);

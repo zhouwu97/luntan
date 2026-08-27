@@ -232,10 +232,10 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	}
 }
 
-func TestProfileCommentsReturnsPostsOrderedByLatestReceivedComment(t *testing.T) {
+func TestProfileCommentsReturnsAuthoredComments(t *testing.T) {
 	query, _, err := profileCommentListQuery("u1", "", 1)
-	if err != nil || !strings.Contains(query, "c.author_id <> p.author_id") {
-		t.Fatalf("profile comments query must exclude self comments: %s", query)
+	if err != nil || !strings.Contains(query, "c.author_id = $1") {
+		t.Fatalf("profile comments query must query user authored comments: %s", query)
 	}
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -246,18 +246,18 @@ func TestProfileCommentsReturnsPostsOrderedByLatestReceivedComment(t *testing.T)
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).AddRow("u1", "user", "active", "用户", 1, 0, "email", "", false, nil))
-	mock.ExpectQuery(`(?s)SELECT p\.id, p\.title.*MAX\(c\.created_at\) AS latest_comment_at.*ORDER BY latest_comment_at DESC, p\.id DESC LIMIT \$2`).
+	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
 		WithArgs("u1", 2).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
-			AddRow("post-1", "帖子一", "正文一", "c1", "大型拆箱", int64(3), int64(2), int64(1), created.Add(-time.Hour), created).
-			AddRow("post-2", "帖子二", "正文二", "c1", "大型拆箱", int64(1), int64(0), int64(0), created.Add(-2*time.Hour), created.Add(-time.Minute)))
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
+			AddRow("c1", "post-1", "帖子一", "我写的评论一", "c1", "大型拆箱", int64(3), int64(2), int64(1), created.Add(-time.Hour), created).
+			AddRow("c2", "post-2", "帖子二", "我写的评论二", "c1", "大型拆箱", int64(1), int64(0), int64(0), created.Add(-2*time.Hour), created.Add(-time.Minute)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/comments?limit=1", nil)
 	req.Header.Set("Authorization", "Bearer access-token")
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
 
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"post-1"`) || !strings.Contains(res.Body.String(), `"activity_at":"2026-08-24T23:20:00Z"`) || !strings.Contains(res.Body.String(), `"has_more":true`) {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"comment_id":"c1"`) || !strings.Contains(res.Body.String(), `"id":"post-1"`) || !strings.Contains(res.Body.String(), `"activity_at":"2026-08-24T23:20:00Z"`) || !strings.Contains(res.Body.String(), `"has_more":true`) {
 		t.Fatalf("profile comments response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

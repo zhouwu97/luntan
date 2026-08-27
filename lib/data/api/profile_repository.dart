@@ -49,10 +49,11 @@ class ProfilePostItem {
     required this.bookmarkCount,
     required this.publishedAt,
     this.activityAt,
+    this.commentId,
     this.authorId = '',
     this.authorUsername = '',
     this.authorNickname = '',
-    this.authorLevel = 1,
+    this.authorLevel = 0,
     this.communitySlug = '',
     this.postType = 'normal',
     this.viewCount = 0,
@@ -79,6 +80,7 @@ class ProfilePostItem {
   final DateTime publishedAt;
   // “我的评论”列表按收到最新评论排序；普通帖子列表仍按发布时间排序。
   final DateTime? activityAt;
+  final String? commentId;
   final String authorId;
   final String authorUsername;
   final String authorNickname;
@@ -114,16 +116,19 @@ class ProfileRepository {
 
   final ApiClient _client;
 
+  ApiClient get client => _client;
+
   Future<ProfileSummary> getProfile() async {
     final value = await _client.getJson('/api/v1/me/profile');
-    final level = _int(value['level'], fallback: 1);
+    final rawLevel = _int(value['level'], fallback: 0);
     final exp = _int(value['experience'], fallback: 0);
     final growth = value['growth'] is Map<String, dynamic>
         ? GrowthState.fromJson(
             value['growth'] as Map<String, dynamic>,
-            fallbackLevel: level,
+            fallbackLevel: rawLevel,
           )
-        : GrowthState.fromJson(null, fallbackLevel: level);
+        : GrowthState.fromJson(null, fallbackLevel: rawLevel);
+    final level = growth.level;
     return ProfileSummary(
       id: _string(value['id']),
       username: _string(value['username']),
@@ -180,7 +185,7 @@ class ProfileRepository {
     required String signature,
     String? avatarMediaId,
   }) async {
-    final value = await _client.patchJson(
+    await _client.patchJson(
       '/api/v1/me/profile',
       body: {
         'nickname': nickname.trim(),
@@ -188,21 +193,7 @@ class ProfileRepository {
         'avatar_media_id': avatarMediaId,
       },
     );
-    return ProfileSummary(
-      id: _string(value['id']),
-      username: _string(value['username']),
-      nickname: _string(value['nickname']),
-      avatarMediaId: _nullableString(value['avatar_media_id']),
-      avatarUrl: _nullableString(value['avatar_url']),
-      level: _int(value['level'], fallback: 1),
-      trustLevel: _string(value['trust_level']),
-      signature: _string(value['signature']),
-      postCount: _int(value['post_count']),
-      commentCount: _int(value['comment_count']),
-      likeReceivedCount: _int(value['like_received_count']),
-      followerCount: _int(value['follower_count']),
-      followingCount: _int(value['following_count']),
-    );
+    return getProfile();
   }
 
   String _string(dynamic value) => value is String ? value : '';
@@ -256,6 +247,7 @@ class ProfileRepository {
       bookmarkCount: _int(value['bookmark_count']),
       publishedAt: publishedAt,
       activityAt: activityAt,
+      commentId: _nullableString(value['comment_id']),
       authorId: _string(value['author_id'] ?? author['id']),
       authorUsername: _string(value['author_username'] ?? author['username']),
       authorNickname: _string(value['author_nickname'] ?? author['nickname']),

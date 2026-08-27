@@ -44,21 +44,22 @@ class ForumPostCard extends StatelessWidget {
     final openComments = onOpenComments ?? onOpen;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: const BoxDecoration(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFF0F4F8), width: 6),
-        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFEDF2F7), width: 0.8),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onOpen,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onOpen,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 13, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ForumAuthorRow(post: post, onMenu: onMenu),
                 const SizedBox(height: 9),
@@ -162,8 +163,9 @@ class ForumPostCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class _Tag extends StatelessWidget {

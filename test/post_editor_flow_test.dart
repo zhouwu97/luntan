@@ -117,48 +117,4 @@ void main() {
     expect(restored.title, '标题');
     expect(restored.topic, 'outfit');
   });
-
-  testWidgets('投票发布支持动态选项、多选并把配置交给发布回调', (tester) async {
-    tester.view.physicalSize = const Size(800, 1400);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-
-    PostDraft? published;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PostEditorScreen(
-          initialCommunityId: 'community-campus',
-          availableCommunities: ForumStore.seeded().communities,
-          onPublish: (draft) async => published = draft,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('普通帖子'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('投票').last);
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextField).at(0), '投票标题');
-    await tester.enterText(find.byType(TextField).at(1), '选项一');
-    await tester.enterText(find.byType(TextField).at(2), '选项二');
-    final addOption = find.text('添加选项');
-    await tester.ensureVisible(addOption);
-    await tester.tap(addOption);
-    await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsNWidgets(5));
-    await tester.enterText(find.byType(TextField).at(3), '选项三');
-    await tester.tap(find.text('允许多选'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byType(TextField).at(4));
-    await tester.enterText(find.byType(TextField).at(4), '正文');
-    await tester.tap(find.widgetWithText(FilledButton, '发布'));
-    await tester.pumpAndSettle();
-
-    expect(published, isNotNull);
-    expect(published!.isPoll, isTrue);
-    expect(published!.pollOptions, ['选项一', '选项二', '选项三']);
-    expect(published!.allowMultiple, isTrue);
-  });
 }

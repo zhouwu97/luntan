@@ -18,6 +18,7 @@ import 'exchange_store_screen.dart';
 import 'bookmark_folders_screen.dart';
 import 'entity_screens.dart';
 import 'points_screen.dart';
+import 'profile_list_screen.dart';
 import 'settings_screen.dart';
 
 typedef OpenPostById = void Function(String postId, {String? focusCommentId});
@@ -330,6 +331,13 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showList(BuildContext context, String label) {
+    // API 模式: 使用 ProfileRepository 加载数据
+    if (isApiMode && profileRepository != null) {
+      _showApiList(context, label);
+      return;
+    }
+
+    // Mock 模式: 使用 ForumStore
     final userId = currentUserId ?? 'user-1';
     final posts = switch (label) {
       '我的收藏' => store.bookmarkedPosts,
@@ -373,13 +381,7 @@ class ProfileScreen extends StatelessWidget {
                 child: posts.isEmpty
                     ? Center(
                         child: Text(
-                          label == '我的发布' ||
-                                  label == '我的发帖' ||
-                                  label == '我的评论' ||
-                                  label == '我的回帖' ||
-                                  label == '关注的吧'
-                              ? '$label暂未接入'
-                              : '$label暂时为空，去首页逛逛吧',
+                          '$label暂时为空，去首页逛逛吧',
                           style: const TextStyle(color: AppTheme.textSecondary),
                         ),
                       )
@@ -414,6 +416,54 @@ class ProfileScreen extends StatelessWidget {
                       ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showApiList(BuildContext context, String label) {
+    final repository = profileRepository;
+    if (repository == null) {
+      _showFallbackMessage(context, label, '功能暂不可用');
+      return;
+    }
+
+    final kind = switch (label) {
+      '我的发布' || '我的发帖' => 'posts',
+      '我的评论' || '我的回帖' => 'comments',
+      _ => null,
+    };
+
+    if (kind == null) {
+      _showFallbackMessage(context, label, '$label暂未接入');
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfileListScreen(
+          label: label,
+          kind: kind,
+          repository: repository,
+          onOpenPostId: onOpenPostById ?? (id, {focusCommentId}) {},
+        ),
+      ),
+    );
+  }
+
+  void _showFallbackMessage(BuildContext context, String label, String message) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: SizedBox(
+          height: 200,
+          child: Center(
+            child: Text(
+              message,
+              style: const TextStyle(color: AppTheme.textSecondary),
+            ),
           ),
         ),
       ),

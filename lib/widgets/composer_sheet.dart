@@ -253,7 +253,11 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         ...images.map((image) => image.mediaId).whereType<String>(),
       };
       for (final mediaId in mediaIds) {
-        widget.publishController!.deleteMedia(mediaId).catchError((_) {});
+        widget.publishController!.deleteMedia(mediaId).catchError((error) {
+          if (kDebugMode) {
+            debugPrint('[Composer] Failed to delete abandoned media $mediaId: $error');
+          }
+        });
       }
     }
     titleController.dispose();
@@ -497,11 +501,19 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       if (!mounted) {
         // 取消编辑器后，上传协程仍可能晚于 dispose 返回 media_id；
         // 此时页面已无法把媒体挂到帖子，立即回收避免孤儿媒体。
-        await publisher.deleteMedia(mediaId).catchError((_) {});
+        await publisher.deleteMedia(mediaId).catchError((error) {
+          if (kDebugMode) {
+            debugPrint('[Composer] Failed to delete orphan media after unmount: $error');
+          }
+        });
         return;
       }
       if (image.pendingDelete || !images.contains(image)) {
-        await publisher.deleteMedia(mediaId).catchError((_) {});
+        await publisher.deleteMedia(mediaId).catchError((error) {
+          if (kDebugMode) {
+            debugPrint('[Composer] Failed to delete removed media $mediaId: $error');
+          }
+        });
         return;
       }
       setState(() {

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter/material.dart';
 
 import 'controllers/auth_controller.dart';
@@ -325,7 +327,11 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     if (!apiMode && postForHistory != null) store.recordHistory(postForHistory);
     if (apiMode && repositories.profile != null) {
       // 浏览历史是服务端事实；失败不阻塞打开帖子，详情页仍可正常阅读。
-      repositories.profile!.recordHistory(normalizedPostId).catchError((_) {});
+      repositories.profile!.recordHistory(normalizedPostId).catchError((error) {
+        if (kDebugMode) {
+          debugPrint('[History] Failed to record post visit: $error');
+        }
+      });
     }
     final detailController = PostDetailController(
       repository: repositories.post,

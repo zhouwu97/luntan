@@ -136,7 +136,7 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
                 itemCount:
                     folders.length +
                     (_loadingMore || _loadMoreError != null ? 1 : 0),
-                onReorderItem: (oldIndex, newIndex) =>
+                onReorder: (oldIndex, newIndex) =>
                     _reorderFolders(folders, oldIndex, newIndex),
                 itemBuilder: (context, index) {
                   if (index >= folders.length) {
@@ -250,7 +250,7 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
     if (oldIndex == 0 || oldIndex >= folders.length || oldIndex == newIndex) {
       return;
     }
-
+    if (newIndex > oldIndex) newIndex -= 1;
     final ordered = [...folders];
     final moved = ordered.removeAt(oldIndex);
     ordered.insert(newIndex, moved);

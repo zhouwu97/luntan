@@ -102,13 +102,13 @@
 | PUT | `/posts/{id}/bookmark-folders` | 是 | 覆盖帖子收藏夹归属；空数组表示取消收藏 |
 | POST | `/posts/{id}/history` | 是 | 记录浏览历史 |
 | POST | `/posts/{id}/poll` | 是 | 创建投票 |
-| POST | `/posts/{id}/market` | 是 | 创建集市帖 |
+| ~~POST~~ | ~~`/posts/{id}/market`~~ | ~~是~~ | ~~创建集市帖~~ **已禁用** |
 
 发帖请求：
 ```json
 {
   "community_id": "string",
-  "type": "normal|game_share|poll|market|question",
+  "type": "normal|game_share|poll|question",
   "title": "string",
   "content": "string",
   "media_ids": ["string"],
@@ -117,17 +117,13 @@
     "options": ["A", "B"],
     "allow_multiple": false,
     "ends_at": "RFC3339|null"
-  },
-  "market": {
-    "price": 12.5,
-    "currency": "CNY",
-    "condition": "九成新",
-    "delivery": "面交"
   }
 }
 ```
 头：`Idempotency-Key: <uuid>`。响应：`{ "id": "string", ... }`。
-`type=poll` 时 `poll` 必填，`type=market` 时 `market` 必填；所有子资源在同一事务中提交，任一步失败全部回滚。
+`type=poll` 时 `poll` 必填；所有子资源在同一事务中提交，任一步失败全部回滚。
+
+> **注意**: `type=market` 和 `/posts/{id}/market` 端点已禁用。历史市场帖数据仅保留用于兼容，不再创建或展示新的市场帖子。
 
 ### 收藏夹 Bookmark Folders
 
@@ -143,6 +139,28 @@
 `bookmark_folder_items(folder_id, post_id)` 只表示分类关系。一个帖子进入多个收藏夹
 只增加一次 `bookmark_count`。旧的 bookmark PUT 会自动归入默认收藏夹，旧 DELETE
 会清除所有收藏夹归属并取消收藏。删除自定义收藏夹时，没有其他归属的帖子会回到默认收藏夹。
+
+### 个人中心列表 Profile Lists
+
+| 方法 | 路径 | 登录 | 说明 |
+|---|---|---|---|
+| GET | `/me/posts?cursor=&limit=&include_details=` | 是 | 我的发帖列表 |
+| GET | `/me/comments?cursor=&limit=&include_details=` | 是 | 我的评论列表（返回收到回复的帖子） |
+| GET | `/me/likes?cursor=&limit=&include_details=` | 是 | 我的点赞列表 |
+| GET | `/me/bookmarks?cursor=&limit=&include_details=` | 是 | 我的收藏列表（跨收藏夹） |
+| GET | `/me/history?cursor=&limit=&include_details=` | 是 | 浏览历史 |
+| DELETE | `/me/history` | 是 | 清空浏览历史 |
+
+所有端点返回 `{items: [ProfilePostItem], next_cursor, has_more}`。
+
+`ProfilePostItem` 字段：
+- `id`, `title`, `content_preview`, `community_id`, `community_name`
+- `comment_count`, `like_count`, `bookmark_count`, `published_at`
+- `comment_id` (仅 `/me/comments` 返回，标识用户在该帖中的评论)
+- `activity_at` (用户最后互动时间，用于 `/me/comments` 排序)
+
+`include_details=1` 时返回完整帖子字段（作者、媒体、viewer_state），适合直接渲染卡片。
+默认返回轻量版本，适合列表展示。
 
 ### 评论 Comments
 

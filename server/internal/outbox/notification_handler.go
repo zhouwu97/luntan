@@ -153,7 +153,7 @@ func notificationPushBody(targetData map[string]any) string {
 			return value
 		}
 	}
-	return "打开杯友酱查看详情"
+	return "打开圣杯酱查看详情"
 }
 
 func notificationDataString(data map[string]any, key string) string {

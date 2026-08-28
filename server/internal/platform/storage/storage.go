@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -177,10 +180,13 @@ func NewObjectStorageFromEnv() ObjectStorage {
 	secret := strings.TrimSpace(os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"))
 	internalURL := strings.TrimSpace(os.Getenv("STORAGE_INTERNAL_BASE_URL"))
 	deleteSecret := strings.TrimSpace(os.Getenv("STORAGE_DELETE_SECRET"))
-	if uploadURL == "" && internalURL == "" {
-		return UnavailableMediaStorage{}
+	if uploadURL != "" || internalURL != "" {
+		return NewHTTPMediaStorage(uploadURL, internalURL, secret, deleteSecret)
 	}
-	return NewHTTPMediaStorage(uploadURL, internalURL, secret, deleteSecret)
+	if localDir := strings.TrimSpace(os.Getenv("MEDIA_STORAGE_DIR")); localDir != "" {
+		return NewLocalMediaStorage(localDir, secret)
+	}
+	return UnavailableMediaStorage{}
 }
 
 type UnavailableMediaStorage struct{}
@@ -408,6 +414,311 @@ func (s *HTTPMediaStorage) DeleteMulti(ctx context.Context, objectKeys []string)
 		}
 	}
 	return firstErr
+}
+
+// SignedUploadHandler 是内置本地媒体存储接收客户端直传请求所需的最小接口。
+// 外部对象存储仍由其自身的上传地址处理，不会进入该接口。
+type SignedUploadHandler interface {
+	ServeSignedUpload(http.ResponseWriter, *http.Request)
+}
+
+// LocalMediaStorage 为开发/QA 环境提供受签名保护的本地媒体存储。
+// 它的上传 URL 使用 API 的相对路径，避免把服务器内网地址暴露给客户端；
+// 正式生产环境仍应配置对象存储，避免单机磁盘成为容量和可用性瓶颈。
+type LocalMediaStorage struct {
+	root   string
+	secret []byte
+}
+
+func NewLocalMediaStorage(rootDir, secret string) *LocalMediaStorage {
+	return &LocalMediaStorage{
+		root:   filepath.Clean(strings.TrimSpace(rootDir)),
+		secret: []byte(strings.TrimSpace(secret)),
+	}
+}
+
+func (s *LocalMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, expiresAt time.Time) (string, error) {
+	if s == nil || strings.TrimSpace(s.root) == "" || len(s.secret) == 0 {
+		return "", ErrStorageUnavailable
+	}
+	if _, err := s.objectPath(objectKey); err != nil {
+		return "", ErrInvalidMedia
+	}
+	expires := strconv.FormatInt(expiresAt.Unix(), 10)
+	return "/api/v1/media/upload?" + url.Values{
+		"asset_id":   {assetID},
+		"object_key": {objectKey},
+		"mime_type":  {mimeType},
+		"expires":    {expires},
+		"signature":  {s.uploadSignature(assetID, objectKey, expires)},
+	}.Encode(), nil
+}
+
+// ServeSignedUpload 校验上传凭证后将请求体原子写入本地媒体目录。
+// 该接口不依赖登录态，安全性来自短时效 HMAC 签名；签名不包含文件内容，
+// 完整性和 MIME/尺寸校验继续由 completeMedia 的 VerifyUploaded 执行。
+func (s *LocalMediaStorage) ServeSignedUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s == nil || len(s.secret) == 0 {
+		http.Error(w, "media storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	query := r.URL.Query()
+	assetID := strings.TrimSpace(query.Get("asset_id"))
+	objectKey := query.Get("object_key")
+	mimeType := strings.TrimSpace(query.Get("mime_type"))
+	expiresText := strings.TrimSpace(query.Get("expires"))
+	signature := strings.TrimSpace(query.Get("signature"))
+	if assetID == "" || mimeType == "" || expiresText == "" || signature == "" {
+		http.Error(w, "invalid upload signature", http.StatusForbidden)
+		return
+	}
+	expires, err := strconv.ParseInt(expiresText, 10, 64)
+	if err != nil || time.Now().UTC().After(time.Unix(expires, 0)) {
+		http.Error(w, "upload signature expired", http.StatusForbidden)
+		return
+	}
+	expected := s.uploadSignature(assetID, objectKey, expiresText)
+	if len(signature) != len(expected) || subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) != 1 {
+		http.Error(w, "invalid upload signature", http.StatusForbidden)
+		return
+	}
+	if _, err := s.objectPath(objectKey); err != nil {
+		http.Error(w, "invalid object key", http.StatusForbidden)
+		return
+	}
+	if contentType := strings.TrimSpace(r.Header.Get("Content-Type")); contentType != "" {
+		parsed, _, parseErr := mime.ParseMediaType(contentType)
+		if parseErr != nil || !strings.EqualFold(parsed, mimeType) {
+			http.Error(w, "content type does not match upload signature", http.StatusBadRequest)
+			return
+		}
+	}
+	if r.ContentLength > maxLocalUploadBytes {
+		http.Error(w, "uploaded media is too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if err := s.writeObject(objectKey, r.Body, r.ContentLength); err != nil {
+		if errors.Is(err, ErrInvalidMedia) {
+			http.Error(w, "uploaded media is too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "could not store uploaded media", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+const maxLocalUploadBytes int64 = 100 * 1024 * 1024
+
+func (s *LocalMediaStorage) VerifyUploaded(_ context.Context, asset *MediaAsset) error {
+	if s == nil || asset == nil {
+		return ErrInvalidMedia
+	}
+	filePath, err := s.objectPath(asset.ObjectKey)
+	if err != nil {
+		return ErrInvalidMedia
+	}
+	file, err := os.Open(filePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrInvalidMedia
+	}
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	if !info.Mode().IsRegular() || info.Size() != asset.Size {
+		return ErrInvalidMedia
+	}
+	hasher := sha256.New()
+	prefix := &limitedPrefixWriter{remaining: 1 << 20}
+	written, err := io.Copy(io.MultiWriter(hasher, prefix), io.LimitReader(file, asset.Size+1))
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	if written != asset.Size || !strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), asset.SHA256) {
+		return ErrInvalidMedia
+	}
+	return verifyMediaContent(prefix.Bytes(), asset)
+}
+
+func (s *LocalMediaStorage) Get(_ context.Context, objectKey string) (io.ReadCloser, int64, string, error) {
+	if s == nil {
+		return nil, 0, "", ErrStorageUnavailable
+	}
+	filePath, err := s.objectPath(objectKey)
+	if err != nil {
+		return nil, 0, "", ErrInvalidMedia
+	}
+	file, err := os.Open(filePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, 0, "", ErrObjectNotFound
+	}
+	if err != nil {
+		return nil, 0, "", ErrStorageUnavailable
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, 0, "", ErrStorageUnavailable
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(objectKey))
+	if contentType == "" {
+		var prefix [512]byte
+		read, readErr := file.Read(prefix[:])
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			_ = file.Close()
+			return nil, 0, "", ErrStorageUnavailable
+		}
+		contentType = http.DetectContentType(prefix[:read])
+		if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+			_ = file.Close()
+			return nil, 0, "", ErrStorageUnavailable
+		}
+	}
+	return file, info.Size(), contentType, nil
+}
+
+func (s *LocalMediaStorage) Put(_ context.Context, objectKey, _ string, reader io.Reader, size int64) error {
+	if s == nil {
+		return ErrStorageUnavailable
+	}
+	return s.writeObject(objectKey, reader, size)
+}
+
+func (s *LocalMediaStorage) Delete(_ context.Context, objectKey string) error {
+	if s == nil {
+		return ErrStorageUnavailable
+	}
+	filePath, err := s.objectPath(objectKey)
+	if err != nil {
+		return ErrInvalidMedia
+	}
+	if err := os.Remove(filePath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return ErrStorageUnavailable
+	}
+	return nil
+}
+
+func (s *LocalMediaStorage) DeleteMulti(ctx context.Context, objectKeys []string) error {
+	var firstErr error
+	for _, objectKey := range objectKeys {
+		if strings.TrimSpace(objectKey) == "" {
+			continue
+		}
+		if err := s.Delete(ctx, objectKey); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *LocalMediaStorage) uploadSignature(assetID, objectKey, expires string) string {
+	hash := hmac.New(sha256.New, s.secret)
+	_, _ = hash.Write([]byte(assetID + "|" + objectKey + "|" + expires))
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func (s *LocalMediaStorage) objectPath(objectKey string) (string, error) {
+	key := strings.TrimSpace(objectKey)
+	if key == "" || strings.Contains(key, "\\") {
+		return "", ErrInvalidMedia
+	}
+	cleaned := path.Clean(key)
+	if cleaned != key || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
+		return "", ErrInvalidMedia
+	}
+	root, err := filepath.Abs(s.root)
+	if err != nil {
+		return "", ErrStorageUnavailable
+	}
+	candidate, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(cleaned)))
+	if err != nil {
+		return "", ErrStorageUnavailable
+	}
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) || filepath.IsAbs(relative) {
+		return "", ErrInvalidMedia
+	}
+	return candidate, nil
+}
+
+func (s *LocalMediaStorage) writeObject(objectKey string, reader io.Reader, expectedSize int64) error {
+	filePath, err := s.objectPath(objectKey)
+	if err != nil {
+		return ErrInvalidMedia
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return ErrStorageUnavailable
+	}
+	// 用户媒体会由 Nginx 作为公开帖子内容读取，根目录到对象目录都需要可遍历。
+	if err := s.makePublicDirs(filepath.Dir(filePath)); err != nil {
+		return ErrStorageUnavailable
+	}
+	temporary, err := os.CreateTemp(s.root, ".media-upload-*")
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	temporaryName := temporary.Name()
+	removeTemporary := true
+	defer func() {
+		_ = temporary.Close()
+		if removeTemporary {
+			_ = os.Remove(temporaryName)
+		}
+	}()
+	written, err := io.Copy(temporary, io.LimitReader(reader, maxLocalUploadBytes+1))
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	if written > maxLocalUploadBytes || (expectedSize >= 0 && written != expectedSize) {
+		return ErrInvalidMedia
+	}
+	if err := temporary.Close(); err != nil {
+		return ErrStorageUnavailable
+	}
+	if err := os.Chmod(temporaryName, 0644); err != nil {
+		return ErrStorageUnavailable
+	}
+	if err := os.Rename(temporaryName, filePath); err != nil {
+		return ErrStorageUnavailable
+	}
+	removeTemporary = false
+	return nil
+}
+
+func (s *LocalMediaStorage) makePublicDirs(directory string) error {
+	root, err := filepath.Abs(s.root)
+	if err != nil {
+		return err
+	}
+	current, err := filepath.Abs(directory)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := os.Chmod(current, 0755); err != nil {
+			return err
+		}
+		if current == root {
+			return nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ErrInvalidMedia
+		}
+		current = parent
+	}
 }
 
 type limitedPrefixWriter struct {

@@ -10,22 +10,24 @@ import (
 )
 
 type userProfileResponse struct {
-	ID             string         `json:"id"`
-	Username       string         `json:"username"`
-	Nickname       string         `json:"nickname"`
-	AvatarMediaID  string         `json:"avatar_media_id,omitempty"`
-	Bio            string         `json:"bio"`
-	Level          int            `json:"level"`
-	Experience     int64          `json:"experience"`
-	AccountType    string         `json:"account_type"`
-	Growth         GrowthState    `json:"growth"`
-	TrustLevel     string         `json:"trust_level"`
-	Status         string         `json:"status"`
-	PostCount      int64          `json:"post_count"`
-	FollowerCount  int64          `json:"follower_count"`
-	FollowingCount int64          `json:"following_count"`
-	CreatedAt      string         `json:"created_at"`
-	ViewerState    map[string]any `json:"viewer_state"`
+	ID                string         `json:"id"`
+	Username          string         `json:"username"`
+	Nickname          string         `json:"nickname"`
+	AvatarMediaID     string         `json:"avatar_media_id,omitempty"`
+	BackgroundMediaID string         `json:"background_media_id,omitempty"`
+	BackgroundURL     string         `json:"background_url,omitempty"`
+	Bio               string         `json:"bio"`
+	Level             int            `json:"level"`
+	Experience        int64          `json:"experience"`
+	AccountType       string         `json:"account_type"`
+	Growth            GrowthState    `json:"growth"`
+	TrustLevel        string         `json:"trust_level"`
+	Status            string         `json:"status"`
+	PostCount         int64          `json:"post_count"`
+	FollowerCount     int64          `json:"follower_count"`
+	FollowingCount    int64          `json:"following_count"`
+	CreatedAt         string         `json:"created_at"`
+	ViewerState       map[string]any `json:"viewer_state"`
 }
 
 func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id string) {
@@ -34,6 +36,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	}
 	var item userProfileResponse
 	var createdAt sql.NullTime
+	var backgroundObjectKey string
 	var viewerID, accountType string
 	var exp int64
 	var rawLevel int
@@ -43,7 +46,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	}
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT u.id, u.username, COALESCE(up.nickname, u.username),
-		       COALESCE(up.avatar_media_id, ''), COALESCE(up.bio, ''),
+		       COALESCE(up.avatar_media_id, ''), COALESCE(up.background_media_id, ''), COALESCE(background.object_key, ''), COALESCE(up.bio, ''),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.trust_level, 'new'), u.status, u.created_at,
 		       COALESCE(up.experience, 0), COALESCE(u.account_type, 'email'),
@@ -52,8 +55,9 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
 		WHERE u.id = $1 AND u.deleted_at IS NULL`, id).
-		Scan(&item.ID, &item.Username, &item.Nickname, &item.AvatarMediaID, &item.Bio,
+		Scan(&item.ID, &item.Username, &item.Nickname, &item.AvatarMediaID, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
 			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.FollowerCount, &item.FollowingCount)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "用户不存在"})
@@ -70,6 +74,9 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	item.Growth = growth
 	if createdAt.Valid {
 		item.CreatedAt = createdAt.Time.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
+	}
+	if backgroundObjectKey != "" {
+		item.BackgroundURL = publicMediaURL(backgroundObjectKey)
 	}
 	item.ViewerState = map[string]any{
 		"is_following": false,
@@ -101,7 +108,10 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
-	query, args, err := profileListQuery("posts", userID, r.URL.Query().Get("cursor"), limit)
+	// 本人查看自己的发布时包含待审核内容，否则刚发布的帖子会在自己的列表里消失。
+	viewer, viewerOK := resolveOptionalViewer(s, r)
+	includePending := viewerOK && viewer.ID != "" && viewer.ID == userID
+	query, args, err := profileListQueryFor("posts", userID, r.URL.Query().Get("cursor"), limit, includePending)
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 		return

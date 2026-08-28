@@ -107,6 +107,8 @@ class _FailingCommentRepository implements CommentRepository {
     required String content,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) => throw StateError('not used');
 
   @override
@@ -114,6 +116,8 @@ class _FailingCommentRepository implements CommentRepository {
     required String commentId,
     required String content,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) => throw StateError('not used');
 
   @override

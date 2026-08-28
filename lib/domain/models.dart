@@ -374,6 +374,8 @@ class Comment {
     this.replyToUserId,
     this.replyToUser,
     required this.content,
+    this.media = const [],
+    this.stickerId,
     this.likeCount = 0,
     this.isLiked = false,
     this.replyCount = 0,
@@ -394,6 +396,8 @@ class Comment {
   /// 服务端返回的回复目标快照，避免客户端用“用户”占位或猜测昵称。
   final User? replyToUser;
   final String content;
+  final List<MediaAsset> media;
+  final String? stickerId;
   int likeCount;
   bool isLiked;
   int replyCount;
@@ -401,6 +405,8 @@ class Comment {
   final ModerationStatus moderationStatus;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  List<MediaAsset> get images => media;
 }
 
 class Reaction {

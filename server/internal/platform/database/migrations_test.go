@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +17,16 @@ func TestMigrationFilesAreOrderedAndPaired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 35 || files[0].Version != "000001" || files[1].Version != "000002" || files[2].Version != "000003" || files[3].Version != "000004" || files[4].Version != "000005" || files[5].Version != "000006" || files[6].Version != "000007" || files[7].Version != "000008" || files[8].Version != "000009" || files[9].Version != "000010" || files[10].Version != "000011" || files[11].Version != "000012" || files[12].Version != "000013" || files[13].Version != "000014" || files[14].Version != "000015" || files[15].Version != "000016" || files[16].Version != "000017" || files[17].Version != "000018" || files[18].Version != "000019" || files[19].Version != "000020" || files[20].Version != "000021" || files[21].Version != "000022" || files[22].Version != "000023" || files[23].Version != "000024" || files[24].Version != "000025" || files[25].Version != "000026" || files[26].Version != "000027" || files[27].Version != "000028" || files[28].Version != "000029" || files[29].Version != "000030" || files[30].Version != "000031" || files[31].Version != "000032" || files[32].Version != "000033" || files[33].Version != "000034" || files[34].Version != "000035" {
-		t.Fatalf("unexpected migration order: %#v", files)
+	// 版本必须从 000001 起连续无缺口，且全部为升序。
+	// 这里刻意不写死迁移总数，否则每新增一个迁移都要修改本测试。
+	if len(files) == 0 {
+		t.Fatal("未发现任何 up 迁移文件")
+	}
+	for i, file := range files {
+		want := fmt.Sprintf("%06d", i+1)
+		if file.Version != want {
+			t.Fatalf("迁移版本不连续：第 %d 个迁移版本为 %s，期望 %s（全部：%d 个）", i+1, file.Version, want, len(files))
+		}
 	}
 	for _, file := range files {
 		entries, err := os.ReadDir(directory)

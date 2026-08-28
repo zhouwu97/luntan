@@ -607,8 +607,8 @@ class _AuthScreenState extends State<AuthScreen> {
                               switchOutCurve: AppMotion.standard,
                               child: _mode == AuthMode.login
                                   ? (_loginMethod == LoginMethod.code
-                                      ? _buildCodeLoginForm(busy)
-                                      : _buildPasswordLoginForm(busy))
+                                        ? _buildCodeLoginForm(busy)
+                                        : _buildPasswordLoginForm(busy))
                                   : _buildRegisterForm(busy),
                             ),
                           ],
@@ -673,11 +673,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             ],
           ),
-          child: const Icon(
-            Icons.forum_rounded,
-            color: Colors.white,
-            size: 26,
-          ),
+          child: const Icon(Icons.forum_rounded, color: Colors.white, size: 26),
         ),
         const SizedBox(width: 14),
         const Expanded(
@@ -685,7 +681,7 @@ class _AuthScreenState extends State<AuthScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '欢迎来到校园论坛',
+                '欢迎来到圣杯酱',
                 style: TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.w900,
@@ -1119,9 +1115,7 @@ class _AuthScreenState extends State<AuthScreen> {
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
-            onPressed: busy
-                ? null
-                : () => _switchLoginMethod(LoginMethod.code),
+            onPressed: busy ? null : () => _switchLoginMethod(LoginMethod.code),
             style: TextButton.styleFrom(
               foregroundColor: AppTheme.textSecondary,
               padding: EdgeInsets.zero,

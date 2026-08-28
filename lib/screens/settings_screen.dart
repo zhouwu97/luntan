@@ -123,7 +123,7 @@ class SettingsCenterScreen extends StatelessWidget {
             children: [
               _SettingsTile(
                 icon: Icons.info_outline_rounded,
-                title: '关于杯友酱',
+                title: '关于圣杯酱',
                 subtitle: '版本 v1.0.0 · 社区规则与反馈',
                 onTap: () => onFeedback('当前版本 v1.0.0'),
               ),

@@ -135,17 +135,17 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 	if s.mailSender == nil {
 		s.mailSender = disabledMailSender{}
 	}
-	subject := "杯友酱登录验证码"
+	subject := "圣杯酱登录验证码"
 	actionText := "登录"
 	if purpose == "register" {
-		subject = "杯友酱注册验证码"
+		subject = "圣杯酱注册验证码"
 		actionText = "注册"
 	} else if purpose == "password_reset" {
-		subject = "杯友酱密码重置验证码"
+		subject = "圣杯酱密码重置验证码"
 		actionText = "密码重置"
 	}
 
-	mailErr := s.mailSender.Send(r.Context(), email, subject, fmt.Sprintf(`<p>你的杯友酱%s验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">%s</p><p>验证码 10 分钟内有效。如非本人操作，请忽略此邮件。</p>`, actionText, html.EscapeString(code)))
+	mailErr := s.mailSender.Send(r.Context(), email, subject, fmt.Sprintf(`<p>你的圣杯酱%s验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">%s</p><p>验证码 10 分钟内有效。如非本人操作，请忽略此邮件。</p>`, actionText, html.EscapeString(code)))
 	if mailErr != nil {
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'delivery_failed', failure_reason = $1 WHERE id = $2`, mailErr.Error(), codeID)
 		if strings.EqualFold(s.appEnv, "production") {
@@ -154,6 +154,12 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 		}
 		// 本地开发无 SMTP 时返回开发验证码，生产环境永不返回，便于联调而不降低线上安全性。
 		devCode = code
+		// dev_code 即为投递通道：若保持 delivery_failed，校验查询（只认 created/sending/sent）
+		// 会永远拒绝该验证码，导致全新 dev 环境无法注册。生产环境不走此分支。
+		if _, err := s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'sent', sent_at = now() WHERE id = $1 AND consumed_at IS NULL`, codeID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	} else {
 		if _, err := s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'sent', sent_at = now() WHERE id = $1`, codeID); err != nil {
 			writeInternalError(w, r, err)

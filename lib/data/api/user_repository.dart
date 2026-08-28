@@ -17,6 +17,8 @@ class UserProfile {
     required this.followingCount,
     required this.createdAt,
     this.avatarMediaId,
+    this.backgroundMediaId,
+    this.backgroundUrl,
     this.isFollowing = false,
     this.isBlocked = false,
     this.canFollow = false,
@@ -36,6 +38,8 @@ class UserProfile {
   final int followingCount;
   final DateTime createdAt;
   final String? avatarMediaId;
+  final String? backgroundMediaId;
+  final String? backgroundUrl;
   final bool isFollowing;
   final bool isBlocked;
   final bool canFollow;
@@ -175,6 +179,8 @@ class ApiUserRepository implements UserRepository {
         followingCount: _int(value['following_count']),
         createdAt: _date(value['created_at']),
         avatarMediaId: _nullable(value['avatar_media_id']),
+        backgroundMediaId: _nullable(value['background_media_id']),
+        backgroundUrl: _nullable(value['background_url']),
         isFollowing: viewer['is_following'] == true,
         isBlocked: viewer['is_blocked'] == true,
         canFollow: viewer['can_follow'] == true,

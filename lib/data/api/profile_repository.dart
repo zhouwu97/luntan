@@ -8,6 +8,8 @@ class ProfileSummary {
     required this.nickname,
     this.avatarMediaId,
     this.avatarUrl,
+    this.backgroundMediaId,
+    this.backgroundUrl,
     required this.level,
     this.experience = 0,
     this.growth,
@@ -25,6 +27,8 @@ class ProfileSummary {
   final String nickname;
   final String? avatarMediaId;
   final String? avatarUrl;
+  final String? backgroundMediaId;
+  final String? backgroundUrl;
   final int level;
   final int experience;
   final GrowthState? growth;
@@ -141,6 +145,8 @@ class ProfileRepository {
       nickname: _string(value['nickname']),
       avatarMediaId: _nullableString(value['avatar_media_id']),
       avatarUrl: _nullableString(value['avatar_url']),
+      backgroundMediaId: _nullableString(value['background_media_id']),
+      backgroundUrl: _nullableString(value['background_url']),
       level: level,
       experience: exp,
       growth: growth,
@@ -190,6 +196,7 @@ class ProfileRepository {
     required String nickname,
     required String signature,
     String? avatarMediaId,
+    String? backgroundMediaId,
   }) async {
     await _client.patchJson(
       '/api/v1/me/profile',
@@ -197,6 +204,7 @@ class ProfileRepository {
         'nickname': nickname.trim(),
         'bio': signature.trim(),
         'avatar_media_id': avatarMediaId,
+        'background_media_id': backgroundMediaId,
       },
     );
     return getProfile();

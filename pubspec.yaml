@@ -37,6 +37,7 @@ dependencies:
   image_picker: ^1.2.3
   crypto: ^3.0.7
   share_plus: ^10.1.4
+  url_launcher: ^6.3.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -93,6 +94,11 @@ flutter:
   #         weight: 700
   assets:
     - assets/ranking/
+    - assets/profile_default_background.png
+    - assets/images/stickers/mingfeng/
+    - assets/images/stickers/mingfeng-daily/
+    - assets/images/stickers/mingfeng-ovo/
+    - assets/images/stickers/mingfengfeng/
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package

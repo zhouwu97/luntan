@@ -37,6 +37,11 @@ type rankingToyRecord struct {
 	RatingCount      int64
 	Category         string
 	Segments         []string
+	CoverObjectKey   string
+	HeroObjectKey    string
+	CouponURL        string
+	SourceURL        string
+	SourceProvider   string
 	Wanted           bool
 	Owned            bool
 	Rating           sql.NullInt64
@@ -62,7 +67,54 @@ type rankingToyComment struct {
 	ReplyToUser    *userSummary
 	ReplyCount     int64
 	AuthorRating   sql.NullInt64
+	Media          []rankingToyCommentMedia
 }
+
+// rankingToyCommentMedia 是本项目媒体库中的评价配图。导入任务只保存对象键，
+// API 统一通过 publicMediaURL 组装访问地址，避免把源站 URL 暴露给客户端。
+type rankingToyCommentMedia struct {
+	ID       string `json:"id"`
+	URL      string `json:"url"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	MimeType string `json:"mime_type"`
+}
+
+type rankingToyCommentMediaPayload struct {
+	ID        string `json:"id"`
+	ObjectKey string `json:"object_key"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	MimeType  string `json:"mime_type"`
+}
+
+func parseRankingToyCommentMedia(raw []byte) ([]rankingToyCommentMedia, error) {
+	if len(raw) == 0 {
+		return []rankingToyCommentMedia{}, nil
+	}
+	var payload []rankingToyCommentMediaPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	items := make([]rankingToyCommentMedia, 0, len(payload))
+	for _, item := range payload {
+		items = append(items, rankingToyCommentMedia{
+			ID: item.ID, URL: publicMediaURL(item.ObjectKey), Width: item.Width,
+			Height: item.Height, MimeType: item.MimeType,
+		})
+	}
+	return items, nil
+}
+
+const rankingToyCommentMediaSelect = `COALESCE((
+	SELECT json_agg(json_build_object(
+		'id', media.id, 'object_key', media.object_key, 'width', media.width,
+		'height', media.height, 'mime_type', media.mime_type
+	) ORDER BY links.sort_order ASC, media.id ASC)
+	FROM ranking_toy_comment_media links
+	JOIN media_assets media ON media.id = links.media_id
+	WHERE links.comment_id = c.id AND media.status = 'ready' AND media.deleted_at IS NULL
+), '[]'::json)`
 
 func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
@@ -72,17 +124,38 @@ func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 	if viewer, ok := s.optionalAuthenticatedUser(r.Context(), r); ok {
 		viewerID = viewer.ID
 	}
-	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT t.id, t.rank, t.name, t.merchant, t.release_year, t.description,
-		       array_to_json(t.tags), t.asset_key, t.want_count,
-		       t.rating_total_centi, t.rating_count,
-		       t.category, array_to_json(t.segments),
-		       COALESCE(us.wanted, false), COALESCE(us.owned, false), us.rating
-		FROM ranking_toys t
-		LEFT JOIN ranking_toy_user_states us
-		  ON us.toy_id = t.id AND us.user_id = $1
-		WHERE t.active = true
-		ORDER BY t.rank ASC`, viewerID)
+	tabKey := strings.TrimSpace(r.URL.Query().Get("tab"))
+	categoryKey := strings.TrimSpace(r.URL.Query().Get("category"))
+	var rows *sql.Rows
+	var err error
+	if tabKey != "" || categoryKey != "" {
+		// 标签榜在源站默认回落到飞机杯；这里和同步快照保持同一规则。
+		if tabKey != "" && categoryKey == "" {
+			categoryKey = "CUP"
+		}
+		rows, err = s.db.QueryContext(r.Context(), `
+			SELECT `+rankingToyColumns("source_rank.rank")+`
+			FROM ranking_toy_rankings source_rank
+			JOIN ranking_toys t ON t.id = source_rank.toy_id
+			LEFT JOIN ranking_toy_user_states us
+			  ON us.toy_id = t.id AND us.user_id = $1
+			LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
+			LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
+			WHERE source_rank.source_provider = 'beiyoujiang'
+			  AND source_rank.tab_key = $2 AND source_rank.category_key = $3
+			  AND t.active = true
+			ORDER BY source_rank.rank ASC`, viewerID, tabKey, categoryKey)
+	} else {
+		rows, err = s.db.QueryContext(r.Context(), `
+			SELECT `+rankingToyColumns("t.rank")+`
+			FROM ranking_toys t
+			LEFT JOIN ranking_toy_user_states us
+			  ON us.toy_id = t.id AND us.user_id = $1
+			LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
+			LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
+			WHERE t.active = true
+			ORDER BY t.rank ASC`, viewerID)
+	}
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -174,15 +247,25 @@ func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID str
 
 func (s *Server) loadRankingToy(ctx context.Context, toyID, viewerID string) (rankingToyRecord, error) {
 	return scanRankingToy(s.db.QueryRowContext(ctx, `
-		SELECT t.id, t.rank, t.name, t.merchant, t.release_year, t.description,
-		       array_to_json(t.tags), t.asset_key, t.want_count,
-		       t.rating_total_centi, t.rating_count,
-		       t.category, array_to_json(t.segments),
-		       COALESCE(us.wanted, false), COALESCE(us.owned, false), us.rating
+		SELECT `+rankingToyColumns("t.rank")+`
 		FROM ranking_toys t
 		LEFT JOIN ranking_toy_user_states us
 		  ON us.toy_id = t.id AND us.user_id = $2
+		LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
+		LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
 		WHERE t.id = $1 AND t.active = true`, toyID, viewerID))
+}
+
+// rankingToyColumns 由两条受控查询共用。rankExpression 仅传入源码常量，
+// 不接受用户输入，避免为了支持视图名次引入 SQL 拼接风险。
+func rankingToyColumns(rankExpression string) string {
+	return `t.id, ` + rankExpression + `, t.name, t.merchant, t.release_year, t.description,
+		array_to_json(t.tags), t.asset_key, t.want_count,
+		t.rating_total_centi, t.rating_count,
+		t.category, array_to_json(t.segments),
+		COALESCE(cover.object_key, ''), COALESCE(hero.object_key, ''),
+		t.coupon_url, t.source_url, t.source_provider,
+		COALESCE(us.wanted, false), COALESCE(us.owned, false), us.rating`
 }
 
 func scanRankingToy(scanner rankingToyScanner) (rankingToyRecord, error) {
@@ -203,6 +286,11 @@ func scanRankingToy(scanner rankingToyScanner) (rankingToyRecord, error) {
 		&item.RatingCount,
 		&item.Category,
 		&segmentsRaw,
+		&item.CoverObjectKey,
+		&item.HeroObjectKey,
+		&item.CouponURL,
+		&item.SourceURL,
+		&item.SourceProvider,
 		&item.Wanted,
 		&item.Owned,
 		&item.Rating,
@@ -238,6 +326,11 @@ func (item rankingToyRecord) response() map[string]any {
 		"description":  item.Description,
 		"tags":         item.Tags,
 		"asset_key":    item.AssetKey,
+		"cover_url":    publicMediaURL(item.CoverObjectKey),
+		"hero_url":     publicMediaURL(item.HeroObjectKey),
+		"coupon_url":   item.CouponURL,
+		"source_url":   item.SourceURL,
+		"source":       item.SourceProvider,
 		"want_count":   item.WantCount,
 		"rating_count": item.RatingCount,
 		"category":     item.Category,
@@ -337,7 +430,7 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
 	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
-	                 aus.rating
+	                 aus.rating, ` + rankingToyCommentMediaSelect + `
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
@@ -365,6 +458,7 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	var last rankingToyComment
 	for rows.Next() {
 		var item rankingToyComment
+		var mediaRaw []byte
 		if err := rows.Scan(
 			&item.ID,
 			&item.AuthorID,
@@ -380,7 +474,12 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 			&item.ReplyToUserID,
 			&item.ReplyCount,
 			&item.AuthorRating,
+			&mediaRaw,
 		); err != nil {
+			return rankingToyCommentPage{}, err
+		}
+		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
+		if err != nil {
 			return rankingToyCommentPage{}, err
 		}
 		if item.ReplyToUserID.Valid && item.ReplyToUserID.String != "" {
@@ -466,7 +565,7 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $3),
 	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
-	                 aus.rating
+	                 aus.rating, ` + rankingToyCommentMediaSelect + `
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
@@ -489,12 +588,18 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 	var last rankingToyComment
 	for rows.Next() {
 		var item rankingToyComment
+		var mediaRaw []byte
 		if err := rows.Scan(
 			&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 			&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 			&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
 			&item.AuthorRating,
+			&mediaRaw,
 		); err != nil {
+			return rankingToyCommentPage{}, err
+		}
+		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
+		if err != nil {
 			return rankingToyCommentPage{}, err
 		}
 		if item.ReplyToUserID.Valid && item.ReplyToUserID.String != "" {
@@ -539,6 +644,7 @@ func (item rankingToyComment) response() map[string]any {
 		"reply_count":      item.ReplyCount,
 		"created_at":       item.CreatedAt,
 		"author_rating":    nullableInt(item.AuthorRating),
+		"media":            item.Media,
 		"author": map[string]any{
 			"id":            item.AuthorID,
 			"username":      item.Username,
@@ -850,12 +956,13 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 
 func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID string) (rankingToyComment, error) {
 	var item rankingToyComment
+	var mediaRaw []byte
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), c.content, c.like_count,
 		       EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
 		       c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
-		       aus.rating
+		       aus.rating, `+rankingToyCommentMediaSelect+`
 		FROM ranking_toy_comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = c.author_id
@@ -864,8 +971,12 @@ func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID stri
 		&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 		&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 		&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
-		&item.AuthorRating,
+		&item.AuthorRating, &mediaRaw,
 	)
+	if err != nil {
+		return item, err
+	}
+	item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 	if err != nil {
 		return item, err
 	}

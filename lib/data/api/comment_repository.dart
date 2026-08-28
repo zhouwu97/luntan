@@ -31,12 +31,16 @@ abstract interface class CommentRepository {
     required String content,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds,
+    String? stickerId,
   });
 
   Future<Comment> createReply({
     required String commentId,
     required String content,
     String? replyToUserId,
+    List<String> mediaIds,
+    String? stickerId,
   });
 
   Future<void> deleteComment(String commentId);
@@ -58,6 +62,8 @@ abstract interface class IdempotentCommentRepository {
     required String idempotencyKey,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds,
+    String? stickerId,
   });
 
   Future<Comment> createReplyWithIdempotency({
@@ -65,6 +71,8 @@ abstract interface class IdempotentCommentRepository {
     required String content,
     required String idempotencyKey,
     String? replyToUserId,
+    List<String> mediaIds,
+    String? stickerId,
   });
 }
 
@@ -131,6 +139,8 @@ class ApiCommentRepository
     required String content,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     return createCommentWithIdempotency(
       postId: postId,
@@ -138,6 +148,8 @@ class ApiCommentRepository
       idempotencyKey: _newIdempotencyKey('comment'),
       parentId: parentId,
       replyToUserId: replyToUserId,
+      mediaIds: mediaIds,
+      stickerId: stickerId,
     );
   }
 
@@ -146,12 +158,16 @@ class ApiCommentRepository
     required String commentId,
     required String content,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     return createReplyWithIdempotency(
       commentId: commentId,
       content: content,
       idempotencyKey: _newIdempotencyKey('reply'),
       replyToUserId: replyToUserId,
+      mediaIds: mediaIds,
+      stickerId: stickerId,
     );
   }
 
@@ -162,10 +178,14 @@ class ApiCommentRepository
     required String idempotencyKey,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     final body = <String, dynamic>{'content': content};
     if (parentId != null) body['parent_id'] = parentId;
     if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
+    if (mediaIds.isNotEmpty) body['media_ids'] = mediaIds;
+    if (stickerId != null && stickerId.isNotEmpty) body['sticker_id'] = stickerId;
     final payload = await _client.postJson(
       '/api/v1/posts/$postId/comments',
       headers: {'Idempotency-Key': idempotencyKey},
@@ -180,9 +200,13 @@ class ApiCommentRepository
     required String content,
     required String idempotencyKey,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     final body = <String, dynamic>{'content': content};
     if (replyToUserId != null) body['reply_to_user_id'] = replyToUserId;
+    if (mediaIds.isNotEmpty) body['media_ids'] = mediaIds;
+    if (stickerId != null && stickerId.isNotEmpty) body['sticker_id'] = stickerId;
     final payload = await _client.postJson(
       '/api/v1/comments/$commentId/replies',
       headers: {'Idempotency-Key': idempotencyKey},
@@ -225,6 +249,24 @@ Comment _commentFromJson(Map<String, dynamic> json) {
   final viewerState = json['viewer_state'] is Map
       ? Map<String, dynamic>.from(json['viewer_state'] as Map)
       : const <String, dynamic>{};
+
+  final media = json['media'] is List
+      ? (json['media'] as List).whereType<Map>().map((raw) {
+          final value = Map<String, dynamic>.from(raw);
+          return MediaAsset(
+            id: _string(value['id']),
+            type: value['type'] == 'video' ? MediaType.video : MediaType.image,
+            url: _nullableString(value['url']),
+            width: _nullableInt(value['width']),
+            height: _nullableInt(value['height']),
+            altText: _nullableString(value['alt_text']),
+            thumb: _parseVariant(value['thumb']),
+            detail: _parseVariant(value['detail']),
+            original: _parseVariant(value['original']),
+          );
+        }).toList()
+      : const <MediaAsset>[];
+
   return Comment(
     id: _string(json['id']),
     postId: _string(json['post_id']),
@@ -259,6 +301,8 @@ Comment _commentFromJson(Map<String, dynamic> json) {
             updatedAt: now,
           ),
     content: _string(json['content']),
+    media: media,
+    stickerId: _nullableString(json['sticker_id']),
     likeCount: _int(json['like_count']),
     isLiked: viewerState['has_liked'] == true,
     replyCount: _int(json['reply_count']),
@@ -277,6 +321,20 @@ Comment _commentFromJson(Map<String, dynamic> json) {
   );
 }
 
+MediaVariant? _parseVariant(dynamic raw) {
+  if (raw is! Map) return null;
+  final value = Map<String, dynamic>.from(raw);
+  final url = _nullableString(value['url']);
+  if (url == null) return null;
+  return MediaVariant(
+    url: url,
+    width: _int(value['width']),
+    height: _int(value['height']),
+    sizeBytes: _nullableInt(value['size']),
+    mimeType: _nullableString(value['mime_type']),
+  );
+}
+
 T _enumByName<T extends Enum>(List<T> values, dynamic value, T fallback) {
   if (value is String) {
     for (final item in values) {
@@ -291,5 +349,8 @@ String? _nullableString(dynamic value) =>
     value is String && value.isNotEmpty ? value : null;
 int _int(dynamic value) =>
     value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+int? _nullableInt(dynamic value) =>
+    value is num ? value.toInt() : int.tryParse('$value');
 DateTime _date(dynamic value, DateTime fallback) =>
     value is String ? DateTime.tryParse(value) ?? fallback : fallback;
+

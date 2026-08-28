@@ -39,7 +39,7 @@ void main() {
       ),
     );
 
-    expect(find.text('欢迎来到校园论坛'), findsOneWidget);
+    expect(find.text('欢迎来到圣杯酱'), findsOneWidget);
     expect(find.text('登录'), findsWidgets);
     expect(find.text('注册'), findsWidgets);
     expect(find.text('验证码登录'), findsOneWidget);

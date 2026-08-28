@@ -293,13 +293,15 @@ func TestFeedLatestByCommentKeepsSnapshotAcrossNewReply(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
+	// 评论 ID 加运行时后缀：集成测试可能指向复用的数据库，固定 ID 会重复插入。
+	snap := fmt.Sprintf("%d", time.Now().UnixNano())
 	insertComment := func(id, postID string, createdAt time.Time) {
 		t.Helper()
 		if _, err := s.db.Exec(`
 			INSERT INTO comments (id, post_id, author_id, root_id, content,
 				publication_status, moderation_status, created_at, updated_at, published_at)
 			VALUES ($1, $2, $3, $1, 'snapshot comment', 'published', 'normal', $4, $4, $4)`,
-			id, postID, authorID, createdAt); err != nil {
+			id+"-"+snap, postID, authorID, createdAt); err != nil {
 			t.Fatal(err)
 		}
 	}

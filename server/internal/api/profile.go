@@ -15,9 +15,10 @@ import (
 )
 
 type profileUpdateInput struct {
-	Nickname      *string `json:"nickname"`
-	Bio           *string `json:"bio"`
-	AvatarMediaID *string `json:"avatar_media_id"`
+	Nickname          *string `json:"nickname"`
+	Bio               *string `json:"bio"`
+	AvatarMediaID     *string `json:"avatar_media_id"`
+	BackgroundMediaID *string `json:"background_media_id"`
 }
 
 func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
@@ -85,17 +86,41 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := s.db.ExecContext(r.Context(), `UPDATE user_profiles SET nickname = $1, bio = $2, avatar_media_id = NULLIF($3, ''), updated_at = now() WHERE user_id = $4`, nickname, bio, avatarMediaID, user.ID); err != nil {
+	backgroundMediaID := ""
+	if input.BackgroundMediaID != nil {
+		backgroundMediaID = strings.TrimSpace(*input.BackgroundMediaID)
+		if backgroundMediaID != "" {
+			var ownedID string
+			if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM media_assets WHERE id = $1 AND owner_id = $2 AND status = 'ready' AND deleted_at IS NULL`, backgroundMediaID, user.ID).Scan(&ownedID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeAuthError(w, r, ErrMediaNotFound)
+					return
+				}
+				writeInternalError(w, r, err)
+				return
+			}
+		}
+	} else {
+		// PATCH 未携带背景字段时保留原背景；传空字符串可移除用户自定义背景。
+		if err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(background_media_id, '') FROM user_profiles WHERE user_id = $1`, user.ID).Scan(&backgroundMediaID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	if _, err := s.db.ExecContext(r.Context(), `UPDATE user_profiles SET nickname = $1, bio = $2, avatar_media_id = NULLIF($3, ''), background_media_id = NULLIF($4, ''), updated_at = now() WHERE user_id = $5`, nickname, bio, avatarMediaID, backgroundMediaID, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	var avatar any
+	var avatar, background any
 	if avatarMediaID != "" {
 		avatar = avatarMediaID
 	}
+	if backgroundMediaID != "" {
+		background = backgroundMediaID
+	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
-		"signature": bio, "avatar_media_id": avatar,
+		"signature": bio, "avatar_media_id": avatar, "background_media_id": background,
 	})
 }
 
@@ -109,19 +134,21 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var nickname, bio, trustLevel, avatarObjectKey, accountType string
-	var avatarMediaID sql.NullString
+	var nickname, bio, trustLevel, avatarObjectKey, backgroundObjectKey, accountType string
+	var avatarMediaID, backgroundMediaID sql.NullString
 	var level int
 	var exp int64
 	if err := s.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.avatar_media_id, ''),
-		       COALESCE(ma.object_key, ''), CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+        SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.avatar_media_id, ''),
+               COALESCE(ma.object_key, ''), COALESCE(up.background_media_id, ''), COALESCE(background.object_key, ''),
+               CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.trust_level, 'new'), COALESCE(up.experience, 0), COALESCE(u.account_type, 'email')
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
-		WHERE u.id = $1`, user.ID).
-		Scan(&nickname, &bio, &avatarMediaID, &avatarObjectKey, &level, &trustLevel, &exp, &accountType); err != nil {
+        LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
+        LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
+        WHERE u.id = $1`, user.ID).
+		Scan(&nickname, &bio, &avatarMediaID, &avatarObjectKey, &backgroundMediaID, &backgroundObjectKey, &level, &trustLevel, &exp, &accountType); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -145,15 +172,19 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
-		"account_type":    accountType,
-		"avatar_media_id": nullableProfileString(avatarMediaID),
-		"level":           growth.Level, "experience": growth.Experience, "growth": growth,
+		"account_type":        accountType,
+		"avatar_media_id":     nullableProfileString(avatarMediaID),
+		"background_media_id": nullableProfileString(backgroundMediaID),
+		"level":               growth.Level, "experience": growth.Experience, "growth": growth,
 		"trust_level": trustLevel, "signature": bio, "post_count": posts,
 		"comment_count": comments, "like_received_count": receivedLikes,
 		"follower_count": followers, "following_count": following,
 	}
 	if avatarObjectKey != "" {
 		response["avatar_url"] = publicMediaURL(avatarObjectKey)
+	}
+	if backgroundObjectKey != "" {
+		response["background_url"] = publicMediaURL(backgroundObjectKey)
 	}
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
@@ -304,7 +335,17 @@ func profileCommentListQuery(userID, rawCursor string, limit int) (string, []any
 }
 
 func profileListQuery(kind, userID, rawCursor string, limit int) (string, []any, error) {
-	where := "p.deleted_at IS NULL AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.type <> 'market'"
+	return profileListQueryFor(kind, userID, rawCursor, limit, false)
+}
+
+// profileListQueryFor 构建个人中心列表查询。includePending 为真时把待审核内容一并
+// 返回，仅用于「本人查看自己的发布」，避免用户发布后内容在自己的列表里凭空消失。
+func profileListQueryFor(kind, userID, rawCursor string, limit int, includePending bool) (string, []any, error) {
+	moderationFilter := "p.moderation_status = 'normal'"
+	if includePending {
+		moderationFilter = "p.moderation_status IN ('normal', 'pending')"
+	}
+	where := "p.deleted_at IS NULL AND p.publication_status = 'published' AND " + moderationFilter + " AND p.type <> 'market'"
 	args := []any{userID}
 	join := "JOIN communities c ON c.id = p.community_id"
 	timestampColumn := "COALESCE(p.published_at, p.created_at)"

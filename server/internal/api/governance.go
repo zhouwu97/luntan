@@ -653,7 +653,11 @@ func (s *Server) isIPRestricted(r *http.Request) bool {
 	if s == nil || s.db == nil {
 		return false
 	}
+	clientIP := httpserver.ClientIP(r)
+	if clientIP == "" || clientIP == "unknown" {
+		return false
+	}
 	var restricted bool
-	err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM ip_restrictions WHERE revoked_at IS NULL AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) AND ip_cidr >>= $1::inet)`, httpserver.ClientIP(r)).Scan(&restricted)
+	err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM ip_restrictions WHERE restriction_type = 'access' AND revoked_at IS NULL AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) AND ip_cidr >>= $1::inet)`, clientIP).Scan(&restricted)
 	return err == nil && restricted
 }

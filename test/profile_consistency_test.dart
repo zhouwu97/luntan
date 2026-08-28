@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/auth_repository.dart';
 import 'package:luntan/data/api/profile_repository.dart';
+import 'package:luntan/data/api/user_repository.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/domain/models.dart';
 import 'package:luntan/screens/entity_screens.dart';
@@ -35,6 +36,46 @@ class _MockProfileRepo extends ProfileRepository {
     }
     return ProfileListPage(items: posts);
   }
+}
+
+class _MockUserRepository implements UserRepository {
+  _MockUserRepository({required this.profile, required this.posts});
+
+  final UserProfile profile;
+  final UserPostPage posts;
+
+  @override
+  Future<UserProfile?> getProfile(String userId) async => profile;
+
+  @override
+  Future<UserPostPage> listPosts(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async => posts;
+
+  @override
+  Future<UserRelationPage> listFollowers(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async => const UserRelationPage(items: []);
+
+  @override
+  Future<UserRelationPage> listFollowing(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async => const UserRelationPage(items: []);
+
+  @override
+  Future<void> setFollow({
+    required String userId,
+    required bool active,
+  }) async {}
+
+  @override
+  Future<void> setBlock({required String userId, required bool active}) async {}
 }
 
 void main() {
@@ -196,6 +237,60 @@ void main() {
       expect(find.byType(UserProfileScreen), findsOneWidget);
       expect(find.text('编辑资料'), findsOneWidget);
       expect(find.text('杯友老张'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('个人主页帖子卡片只展示服务端真实计数', (tester) async {
+      final repository = _MockUserRepository(
+        profile: UserProfile(
+          id: 'user_100',
+          username: 'cup_master',
+          nickname: '杯友老张',
+          bio: '评测老手',
+          level: 3,
+          trustLevel: 'trusted',
+          status: 'active',
+          postCount: 1,
+          followerCount: 11,
+          followingCount: 13,
+          createdAt: DateTime.utc(2026, 8, 24),
+        ),
+        posts: UserPostPage(
+          items: [
+            UserPost(
+              id: 'post_1001',
+              title: '真实开箱体验分享',
+              contentPreview: '做工非常精致',
+              communityName: '评测专区',
+              commentCount: 987,
+              likeCount: 654,
+              viewCount: 321,
+              createdAt: DateTime.utc(2026, 8, 24),
+            ),
+          ],
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UserProfileScreen(
+            repository: repository,
+            userId: 'user_100',
+            isAuthenticated: true,
+            canFollow: false,
+            isSelf: false,
+            onRequireAuth: () {},
+            onFeedback: (_) {},
+            onOpenPostId: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('321'), findsOneWidget);
+      expect(find.text('654'), findsOneWidget);
+      expect(find.text('987'), findsOneWidget);
+      expect(find.text('100%'), findsNothing);
     });
 
     testWidgets('3. 我的评论列表展示评论正文、原帖标题并带 focusCommentId 跳转', (tester) async {

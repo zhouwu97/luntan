@@ -265,6 +265,35 @@ func TestProfileCommentsReturnsAuthoredComments(t *testing.T) {
 	}
 }
 
+func TestPublicUserPostsExposeRealPostCounts(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	created := time.Date(2026, 8, 24, 20, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT p\.id, p\.title.*p\.view_count.*FROM posts p.*p\.author_id = \$1.*LIMIT \$2`).
+		WithArgs("u1", 2).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "title", "content", "community_id", "community_name",
+			"comment_count", "like_count", "bookmark_count", "view_count", "created_at",
+		}).AddRow("post-1", "真实帖子", "正文", "c1", "评测区", 5, 37, 2, 321, created))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1/posts?limit=1", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK ||
+		!strings.Contains(res.Body.String(), `"like_count":37`) ||
+		!strings.Contains(res.Body.String(), `"view_count":321`) {
+		t.Fatalf("public user posts response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoreProductsOrdersByRedeemedCount(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

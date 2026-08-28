@@ -16,7 +16,8 @@ import 'profile_screen.dart';
 
 bool _hasUsableAvatar(String? value) {
   final url = value?.trim().toLowerCase();
-  return url != null && (url.startsWith('https://') || url.startsWith('http://'));
+  return url != null &&
+      (url.startsWith('https://') || url.startsWith('http://'));
 }
 
 class UserProfileScreen extends StatefulWidget {
@@ -179,7 +180,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _loadMoreComments() async {
-    if (_loadingMoreComments || !_hasMoreComments || _nextCommentsCursor == null || widget.profileRepository == null) {
+    if (_loadingMoreComments ||
+        !_hasMoreComments ||
+        _nextCommentsCursor == null ||
+        widget.profileRepository == null) {
       return;
     }
     setState(() => _loadingMoreComments = true);
@@ -274,24 +278,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<void> _openEditProfile() async {
     if (widget.profileRepository == null) return;
-    final summary = _selfSummary ?? (_profile != null
-        ? ProfileSummary(
-            id: _profile!.id,
-            username: _profile!.username,
-            nickname: _profile!.nickname,
-            avatarMediaId: _profile!.avatarMediaId,
-            level: _profile!.level,
-            experience: _profile!.experience,
-            growth: _profile!.growth,
-            trustLevel: _profile!.trustLevel,
-            signature: _profile!.bio,
-            postCount: _profile!.postCount,
-            commentCount: 0,
-            likeReceivedCount: 0,
-            followerCount: _profile!.followerCount,
-            followingCount: _profile!.followingCount,
-          )
-        : null);
+    final summary =
+        _selfSummary ??
+        (_profile != null
+            ? ProfileSummary(
+                id: _profile!.id,
+                username: _profile!.username,
+                nickname: _profile!.nickname,
+                avatarMediaId: _profile!.avatarMediaId,
+                level: _profile!.level,
+                experience: _profile!.experience,
+                growth: _profile!.growth,
+                trustLevel: _profile!.trustLevel,
+                signature: _profile!.bio,
+                postCount: _profile!.postCount,
+                commentCount: 0,
+                likeReceivedCount: 0,
+                followerCount: _profile!.followerCount,
+                followingCount: _profile!.followingCount,
+              )
+            : null);
     if (summary == null) return;
 
     final updated = await Navigator.of(context).push<bool>(
@@ -316,7 +322,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     body: FutureBuilder<UserProfile?>(
       future: _future,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done && _profile == null && _selfSummary == null) {
+        if (snapshot.connectionState != ConnectionState.done &&
+            _profile == null &&
+            _selfSummary == null) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError && _profile == null && _selfSummary == null) {
@@ -326,9 +334,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('用户不存在或加载失败', style: TextStyle(color: AppTheme.textSecondary)),
+                  const Text(
+                    '用户不存在或加载失败',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
                   const SizedBox(height: 8),
-                  TextButton(onPressed: () => setState(() => _future = _load()), child: const Text('重试')),
+                  TextButton(
+                    onPressed: () => setState(() => _future = _load()),
+                    child: const Text('重试'),
+                  ),
                 ],
               ),
             ),
@@ -343,18 +357,25 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             : (profile?.nickname.isNotEmpty == true ? profile!.nickname : '游客');
         final username = _selfSummary?.username.isNotEmpty == true
             ? _selfSummary!.username
-            : (profile?.username.isNotEmpty == true ? profile!.username : 'guest');
+            : (profile?.username.isNotEmpty == true
+                  ? profile!.username
+                  : 'guest');
         final level = _selfSummary?.level ?? profile?.level ?? 1;
         final trustLevel = _selfSummary?.trustLevel.isNotEmpty == true
             ? _selfSummary!.trustLevel
-            : (profile?.trustLevel.isNotEmpty == true ? profile!.trustLevel : 'new');
+            : (profile?.trustLevel.isNotEmpty == true
+                  ? profile!.trustLevel
+                  : 'new');
         final signature = _selfSummary?.signature.isNotEmpty == true
             ? _selfSummary!.signature
             : (profile?.bio.isNotEmpty == true ? profile!.bio : '');
-        final postCount = _selfSummary?.postCount ?? profile?.postCount ?? _posts.length;
+        final postCount =
+            _selfSummary?.postCount ?? profile?.postCount ?? _posts.length;
         final commentCount = _selfSummary?.commentCount ?? _comments.length;
-        final followerCount = _selfSummary?.followerCount ?? profile?.followerCount ?? 0;
-        final followingCount = _selfSummary?.followingCount ?? profile?.followingCount ?? 0;
+        final followerCount =
+            _selfSummary?.followerCount ?? profile?.followerCount ?? 0;
+        final followingCount =
+            _selfSummary?.followingCount ?? profile?.followingCount ?? 0;
         final likeReceivedCount = _selfSummary?.likeReceivedCount ?? 0;
         final avatarUrl = _selfSummary?.avatarUrl;
         final growth = _selfSummary?.growth ?? profile?.growth;
@@ -412,7 +433,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     child: SafeArea(
                       bottom: false,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -424,7 +448,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 shape: BoxShape.circle,
                               ),
                               child: IconButton(
-                                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                                icon: const Icon(
+                                  Icons.arrow_back_rounded,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
                                 onPressed: () => Navigator.of(context).pop(),
                                 tooltip: '返回',
                               ),
@@ -438,7 +466,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   shape: BoxShape.circle,
                                 ),
                                 child: IconButton(
-                                  icon: const Icon(Icons.settings_outlined, color: Colors.white, size: 20),
+                                  icon: const Icon(
+                                    Icons.settings_outlined,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
                                   onPressed: _openEditProfile,
                                   tooltip: '主页设置',
                                 ),
@@ -452,14 +484,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   shape: BoxShape.circle,
                                 ),
                                 child: PopupMenuButton<String>(
-                                  icon: const Icon(Icons.more_horiz_rounded, color: Colors.white, size: 20),
+                                  icon: const Icon(
+                                    Icons.more_horiz_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
                                   onSelected: (value) {
                                     if (value == 'block') _toggleBlock();
                                   },
                                   itemBuilder: (_) => [
                                     PopupMenuItem(
                                       value: 'block',
-                                      child: Text(profile.isBlocked ? '取消拉黑' : '拉黑用户'),
+                                      child: Text(
+                                        profile.isBlocked ? '取消拉黑' : '拉黑用户',
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -487,20 +525,35 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               height: 78,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 3),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  width: 3,
+                                ),
                                 gradient: const LinearGradient(
-                                  colors: [Color(0xFFF4F9FF), Color(0xFFD8EDFF)],
+                                  colors: [
+                                    Color(0xFFF4F9FF),
+                                    Color(0xFFD8EDFF),
+                                  ],
                                 ),
                                 boxShadow: const [
-                                  BoxShadow(color: Color(0x2E000000), blurRadius: 18, offset: Offset(0, 6)),
+                                  BoxShadow(
+                                    color: Color(0x2E000000),
+                                    blurRadius: 18,
+                                    offset: Offset(0, 6),
+                                  ),
                                 ],
                               ),
                               child: ClipOval(
                                 child: _hasUsableAvatar(avatarUrl)
-                                    ? Image.network(avatarUrl!, fit: BoxFit.cover)
+                                    ? Image.network(
+                                        avatarUrl!,
+                                        fit: BoxFit.cover,
+                                      )
                                     : Center(
                                         child: Text(
-                                          nickname.isEmpty ? '游' : nickname.characters.first,
+                                          nickname.isEmpty
+                                              ? '游'
+                                              : nickname.characters.first,
                                           style: const TextStyle(
                                             color: Color(0xFF417CC0),
                                             fontSize: 29,
@@ -517,16 +570,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 borderRadius: BorderRadius.circular(13),
                                 child: Container(
                                   height: 35,
-                                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                  ),
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.5,
+                                      ),
+                                    ),
                                     color: Colors.white.withValues(alpha: 0.16),
                                     borderRadius: BorderRadius.circular(13),
                                   ),
                                   alignment: Alignment.center,
                                   child: const Text(
                                     '编辑资料',
-                                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
                               )
@@ -534,9 +597,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               FilledButton.tonal(
                                 onPressed: _busy ? null : _toggleFollow,
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.white.withValues(alpha: 0.2),
+                                  backgroundColor: Colors.white.withValues(
+                                    alpha: 0.2,
+                                  ),
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(13),
+                                  ),
                                 ),
                                 child: Text(profile.isFollowing ? '已关注' : '关注'),
                               ),
@@ -560,14 +627,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 3.5,
+                              ),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF4B97C6),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
                                 isLocked ? 'Lv.0' : 'Lv.$level',
-                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
                           ],
@@ -576,7 +650,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         // ID 与信任标签
                         Text(
                           '@$username · 信任 $trustLevel',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.78), fontSize: 12),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontSize: 12,
+                          ),
                         ),
                         if (signature.isNotEmpty) ...[
                           const SizedBox(height: 4),
@@ -584,7 +661,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             signature,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                         const SizedBox(height: 12),
@@ -594,7 +674,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             _HeroStatItem(
                               value: likeReceivedCount,
                               label: '获赞',
-                              onTap: () => widget.onFeedback('共收到 $likeReceivedCount 个点赞'),
+                              onTap: () => widget.onFeedback(
+                                '共收到 $likeReceivedCount 个点赞',
+                              ),
                             ),
                             const SizedBox(width: 24),
                             _HeroStatItem(
@@ -602,7 +684,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               label: '关注',
                               onTap: widget.onOpenRelations == null
                                   ? null
-                                  : () => widget.onOpenRelations!(profile?.id ?? widget.userId, false),
+                                  : () => widget.onOpenRelations!(
+                                      profile?.id ?? widget.userId,
+                                      false,
+                                    ),
                             ),
                             const SizedBox(width: 24),
                             _HeroStatItem(
@@ -610,7 +695,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               label: '粉丝',
                               onTap: widget.onOpenRelations == null
                                   ? null
-                                  : () => widget.onOpenRelations!(profile?.id ?? widget.userId, true),
+                                  : () => widget.onOpenRelations!(
+                                      profile?.id ?? widget.userId,
+                                      true,
+                                    ),
                             ),
                           ],
                         ),
@@ -620,7 +708,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           height: 48,
                           padding: const EdgeInsets.symmetric(horizontal: 13),
                           decoration: BoxDecoration(
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.18),
+                            ),
                             color: const Color(0x3E1E2630),
                             borderRadius: BorderRadius.circular(14),
                           ),
@@ -629,14 +719,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               if (isLocked) ...[
                                 const Text(
                                   'Lv.0',
-                                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                                 const SizedBox(width: 9),
                                 Expanded(
                                   child: Text(
                                     '累计经验 $experience EXP · 🔒 注册后解锁等级',
                                     style: TextStyle(
-                                      color: Colors.white.withValues(alpha: 0.9),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.9,
+                                      ),
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -645,7 +741,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               ] else ...[
                                 Text(
                                   'Lv.$level',
-                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
                                 const SizedBox(width: 9),
                                 Expanded(
@@ -653,14 +753,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     borderRadius: BorderRadius.circular(99),
                                     child: Container(
                                       height: 7,
-                                      color: Colors.white.withValues(alpha: 0.32),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.32,
+                                      ),
                                       alignment: Alignment.centerLeft,
                                       child: FractionallySizedBox(
-                                        widthFactor: expReq > 0 ? (expInLevel / expReq).clamp(0.05, 1.0) : 0.5,
+                                        widthFactor: expReq > 0
+                                            ? (expInLevel / expReq).clamp(
+                                                0.05,
+                                                1.0,
+                                              )
+                                            : 0.5,
                                         child: Container(
                                           decoration: BoxDecoration(
                                             color: const Color(0xFF64B6DF),
-                                            borderRadius: BorderRadius.circular(99),
+                                            borderRadius: BorderRadius.circular(
+                                              99,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -670,7 +779,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 const SizedBox(width: 9),
                                 Text(
                                   '$expInLevel / $expReq EXP',
-                                  style: TextStyle(color: Colors.white.withValues(alpha: 0.82), fontSize: 11),
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.82),
+                                    fontSize: 11,
+                                  ),
                                 ),
                               ],
                               if (_pointsBalance != null) ...[
@@ -678,11 +790,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.monetization_on_rounded, color: AppTheme.orange, size: 15),
+                                    const Icon(
+                                      Icons.monetization_on_rounded,
+                                      color: AppTheme.orange,
+                                      size: 15,
+                                    ),
                                     const SizedBox(width: 3),
                                     Text(
                                       '$_pointsBalance',
-                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -707,7 +827,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                   boxShadow: [
-                    BoxShadow(color: Color(0x140E1D2C), blurRadius: 20, offset: Offset(0, -8)),
+                    BoxShadow(
+                      color: Color(0x140E1D2C),
+                      blurRadius: 20,
+                      offset: Offset(0, -8),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -716,20 +840,27 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     Container(
                       height: 52,
                       decoration: const BoxDecoration(
-                        border: Border(bottom: BorderSide(color: Color(0xFFEEF1F4), width: 1)),
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Color(0xFFEEF1F4),
+                            width: 1,
+                          ),
+                        ),
                       ),
                       child: Row(
                         children: [
                           Expanded(
                             child: _HomeTabButton(
-                              label: '帖子 ${postCount > 0 ? postCount : _posts.length}',
+                              label:
+                                  '帖子 ${postCount > 0 ? postCount : _posts.length}',
                               active: _currentTab == 0,
                               onTap: () => setState(() => _currentTab = 0),
                             ),
                           ),
                           Expanded(
                             child: _HomeTabButton(
-                              label: '评论 ${commentCount > 0 ? commentCount : _comments.length}',
+                              label:
+                                  '评论 ${commentCount > 0 ? commentCount : _comments.length}',
                               active: _currentTab == 1,
                               onTap: () => setState(() => _currentTab = 1),
                             ),
@@ -753,13 +884,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     ),
   );
 
-  Widget _buildPostsFeed(String authorName, bool isLocked, int level) => FutureBuilder<UserPostPage>(
+  Widget _buildPostsFeed(
+    String authorName,
+    bool isLocked,
+    int level,
+  ) => FutureBuilder<UserPostPage>(
     future: _postsFuture,
     builder: (context, postsSnapshot) {
-      if (postsSnapshot.connectionState != ConnectionState.done && _posts.isEmpty) {
+      if (postsSnapshot.connectionState != ConnectionState.done &&
+          _posts.isEmpty) {
         return const Center(child: CircularProgressIndicator());
       }
-      final posts = _posts.isEmpty ? postsSnapshot.data?.items ?? const <UserPost>[] : _posts;
+      final posts = _posts.isEmpty
+          ? postsSnapshot.data?.items ?? const <UserPost>[]
+          : _posts;
       if (posts.isEmpty) {
         return Center(
           child: Column(
@@ -772,10 +910,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   color: AppTheme.surfaceBlue,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.article_outlined, color: AppTheme.primary, size: 24),
+                child: const Icon(
+                  Icons.article_outlined,
+                  color: AppTheme.primary,
+                  size: 24,
+                ),
               ),
               const SizedBox(height: 10),
-              const Text('还没有发布过帖子', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+              const Text(
+                '还没有发布过帖子',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
             ],
           ),
         );
@@ -784,7 +929,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         controller: _postsScrollController,
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 28),
         itemCount: posts.length + (_loadingMorePosts ? 1 : 0),
-        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0xFFF0F2F5)),
+        separatorBuilder: (_, _) =>
+            const Divider(height: 1, color: Color(0xFFF0F2F5)),
         itemBuilder: (context, index) {
           if (index == posts.length) {
             return const Padding(
@@ -793,7 +939,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             );
           }
           final post = posts[index];
-          return _PrototypePostCard(
+          return _UserPostCard(
             post: post,
             authorNickname: authorName,
             authorLevel: isLocked ? 0 : level,
@@ -804,13 +950,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     },
   );
 
-  Widget _buildCommentsFeed(String authorName, bool isLocked, int level) => FutureBuilder<ProfileListPage?>(
+  Widget _buildCommentsFeed(
+    String authorName,
+    bool isLocked,
+    int level,
+  ) => FutureBuilder<ProfileListPage?>(
     future: _commentsFuture,
     builder: (context, commentsSnapshot) {
-      if (commentsSnapshot.connectionState != ConnectionState.done && _comments.isEmpty) {
+      if (commentsSnapshot.connectionState != ConnectionState.done &&
+          _comments.isEmpty) {
         return const Center(child: CircularProgressIndicator());
       }
-      final comments = _comments.isEmpty ? commentsSnapshot.data?.items ?? const <ProfilePostItem>[] : _comments;
+      final comments = _comments.isEmpty
+          ? commentsSnapshot.data?.items ?? const <ProfilePostItem>[]
+          : _comments;
       if (comments.isEmpty) {
         return Center(
           child: Column(
@@ -823,10 +976,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   color: AppTheme.surfaceBlue,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.primary, size: 24),
+                child: const Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  color: AppTheme.primary,
+                  size: 24,
+                ),
               ),
               const SizedBox(height: 10),
-              const Text('还没有发表过评论', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+              const Text(
+                '还没有发表过评论',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              ),
             ],
           ),
         );
@@ -835,7 +995,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         controller: _commentsScrollController,
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 28),
         itemCount: comments.length + (_loadingMoreComments ? 1 : 0),
-        separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0xFFF0F2F5)),
+        separatorBuilder: (_, _) =>
+            const Divider(height: 1, color: Color(0xFFF0F2F5)),
         itemBuilder: (context, index) {
           if (index == comments.length) {
             return const Padding(
@@ -844,7 +1005,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             );
           }
           final comment = comments[index];
-          return _PrototypeCommentCard(
+          return _UserCommentCard(
             item: comment,
             authorNickname: authorName,
             authorLevel: isLocked ? 0 : level,
@@ -857,11 +1018,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 }
 
 class _HeroStatItem extends StatelessWidget {
-  const _HeroStatItem({
-    required this.value,
-    required this.label,
-    this.onTap,
-  });
+  const _HeroStatItem({required this.value, required this.label, this.onTap});
 
   final int value;
   final String label;
@@ -945,8 +1102,8 @@ class _HomeTabButton extends StatelessWidget {
   );
 }
 
-class _PrototypePostCard extends StatelessWidget {
-  const _PrototypePostCard({
+class _UserPostCard extends StatelessWidget {
+  const _UserPostCard({
     required this.post,
     required this.authorNickname,
     required this.authorLevel,
@@ -967,14 +1124,16 @@ class _PrototypePostCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 作者信息栏 + 信任盾牌标签
+          // 作者信息栏只展示已有的账号等级，不凭空推算信任指标。
           Row(
             children: [
               CircleAvatar(
                 radius: 19,
                 backgroundColor: AppTheme.surfaceBlue,
                 child: Text(
-                  authorNickname.isEmpty ? '杯' : authorNickname.characters.first,
+                  authorNickname.isEmpty
+                      ? '杯'
+                      : authorNickname.characters.first,
                   style: const TextStyle(
                     color: AppTheme.primary,
                     fontWeight: FontWeight.w900,
@@ -993,19 +1152,30 @@ class _PrototypePostCard extends StatelessWidget {
                           child: Text(
                             authorNickname,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textPrimary,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 5),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFFE8F3F7),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             'Lv.$authorLevel',
-                            style: const TextStyle(color: Color(0xFF5F8DA7), fontSize: 9, fontWeight: FontWeight.w700),
+                            style: const TextStyle(
+                              color: Color(0xFF5F8DA7),
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ],
@@ -1013,25 +1183,10 @@ class _PrototypePostCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       relativeTimeLabel(post.createdAt),
-                      style: const TextStyle(fontSize: 10, color: Color(0xFF9AA5AE)),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE9F8EE),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.shield_outlined, color: Color(0xFF4CB87A), size: 12),
-                    SizedBox(width: 3),
-                    Text(
-                      '100%',
-                      style: TextStyle(color: Color(0xFF4CB87A), fontSize: 10, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF9AA5AE),
+                      ),
                     ),
                   ],
                 ),
@@ -1057,18 +1212,31 @@ class _PrototypePostCard extends StatelessWidget {
               post.contentPreview,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF45505A), height: 1.55),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF45505A),
+                height: 1.55,
+              ),
             ),
           ],
           const SizedBox(height: 10),
-          // 浏览、点赞、评论度量行
+          // 统计值来自用户帖子接口，禁止用其他字段推算或填充演示值。
           Row(
             children: [
-              _MetricItem(icon: Icons.visibility_outlined, label: '${post.commentCount * 12 + 18}'),
+              _MetricItem(
+                icon: Icons.visibility_outlined,
+                label: '${post.viewCount}',
+              ),
               const SizedBox(width: 17),
-              _MetricItem(icon: Icons.favorite_border_rounded, label: '${post.commentCount > 0 ? post.commentCount : 1}'),
+              _MetricItem(
+                icon: Icons.favorite_border_rounded,
+                label: '${post.likeCount}',
+              ),
               const SizedBox(width: 17),
-              _MetricItem(icon: Icons.chat_bubble_outline_rounded, label: '${post.commentCount}'),
+              _MetricItem(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: '${post.commentCount}',
+              ),
             ],
           ),
         ],
@@ -1077,8 +1245,8 @@ class _PrototypePostCard extends StatelessWidget {
   );
 }
 
-class _PrototypeCommentCard extends StatelessWidget {
-  const _PrototypeCommentCard({
+class _UserCommentCard extends StatelessWidget {
+  const _UserCommentCard({
     required this.item,
     required this.authorNickname,
     required this.authorLevel,
@@ -1105,7 +1273,9 @@ class _PrototypeCommentCard extends StatelessWidget {
                 radius: 19,
                 backgroundColor: AppTheme.surfaceBlue,
                 child: Text(
-                  authorNickname.isEmpty ? '杯' : authorNickname.characters.first,
+                  authorNickname.isEmpty
+                      ? '杯'
+                      : authorNickname.characters.first,
                   style: const TextStyle(
                     color: AppTheme.primary,
                     fontWeight: FontWeight.w900,
@@ -1121,18 +1291,29 @@ class _PrototypeCommentCard extends StatelessWidget {
                     children: [
                       Text(
                         authorNickname,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textPrimary,
+                        ),
                       ),
                       const SizedBox(width: 5),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFFE8F3F7),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           'Lv.$authorLevel',
-                          style: const TextStyle(color: Color(0xFF5F8DA7), fontSize: 9, fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            color: Color(0xFF5F8DA7),
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
@@ -1140,7 +1321,10 @@ class _PrototypeCommentCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     relativeTimeLabel(item.activityAt ?? item.publishedAt),
-                    style: const TextStyle(fontSize: 10, color: Color(0xFF9AA5AE)),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF9AA5AE),
+                    ),
                   ),
                 ],
               ),
@@ -1149,7 +1333,11 @@ class _PrototypeCommentCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             item.contentPreview.isNotEmpty ? item.contentPreview : '发表了评论',
-            style: const TextStyle(fontSize: 13, color: Color(0xFF394856), height: 1.55),
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF394856),
+              height: 1.55,
+            ),
           ),
           const SizedBox(height: 8),
           Container(
@@ -1745,4 +1933,3 @@ class _Stat extends StatelessWidget {
     ],
   );
 }
-

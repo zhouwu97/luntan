@@ -452,7 +452,11 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _showFallbackMessage(BuildContext context, String label, String message) {
+  void _showFallbackMessage(
+    BuildContext context,
+    String label,
+    String message,
+  ) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -2217,19 +2221,15 @@ class _RecentPostsApi extends StatelessWidget {
             ),
           );
         }
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
+        return Material(
+          color: Colors.white,
+          elevation: 1,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppTheme.border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0F274969),
-                blurRadius: 16,
-                offset: Offset(0, 5),
-              ),
-            ],
+            side: const BorderSide(color: AppTheme.border),
           ),
+          clipBehavior: Clip.antiAlias,
+          shadowColor: const Color(0x0F274969),
           child: Column(
             children: [
               for (var i = 0; i < items.length; i++) ...[
@@ -2323,120 +2323,117 @@ class _RecentPosts extends StatelessWidget {
       return byTime == 0 ? b.id.compareTo(a.id) : byTime;
     });
     final recentPosts = posts.take(3).toList();
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.white,
+      elevation: 1,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0F274969),
-            blurRadius: 16,
-            offset: Offset(0, 5),
-          ),
-        ],
+        side: const BorderSide(color: AppTheme.border),
       ),
-      child: recentPosts.isEmpty
-          ? Column(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 45,
-                      height: 45,
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceBlue,
-                        borderRadius: BorderRadius.circular(15),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: recentPosts.isEmpty
+            ? Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 45,
+                        height: 45,
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceBlue,
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: const Icon(
+                          Icons.article_outlined,
+                          color: AppTheme.primary,
+                          size: 22,
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.article_outlined,
-                        color: AppTheme.primary,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            isGuest ? '暂时没有发布内容' : '还没有发布过帖子',
-                            style: const TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isGuest ? '暂时没有发布内容' : '还没有发布过帖子',
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            isGuest
-                                ? '游客可以浏览和评论，注册邮箱账号后即可发布帖子。'
-                                : '分享你的第一篇内容吧。',
-                            style: const TextStyle(
-                              color: Color(0xFF8DA0B2),
-                              fontSize: 10.5,
+                            const SizedBox(height: 4),
+                            Text(
+                              isGuest
+                                  ? '游客可以浏览和评论，注册邮箱账号后即可发布帖子。'
+                                  : '分享你的第一篇内容吧。',
+                              style: const TextStyle(
+                                color: Color(0xFF8DA0B2),
+                                fontSize: 10.5,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 40,
-                  child: OutlinedButton(
-                    onPressed: isGuest
-                        ? (onRequireAuth ?? onOpenHome)
-                        : (onOpenComposer ?? onOpenHome),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF376D9E),
-                      backgroundColor: const Color(0xFFFAFDFF),
-                      side: const BorderSide(color: Color(0xFFCFE0F2)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 40,
+                    child: OutlinedButton(
+                      onPressed: isGuest
+                          ? (onRequireAuth ?? onOpenHome)
+                          : (onOpenComposer ?? onOpenHome),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF376D9E),
+                        backgroundColor: const Color(0xFFFAFDFF),
+                        side: const BorderSide(color: Color(0xFFCFE0F2)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
+                        ),
                       ),
-                    ),
-                    child: Text(
-                      isGuest ? '登录 / 注册' : '去发布',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                      child: Text(
+                        isGuest ? '登录 / 注册' : '去发布',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            )
-          : Column(
-              children: recentPosts
-                  .map(
-                    (post) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        post.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        '${post.section.label} · ${post.commentCount} 回复 · 发布于${relativeTimeLabel(post.publishedAt ?? post.createdAt)}',
-                        style: const TextStyle(
-                          color: Color(0xFF8DA0B2),
-                          fontSize: 11,
+                ],
+              )
+            : Column(
+                children: recentPosts
+                    .map(
+                      (post) => ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          post.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
+                        subtitle: Text(
+                          '${post.section.label} · ${post.commentCount} 回复 · 发布于${relativeTimeLabel(post.publishedAt ?? post.createdAt)}',
+                          style: const TextStyle(
+                            color: Color(0xFF8DA0B2),
+                            fontSize: 11,
+                          ),
+                        ),
+                        trailing: const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.textSecondary,
+                        ),
+                        onTap: () => onOpenPost(post),
                       ),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: AppTheme.textSecondary,
-                      ),
-                      onTap: () => onOpenPost(post),
-                    ),
-                  )
-                  .toList(),
-            ),
+                    )
+                    .toList(),
+              ),
+      ),
     );
   }
 }

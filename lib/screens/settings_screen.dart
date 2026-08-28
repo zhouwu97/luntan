@@ -53,8 +53,8 @@ class SettingsCenterScreen extends StatelessWidget {
                 )
               else
                 _SettingsTile(
-                  icon: Icons.verified_user_outlined,
-                  title: '账号与安全',
+                  icon: Icons.account_circle_outlined,
+                  title: '当前账号',
                   subtitle: accountSubtitle ?? '当前账号已登录',
                   color: AppTheme.primary,
                 ),
@@ -240,12 +240,14 @@ class _SettingsSection extends StatelessWidget {
           ),
         ),
       ),
-      DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.white,
+      Material(
+        color: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
+          side: const BorderSide(color: AppTheme.border),
         ),
+        clipBehavior: Clip.antiAlias,
         child: Column(children: children),
       ),
     ],

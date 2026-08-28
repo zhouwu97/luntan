@@ -48,6 +48,8 @@ class UserPost {
     required this.contentPreview,
     required this.communityName,
     required this.commentCount,
+    this.likeCount = 0,
+    this.viewCount = 0,
     required this.createdAt,
   });
 
@@ -56,6 +58,8 @@ class UserPost {
   final String contentPreview;
   final String communityName;
   final int commentCount;
+  final int likeCount;
+  final int viewCount;
   final DateTime createdAt;
 }
 
@@ -204,6 +208,8 @@ class ApiUserRepository implements UserRepository {
               contentPreview: _string(data['content_preview']),
               communityName: _string(data['community_name']),
               commentCount: _int(data['comment_count']),
+              likeCount: _int(data['like_count']),
+              viewCount: _int(data['view_count']),
               createdAt: _date(data['created_at']),
             );
           }).toList()

@@ -58,7 +58,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
     if (saving) return;
-    if (newIndex > oldIndex) newIndex -= 1;
+
     if (oldIndex == newIndex ||
         oldIndex < 0 ||
         oldIndex >= items.length ||
@@ -179,7 +179,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       child: ReorderableListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         itemCount: items.length,
-        onReorder: _reorder,
+        onReorderItem: _reorder,
         itemBuilder: (context, index) {
           final item = items[index];
           return Card(

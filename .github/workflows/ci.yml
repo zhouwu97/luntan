@@ -16,6 +16,7 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.2'
           channel: stable
       - run: flutter pub get
       - run: flutter analyze
@@ -35,7 +36,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U luntan"
+          --health-cmd "pg_isready -U luntan -d luntan_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -49,6 +50,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       # 集成测试共用 CI PostgreSQL；包级并发会让迁移和测试数据互相竞态。
       # Migrate 本身也持有 advisory lock，串行包执行保证 fixture 不跨包交叉。
       - run: go test -p 1 ./...

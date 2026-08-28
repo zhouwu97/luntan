@@ -45,7 +45,7 @@ func insertFeedFixtures(t *testing.T, s *Server) (communityID string, postIDs ma
 	userName := "itest_" + suffix
 	categoryID := "itest-cat-" + suffix
 	communityID = "itest-com-" + suffix
-	if _, err := s.db.Exec(`INSERT INTO users (id, username, status) VALUES ($1, $2, 'active')`, userID, userName); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO users (id, username, status, created_at, updated_at) VALUES ($1, $2, 'active', now() - interval '7 days', now() - interval '7 days')`, userID, userName); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO user_profiles (user_id, nickname) VALUES ($1, $2)`, userID, "itest"); err != nil {
@@ -215,7 +215,7 @@ func TestFeedLatestByCommentAndPostOrder(t *testing.T) {
 	userID := "itest-abc-user-" + suffix
 	categoryID := "itest-abc-cat-" + suffix
 	communityID := "itest-abc-com-" + suffix
-	if _, err := s.db.Exec(`INSERT INTO users (id, username, status) VALUES ($1, $2, 'active')`, userID, "user_"+suffix); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO users (id, username, status, created_at, updated_at) VALUES ($1, $2, 'active', now() - interval '7 days', now() - interval '7 days')`, userID, "user_"+suffix); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO community_categories (id, name, slug) VALUES ($1, $2, $3)`, categoryID, "abc", "abc-"+suffix); err != nil {
@@ -444,7 +444,7 @@ func TestFeedExcludesBlockedAuthorAgainstPostgres(t *testing.T) {
 	blockedPost := "itest-blocked-post-" + suffix
 	insertUser := func(id, username string) {
 		t.Helper()
-		if _, err := s.db.Exec(`INSERT INTO users (id, username, status) VALUES ($1, $2, 'active')`, id, username); err != nil {
+		if _, err := s.db.Exec(`INSERT INTO users (id, username, status, created_at, updated_at) VALUES ($1, $2, 'active', now() - interval '7 days', now() - interval '7 days')`, id, username); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.db.Exec(`INSERT INTO user_profiles (user_id, nickname) VALUES ($1, $2)`, id, "itest"); err != nil {

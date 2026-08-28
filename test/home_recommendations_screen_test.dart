@@ -91,7 +91,7 @@ void main() {
     final reorderable = tester.widget<ReorderableListView>(
       find.byType(ReorderableListView),
     );
-    reorderable.onReorder(0, 2);
+    reorderable.onReorderItem!(0, 1);
     await tester.pumpAndSettle();
 
     expect(repository.reorderedIds, ['p2', 'p1']);

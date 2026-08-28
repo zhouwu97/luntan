@@ -93,7 +93,7 @@ func NewHandlerWithExperienceRewards(db *sql.DB, rules ExperienceRewardRules) ht
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
-	if strings.EqualFold(strings.TrimSpace(s.appEnv), "production") && s.isIPRestricted(r) {
+	if s.isIPRestricted(r) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusForbidden, Code: "IP_RESTRICTED", Message: "当前网络地址暂不可访问"})
 		return
 	}

@@ -63,13 +63,6 @@ class _DraftImage {
 class _PostEditorScreenState extends State<PostEditorScreen> {
   final titleController = TextEditingController();
   final bodyController = TextEditingController();
-  final pollOptionControllers = [
-    TextEditingController(),
-    TextEditingController(),
-  ];
-  bool isPoll = false;
-  bool allowMultiple = false;
-  DateTime? pollEndsAt;
   String? topic;
   String? communityId;
   late final List<Community> _availableCommunities = [
@@ -110,17 +103,11 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   bool get _canUploadSelectedCommunity =>
       _selectedCommunity?.canUploadMedia != false;
 
-  bool get _canCreatePollSelectedCommunity =>
-      _selectedCommunity?.canCreatePoll != false;
-
   bool get _hasDraftContent =>
       titleController.text.trim().isNotEmpty ||
       bodyController.text.trim().isNotEmpty ||
       images.isNotEmpty ||
       selectedMedia.isNotEmpty ||
-      pollOptionControllers.any(
-        (controller) => controller.text.trim().isNotEmpty,
-      ) ||
       _restoredMediaIds.isNotEmpty;
 
   List<MediaAsset> get sampleMedia =>
@@ -158,9 +145,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     communityId =
         draft.communityId ?? _defaultCommunityId(_availableCommunities);
     topic = draft.topic;
-    isPoll = false;
-    allowMultiple = false;
-    pollEndsAt = null;
     _restoredMediaIds.addAll(draft.uploadedMediaIds);
     for (var index = 0; index < draft.localImagePaths.length; index++) {
       final path = draft.localImagePaths[index].trim();
@@ -274,43 +258,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     }
     titleController.dispose();
     bodyController.dispose();
-    for (final controller in pollOptionControllers) {
-      controller.dispose();
-    }
     super.dispose();
-  }
-
-  void _addPollOption() {
-    if (pollOptionControllers.length >= 10) return;
-    setState(() => pollOptionControllers.add(TextEditingController()));
-    _scheduleDraftSave();
-  }
-
-  void _removePollOption(int index) {
-    if (pollOptionControllers.length <= 2) return;
-    final controller = pollOptionControllers.removeAt(index);
-    controller.dispose();
-    setState(() {});
-    _scheduleDraftSave();
-  }
-
-  Future<void> _choosePollDeadline() async {
-    final now = DateTime.now();
-    final initialDate = pollEndsAt ?? now.add(const Duration(days: 7));
-    final picked = await showDatePicker(
-      context: context,
-      firstDate: DateTime(now.year, now.month, now.day),
-      lastDate: DateTime(now.year + 1, now.month, now.day),
-      initialDate: initialDate.isBefore(now) ? now : initialDate,
-      helpText: '选择投票截止日期',
-      cancelText: '取消',
-      confirmText: '确定',
-    );
-    if (!mounted || picked == null) return;
-    setState(() {
-      pollEndsAt = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
-    });
-    _scheduleDraftSave();
   }
 
   void submit() {
@@ -327,19 +275,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
     if (body.isEmpty) return setState(() => errorText = '正文不能为空');
-    if (isPoll && !_canCreatePollSelectedCommunity) {
-      return setState(() => errorText = '当前社区暂不允许发起投票，请更换社区');
-    }
-    final pollOptions = pollOptionControllers
-        .map((controller) => controller.text.trim())
-        .where((value) => value.isNotEmpty)
-        .toList();
-    if (isPoll && pollOptions.length < 2) {
-      return setState(() => errorText = '投票至少需要两个选项');
-    }
-    if (isPoll && pollOptions.toSet().length != pollOptions.length) {
-      return setState(() => errorText = '投票选项不能重复');
-    }
     if (images.isNotEmpty && !_canUploadSelectedCommunity) {
       return setState(() => errorText = '当前社区暂不允许上传图片，请更换社区');
     }
@@ -353,7 +288,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       );
     }
     setState(() => submitting = true);
-    _finishSubmit(title: title, body: body, pollOptions: pollOptions);
+    _finishSubmit(title: title, body: body, pollOptions: const []);
   }
 
   ComposerDraftSnapshot _snapshot() => ComposerDraftSnapshot(
@@ -361,13 +296,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     body: bodyController.text,
     communityId: communityId,
     topic: topic,
-    isPoll: isPoll,
-    pollOptions: pollOptionControllers
-        .map((controller) => controller.text.trim())
-        .where((value) => value.isNotEmpty)
-        .toList(),
-    allowMultiple: allowMultiple,
-    pollEndsAt: pollEndsAt,
+    isPoll: false,
+    pollOptions: const [],
+    allowMultiple: false,
+    pollEndsAt: null,
     localImagePaths: images.map((item) => item.file.path).toList(),
     uploadedMediaIds: <String>{
       ..._restoredMediaIds,
@@ -465,10 +397,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         media: selectedMedia,
         mediaIds: mediaIds,
         topic: topic,
-        isPoll: isPoll,
-        pollOptions: pollOptions,
-        allowMultiple: allowMultiple,
-        pollEndsAt: pollEndsAt,
+        isPoll: false,
+        pollOptions: const [],
+        allowMultiple: false,
+        pollEndsAt: null,
       );
       await widget.onPublish(draft);
       if (!mounted) return;

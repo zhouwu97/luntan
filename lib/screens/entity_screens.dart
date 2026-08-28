@@ -1727,25 +1727,22 @@ class _CommunityFeedMessage extends StatelessWidget {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({required this.label, required this.value, this.onTap});
+  const _Stat({required this.label, required this.value});
   final String label;
   final int value;
-  final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Column(
-      children: [
-        Text(
-          '$value',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-        ),
-        Text(
-          label,
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
-      ],
-    ),
+  Widget build(BuildContext context) => Column(
+    children: [
+      Text(
+        '$value',
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+      ),
+      Text(
+        label,
+        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      ),
+    ],
   );
 }
+

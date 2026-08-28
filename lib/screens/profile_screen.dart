@@ -816,22 +816,6 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     );
   }
 
-  Future<void> _openEditProfile(ProfileSummary profile) async {
-    final updated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => EditProfileScreen(
-          profile: profile,
-          repository: widget.repository,
-          publishRepository: widget.publishRepository,
-        ),
-      ),
-    );
-    if (updated == true && mounted) {
-      widget.onFeedback('个人资料已更新');
-      _refresh();
-    }
-  }
-
   void _openBookmarks() {
     if (widget.isGuest || widget.currentUser?.canManageBookmarks == false) {
       if (widget.onRequireAuth != null) {
@@ -876,78 +860,6 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       ),
     );
   }
-}
-
-class _GuestAccountBanner extends StatelessWidget {
-  const _GuestAccountBanner({this.onRequireAuth});
-
-  final VoidCallback? onRequireAuth;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-    decoration: BoxDecoration(
-      color: AppTheme.surfaceBlue,
-      borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-      border: Border.all(color: AppTheme.border),
-    ),
-    child: Row(
-      children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(
-            Icons.person_outline_rounded,
-            color: AppTheme.primary,
-            size: 20,
-          ),
-        ),
-        const SizedBox(width: 10),
-        const Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '当前为游客模式',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
-                ),
-              ),
-              SizedBox(height: 2),
-              Text(
-                '登录或绑定邮箱后保存个人数据与经验',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        FilledButton(
-          onPressed: onRequireAuth,
-          style: FilledButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          child: const Text(
-            '去登录',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 class EditProfileScreen extends StatefulWidget {
@@ -2511,72 +2423,6 @@ class _ProfileTopbar extends StatelessWidget {
       ),
     ],
   );
-}
-
-// 保持向下兼容的别名与工具组件
-class _ProfileHero extends StatelessWidget {
-  const _ProfileHero({this.user, required this.isApiMode, this.onRequireAuth});
-
-  final AuthUser? user;
-  final bool isApiMode;
-  final VoidCallback? onRequireAuth;
-
-  @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
-}
-
-class _StatsStrip extends StatelessWidget {
-  const _StatsStrip({
-    required this.store,
-    required this.onTap,
-    required this.isApiMode,
-  });
-
-  final ForumStore store;
-  final ValueChanged<String> onTap;
-  final bool isApiMode;
-
-  @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
-}
-
-class _ProfileTool extends StatelessWidget {
-  const _ProfileTool({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => _ToolButton(
-    icon: icon,
-    label: label,
-    iconColor: color,
-    bgColor: color.withValues(alpha: 0.12),
-    onTap: onTap,
-  );
-}
-
-class _ApiStat extends StatelessWidget {
-  const _ApiStat({
-    required this.value,
-    required this.label,
-    required this.onTap,
-  });
-
-  final int value;
-  final String label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) =>
-      _StatButton(count: value, label: label, onTap: onTap ?? () {});
 }
 
 class _ExchangePreview extends StatelessWidget {

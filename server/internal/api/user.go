@@ -116,8 +116,8 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 	for rows.Next() {
 		var id, title, content, communityID, communityName string
 		var createdAt time.Time
-		var commentCount, likeCount, bookmarkCount int64
-		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &createdAt); err != nil {
+		var commentCount, likeCount, bookmarkCount, viewCount int64
+		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &createdAt); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -126,6 +126,7 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 			"community_id": communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
+			"view_count": viewCount,
 		})
 	}
 	if err := rows.Err(); err != nil {

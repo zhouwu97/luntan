@@ -82,6 +82,28 @@ void main() {
     client.close();
   });
 
+  test('ApiUserRepository 映射公开帖子真实点赞和浏览量', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          utf8.encode(
+            '{"items":[{"id":"post-1","title":"真实帖子","content_preview":"正文","community_name":"评测区","comment_count":5,"like_count":37,"view_count":321,"created_at":"2026-08-24T20:00:00Z"}],"has_more":false}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+
+    final page = await ApiUserRepository(client).listPosts('u1');
+
+    expect(page.items.single.likeCount, 37);
+    expect(page.items.single.viewCount, 321);
+    expect(page.items.single.commentCount, 5);
+    client.close();
+  });
+
   test('ApiUserRepository 将游客经验保留但等级永久锁定为 0', () async {
     final client = ApiClient(
       baseUri: Uri.parse('https://example.com'),

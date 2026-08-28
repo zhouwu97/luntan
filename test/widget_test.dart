@@ -442,6 +442,25 @@ void main() {
     expect(find.text('清空浏览历史'), findsOneWidget);
     expect(find.text('退出登录'), findsOneWidget);
     expect(find.text('注销账号'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('已登录设置将账号展示为状态而不是未实现的安全入口', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsCenterScreen(
+          isGuest: false,
+          accountSubtitle: 'user@example.com',
+          onOpenMessages: () {},
+          onFeedback: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.text('当前账号'), findsOneWidget);
+    expect(find.text('user@example.com'), findsOneWidget);
+    expect(find.text('账号与安全'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('治理中心只展示当前 capability 对应的入口', (tester) async {

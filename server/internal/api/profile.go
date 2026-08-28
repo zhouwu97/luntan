@@ -202,8 +202,8 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 	for rows.Next() {
 		var id, title, content, communityID, communityName string
 		var createdAt time.Time
-		var commentCount, likeCount, bookmarkCount int64
-		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &createdAt); err != nil {
+		var commentCount, likeCount, bookmarkCount, viewCount int64
+		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &createdAt); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -212,6 +212,7 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 			"community_id": communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
+			"view_count":   viewCount,
 			"published_at": createdAt,
 		})
 	}
@@ -332,7 +333,7 @@ func profileListQuery(kind, userID, rawCursor string, limit int) (string, []any,
 	limitPosition := len(args)
 	return fmt.Sprintf(`
 		SELECT p.id, p.title, LEFT(p.content, 200), p.community_id, c.name,
-		       p.comment_count, p.like_count, p.bookmark_count, %s
+		       p.comment_count, p.like_count, p.bookmark_count, p.view_count, %s
 		FROM posts p %s
 		WHERE %s ORDER BY %s DESC, p.id DESC LIMIT $%d`, timestampColumn, join, where, timestampColumn, limitPosition), args, nil
 }

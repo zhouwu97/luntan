@@ -4,6 +4,7 @@ import '../../domain/models.dart';
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import 'comment_reply_preview.dart';
+import 'emoji/sticker_catalog.dart';
 
 class CommentItem extends StatefulWidget {
   const CommentItem({
@@ -17,6 +18,7 @@ class CommentItem extends StatefulWidget {
     this.onLike,
     this.onMore,
     this.onViewAllReplies,
+    this.onAuthorTap,
   });
 
   final Comment comment;
@@ -28,6 +30,7 @@ class CommentItem extends StatefulWidget {
   final VoidCallback? onLike;
   final VoidCallback? onMore;
   final VoidCallback? onViewAllReplies;
+  final ValueChanged<String>? onAuthorTap;
 
   @override
   State<CommentItem> createState() => _CommentItemState();
@@ -75,6 +78,41 @@ class _CommentItemState extends State<CommentItem>
     super.dispose();
   }
 
+  void _handleAuthorTap() {
+    final authorId = widget.comment.authorId;
+    if (authorId.isNotEmpty && !authorId.startsWith('guest')) {
+      widget.onAuthorTap?.call(authorId);
+    }
+  }
+
+  void _openImagePreview(BuildContext context, String imageUrl) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            elevation: 0,
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white54,
+                  size: 64,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final comment = widget.comment;
@@ -99,87 +137,136 @@ class _CommentItemState extends State<CommentItem>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 用户头像
-              _buildCommentAvatar(context, avatar, author),
-              const SizedBox(width: 10),
-
-              // 用户名、等级、时间与楼层
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+          // 头部：头像 + 昵称（统一点击热区，支持跳转个人主页）
+          InkWell(
+            onTap: widget.onAuthorTap != null ? _handleAuthorTap : null,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildCommentAvatar(context, avatar, author),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Text(
-                            author,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.textPrimary,
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.levelBg,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'Lv.$level',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.levelText,
+                            const SizedBox(width: 5),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.levelBg,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Lv.$level',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.levelText,
+                                ),
+                              ),
                             ),
-                          ),
+                            const Spacer(),
+                            Text(
+                              '${widget.floor} 楼',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: Color(0xFFA0AFBD),
+                              ),
+                            ),
+                          ],
                         ),
-                        const Spacer(),
+                        const SizedBox(height: 2),
                         Text(
-                          '${widget.floor} 楼',
+                          relativeTimeLabel(comment.createdAt),
                           style: const TextStyle(
-                            fontSize: 10.5,
-                            color: Color(0xFFA0AFBD),
+                            fontSize: 10,
+                            color: Color(0xFF99A8B7),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      relativeTimeLabel(comment.createdAt),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF99A8B7),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          // 评论正文
-          Padding(
-            padding: const EdgeInsets.only(left: 44, top: 8, right: 4),
-            child: Text(
-              comment.content,
-              style: const TextStyle(
-                fontSize: 14,
-                color: AppTheme.textPrimary,
-                height: 1.6,
+                  ),
+                ],
               ),
             ),
           ),
+
+          // 评论正文
+          if (comment.content.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 44, top: 4, right: 4),
+              child: Text(
+                comment.content,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.textPrimary,
+                  height: 1.6,
+                ),
+              ),
+            ),
+
+          // 评论图片展示
+          if (comment.media.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 44, top: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: comment.media.map((media) {
+                  final imageUrl = media.url ?? media.detail?.url ?? media.thumb?.url ?? '';
+                  if (imageUrl.isEmpty) return const SizedBox.shrink();
+
+                  return GestureDetector(
+                    onTap: () => _openImagePreview(context, imageUrl),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          maxWidth: 200,
+                          maxHeight: 200,
+                        ),
+                        color: const Color(0xFFEAF0F6),
+                        child: Image.network(
+                          imageUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Icon(Icons.broken_image_outlined, color: Colors.grey),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+          // 评论贴纸展示
+          if (comment.stickerId != null && comment.stickerId!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 44, top: 8),
+              child: _buildStickerView(comment.stickerId!),
+            ),
 
           // 操作栏（回复、点赞、更多）
           Padding(
@@ -261,9 +348,32 @@ class _CommentItemState extends State<CommentItem>
               totalReplyCount: comment.replyCount,
               onOpenThread: widget.onViewAllReplies ?? () {},
               onReplyTo: widget.onReplyTo,
+              onAuthorTap: widget.onAuthorTap,
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStickerView(String stickerId) {
+    final sticker = appStickerById(stickerId);
+    if (sticker != null) {
+      return Image.asset(
+        sticker.thumbnailAsset,
+        width: 100,
+        height: 100,
+        fit: BoxFit.contain,
+      );
+    }
+    return Container(
+      width: 80,
+      height: 80,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F4F8),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(Icons.sticky_note_2_outlined, color: Colors.grey, size: 36),
     );
   }
 

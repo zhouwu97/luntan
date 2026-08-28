@@ -21,22 +21,40 @@ var (
 	ErrInvalidComment        = errors.New("invalid comment")
 )
 
+type commentAttachmentResponse struct {
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	URL          string `json:"url,omitempty"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	StickerID    string `json:"sticker_id,omitempty"`
+}
+
+type commentAttachmentInput struct {
+	Type    string `json:"type"`
+	MediaID string `json:"media_id"`
+}
+
 type commentResponse struct {
-	ID            string              `json:"id"`
-	PostID        string              `json:"post_id"`
-	Author        userSummary         `json:"author"`
-	ReplyToUser   *userSummary        `json:"reply_to_user,omitempty"`
-	RootID        *string             `json:"root_id,omitempty"`
-	ParentID      *string             `json:"parent_id,omitempty"`
-	ReplyToUserID *string             `json:"reply_to_user_id,omitempty"`
-	Content       string              `json:"content"`
-	LikeCount     int64               `json:"like_count"`
-	ReplyCount    int64               `json:"reply_count"`
-	Publication   string              `json:"publication_status"`
-	Moderation    string              `json:"moderation_status"`
-	CreatedAt     time.Time           `json:"created_at"`
-	UpdatedAt     time.Time           `json:"updated_at"`
-	ViewerState   *viewerCommentState `json:"viewer_state,omitempty"`
+	ID            string                      `json:"id"`
+	PostID        string                      `json:"post_id"`
+	Author        userSummary                 `json:"author"`
+	ReplyToUser   *userSummary                `json:"reply_to_user,omitempty"`
+	RootID        *string                     `json:"root_id,omitempty"`
+	ParentID      *string                     `json:"parent_id,omitempty"`
+	ReplyToUserID *string                     `json:"reply_to_user_id,omitempty"`
+	Content       string                      `json:"content"`
+	Media         []postMediaResponse         `json:"media,omitempty"`
+	StickerID     *string                     `json:"sticker_id,omitempty"`
+	Attachments   []commentAttachmentResponse `json:"attachments,omitempty"`
+	LikeCount     int64                       `json:"like_count"`
+	ReplyCount    int64                       `json:"reply_count"`
+	Publication   string                      `json:"publication_status"`
+	Moderation    string                      `json:"moderation_status"`
+	CreatedAt     time.Time                   `json:"created_at"`
+	UpdatedAt     time.Time                   `json:"updated_at"`
+	ViewerState   *viewerCommentState         `json:"viewer_state,omitempty"`
 }
 
 type viewerCommentState struct {
@@ -44,9 +62,12 @@ type viewerCommentState struct {
 }
 
 type commentInput struct {
-	Content       string `json:"content"`
-	ParentID      string `json:"parent_id"`
-	ReplyToUserID string `json:"reply_to_user_id"`
+	Content       string                   `json:"content"`
+	ParentID      string                   `json:"parent_id"`
+	ReplyToUserID string                   `json:"reply_to_user_id"`
+	MediaIDs      []string                 `json:"media_ids"`
+	StickerID     string                   `json:"sticker_id"`
+	Attachments   []commentAttachmentInput `json:"attachments"`
 }
 
 type commentCursor struct {
@@ -96,7 +117,7 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	query := fmt.Sprintf(`
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
+		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.reply_count, c.publication_status, c.moderation_status,
 		       c.created_at, c.updated_at, %s AS viewer_has_liked
 		FROM comments c
 		JOIN users u ON u.id = c.author_id
@@ -126,14 +147,15 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	items := make([]commentResponse, 0, limit+1)
 	for rows.Next() {
 		var item commentResponse
-		var authorID, rootID, parentID, replyTo string
+		var authorID, rootID, parentID, replyTo, stickerID string
 		var viewerHasLiked bool
-		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
+		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rootID, &parentID, &replyTo, &item.Content, &stickerID, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 		item.Author.ID = authorID
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rootID), optionalString(parentID), optionalString(replyTo)
+		item.StickerID = optionalString(stickerID)
 		if err := enrichReplyToUser(r.Context(), s.db, &item); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -144,6 +166,10 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := enrichCommentsMedia(r.Context(), s.db, items); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -204,7 +230,7 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 	query := fmt.Sprintf(`
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
+		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.reply_count, c.publication_status, c.moderation_status,
 		       c.created_at, c.updated_at, %s AS viewer_has_liked
 		FROM comments c
 		JOIN users u ON u.id = c.author_id
@@ -235,14 +261,15 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 	items := make([]commentResponse, 0, limit+1)
 	for rows.Next() {
 		var item commentResponse
-		var authorID, rowRootID, parentID, replyTo string
+		var authorID, rowRootID, parentID, replyTo, stickerID string
 		var viewerHasLiked bool
-		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rowRootID, &parentID, &replyTo, &item.Content, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
+		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rowRootID, &parentID, &replyTo, &item.Content, &stickerID, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 		item.Author.ID = authorID
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rowRootID), optionalString(parentID), optionalString(replyTo)
+		item.StickerID = optionalString(stickerID)
 		if err := enrichReplyToUser(r.Context(), s.db, &item); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -253,6 +280,10 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := enrichCommentsMedia(r.Context(), s.db, items); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -322,10 +353,52 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	input.Content = strings.TrimSpace(input.Content)
-	if input.Content == "" || len([]rune(input.Content)) > 5000 {
+	if len([]rune(input.Content)) > 5000 {
 		writeAuthError(w, r, ErrInvalidComment)
 		return
 	}
+	mediaIDs := make([]string, 0, len(input.MediaIDs)+len(input.Attachments))
+	for _, id := range input.MediaIDs {
+		trimmed := strings.TrimSpace(id)
+		if trimmed != "" && !sliceContains(mediaIDs, trimmed) {
+			mediaIDs = append(mediaIDs, trimmed)
+		}
+	}
+	for _, att := range input.Attachments {
+		if att.Type == "image" || att.Type == "" {
+			trimmed := strings.TrimSpace(att.MediaID)
+			if trimmed != "" && !sliceContains(mediaIDs, trimmed) {
+				mediaIDs = append(mediaIDs, trimmed)
+			}
+		}
+	}
+	stickerID := strings.TrimSpace(input.StickerID)
+	if stickerID == "" {
+		for _, att := range input.Attachments {
+			if att.Type == "sticker" && strings.TrimSpace(att.MediaID) != "" {
+				stickerID = strings.TrimSpace(att.MediaID)
+				break
+			}
+		}
+	}
+	if input.Content == "" && len(mediaIDs) == 0 && stickerID == "" {
+		writeAuthError(w, r, ErrInvalidComment)
+		return
+	}
+
+	for _, mid := range mediaIDs {
+		var ownerID, status string
+		err := s.db.QueryRowContext(r.Context(), `SELECT owner_id, status FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mid).Scan(&ownerID, &status)
+		if errors.Is(err, sql.ErrNoRows) || ownerID != user.ID || status != "ready" {
+			writeAuthError(w, r, ErrInvalidMedia)
+			return
+		}
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+
 	parentID := strings.TrimSpace(forcedParentID)
 	if parentID == "" {
 		parentID = strings.TrimSpace(input.ParentID)
@@ -417,9 +490,19 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeInternalError(w, r, err)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO comments (id, post_id, author_id, root_id, parent_id, reply_to_user_id, content, publication_status, moderation_status, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, 'published', 'normal', $8, $8, $8)`, commentID, postID, user.ID, rootID, parentID, strings.TrimSpace(input.ReplyToUserID), input.Content, now); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `
+		INSERT INTO comments (id, post_id, author_id, root_id, parent_id, reply_to_user_id, content, sticker_id, publication_status, moderation_status, created_at, updated_at, published_at)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, NULLIF($8, ''), 'published', 'normal', $9, $9, $9)`,
+		commentID, postID, user.ID, rootID, parentID, strings.TrimSpace(input.ReplyToUserID), input.Content, stickerID, now,
+	); err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	for idx, mid := range mediaIDs {
+		if _, err := tx.ExecContext(r.Context(), `INSERT INTO comment_media (comment_id, media_id, sort_order, created_at) VALUES ($1, $2, $3, $4)`, commentID, mid, idx, now); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	if parentID != "" {
 		if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET reply_count = reply_count + 1, updated_at = $1 WHERE id = $2`, now, parentID); err != nil {
@@ -445,12 +528,14 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeInternalError(w, r, err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
+
+	response, err := loadCommentResponseTx(r.Context(), tx, commentID)
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	response := commentResponse{ID: commentID, PostID: postID, Author: userSummary{ID: user.ID, Username: user.Username, Nickname: user.Nickname}, RootID: optionalString(rootID), ParentID: optionalString(parentID), ReplyToUserID: optionalString(strings.TrimSpace(input.ReplyToUserID)), Content: input.Content, Publication: "published", Moderation: "normal", CreatedAt: now, UpdatedAt: now, ViewerState: &viewerCommentState{}}
-	if err := enrichReplyToUser(r.Context(), s.db, &response); err != nil {
+
+	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -459,18 +544,18 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 
 func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID string) (commentResponse, error) {
 	var response commentResponse
-	var authorID, rootID, parentID, replyTo string
+	var authorID, rootID, parentID, replyTo, stickerID string
 	err := tx.QueryRowContext(ctx, `
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, c.like_count, c.reply_count, c.publication_status, c.moderation_status,
+		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.reply_count, c.publication_status, c.moderation_status,
 		       c.created_at, c.updated_at
 		FROM comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = c.author_id
 		WHERE c.id = $1`, commentID).Scan(
 		&response.ID, &response.PostID, &authorID, &response.Author.Username, &response.Author.Nickname,
-		&rootID, &parentID, &replyTo, &response.Content, &response.LikeCount, &response.ReplyCount,
+		&rootID, &parentID, &replyTo, &response.Content, &stickerID, &response.LikeCount, &response.ReplyCount,
 		&response.Publication, &response.Moderation, &response.CreatedAt, &response.UpdatedAt,
 	)
 	if err != nil {
@@ -480,11 +565,172 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID string) (c
 	response.RootID = optionalString(rootID)
 	response.ParentID = optionalString(parentID)
 	response.ReplyToUserID = optionalString(replyTo)
+	response.StickerID = optionalString(stickerID)
 	if err := enrichReplyToUser(ctx, tx, &response); err != nil {
 		return commentResponse{}, err
 	}
+	responseList := []commentResponse{response}
+	if err := enrichCommentsMedia(ctx, tx, responseList); err != nil {
+		return commentResponse{}, err
+	}
+	response = responseList[0]
 	response.ViewerState = &viewerCommentState{}
 	return response, nil
+}
+
+type databaseQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func enrichCommentsMedia(ctx context.Context, db databaseQueryer, items []commentResponse) error {
+	if len(items) == 0 {
+		return nil
+	}
+	commentIDs := make([]any, len(items))
+	idToIdx := make(map[string]int, len(items))
+	for i := range items {
+		commentIDs[i] = items[i].ID
+		idToIdx[items[i].ID] = i
+		if items[i].Media == nil {
+			items[i].Media = make([]postMediaResponse, 0)
+		}
+		if items[i].Attachments == nil {
+			items[i].Attachments = make([]commentAttachmentResponse, 0)
+		}
+		if items[i].StickerID != nil && *items[i].StickerID != "" {
+			items[i].Attachments = append(items[i].Attachments, commentAttachmentResponse{
+				ID:        *items[i].StickerID,
+				Type:      "sticker",
+				StickerID: *items[i].StickerID,
+			})
+		}
+	}
+
+	placeholders := make([]string, len(commentIDs))
+	for i := range placeholders {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT cm.comment_id, ma.id, ma.mime_type, ma.width, ma.height, ma.original_name, ma.object_key
+		FROM comment_media cm
+		JOIN media_assets ma ON ma.id = cm.media_id
+		WHERE cm.comment_id IN (%s) AND ma.status = 'ready' AND ma.deleted_at IS NULL
+		ORDER BY cm.comment_id ASC, cm.sort_order ASC, ma.id ASC`, strings.Join(placeholders, ", "))
+
+	rows, err := db.QueryContext(ctx, query, commentIDs...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type mediaWithKey struct {
+		commentID string
+		media     postMediaResponse
+		objectKey string
+	}
+	mediaList := make([]mediaWithKey, 0)
+	mediaIDs := make([]any, 0)
+	seenMedia := make(map[string]struct{})
+
+	for rows.Next() {
+		var mk mediaWithKey
+		if err := rows.Scan(&mk.commentID, &mk.media.ID, &mk.media.MimeType, &mk.media.Width, &mk.media.Height, &mk.media.AltText, &mk.objectKey); err != nil {
+			return err
+		}
+		if strings.HasPrefix(mk.media.MimeType, "video/") {
+			mk.media.Type = "video"
+		} else {
+			mk.media.Type = "image"
+		}
+		mk.media.URL = publicMediaURL(mk.objectKey)
+		mediaList = append(mediaList, mk)
+		if _, ok := seenMedia[mk.media.ID]; !ok {
+			seenMedia[mk.media.ID] = struct{}{}
+			mediaIDs = append(mediaIDs, mk.media.ID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_ = rows.Close()
+
+	variantsMap := make(map[string]map[string]*mediaVariantResponse)
+	if len(mediaIDs) > 0 {
+		vPlaceholders := make([]string, len(mediaIDs))
+		for i := range vPlaceholders {
+			vPlaceholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		vQuery := fmt.Sprintf(`
+			SELECT mv.media_id, mv.variant, mv.object_key, mv.mime_type, mv.width, mv.height, mv.size_bytes
+			FROM media_variants mv
+			WHERE mv.media_id IN (%s) AND mv.status = 'ready'`, strings.Join(vPlaceholders, ", "))
+		vRows, err := db.QueryContext(ctx, vQuery, mediaIDs...)
+		if err == nil {
+			for vRows.Next() {
+				var mid, variant, objKey, mimeType string
+				var width, height int
+				var sizeBytes int64
+				if err := vRows.Scan(&mid, &variant, &objKey, &mimeType, &width, &height, &sizeBytes); err == nil {
+					if variantsMap[mid] == nil {
+						variantsMap[mid] = make(map[string]*mediaVariantResponse)
+					}
+					variantsMap[mid][variant] = &mediaVariantResponse{
+						URL:       publicMediaURL(objKey),
+						Width:     width,
+						Height:    height,
+						SizeBytes: sizeBytes,
+						MimeType:  mimeType,
+					}
+				}
+			}
+			vRows.Close()
+		}
+	}
+
+	for _, mk := range mediaList {
+		idx, ok := idToIdx[mk.commentID]
+		if !ok {
+			continue
+		}
+		m := mk.media
+		if vmap, ok := variantsMap[m.ID]; ok {
+			m.Thumb = vmap["thumb"]
+			m.Detail = vmap["detail"]
+			m.Original = vmap["original"]
+		}
+		if m.Thumb == nil && m.URL != "" {
+			m.Thumb = &mediaVariantResponse{
+				URL:      m.URL,
+				Width:    m.Width,
+				Height:   m.Height,
+				MimeType: m.MimeType,
+			}
+		}
+		items[idx].Media = append(items[idx].Media, m)
+		thumbURL := m.URL
+		if m.Thumb != nil && m.Thumb.URL != "" {
+			thumbURL = m.Thumb.URL
+		}
+		items[idx].Attachments = append(items[idx].Attachments, commentAttachmentResponse{
+			ID:           m.ID,
+			Type:         m.Type,
+			URL:          m.URL,
+			ThumbnailURL: thumbURL,
+			Width:        m.Width,
+			Height:       m.Height,
+		})
+	}
+	return nil
+}
+
+func sliceContains(slice []string, target string) bool {
+	for _, s := range slice {
+		if s == target {
+			return true
+		}
+	}
+	return false
 }
 
 type userSummaryQueryer interface {

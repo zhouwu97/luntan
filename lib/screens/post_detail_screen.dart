@@ -1,24 +1,27 @@
 import 'dart:async';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../controllers/comments_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../controllers/post_detail_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/poll_repository.dart';
+import '../data/api/publish_repository.dart';
 import '../data/app_links.dart';
 import '../domain/models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/comments/comment_composer_controller.dart';
 import '../widgets/comments/comment_item.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import '../widgets/comments/comment_thread_sheet.dart';
 import '../widgets/forum_author_row.dart';
 import '../widgets/post_media_preview.dart';
-import 'package:share_plus/share_plus.dart';
 
 class PostDetailScreen extends StatefulWidget {
   const PostDetailScreen({
@@ -45,6 +48,8 @@ class PostDetailScreen extends StatefulWidget {
     this.onEditPost,
     this.onReport,
     this.pollRepository,
+    this.publishRepository,
+    this.onOpenUserId,
   });
 
   final PostDetailController controller;
@@ -71,13 +76,15 @@ class PostDetailScreen extends StatefulWidget {
   final Future<void> Function(Post, String title, String content)? onEditPost;
   final Future<void> Function(String targetType, String targetId)? onReport;
   final PollRepository? pollRepository;
+  final PublishRepository? publishRepository;
+  final ValueChanged<String>? onOpenUserId;
 
   @override
   State<PostDetailScreen> createState() => _PostDetailScreenState();
 }
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
-  final replyController = TextEditingController();
+  final _composerController = CommentComposerController();
   final commentsKey = GlobalKey();
   final commentsScrollController = ScrollController();
   bool isSending = false;
@@ -102,7 +109,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   void dispose() {
     _highlightTimer?.cancel();
     _threadOpenTimer?.cancel();
-    replyController.dispose();
+    _composerController.dispose();
     commentsScrollController
       ..removeListener(_loadMoreComments)
       ..dispose();
@@ -125,22 +132,64 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       return;
     }
     if (isSending) return;
-    final content = replyController.text.trim();
-    if (content.isEmpty) return;
+    final draft = _composerController.draft;
+    if (draft.isEmpty) return;
+
     final comments = widget.commentsController;
     setState(() => isSending = true);
     final target = replyTarget;
     final before = post.commentCount;
+
     try {
+      List<String> mediaIds = const [];
+      if (draft.localImage != null) {
+        final file = draft.localImage!;
+        final bytes = await file.readAsBytes();
+        final lower = file.name.toLowerCase();
+        final mimeType = lower.endsWith('.png')
+            ? 'image/png'
+            : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+        final digest = sha256.convert(bytes).toString();
+        if (widget.publishRepository != null) {
+          final ticket = await widget.publishRepository!.requestMediaUpload(
+            fileName: file.name,
+            mimeType: mimeType,
+            size: bytes.length,
+            sha256: digest,
+          );
+          await widget.publishRepository!.uploadMedia(
+            ticket: ticket,
+            bytes: bytes,
+            size: bytes.length,
+            sha256: digest,
+          );
+          mediaIds = [ticket.mediaId];
+        } else {
+          mediaIds = [file.path];
+        }
+      }
+
+      final stickerId = draft.sticker?.id;
+
       if (target == null) {
-        await comments.addComment(content);
+        await comments.addComment(
+          draft.text,
+          mediaIds: mediaIds,
+          stickerId: stickerId,
+        );
       } else {
-        await comments.replyTo(target, content, replyToUserId: target.authorId);
+        await comments.replyTo(
+          target,
+          draft.text,
+          replyToUserId: target.authorId,
+          mediaIds: mediaIds,
+          stickerId: stickerId,
+        );
       }
       if (post.commentCount == before) post.commentCount = before + 1;
       if (!mounted) return;
       setState(() {
-        replyController.clear();
+        _composerController.reset();
         replyTarget = null;
       });
       widget.onFeedback('回复已发布');
@@ -245,6 +294,44 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         onRequireAuth: widget.onRequireAuth,
         canComment: widget.canComment ?? widget.isAuthenticated,
         blockedMessage: _commentBlockedMessage,
+        onAuthorTap: widget.onOpenUserId,
+        onReplyDraft: (target, draft) async {
+          List<String> mediaIds = const [];
+          if (draft.localImage != null) {
+            final file = draft.localImage!;
+            final bytes = await file.readAsBytes();
+            final lower = file.name.toLowerCase();
+            final mimeType = lower.endsWith('.png')
+                ? 'image/png'
+                : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+            final digest = sha256.convert(bytes).toString();
+            if (widget.publishRepository != null) {
+              final ticket = await widget.publishRepository!.requestMediaUpload(
+                fileName: file.name,
+                mimeType: mimeType,
+                size: bytes.length,
+                sha256: digest,
+              );
+              await widget.publishRepository!.uploadMedia(
+                ticket: ticket,
+                bytes: bytes,
+                size: bytes.length,
+                sha256: digest,
+              );
+              mediaIds = [ticket.mediaId];
+            } else {
+              mediaIds = [file.path];
+            }
+          }
+          final stickerId = draft.sticker?.id;
+          return widget.commentsController.replyTo(
+            target,
+            draft.text,
+            replyToUserId: target.authorId,
+            mediaIds: mediaIds,
+            stickerId: stickerId,
+          );
+        },
         onReply: (target, content) => widget.commentsController.replyTo(
           target,
           content,
@@ -555,10 +642,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   floor: index + 2,
                                   replies: children,
                                   isHighlighted: isHighlighted,
-                                  onReply: () =>
-                                      setState(() => replyTarget = comment),
-                                  onReplyTo: (target) =>
-                                      setState(() => replyTarget = target),
+                                  onAuthorTap: widget.onOpenUserId,
+                                  onReply: () {
+                                    setState(() => replyTarget = comment);
+                                    _composerController.openReply(
+                                      parentCommentId: comment.id,
+                                      replyToUserId: comment.authorId,
+                                      replyToName: comment.author?.nickname,
+                                    );
+                                  },
+                                  onReplyTo: (target) {
+                                    setState(() => replyTarget = target);
+                                    _composerController.openReply(
+                                      parentCommentId: target.id,
+                                      replyToUserId: target.authorId,
+                                      replyToName: target.author?.nickname,
+                                    );
+                                  },
                                   onLike: () => _likeComment(comment),
                                   onMore: () => _showCommentMenu(comment),
                                   onViewAllReplies: () =>
@@ -622,7 +722,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
               // 底部评论输入栏
               CommentReplyBar(
-                controller: replyController,
+                composerController: _composerController,
                 target: replyTarget,
                 sending: isSending,
                 isAuthenticated: widget.isAuthenticated,

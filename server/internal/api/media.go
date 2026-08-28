@@ -59,6 +59,19 @@ type mediaCompleteInput struct {
 	SHA256 string `json:"sha256"`
 }
 
+type signedMediaUploadHandler interface {
+	ServeSignedUpload(http.ResponseWriter, *http.Request)
+}
+
+func (s *Server) receiveSignedMediaUpload(w http.ResponseWriter, r *http.Request) {
+	handler, ok := s.mediaStorage.(signedMediaUploadHandler)
+	if !ok {
+		writeAuthError(w, r, ErrStorageUnavailable)
+		return
+	}
+	handler.ServeSignedUpload(w, r)
+}
+
 func (s *Server) createMediaUploadToken(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return

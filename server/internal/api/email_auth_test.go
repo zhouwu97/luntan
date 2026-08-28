@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -183,5 +184,101 @@ func TestEmailRegisterRouteValidatesCodeAndCreatesUser(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestRequestEmailCodeDevFallbackMarksCodeSent 保证 dev 环境无 SMTP 时返回的 dev_code
+// 对应的验证码记录处于可校验状态（sent），否则注册/登录永远无法通过校验。
+func TestRequestEmailCodeDevFallbackMarksCodeSent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := NewHandler(db)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = $1 AND account_type != 'guest' AND deleted_at IS NULL)`)).
+		WithArgs("devcode@example.com").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtext('email-code:' || $1 || ':' || $2))`)).
+		WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM email_codes WHERE lower(email) = $1 AND purpose = $2 AND status IN ('created', 'sending', 'sent') AND consumed_at IS NULL AND created_at > now() - interval '60 seconds')`)).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE email_codes SET consumed_at = COALESCE(consumed_at, $1)`)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO email_codes`)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO risk_events`)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE email_codes SET status = 'delivery_failed', failure_reason = $1 WHERE id = $2`)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// 修复点：dev_code 作为投递通道时，记录必须回到可校验状态
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE email_codes SET status = 'sent', sent_at = now() WHERE id = $1 AND consumed_at IS NULL`)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	body, _ := json.Marshal(map[string]string{"email": "devcode@example.com", "purpose": "register"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/code/request", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	// 必须用类型断言取值：直接比较 resp["dev_code"] == "" 在键缺失时得到
+	// nil == "" 为 false，会让「响应里根本没有 dev_code」的情况被漏过。
+	devCode, _ := resp["dev_code"].(string)
+	if devCode == "" {
+		t.Fatalf("dev 环境应返回 dev_code: %s", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEmailCodeDevFallbackRegisterIntegration 在真实 PostgreSQL 上验证
+// dev_code 从请求到注册的完整链路（未配置 DATABASE_URL 时跳过）。
+func TestEmailCodeDevFallbackRegisterIntegration(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("itest-devcode-%d@example.com", suffix)
+	username := fmt.Sprintf("itest_dc_%d", suffix%100000000)
+
+	codeBody, _ := json.Marshal(map[string]string{"email": email, "purpose": "register"})
+	codeReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/code/request", bytes.NewReader(codeBody))
+	codeRec := httptest.NewRecorder()
+	handler.ServeHTTP(codeRec, codeReq)
+	if codeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for code request, got %d: %s", codeRec.Code, codeRec.Body.String())
+	}
+	var codeResp map[string]any
+	_ = json.Unmarshal(codeRec.Body.Bytes(), &codeResp)
+	devCode, _ := codeResp["dev_code"].(string)
+	if devCode == "" {
+		t.Fatalf("dev 环境应返回 dev_code: %s", codeRec.Body.String())
+	}
+
+	regBody, _ := json.Marshal(map[string]string{
+		"email":    email,
+		"code":     devCode,
+		"password": "password123",
+		"nickname": "验收注册",
+		"username": username,
+	})
+	regReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(regBody))
+	regRec := httptest.NewRecorder()
+	handler.ServeHTTP(regRec, regReq)
+	if regRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for register with dev_code, got %d: %s", regRec.Code, regRec.Body.String())
+	}
+	var regResp map[string]any
+	_ = json.Unmarshal(regRec.Body.Bytes(), &regResp)
+	if regResp["access_token"] == nil {
+		t.Fatalf("missing access_token: %s", regRec.Body.String())
 	}
 }

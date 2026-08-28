@@ -8,8 +8,10 @@ import '../../data/api/comment_repository.dart';
 import '../../domain/models.dart';
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
+import 'comment_composer_controller.dart';
 import 'comment_reply_bar.dart';
 import 'comment_skeleton.dart';
+import 'emoji/sticker_catalog.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
@@ -24,7 +26,9 @@ class CommentThreadSheet extends StatefulWidget {
     this.canComment = true,
     required this.blockedMessage,
     required this.onReply,
+    this.onReplyDraft,
     this.onToggleLike,
+    this.onAuthorTap,
   });
 
   final Comment rootComment;
@@ -35,7 +39,9 @@ class CommentThreadSheet extends StatefulWidget {
   final bool canComment;
   final String blockedMessage;
   final Future<Comment> Function(Comment target, String content) onReply;
+  final Future<Comment> Function(Comment target, CommentDraft draft)? onReplyDraft;
   final Future<void> Function(Comment comment)? onToggleLike;
+  final ValueChanged<String>? onAuthorTap;
 
   @override
   State<CommentThreadSheet> createState() => _CommentThreadSheetState();
@@ -44,7 +50,7 @@ class CommentThreadSheet extends StatefulWidget {
 class _CommentThreadSheetState extends State<CommentThreadSheet> {
   final List<Comment> replies = [];
   final ScrollController scrollController = ScrollController();
-  final TextEditingController inputController = TextEditingController();
+  final CommentComposerController _composer = CommentComposerController();
   Comment? currentReplyTarget;
   String? nextCursor;
   bool hasMore = true;
@@ -72,7 +78,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
     scrollController
       ..removeListener(_onScroll)
       ..dispose();
-    inputController.dispose();
+    _composer.dispose();
     super.dispose();
   }
 
@@ -118,74 +124,69 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
           'GET /api/v1/comments/${widget.rootComment.id}/replies; $error',
         );
       }
-      if (mounted && generation == _generation) {
-        setState(() {
-          errorMessage = '回复加载失败，请重试';
-          loading = false;
-          loadState = _ReplyLoadState.error;
-        });
-      }
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        loading = false;
+        loadState = _ReplyLoadState.error;
+        errorMessage = userFacingApiMessage(error, fallback: '回复加载失败，请重试');
+      });
     }
   }
 
   Future<void> _loadMore() async {
-    if (loading || loadingMore || !hasMore || nextCursor == null) return;
-    final generation = _generation;
-    final cursor = nextCursor!;
-    setState(() => loadingMore = true);
+    if (loadingMore || !hasMore || nextCursor == null) return;
+    setState(() {
+      loadingMore = true;
+      loadMoreError = null;
+    });
 
     try {
       final page = await widget.repository.listReplies(
         commentId: widget.rootComment.id,
-        cursor: cursor,
+        cursor: nextCursor,
       );
-      if (!mounted || generation != _generation) return;
+      if (!mounted) return;
       setState(() {
-        final existingIds = replies.map((r) => r.id).toSet();
         for (final item in page.items) {
-          if (existingIds.add(item.id)) {
+          if (!replies.any((r) => r.id == item.id)) {
             replies.add(item);
           }
         }
         nextCursor = page.nextCursor;
-        hasMore = page.hasMore && page.nextCursor != cursor;
+        hasMore = page.hasMore && page.nextCursor != null;
         loadingMore = false;
-        loadMoreError = null;
       });
       _checkAndFocusTarget();
-    } catch (_) {
-      if (mounted && generation == _generation) {
-        setState(() {
-          loadMoreError = '加载更多失败，点击重试';
-          loadingMore = false;
-        });
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint(
+          'Comment replies paginate failed: '
+          'GET /api/v1/comments/${widget.rootComment.id}/replies?cursor=$nextCursor; $error',
+        );
       }
+      if (!mounted) return;
+      setState(() {
+        loadingMore = false;
+        loadMoreError = '加载更多失败，点击重试';
+      });
     }
   }
 
   void _checkAndFocusTarget() {
-    final targetId = widget.focusReplyId;
-    if (targetId == null || _hasFocusedTarget) return;
-
-    final found = replies.any((r) => r.id == targetId);
-    if (!found) {
-      if (hasMore && !loading && !loadingMore) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _loadMore();
-        });
-      }
-      return;
-    }
+    if (_hasFocusedTarget || widget.focusReplyId == null) return;
+    final index = replies.indexWhere((r) => r.id == widget.focusReplyId);
+    if (index == -1) return;
 
     _hasFocusedTarget = true;
-    setState(() => highlightedReplyId = targetId);
+    setState(() => highlightedReplyId = widget.focusReplyId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final context = GlobalObjectKey('reply:$targetId').currentContext;
-      if (context != null && mounted) {
+      final context = GlobalObjectKey('reply:${widget.focusReplyId}').currentContext;
+      if (context != null) {
         Scrollable.ensureVisible(
           context,
           duration: AppMotion.normal,
+          curve: AppMotion.standard,
           alignment: 0.3,
         );
       }
@@ -197,19 +198,20 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
   }
 
   Future<void> _sendReply() async {
-    final text = inputController.text.trim();
-    if (text.isEmpty || sending) return;
+    final draft = _composer.draft;
+    if (draft.isEmpty || sending) return;
 
     final target = currentReplyTarget ?? widget.rootComment;
     setState(() => sending = true);
 
     try {
-      final newComment = await widget.onReply(target, text);
+      final newComment = widget.onReplyDraft != null
+          ? await widget.onReplyDraft!(target, draft)
+          : await widget.onReply(target, draft.text);
       if (!mounted) return;
       setState(() {
-        inputController.clear();
+        _composer.reset();
         currentReplyTarget = null;
-        // 如果未存在则插入末尾
         if (!replies.any((r) => r.id == newComment.id)) {
           replies.add(newComment);
         }
@@ -236,6 +238,40 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
         );
       }
     }
+  }
+
+  void _handleAuthorTap(String? authorId) {
+    if (authorId != null && authorId.isNotEmpty && !authorId.startsWith('guest')) {
+      widget.onAuthorTap?.call(authorId);
+    }
+  }
+
+  void _openImagePreview(BuildContext context, String imageUrl) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            elevation: 0,
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white54,
+                  size: 64,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -306,54 +342,92 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildSmallAvatar(root.author?.avatar?.trim(), rootAuthor, size: 26),
+                      InkWell(
+                        onTap: () => _handleAuthorTap(root.authorId),
+                        borderRadius: BorderRadius.circular(13),
+                        child: _buildSmallAvatar(root.author?.avatar?.trim(), rootAuthor, size: 26),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Text(
-                                  rootAuthor,
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 0.5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.levelBg,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    'Lv.$rootLevel',
+                            InkWell(
+                              onTap: () => _handleAuthorTap(root.authorId),
+                              borderRadius: BorderRadius.circular(4),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    rootAuthor,
                                     style: const TextStyle(
-                                      fontSize: 8.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.levelText,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textPrimary,
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              root.content,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF62788D),
-                                height: 1.45,
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 0.5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.levelBg,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'Lv.$rootLevel',
+                                      style: const TextStyle(
+                                        fontSize: 8.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppTheme.levelText,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
+                            if (root.content.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                root.content,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF62788D),
+                                  height: 1.45,
+                                ),
+                              ),
+                            ],
+                            if (root.media.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Wrap(
+                                  spacing: 4,
+                                  children: root.media.map((m) {
+                                    final url = m.url ?? m.thumb?.url ?? '';
+                                    if (url.isEmpty) return const SizedBox.shrink();
+                                    return GestureDetector(
+                                      onTap: () => _openImagePreview(context, url),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: Image.network(
+                                          url,
+                                          width: 48,
+                                          height: 48,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            if (root.stickerId != null && root.stickerId!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: _buildStickerThumbnail(root.stickerId!, size: 40),
+                              ),
                           ],
                         ),
                       ),
@@ -371,7 +445,7 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
 
           // 底部回复栏
           CommentReplyBar(
-            controller: inputController,
+            composerController: _composer,
             target: currentReplyTarget,
             sending: sending,
             isAuthenticated: widget.isAuthenticated,
@@ -481,57 +555,106 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSmallAvatar(reply.author?.avatar?.trim(), author, size: 30),
+              InkWell(
+                onTap: () => _handleAuthorTap(reply.authorId),
+                borderRadius: BorderRadius.circular(15),
+                child: _buildSmallAvatar(reply.author?.avatar?.trim(), author, size: 30),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Text(
-                          author,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
+                    InkWell(
+                      onTap: () => _handleAuthorTap(reply.authorId),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Row(
+                        children: [
+                          Text(
+                            author,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary,
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          relativeTimeLabel(reply.createdAt),
-                          style: const TextStyle(
-                            fontSize: 9.5,
-                            color: Color(0xFF9AA9B8),
+                          const Spacer(),
+                          Text(
+                            relativeTimeLabel(reply.createdAt),
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              color: Color(0xFF9AA9B8),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     if (replyTo != null) ...[
                       const SizedBox(height: 2),
-                      Text(
-                        '回复 @$replyTo',
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          color: Color(0xFF7990A5),
+                      InkWell(
+                        onTap: () => _handleAuthorTap(reply.replyToUserId),
+                        borderRadius: BorderRadius.circular(4),
+                        child: Text(
+                          '回复 @$replyTo',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Color(0xFF7990A5),
+                          ),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 4),
-                    Text(
-                      reply.content,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppTheme.textPrimary,
-                        height: 1.55,
+                    if (reply.content.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        reply.content,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textPrimary,
+                          height: 1.55,
+                        ),
                       ),
-                    ),
+                    ],
+                    if (reply.media.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: reply.media.map((m) {
+                            final url = m.url ?? m.thumb?.url ?? '';
+                            if (url.isEmpty) return const SizedBox.shrink();
+                            return GestureDetector(
+                              onTap: () => _openImagePreview(context, url),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: Image.network(
+                                  url,
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    if (reply.stickerId != null && reply.stickerId!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: _buildStickerThumbnail(reply.stickerId!, size: 60),
+                      ),
                     const SizedBox(height: 6),
                     Row(
                       children: [
                         GestureDetector(
-                          onTap: () =>
-                              setState(() => currentReplyTarget = reply),
+                          onTap: () {
+                            setState(() => currentReplyTarget = reply);
+                            _composer.openReply(
+                              parentCommentId: reply.id,
+                              replyToUserId: reply.authorId,
+                              replyToName: author,
+                            );
+                          },
                           child: const Text(
                             '回复',
                             style: TextStyle(
@@ -580,6 +703,28 @@ class _CommentThreadSheetState extends State<CommentThreadSheet> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildStickerThumbnail(String stickerId, {required double size}) {
+    final sticker = appStickerById(stickerId);
+    if (sticker != null) {
+      return Image.asset(
+        sticker.thumbnailAsset,
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+      );
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F4F8),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(Icons.sticky_note_2_outlined, color: Colors.grey, size: 24),
     );
   }
 

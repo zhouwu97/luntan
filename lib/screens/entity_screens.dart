@@ -20,6 +20,31 @@ bool _hasUsableAvatar(String? value) {
       (url.startsWith('https://') || url.startsWith('http://'));
 }
 
+/// 个人主页优先展示用户上传的背景，未上传时使用项目内置的默认背景。
+class _ProfileHeroBackground extends StatelessWidget {
+  const _ProfileHeroBackground({this.imageUrl});
+
+  final String? imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasUsableAvatar(imageUrl)) {
+      return Image.network(
+        imageUrl!,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => Image.asset(
+          'assets/profile_default_background.png',
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+    return Image.asset(
+      'assets/profile_default_background.png',
+      fit: BoxFit.cover,
+    );
+  }
+}
+
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({
     super.key,
@@ -286,6 +311,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 username: _profile!.username,
                 nickname: _profile!.nickname,
                 avatarMediaId: _profile!.avatarMediaId,
+                backgroundMediaId: _profile!.backgroundMediaId,
+                backgroundUrl: _profile!.backgroundUrl,
                 level: _profile!.level,
                 experience: _profile!.experience,
                 growth: _profile!.growth,
@@ -378,6 +405,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             _selfSummary?.followingCount ?? profile?.followingCount ?? 0;
         final likeReceivedCount = _selfSummary?.likeReceivedCount ?? 0;
         final avatarUrl = _selfSummary?.avatarUrl;
+        final backgroundUrl =
+            _selfSummary?.backgroundUrl ?? profile?.backgroundUrl;
         final growth = _selfSummary?.growth ?? profile?.growth;
         final experience = _selfSummary?.experience ?? profile?.experience ?? 0;
         final expInLevel = growth?.experienceInLevel ?? 0;
@@ -394,20 +423,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               height: 445,
               child: Stack(
                 children: [
-                  Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment(0.4, -1),
-                        end: Alignment(-0.4, 1),
-                        colors: [
-                          Color(0xFF8FBEFA),
-                          Color(0xFFAFD9F7),
-                          Color(0xFFFFD2DB),
-                          Color(0xFFF4C79E),
-                        ],
-                        stops: [0.0, 0.30, 0.69, 1.0],
-                      ),
-                    ),
+                  Positioned.fill(
+                    child: _ProfileHeroBackground(imageUrl: backgroundUrl),
                   ),
                   Positioned.fill(
                     child: Container(

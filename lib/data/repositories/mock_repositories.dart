@@ -665,6 +665,8 @@ class MockCommentRepository
     required String content,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     final post = _store.posts.firstWhere((item) => item.id == postId);
     return _store.addComment(
@@ -672,6 +674,8 @@ class MockCommentRepository
       content,
       parentId: parentId,
       replyToUserId: replyToUserId,
+      mediaIds: mediaIds,
+      stickerId: stickerId,
     );
   }
 
@@ -680,6 +684,8 @@ class MockCommentRepository
     required String commentId,
     required String content,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     final source = _store.commentsByPost.values
         .expand((items) => items)
@@ -690,6 +696,8 @@ class MockCommentRepository
       content,
       parentId: source.id,
       replyToUserId: replyToUserId,
+      mediaIds: mediaIds,
+      stickerId: stickerId,
     );
   }
 

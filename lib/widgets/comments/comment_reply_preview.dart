@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
@@ -10,12 +11,14 @@ class CommentReplyPreview extends StatelessWidget {
     required this.totalReplyCount,
     required this.onOpenThread,
     this.onReplyTo,
+    this.onAuthorTap,
   });
 
   final List<Comment> replies;
   final int totalReplyCount;
   final VoidCallback onOpenThread;
   final ValueChanged<Comment>? onReplyTo;
+  final ValueChanged<String>? onAuthorTap;
 
   @override
   Widget build(BuildContext context) {
@@ -48,6 +51,19 @@ class CommentReplyPreview extends StatelessWidget {
                             reply.replyToUser?.username ??
                             '用户');
 
+                  final authorTapRecognizer = (onAuthorTap != null &&
+                          reply.authorId.isNotEmpty &&
+                          !reply.authorId.startsWith('guest'))
+                      ? (TapGestureRecognizer()..onTap = () => onAuthorTap!(reply.authorId))
+                      : null;
+
+                  final replyToTapRecognizer = (onAuthorTap != null &&
+                          reply.replyToUserId != null &&
+                          reply.replyToUserId!.isNotEmpty &&
+                          !reply.replyToUserId!.startsWith('guest'))
+                      ? (TapGestureRecognizer()..onTap = () => onAuthorTap!(reply.replyToUserId!))
+                      : null;
+
                   return InkWell(
                     onTap: () {
                       if (onReplyTo != null) {
@@ -75,6 +91,7 @@ class CommentReplyPreview extends StatelessWidget {
                                 fontWeight: FontWeight.w700,
                                 color: Color(0xFF385A79),
                               ),
+                              recognizer: authorTapRecognizer,
                             ),
                             if (replyTo != null) ...[
                               const TextSpan(text: ' 回复 '),
@@ -84,6 +101,7 @@ class CommentReplyPreview extends StatelessWidget {
                                   fontWeight: FontWeight.w700,
                                   color: AppTheme.primary,
                                 ),
+                                recognizer: replyToTapRecognizer,
                               ),
                             ],
                             const TextSpan(
@@ -102,7 +120,7 @@ class CommentReplyPreview extends StatelessWidget {
                 }).toList(),
               ),
             ),
-          if (totalReplyCount > previewItems.length || totalReplyCount > 0)
+          if (totalReplyCount > 0)
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 10),
               child: GestureDetector(
@@ -110,8 +128,8 @@ class CommentReplyPreview extends StatelessWidget {
                 child: Text(
                   '展开 $totalReplyCount 条回复 ›',
                   style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.primary,
                   ),
                 ),

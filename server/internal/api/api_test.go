@@ -120,7 +120,7 @@ func TestCreatePostWritesRevisionAndIsIdempotentByUserKey(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`)).WithArgs("u1", "post-key-1").WillReturnRows(sqlmock.NewRows([]string{"pg_advisory_xact_lock"}).AddRow(nil))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT post_id FROM post_idempotency_keys WHERE user_id = $1 AND idempotency_key = $2`)).WithArgs("u1", "post-key-1").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM communities WHERE id = $1 AND status = 'active' AND deleted_at IS NULL`)).WithArgs("c1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("c1"))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7)`)).WithArgs(sqlmock.AnyArg(), "u1", "c1", "normal", "标题", "正文", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7) RETURNING post_status, moderation_status`)).WithArgs(sqlmock.AnyArg(), "u1", "c1", "normal", "标题", "正文", sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"post_status", "moderation_status"}).AddRow("published", "normal"))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_revisions (id, post_id, editor_id, community_id, type, title, content, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`)).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "u1", "c1", "normal", "标题", "正文", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO post_idempotency_keys (user_id, idempotency_key, post_id, created_at) VALUES ($1, $2, $3, $4)`)).WithArgs("u1", "post-key-1", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(`(?s)SELECT COALESCE\(up\.experience, 0\).*FROM users u`).WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"experience", "account_type"}).AddRow(100, "email"))
@@ -219,7 +219,8 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
-	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).WithArgs("p1", 2).WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "author_id", "username", "nickname", "root_id", "parent_id", "reply_to_user_id", "content", "like_count", "reply_count", "publication_status", "moderation_status", "created_at", "updated_at", "viewer_has_liked"}).AddRow("cm2", "p1", "u1", "user", "User", "cm2", "", "", "第二条", 0, 0, "published", "normal", created, created, false).AddRow("cm1", "p1", "u1", "user", "User", "cm1", "", "", "第一条", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute), false))
+	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).WithArgs("p1", 2).WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "author_id", "username", "nickname", "root_id", "parent_id", "reply_to_user_id", "content", "sticker_id", "like_count", "reply_count", "publication_status", "moderation_status", "created_at", "updated_at", "viewer_has_liked"}).AddRow("cm2", "p1", "u1", "user", "User", "cm2", "", "", "第二条", "", 0, 0, "published", "normal", created, created, false).AddRow("cm1", "p1", "u1", "user", "User", "cm1", "", "", "第一条", "", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute), false))
+	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm`).WithArgs("cm2", "cm1").WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "mime_type", "width", "height", "original_name", "object_key"}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/p1/comments?limit=1", nil)
 	res := httptest.NewRecorder()
@@ -584,3 +585,24 @@ func TestAPIUsesDatabaseErrorsAsInternalError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCreateCommentValidationAllowsMediaOrStickerAlone(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Empty content, no media, no sticker -> 400
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/p1/comments", strings.NewReader(`{"content":""}`))
+	req.Header.Set("Idempotency-Key", "test-key-1")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized { // auth fails first before json decode
+		t.Fatalf("expected 401 on unauthenticated comment create, got %d", res.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+

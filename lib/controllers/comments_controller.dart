@@ -101,7 +101,11 @@ class CommentsController extends ChangeNotifier {
       ..sort(_compareByCreatedAt);
   }
 
-  Future<Comment> addComment(String content) {
+  Future<Comment> addComment(
+    String content, {
+    List<String> mediaIds = const [],
+    String? stickerId,
+  }) {
     final running = _addInFlight;
     if (running != null) return running;
     late final Future<Comment> future;
@@ -112,8 +116,15 @@ class CommentsController extends ChangeNotifier {
                 postId: postId,
                 content: content,
                 idempotencyKey: key,
+                mediaIds: mediaIds,
+                stickerId: stickerId,
               )
-        : _repository.createComment(postId: postId, content: content);
+        : _repository.createComment(
+            postId: postId,
+            content: content,
+            mediaIds: mediaIds,
+            stickerId: stickerId,
+          );
     future = create
         .then((comment) {
           _pendingCommentIdempotencyKey = null;
@@ -132,6 +143,8 @@ class CommentsController extends ChangeNotifier {
     Comment parent,
     String content, {
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) {
     final running = _replyInFlight[parent.id];
     if (running != null) return running;
@@ -145,11 +158,15 @@ class CommentsController extends ChangeNotifier {
                 content: content,
                 idempotencyKey: key,
                 replyToUserId: replyToUserId,
+                mediaIds: mediaIds,
+                stickerId: stickerId,
               )
         : _repository.createReply(
             commentId: parent.id,
             content: content,
             replyToUserId: replyToUserId,
+            mediaIds: mediaIds,
+            stickerId: stickerId,
           );
     late final Future<Comment> future;
     future = create

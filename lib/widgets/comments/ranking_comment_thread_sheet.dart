@@ -25,6 +25,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
     this.canLike = true,
     this.onRequireAuth,
     this.blockedMessage = '当前身份暂不能评论，请登录邮箱账号后重试',
+    this.onAuthorTap,
   });
 
   final RankingToyComment rootComment;
@@ -41,6 +42,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
   final bool canLike;
   final VoidCallback? onRequireAuth;
   final String blockedMessage;
+  final ValueChanged<String>? onAuthorTap;
 
   @override
   State<RankingCommentThreadSheet> createState() =>
@@ -299,17 +301,26 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          CircleAvatar(
-                            radius: 15,
-                            backgroundColor: AppTheme.surfaceBlue,
-                            child: Text(
-                              rootName.isEmpty
-                                  ? '友'
-                                  : rootName.characters.first,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.primary,
+                          InkWell(
+                            onTap: () {
+                              if (widget.rootComment.authorId.isNotEmpty &&
+                                  !widget.rootComment.authorId.startsWith('guest')) {
+                                widget.onAuthorTap?.call(widget.rootComment.authorId);
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(15),
+                            child: CircleAvatar(
+                              radius: 15,
+                              backgroundColor: AppTheme.surfaceBlue,
+                              child: Text(
+                                rootName.isEmpty
+                                    ? '友'
+                                    : rootName.characters.first,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.primary,
+                                ),
                               ),
                             ),
                           ),
@@ -320,11 +331,20 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                               children: [
                                 Row(
                                   children: [
-                                    Text(
-                                      rootName,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
+                                    InkWell(
+                                      onTap: () {
+                                        if (widget.rootComment.authorId.isNotEmpty &&
+                                            !widget.rootComment.authorId.startsWith('guest')) {
+                                          widget.onAuthorTap?.call(widget.rootComment.authorId);
+                                        }
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Text(
+                                        rootName,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 6),
@@ -441,15 +461,23 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 15,
-            backgroundColor: AppTheme.surfaceBlue,
-            child: Text(
-              name.isEmpty ? '友' : name.characters.first,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: AppTheme.primary,
+          InkWell(
+            onTap: () {
+              if (reply.authorId.isNotEmpty && !reply.authorId.startsWith('guest')) {
+                widget.onAuthorTap?.call(reply.authorId);
+              }
+            },
+            borderRadius: BorderRadius.circular(15),
+            child: CircleAvatar(
+              radius: 15,
+              backgroundColor: AppTheme.surfaceBlue,
+              child: Text(
+                name.isEmpty ? '友' : name.characters.first,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.primary,
+                ),
               ),
             ),
           ),
@@ -460,12 +488,20 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
               children: [
                 Row(
                   children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
+                    InkWell(
+                      onTap: () {
+                        if (reply.authorId.isNotEmpty && !reply.authorId.startsWith('guest')) {
+                          widget.onAuthorTap?.call(reply.authorId);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(4),
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 5),

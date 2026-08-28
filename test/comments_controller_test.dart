@@ -155,6 +155,8 @@ class _FakeCommentRepository implements CommentRepository {
     required String content,
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async => _comment('c3', content);
 
   @override
@@ -162,6 +164,8 @@ class _FakeCommentRepository implements CommentRepository {
     required String commentId,
     required String content,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) async {
     replyCalls++;
     await Future<void>.delayed(const Duration(milliseconds: 5));

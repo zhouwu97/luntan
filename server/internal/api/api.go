@@ -357,6 +357,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/api/v1/media/upload-token":
 		s.createMediaUploadToken(w, r)
 		return
+	case r.Method == http.MethodPut && path == "/api/v1/media/upload":
+		s.receiveSignedMediaUpload(w, r)
+		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/media/") && strings.HasSuffix(path, "/complete"):
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/media/"), "/complete")
 		s.completeMedia(w, r, mediaID)

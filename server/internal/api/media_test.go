@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
@@ -200,5 +201,21 @@ func TestMediaInputLimits(t *testing.T) {
 		SHA256:   checksum,
 	}) {
 		t.Fatal("expected >40MP image to be rejected")
+	}
+}
+
+func TestLocalMediaUploadRouteAcceptsSignedPut(t *testing.T) {
+	store := storage.NewLocalMediaStorage(t.TempDir(), "local-test-secret")
+	data := []byte("not-an-image")
+	uploadURL, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "application/octet-stream", time.Now().Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("SignUpload failed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPut, uploadURL, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	res := httptest.NewRecorder()
+	NewHandlerWithMedia(nil, nil, store).ServeHTTP(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("local media upload route status = %d, body=%s", res.Code, res.Body.String())
 	}
 }

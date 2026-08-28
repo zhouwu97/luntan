@@ -374,6 +374,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               onEditPost: editPost,
               onReport: apiMode ? report : null,
               pollRepository: repositories.poll,
+              publishRepository: repositories.publish,
+              onOpenUserId: openUserProfile,
             ),
           ),
         )
@@ -907,7 +909,11 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: auth,
       builder: (context, _) {
-        if (auth.status == AuthStatus.unknown) return const _SplashScreen();
+        // 公开内容允许游客直接浏览；登录状态检查在后台进行，不应挡住首帧。
+        // 只有用户主动进入登录流程后，unknown 状态才需要展示检查中的页面。
+        if (auth.status == AuthStatus.unknown && !browseWithoutAuth) {
+          return const _SplashScreen();
+        }
         if (auth.status == AuthStatus.authenticated || browseWithoutAuth) {
           return _mainShell();
         }
@@ -1009,7 +1015,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: '杯友酱',
+    title: '圣杯酱',
     theme: AppTheme.light,
     navigatorKey: navigatorKey,
     scaffoldMessengerKey: scaffoldMessengerKey,

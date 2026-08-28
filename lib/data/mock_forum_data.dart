@@ -315,17 +315,27 @@ class ForumStore extends ChangeNotifier {
     String content, {
     String? parentId,
     String? replyToUserId,
+    List<String> mediaIds = const [],
+    String? stickerId,
   }) {
     final now = DateTime.now();
     final comments = commentsByPost.putIfAbsent(post.id, () => <Comment>[]);
+    final mediaAssets = mediaIds.map((id) => MediaAsset(
+      id: id,
+      type: MediaType.image,
+      url: id.startsWith('http') ? id : null,
+    )).toList();
     final comment = Comment(
       id: 'comment-${now.microsecondsSinceEpoch}',
       postId: post.id,
       authorId: _currentUser.id,
+      author: _currentUser,
       rootId: parentId == null ? null : _rootIdForReply(comments, parentId),
       parentId: parentId,
       replyToUserId: replyToUserId,
       content: content,
+      media: mediaAssets,
+      stickerId: stickerId,
       createdAt: now,
       updatedAt: now,
     );

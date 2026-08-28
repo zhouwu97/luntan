@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../domain/models.dart';
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import '../motion_tap_icon.dart';
+import 'comment_attachment_preview.dart';
+import 'comment_composer_controller.dart';
+import 'emoji/comment_emoji_panel.dart';
 
 class CommentReplyBar extends StatefulWidget {
   const CommentReplyBar({
     super.key,
-    required this.controller,
+    this.controller,
+    this.composerController,
     this.target,
     this.sending = false,
     this.isAuthenticated = true,
@@ -29,7 +34,8 @@ class CommentReplyBar extends StatefulWidget {
     this.focusNode,
   });
 
-  final TextEditingController controller;
+  final TextEditingController? controller;
+  final CommentComposerController? composerController;
   final Comment? target;
   final bool sending;
   final bool isAuthenticated;
@@ -56,19 +62,30 @@ class CommentReplyBar extends StatefulWidget {
 }
 
 class _CommentReplyBarState extends State<CommentReplyBar> {
-  late final FocusNode _internalFocusNode;
+  CommentComposerController? _internalComposer;
+  final ImagePicker _picker = ImagePicker();
   bool _isEditing = false;
 
-  FocusNode get _effectiveFocusNode => widget.focusNode ?? _internalFocusNode;
+  CommentComposerController get _composer =>
+      widget.composerController ?? (_internalComposer ??= CommentComposerController());
 
   @override
   void initState() {
     super.initState();
-    _internalFocusNode = FocusNode();
-    _effectiveFocusNode.addListener(_handleFocusChange);
-    widget.controller.addListener(_handleTextChange);
+    if (widget.composerController == null) {
+      _internalComposer = CommentComposerController();
+    }
+    _syncControllerText();
+    _composer.addListener(_handleComposerChange);
     if (widget.target != null || widget.isSheetMode) {
       _isEditing = true;
+    }
+  }
+
+  void _syncControllerText() {
+    if (widget.controller != null &&
+        widget.controller!.text != _composer.textController.text) {
+      _composer.textController.text = widget.controller!.text;
     }
   }
 
@@ -77,42 +94,24 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
     super.didUpdateWidget(oldWidget);
     if (widget.target != null && oldWidget.target == null) {
       _isEditing = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_effectiveFocusNode.hasFocus) {
-          _effectiveFocusNode.requestFocus();
-        }
-      });
+      _composer.open();
     }
+    _syncControllerText();
   }
 
   @override
   void dispose() {
-    _effectiveFocusNode.removeListener(_handleFocusChange);
-    widget.controller.removeListener(_handleTextChange);
-    if (widget.focusNode == null) {
-      _internalFocusNode.dispose();
-    }
+    _composer.removeListener(_handleComposerChange);
+    _internalComposer?.dispose();
     super.dispose();
   }
 
-  void _handleFocusChange() {
-    if (mounted) {
-      setState(() {
-        if (_effectiveFocusNode.hasFocus) {
-          _isEditing = true;
-        } else if (widget.target == null &&
-            widget.controller.text.isEmpty &&
-            !widget.isSheetMode) {
-          _isEditing = false;
-        }
-      });
+  void _handleComposerChange() {
+    if (widget.controller != null &&
+        widget.controller!.text != _composer.textController.text) {
+      widget.controller!.text = _composer.textController.text;
     }
-  }
-
-  void _handleTextChange() {
-    if (widget.controller.text.isNotEmpty && !_isEditing && mounted) {
-      setState(() => _isEditing = true);
-    }
+    if (mounted) setState(() {});
   }
 
   void _activateEditing() {
@@ -125,13 +124,39 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
       return;
     }
     setState(() => _isEditing = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _effectiveFocusNode.requestFocus();
-    });
+    _composer.open();
+  }
+
+  Future<void> _handlePickImage() async {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
+    if (!widget.canComment) {
+      widget.onFeedback(widget.blockedMessage);
+      return;
+    }
+    try {
+      final image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 85,
+      );
+      if (image != null) {
+        setState(() => _isEditing = true);
+        _composer.setLocalImage(image);
+      }
+    } catch (e) {
+      widget.onFeedback('选择图片失败: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    _composer.updateKeyboardMetrics(keyboardInset);
+
     final targetUser = widget.target?.author?.nickname ??
         (widget.target?.authorId.isNotEmpty == true ? '用户' : null);
 
@@ -139,32 +164,42 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
         widget.commentCount != null &&
         widget.likeCount != null;
 
-    final isExpanded = _isEditing || widget.target != null || widget.isSheetMode;
+    final isExpanded = _isEditing ||
+        widget.target != null ||
+        widget.isSheetMode ||
+        _composer.isOpen ||
+        _composer.showEmojiPanel ||
+        !_composer.draft.isEmpty;
+
+    final showEmoji = _composer.showEmojiPanel || _composer.inputHandoffActive;
 
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: AppTheme.border)),
       ),
-      padding: EdgeInsets.fromLTRB(
-        14,
-        8,
-        14,
-        8 + MediaQuery.of(context).viewInsets.bottom,
-      ),
       child: SafeArea(
         top: false,
+        bottom: !showEmoji,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 回复目标动态栏
+            // 附件预览栏（图片或贴纸）
+            CommentAttachmentPreview(
+              localImage: _composer.localImage,
+              sticker: _composer.sticker,
+              onRemoveImage: _composer.clearLocalImage,
+              onRemoveSticker: _composer.clearSticker,
+            ),
+
+            // 回复目标动态提示
             AnimatedSize(
               duration: AppMotion.fast,
               curve: AppMotion.standard,
               child: widget.target != null
                   ? Padding(
-                      padding: const EdgeInsets.only(bottom: 6, left: 4),
+                      padding: const EdgeInsets.only(top: 6, bottom: 2, left: 16, right: 16),
                       child: Row(
                         children: [
                           Text(
@@ -179,9 +214,8 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
                           GestureDetector(
                             onTap: () {
                               widget.onCancelTarget();
-                              if (widget.controller.text.isEmpty &&
-                                  !widget.isSheetMode) {
-                                _effectiveFocusNode.unfocus();
+                              if (_composer.draft.isEmpty && !widget.isSheetMode) {
+                                _composer.close();
                                 setState(() => _isEditing = false);
                               }
                             },
@@ -204,10 +238,31 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
                   : const SizedBox.shrink(),
             ),
 
-            if (!isExpanded && showDetailActions)
-              _buildDefaultBar(targetUser)
-            else
-              _buildActiveInputBar(targetUser),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                14,
+                6,
+                14,
+                showEmoji ? 6 : (6 + (isExpanded ? 0 : 0)),
+              ),
+              child: (!isExpanded && showDetailActions)
+                  ? _buildDefaultBar(targetUser)
+                  : _buildActiveInputBar(targetUser),
+            ),
+
+            // 表情/贴纸面板容器
+            if (showEmoji)
+              SizedBox(
+                height: _composer.stableKeyboardHeight,
+                child: CommentEmojiPanel(
+                  enabled: !widget.sending,
+                  onEmojiSelected: (emoji) => _composer.insertEmoji(emoji),
+                  onBackspace: () => _composer.deleteBackward(),
+                  onStickerSelected: (sticker) {
+                    _composer.setSticker(sticker);
+                  },
+                ),
+              ),
           ],
         ),
       ),
@@ -334,56 +389,96 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
   }
 
   Widget _buildActiveInputBar(String? targetUser) {
+    final canSubmit = !_composer.draft.isEmpty && !widget.sending;
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
+        // 图片附件按钮
+        IconButton(
+          icon: Icon(
+            Icons.image_outlined,
+            color: _composer.localImage != null
+                ? AppTheme.primary
+                : const Color(0xFF6C8093),
+            size: 22,
+          ),
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 40),
+          tooltip: '添加图片',
+          onPressed: widget.sending ? null : _handlePickImage,
+        ),
+
+        // 表情/贴纸面板切换按钮
+        IconButton(
+          icon: Icon(
+            _composer.showEmojiPanel
+                ? Icons.keyboard_alt_outlined
+                : Icons.sentiment_satisfied_alt_rounded,
+            color: _composer.showEmojiPanel || _composer.sticker != null
+                ? AppTheme.primary
+                : const Color(0xFF6C8093),
+            size: 22,
+          ),
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 40),
+          tooltip: '表情与贴纸',
+          onPressed: widget.sending ? null : () => _composer.toggleEmoji(),
+        ),
+        const SizedBox(width: 4),
+
+        // 输入框
         Expanded(
           child: Container(
-            height: 42,
+            constraints: const BoxConstraints(minHeight: 40, maxHeight: 100),
             decoration: BoxDecoration(
               color: const Color(0xFFF5F8FB),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: const Color(0xFFDDE7F0)),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Center(
-              child: TextField(
-                focusNode: _effectiveFocusNode,
-                controller: widget.controller,
-                enabled: !widget.sending,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  color: AppTheme.textPrimary,
-                ),
-                decoration: InputDecoration(
-                  hintText: widget.target != null
-                      ? '回复 @${targetUser ?? "用户"}…'
-                      : '友善地回复一句…',
-                  hintStyle: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF899AAC),
-                  ),
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                  filled: false,
-                  isDense: true,
-                ),
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) {
-                  if (!widget.sending) widget.onSubmit();
-                },
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            alignment: Alignment.centerLeft,
+            child: TextField(
+              focusNode: _composer.focusNode,
+              controller: _composer.textController,
+              enabled: !widget.sending,
+              maxLines: null,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppTheme.textPrimary,
               ),
+              decoration: InputDecoration(
+                hintText: widget.target != null
+                    ? '回复 @${targetUser ?? "用户"}…'
+                    : '友善地回复一句…',
+                hintStyle: const TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF899AAC),
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                filled: false,
+                isDense: true,
+              ),
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) {
+                if (canSubmit) widget.onSubmit();
+              },
             ),
           ),
         ),
         const SizedBox(width: 8),
+
+        // 发送按钮
         SizedBox(
-          height: 42,
+          height: 40,
           child: FilledButton(
-            onPressed: widget.sending
-                ? null
-                : () {
+            onPressed: canSubmit
+                ? () {
                     if (!widget.isAuthenticated) {
                       widget.onRequireAuth?.call();
                       return;
@@ -393,10 +488,13 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
                       return;
                     }
                     widget.onSubmit();
-                  },
+                  }
+                : null,
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
+              disabledBackgroundColor: const Color(0xFFDDE7F0),
+              disabledForegroundColor: const Color(0xFF9CB1C4),
               padding: const EdgeInsets.symmetric(horizontal: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(13),
@@ -425,4 +523,5 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
     );
   }
 }
+
 

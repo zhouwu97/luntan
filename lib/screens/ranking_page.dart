@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
+import '../data/beiyoujiang_catalog.dart';
 import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
@@ -26,6 +28,9 @@ class RankingItem {
     this.category = 'cup',
     this.segments = const [],
     this.ratingDistribution = const {},
+    this.remoteImageUrl,
+    this.couponUrl,
+    this.sourceUrl,
   });
 
   final int rank;
@@ -42,6 +47,9 @@ class RankingItem {
   final String category;
   final List<String> segments;
   final Map<int, int> ratingDistribution;
+  final String? remoteImageUrl;
+  final String? couponUrl;
+  final String? sourceUrl;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -57,6 +65,9 @@ class RankingItem {
     'description': description,
     'category': category,
     'segments': segments,
+    'remote_image_url': remoteImageUrl,
+    'coupon_url': couponUrl,
+    'source_url': sourceUrl,
     'rating_distribution': ratingDistribution.map(
       (key, value) => MapEntry('$key', value),
     ),
@@ -93,8 +104,32 @@ class RankingItem {
       category: '${json['category'] ?? 'cup'}',
       segments: strings(json['segments']),
       ratingDistribution: distribution,
+      remoteImageUrl: json['remote_image_url'] as String?,
+      couponUrl: json['coupon_url'] as String?,
+      sourceUrl: json['source_url'] as String?,
     );
   }
+}
+
+Widget _rankingImage(
+  RankingItem item, {
+  required double width,
+  required double height,
+  required BoxFit fit,
+}) {
+  final remoteUrl = item.remoteImageUrl;
+  if (remoteUrl != null && remoteUrl.isNotEmpty) {
+    return Image.network(
+      remoteUrl,
+      width: width,
+      height: height,
+      fit: fit,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, _, _) =>
+          Image.asset(item.asset, width: width, height: height, fit: fit),
+    );
+  }
+  return Image.asset(item.asset, width: width, height: height, fit: fit);
 }
 
 const _mainRankingItems = <RankingItem>[
@@ -361,6 +396,7 @@ class RankingPage extends StatefulWidget {
     this.canVote = false,
     this.onRequireAuth,
     this.cache,
+    this.useBeiyoujiangCatalog = false,
   });
 
   final RankingRepository? repository;
@@ -370,6 +406,7 @@ class RankingPage extends StatefulWidget {
   final bool canVote;
   final VoidCallback? onRequireAuth;
   final RankingCacheStore? cache;
+  final bool useBeiyoujiangCatalog;
 
   @override
   State<RankingPage> createState() => _RankingPageState();
@@ -379,16 +416,31 @@ class _RankingPageState extends State<RankingPage> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
   int _selectedTab = 0;
-  int _selectedCategory = 0;
+  int _selectedCategory = -1;
   List<RankingItem>? _remoteItems;
   DateTime? _remoteUpdatedAt;
   Object? _remoteError;
   bool _loadingRemote = false;
+  BeiyoujiangCatalog? _beiyoujiangCatalog;
+  Object? _catalogError;
+
+  static const _sourceTabKeys = ['', 'ENTRY', 'ADVANCED', 'HIGH', 'EXTREME'];
+  static const _sourceCategoryKeys = [
+    'CUP',
+    'SMALL_MOLD',
+    'LARGE_MOLD',
+    'HALF_BODY',
+    'LUBE',
+  ];
 
   @override
   void initState() {
     super.initState();
-    if (widget.repository != null) _loadRemoteRanking();
+    if (widget.useBeiyoujiangCatalog) {
+      _loadBeiyoujiangCatalog();
+    } else if (widget.repository != null) {
+      _loadRemoteRanking();
+    }
   }
 
   @override
@@ -429,6 +481,19 @@ class _RankingPageState extends State<RankingPage> {
     }
   }
 
+  Future<void> _loadBeiyoujiangCatalog() async {
+    try {
+      final catalog = await BeiyoujiangCatalog.load();
+      if (!mounted) return;
+      setState(() {
+        _beiyoujiangCatalog = catalog;
+        _catalogError = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _catalogError = error);
+    }
+  }
+
   RankingItem _itemFromRemote(RankingToy toy) {
     final score = toy.score == toy.score.roundToDouble()
         ? toy.score.toStringAsFixed(0)
@@ -453,13 +518,55 @@ class _RankingPageState extends State<RankingPage> {
     );
   }
 
+  RankingItem _itemFromBeiyoujiang(BeiyoujiangCatalogItem item) {
+    final score = item.score == item.score.roundToDouble()
+        ? item.score.toStringAsFixed(0)
+        : item.score.toStringAsFixed(1);
+    return RankingItem(
+      id: 'beiyoujiang-${item.id}',
+      rank: item.rank,
+      name: item.name,
+      hot: item.wantCountText,
+      tags: item.tags,
+      ratings: '${item.reviewCount}人评分',
+      score: score,
+      asset: 'assets/ranking/thumb_02.webp',
+      merchant: item.merchant,
+      releaseYear: item.releaseYear,
+      description: item.description,
+      category: item.category,
+      segments: [item.stimulation],
+      remoteImageUrl: item.imageUrlFor(),
+      couponUrl: item.shopLink,
+      sourceUrl: item.detailUrl,
+    );
+  }
+
   List<RankingItem> get _allSourceItems {
+    final catalog = _beiyoujiangCatalog;
+    if (widget.useBeiyoujiangCatalog && catalog != null) {
+      return catalog.searchableItems.map(_itemFromBeiyoujiang).toList();
+    }
     if (widget.repository != null) return _remoteItems ?? const [];
     return [_topRankingItem, ..._mainRankingItems];
   }
 
+  BeiyoujiangRankingView? get _selectedSourceView {
+    final catalog = _beiyoujiangCatalog;
+    if (!widget.useBeiyoujiangCatalog || catalog == null) return null;
+    final tab = _sourceTabKeys[_selectedTab];
+    final category = _selectedCategory < 0
+        ? ''
+        : _sourceCategoryKeys[_selectedCategory];
+    return catalog.viewFor(tab: tab, category: category);
+  }
+
   List<RankingItem> get _filteredItems {
     final query = _searchQuery.trim().toLowerCase();
+    final sourceView = _selectedSourceView;
+    if (query.isEmpty && sourceView != null) {
+      return sourceView.items.map(_itemFromBeiyoujiang).toList();
+    }
     return _allSourceItems.where((item) {
       if (query.isNotEmpty) {
         final matchesName = item.name.toLowerCase().contains(query);
@@ -495,15 +602,17 @@ class _RankingPageState extends State<RankingPage> {
         2 => 'large_hip',
         3 => 'half_body',
         4 => 'lubricant',
-        _ => 'cup',
+        _ => '',
       };
-      if (item.category != catKey) return false;
+      if (catKey.isNotEmpty && item.category != catKey) return false;
 
       return true;
     }).toList();
   }
 
   RankingItem get _topItem {
+    final sourceTop = _selectedSourceView?.weeklyTop;
+    if (sourceTop != null) return _itemFromBeiyoujiang(sourceTop);
     final items = _filteredItems;
     if (items.isEmpty) return _topRankingItem;
     return items.firstWhere(
@@ -551,12 +660,21 @@ class _RankingPageState extends State<RankingPage> {
   );
 
   Widget _rankingScrollView() {
+    if (widget.useBeiyoujiangCatalog && _beiyoujiangCatalog == null) {
+      if (_catalogError != null) {
+        return _RankingLoadError(onRetry: _loadBeiyoujiangCatalog);
+      }
+      return const Center(child: CircularProgressIndicator());
+    }
     if (widget.repository != null &&
+        !widget.useBeiyoujiangCatalog &&
         _remoteError != null &&
         _remoteItems == null) {
       return _RankingLoadError(onRetry: _loadRemoteRanking);
     }
-    if (widget.repository != null && _remoteItems == null) {
+    if (widget.repository != null &&
+        !widget.useBeiyoujiangCatalog &&
+        _remoteItems == null) {
       return const Center(child: CircularProgressIndicator());
     }
     final query = _searchQuery.trim();
@@ -601,25 +719,44 @@ class _RankingPageState extends State<RankingPage> {
       );
     }
 
-    final showTopBanner = _selectedTab == 0 && items.any((i) => i.rank == 1);
+    final showTopBanner =
+        _selectedSourceView?.weeklyTop != null ||
+        (_selectedTab == 0 && items.any((i) => i.rank == 1));
     final listItems = showTopBanner
         ? items.where((i) => i.id != _topItem.id).toList()
         : items;
 
     return ListView(
       children: [
-        if (_remoteError != null && _remoteItems != null)
+        if (!widget.useBeiyoujiangCatalog &&
+            _remoteError != null &&
+            _remoteItems != null)
           _RankingStaleBanner(
             updatedAt: _remoteUpdatedAt,
             onRetry: _loadRemoteRanking,
           ),
         _RankingTabs(
           selectedIndex: _selectedTab,
-          onTap: (index) => setState(() => _selectedTab = index),
+          onTap: (index) => setState(() {
+            _selectedTab = index;
+            if (widget.useBeiyoujiangCatalog &&
+                index > 0 &&
+                _selectedCategory < 0) {
+              _selectedCategory = 0;
+            }
+          }),
         ),
         _CategoryGrid(
           selectedIndex: _selectedCategory,
-          onTap: (index) => setState(() => _selectedCategory = index),
+          onTap: (index) => setState(() {
+            if (widget.useBeiyoujiangCatalog &&
+                _selectedTab == 0 &&
+                index == _selectedCategory) {
+              _selectedCategory = -1;
+            } else {
+              _selectedCategory = index;
+            }
+          }),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1043,7 +1180,12 @@ class _TopRankingCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.asset('assets/ranking/hero.webp', fit: BoxFit.contain),
+                  _rankingImage(
+                    item,
+                    width: double.infinity,
+                    height: 142,
+                    fit: BoxFit.cover,
+                  ),
                   Positioned(
                     top: 0,
                     left: 0,
@@ -1195,6 +1337,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       segments: toy.segments,
       ratingDistribution:
           _remoteDetail?.ratingDistribution ?? item.ratingDistribution,
+      remoteImageUrl: item.remoteImageUrl,
+      couponUrl: item.couponUrl,
+      sourceUrl: item.sourceUrl,
     );
   }
 
@@ -1291,11 +1436,17 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _setWanted() async {
-    if (!_requireCapability(widget.canVote, '当前身份暂不能记录想要，请登录邮箱账号后重试')) {
-      return;
-    }
-    if (!_hasServer) {
-      setState(() => _wanted = !_wanted);
+    final nextWanted = !_wanted;
+    // 游客也可以管理本机“想冲”清单；源站优惠链接不依赖登录态。
+    if (!_hasServer || !widget.isAuthenticated || !widget.canVote) {
+      setState(() => _wanted = nextWanted);
+      if (nextWanted && mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RankingCouponPage(item: item),
+          ),
+        );
+      }
       return;
     }
     try {
@@ -1314,11 +1465,17 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _setOwned() async {
-    if (!_requireCapability(widget.canVote, '当前身份暂不能记录拥有，请登录邮箱账号后重试')) {
-      return;
-    }
-    if (!_hasServer) {
-      setState(() => _owned = !_owned);
+    final nextOwned = !_owned;
+    // “买过”同样允许游客先在本机标记，避免未登录时强制跳转认证页。
+    if (!_hasServer || !widget.isAuthenticated || !widget.canVote) {
+      setState(() => _owned = nextOwned);
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RankingPurchasePage(item: item, owned: nextOwned),
+          ),
+        );
+      }
       return;
     }
     try {
@@ -1602,9 +1759,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
               _DetailTopBar(
                 onBack: () => Navigator.of(context).maybePop(),
                 onShare: () async {
-                  final shareUrl = AppLinks.ranking(
-                    item.id.isNotEmpty ? item.id : '${item.rank}',
-                  );
+                  final shareUrl =
+                      item.sourceUrl ??
+                      AppLinks.ranking(
+                        item.id.isNotEmpty ? item.id : '${item.rank}',
+                      );
                   try {
                     await Share.share(shareUrl, subject: '分享榜单商品');
                   } catch (_) {
@@ -1704,6 +1863,175 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   );
 }
 
+/// 游客点击“想冲”后展示的优惠券入口页。
+class RankingCouponPage extends StatelessWidget {
+  const RankingCouponPage({super.key, required this.item});
+
+  final RankingItem item;
+
+  Future<void> _openCoupon(BuildContext context) async {
+    final link = item.couponUrl;
+    if (link == null || link.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('该商品暂未提供优惠券链接')));
+      return;
+    }
+    final opened = await launchUrl(
+      Uri.parse(link),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      await Clipboard.setData(ClipboardData(text: link));
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('无法打开浏览器，优惠链接已复制')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('想冲清单')),
+    body: SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: _rankingImage(
+                  item,
+                  width: 150,
+                  height: 150,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              item.name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF182C49),
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '已加入本机想冲清单，可直接领取或查看优惠。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF718096), fontSize: 13),
+            ),
+            const SizedBox(height: 28),
+            if (item.couponUrl != null && item.couponUrl!.isNotEmpty) ...[
+              SelectableText(
+                item.couponUrl!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFF55739A), fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+            ] else
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '该商品暂未提供优惠券链接',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
+                ),
+              ),
+            FilledButton.icon(
+              onPressed: () => _openCoupon(context),
+              icon: const Icon(Icons.local_offer_outlined),
+              label: const Text('打开优惠券链接'),
+            ),
+            TextButton.icon(
+              onPressed: item.couponUrl == null
+                  ? null
+                  : () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: item.couponUrl!),
+                      );
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('优惠券链接已复制')),
+                        );
+                      }
+                    },
+              icon: const Icon(Icons.copy_outlined, size: 17),
+              label: const Text('复制链接'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// 游客点击“买过”后展示的购买状态页。
+class RankingPurchasePage extends StatelessWidget {
+  const RankingPurchasePage({
+    super.key,
+    required this.item,
+    required this.owned,
+  });
+
+  final RankingItem item;
+  final bool owned;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('购买记录')),
+    body: SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(
+              owned ? Icons.check_circle_rounded : Icons.undo_rounded,
+              size: 58,
+              color: owned ? const Color(0xFFF76591) : const Color(0xFF8A96A9),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              owned ? '已标记为买过' : '已取消“买过”标记',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF182C49),
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              item.name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF718096), fontSize: 14),
+            ),
+            const SizedBox(height: 22),
+            const Text(
+              '游客标记仅保存在当前设备；登录账号后可同步并发布评价。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
+            ),
+            const SizedBox(height: 28),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.arrow_back_rounded),
+              label: const Text('返回商品详情'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _DetailTopBar extends StatelessWidget {
   const _DetailTopBar({required this.onBack, required this.onShare});
 
@@ -1770,7 +2098,12 @@ class _DetailProductIntro extends StatelessWidget {
         children: [
           SizedBox(
             width: 112,
-            child: Image.asset(item.asset, fit: BoxFit.contain),
+            child: _rankingImage(
+              item,
+              width: 112,
+              height: 142,
+              fit: BoxFit.contain,
+            ),
           ),
           const SizedBox(width: 18),
           Expanded(
@@ -2651,8 +2984,8 @@ class _RankingCard extends StatelessWidget {
             const SizedBox(width: 12),
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.asset(
-                item.asset,
+              child: _rankingImage(
+                item,
                 width: 64,
                 height: 64,
                 fit: BoxFit.contain,

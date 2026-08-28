@@ -9,6 +9,10 @@ import (
 	"image/color"
 	"image/jpeg"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -108,5 +112,73 @@ func TestMemoryStorageSignUpload(t *testing.T) {
 	url, err := store.SignUpload(context.Background(), "asset1", "obj1", "image/png", time.Now().Add(5*time.Minute))
 	if err != nil || url == "" {
 		t.Fatalf("SignUpload failed: url=%s, err=%v", url, err)
+	}
+}
+
+func TestObjectStorageFromEnvUsesLocalDiskForConfiguredQAStorage(t *testing.T) {
+	t.Setenv("OBJECT_STORAGE_UPLOAD_BASE_URL", "")
+	t.Setenv("OBJECT_STORAGE_SIGNING_SECRET", "local-test-secret")
+	t.Setenv("MEDIA_STORAGE_DIR", t.TempDir())
+
+	store := NewObjectStorageFromEnv()
+	if _, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "image/png", time.Now().Add(5*time.Minute)); err != nil {
+		t.Fatalf("configured local media storage should issue an upload URL, got: %v", err)
+	}
+}
+
+func TestLocalMediaStorageSignedUploadAndVerify(t *testing.T) {
+	store := NewLocalMediaStorage(t.TempDir(), "local-test-secret")
+	data := createTestJPEG(100, 80)
+	digest := sha256.Sum256(data)
+	digestHex := hex.EncodeToString(digest[:])
+	expiresAt := time.Now().Add(5 * time.Minute)
+	uploadURL, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "image/jpeg", expiresAt)
+	if err != nil {
+		t.Fatalf("SignUpload failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, uploadURL, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "image/jpeg")
+	res := httptest.NewRecorder()
+	store.ServeSignedUpload(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("signed upload status = %d, body=%s", res.Code, res.Body.String())
+	}
+
+	asset := &MediaAsset{
+		ID:        "asset1",
+		ObjectKey: "media/u1/asset1",
+		MimeType:  "image/jpeg",
+		Width:     100,
+		Height:    80,
+		Size:      int64(len(data)),
+		SHA256:    digestHex,
+		Status:    "pending",
+	}
+	if err := store.VerifyUploaded(context.Background(), asset); err != nil {
+		t.Fatalf("VerifyUploaded failed: %v", err)
+	}
+	filePath, err := store.objectPath(asset.ObjectKey)
+	if err != nil {
+		t.Fatalf("resolve stored object path: %v", err)
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("stat stored object: %v", err)
+	}
+	if info.Mode().Perm()&0444 == 0 {
+		t.Fatalf("stored object is not readable: permissions = %o", info.Mode().Perm())
+	}
+	for _, directory := range []string{
+		filepath.Dir(filePath),
+		filepath.Dir(filepath.Dir(filePath)),
+	} {
+		directoryInfo, statErr := os.Stat(directory)
+		if statErr != nil {
+			t.Fatalf("stat object directory: %v", statErr)
+		}
+		if directoryInfo.Mode().Perm()&0111 == 0 {
+			t.Fatalf("object directory is not traversable: %s permissions=%o", directory, directoryInfo.Mode().Perm())
+		}
 	}
 }

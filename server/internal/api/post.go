@@ -121,7 +121,10 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	postID := newPostID()
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7)`, postID, user.ID, input.CommunityID, input.Type, input.Title, input.Content, now); err != nil {
+	// post_status / moderation_status 由 apply_forum_content_rules 触发器最终裁定
+	// （新账号每日首帖规则 + 可疑内容规则），必须 RETURNING 读回，不能在 Go 侧重算。
+	var dbPostStatus, dbModerationStatus string
+	if err := tx.QueryRowContext(r.Context(), `INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, created_at, updated_at, published_at) VALUES ($1, $2, $3, $4, 'published', 'normal', $5, $6, $7, $7, $7) RETURNING post_status, moderation_status`, postID, user.ID, input.CommunityID, input.Type, input.Title, input.Content, now).Scan(&dbPostStatus, &dbModerationStatus); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -168,11 +171,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	postStatus, moderationStatus := "published", "normal"
-	if contentNeedsReview(input.Title, input.Content) {
-		postStatus, moderationStatus = "pending", "pending"
-	}
-	response := postMutationResponse{ID: postID, AuthorID: user.ID, CommunityID: input.CommunityID, Type: input.Type, Title: input.Title, Content: input.Content, PublicationStatus: "published", ModerationStatus: moderationStatus, PostStatus: postStatus, CreatedAt: now, UpdatedAt: now, PublishedAt: &now}
+	response := postMutationResponse{ID: postID, AuthorID: user.ID, CommunityID: input.CommunityID, Type: input.Type, Title: input.Title, Content: input.Content, PublicationStatus: "published", ModerationStatus: dbModerationStatus, PostStatus: dbPostStatus, CreatedAt: now, UpdatedAt: now, PublishedAt: &now}
 	response.MediaIDs = append([]string(nil), input.MediaIDs...)
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
@@ -411,9 +410,19 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 		writeInternalError(w, r, err)
 		return
 	}
-	if deletedAt.Valid || row.Publication != "published" || row.Moderation != "normal" {
+	if deletedAt.Valid {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "帖子不存在"})
 		return
+	}
+	// 待审核（pending）内容对公众不可见，但作者本人与审核人员必须能看到。
+	// 否则用户看到「发布成功」却在详情页、个人主页和搜索里都找不到自己的帖子。
+	if row.Publication != "published" || row.Moderation != "normal" {
+		viewer, ok := resolveOptionalViewer(s, r)
+		canReview := ok && viewer.ID != "" && s.hasAnyPermission(r, viewer.ID, "report.review")
+		if !ok || (viewer.ID != row.Author.ID && !canReview) {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "帖子不存在"})
+			return
+		}
 	}
 	if publishedAt.Valid {
 		row.PublishedAt = &publishedAt.Time

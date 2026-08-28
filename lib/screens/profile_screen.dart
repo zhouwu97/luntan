@@ -294,7 +294,7 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 22),
                 Text(
-                  '杯友酱 · 把真实的玩具体验留在这里',
+                  '圣杯酱 · 把真实的玩具体验留在这里',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: AppTheme.textSecondary.withValues(alpha: .65),
@@ -821,7 +821,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
             ),
             const SizedBox(height: 22),
             Text(
-              '杯友酱 · 把真实的玩具体验留在这里',
+              '圣杯酱 · 把真实的玩具体验留在这里',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textSecondary.withValues(alpha: .65),
@@ -937,6 +937,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController signatureController;
   XFile? avatarFile;
   Uint8List? avatarBytes;
+  XFile? backgroundFile;
+  Uint8List? backgroundBytes;
   bool saving = false;
   String? errorText;
 
@@ -973,6 +975,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
   }
 
+  Future<void> _pickBackground() async {
+    if (saving) return;
+    final file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+    );
+    if (!mounted || file == null) return;
+    final bytes = await file.readAsBytes();
+    if (bytes.length > 10 * 1024 * 1024) {
+      setState(() => errorText = '主页背景图不能超过 10 MB');
+      return;
+    }
+    setState(() {
+      backgroundFile = file;
+      backgroundBytes = bytes;
+      errorText = null;
+    });
+  }
+
   Future<String?> _uploadAvatar() async {
     final publisher = widget.publishRepository;
     final file = avatarFile;
@@ -1001,6 +1022,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return ticket.mediaId;
   }
 
+  Future<String?> _uploadBackground() async {
+    final publisher = widget.publishRepository;
+    final file = backgroundFile;
+    final bytes = backgroundBytes;
+    if (publisher == null || file == null || bytes == null) {
+      return widget.profile.backgroundMediaId;
+    }
+    final lower = file.name.toLowerCase();
+    final mimeType = lower.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    final digest = sha256.convert(bytes).toString();
+    final ticket = await publisher.requestMediaUpload(
+      fileName: file.name,
+      mimeType: mimeType,
+      size: bytes.length,
+      sha256: digest,
+    );
+    if (DateTime.now().isAfter(ticket.expiresAt)) {
+      throw const PublishException('背景图上传凭证已过期，请重新选择');
+    }
+    await publisher.uploadMedia(
+      ticket: ticket,
+      bytes: bytes,
+      size: bytes.length,
+      sha256: digest,
+    );
+    return ticket.mediaId;
+  }
+
   Future<void> _save() async {
     final nickname = nicknameController.text.trim();
     final signature = signatureController.text.trim();
@@ -1018,10 +1067,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
     try {
       final avatarMediaId = await _uploadAvatar();
+      final backgroundMediaId = await _uploadBackground();
       await widget.repository.updateProfile(
         nickname: nickname,
         signature: signature,
         avatarMediaId: avatarMediaId,
+        backgroundMediaId: backgroundMediaId,
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (error) {
@@ -1072,6 +1123,64 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           child: Text(
             '点击更换头像',
             style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          '主页背景',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: _pickBackground,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            height: 108,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (backgroundBytes != null)
+                    Image.memory(backgroundBytes!, fit: BoxFit.cover)
+                  else if (_hasUsableAvatarUrl(widget.profile.backgroundUrl))
+                    Image.network(
+                      widget.profile.backgroundUrl!,
+                      fit: BoxFit.cover,
+                    )
+                  else
+                    Image.asset(
+                      'assets/profile_default_background.png',
+                      fit: BoxFit.cover,
+                    ),
+                  const ColoredBox(color: Color(0x330B1422)),
+                  const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.add_photo_alternate_outlined,
+                          color: Colors.white,
+                        ),
+                        SizedBox(height: 5),
+                        Text(
+                          '点击上传主页背景图',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 24),

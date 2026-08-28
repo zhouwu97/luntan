@@ -158,15 +158,9 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     communityId =
         draft.communityId ?? _defaultCommunityId(_availableCommunities);
     topic = draft.topic;
-    isPoll = draft.isPoll;
-    allowMultiple = draft.allowMultiple;
-    pollEndsAt = draft.pollEndsAt;
-    while (pollOptionControllers.length < draft.pollOptions.length) {
-      pollOptionControllers.add(TextEditingController());
-    }
-    for (var index = 0; index < draft.pollOptions.length; index++) {
-      pollOptionControllers[index].text = draft.pollOptions[index];
-    }
+    isPoll = false;
+    allowMultiple = false;
+    pollEndsAt = null;
     _restoredMediaIds.addAll(draft.uploadedMediaIds);
     for (var index = 0; index < draft.localImagePaths.length; index++) {
       final path = draft.localImagePaths[index].trim();
@@ -693,27 +687,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                   ),
                 ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: isPoll ? 'poll' : 'normal',
-                decoration: const InputDecoration(labelText: '内容类型'),
-                items: const [
-                  DropdownMenuItem(value: 'normal', child: Text('普通帖子')),
-                  DropdownMenuItem(value: 'poll', child: Text('投票')),
-                ],
-                onChanged: submitting || _restoringDraft
-                    ? null
-                    : (value) {
-                        setState(() {
-                          isPoll = value == 'poll';
-                          if (!isPoll) {
-                            allowMultiple = false;
-                            pollEndsAt = null;
-                          }
-                        });
-                        _scheduleDraftSave();
-                      },
-              ),
-              const SizedBox(height: 12),
               TextField(
                 controller: titleController,
                 enabled: !submitting && !_restoringDraft,
@@ -724,115 +697,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                   hintText: '给帖子起一个清楚的标题',
                 ),
               ),
-              if (isPoll) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  '投票选项',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ...pollOptionControllers.asMap().entries.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: entry.value,
-                            enabled: !submitting && !_restoringDraft,
-                            onChanged: (_) => _scheduleDraftSave(),
-                            decoration: InputDecoration(
-                              labelText: '选项 ${entry.key + 1}',
-                              prefixIcon: const Icon(
-                                Icons.radio_button_unchecked_rounded,
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (pollOptionControllers.length > 2)
-                          IconButton(
-                            tooltip: '删除选项',
-                            onPressed: submitting || _restoringDraft
-                                ? null
-                                : () => _removePollOption(entry.key),
-                            icon: const Icon(Icons.remove_circle_outline),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                Row(
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed:
-                          submitting ||
-                              _restoringDraft ||
-                              pollOptionControllers.length >= 10
-                          ? null
-                          : _addPollOption,
-                      icon: const Icon(Icons.add),
-                      label: const Text('添加选项'),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        title: const Text('允许多选'),
-                        value: allowMultiple,
-                        onChanged: submitting || _restoringDraft
-                            ? null
-                            : (value) {
-                                setState(() => allowMultiple = value);
-                                _scheduleDraftSave();
-                              },
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.event_outlined,
-                      size: 19,
-                      color: AppTheme.textSecondary,
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        pollEndsAt == null
-                            ? '投票截止：不限时间'
-                            : '投票截止：${pollEndsAt!.year}-${pollEndsAt!.month.toString().padLeft(2, '0')}-${pollEndsAt!.day.toString().padLeft(2, '0')}',
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: submitting || _restoringDraft
-                          ? null
-                          : _choosePollDeadline,
-                      child: Text(pollEndsAt == null ? '设置' : '修改'),
-                    ),
-                    if (pollEndsAt != null)
-                      IconButton(
-                        tooltip: '清除截止时间',
-                        onPressed: submitting || _restoringDraft
-                            ? null
-                            : () {
-                                setState(() => pollEndsAt = null);
-                                _scheduleDraftSave();
-                              },
-                        icon: const Icon(Icons.close, size: 18),
-                      ),
-                  ],
-                ),
-              ],
               const SizedBox(height: 12),
               TextField(
                 controller: bodyController,

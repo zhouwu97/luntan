@@ -403,6 +403,18 @@ class AdminCandidate {
   final String email;
 }
 
+class ManagedUserPage {
+  const ManagedUserPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<ManagedUserSummary> items;
+  final String? nextCursor;
+  final bool hasMore;
+}
+
 class ManagedUserSummary {
   const ManagedUserSummary({
     required this.id,
@@ -969,7 +981,7 @@ class PlatformRepository {
     }).toList();
   }
 
-  Future<List<ManagedUserSummary>> listManagedUsers({
+  Future<ManagedUserPage> listManagedUsersPage({
     String query = '',
     String? status,
     String? cursor,
@@ -985,8 +997,29 @@ class PlatformRepository {
       },
     );
     final raw = payload['items'];
-    if (raw is! List) return const <ManagedUserSummary>[];
-    return raw.whereType<Map>().map(_managedUserSummaryFromJson).toList();
+    final items = raw is List
+        ? raw.whereType<Map>().map(_managedUserSummaryFromJson).toList()
+        : const <ManagedUserSummary>[];
+    return ManagedUserPage(
+      items: items,
+      nextCursor: payload['next_cursor'] as String?,
+      hasMore: payload['has_more'] == true,
+    );
+  }
+
+  Future<List<ManagedUserSummary>> listManagedUsers({
+    String query = '',
+    String? status,
+    String? cursor,
+    int limit = 30,
+  }) async {
+    final page = await listManagedUsersPage(
+      query: query,
+      status: status,
+      cursor: cursor,
+      limit: limit,
+    );
+    return page.items;
   }
 
   Future<ManagedUserDetail> getManagedUser(String userId) async {
@@ -1026,21 +1059,53 @@ class PlatformRepository {
     );
   }
 
-  ManagedUserSummary _managedUserSummaryFromJson(Map value) =>
-      ManagedUserSummary(
-        id: _string(value['id']),
-        username: _string(value['username']),
-        nickname: _string(value['nickname']),
-        email: _string(value['email']),
-        status: _string(value['status']),
-        accountType: _string(value['account_type'], fallback: 'email'),
-        createdAt: _date(value['created_at']),
-        roles: value['roles'] is List
-            ? (value['roles'] as List).map((item) => '$item').toList()
-            : const <String>[],
-        banned: value['banned'] == true,
-        muted: value['muted'] == true,
-      );
+  ManagedUserSummary _managedUserSummaryFromJson(Map value) {
+    final rawRoles = value['roles'];
+    final List<String> parsedRoles;
+    if (rawRoles is List) {
+      parsedRoles = rawRoles.map((item) {
+        if (item is Map) {
+          final name = _string(item['name']);
+          final communityId = _string(item['community_id']);
+          return communityId.isNotEmpty ? '$name:$communityId' : name;
+        }
+        final str = '$item'.trim();
+        if (str.startsWith('{') && str.endsWith('}')) {
+          final clean = str.substring(1, str.length - 1);
+          final parts = clean.split(',');
+          String n = '';
+          String c = '';
+          for (final part in parts) {
+            final kv = part.split(':');
+            if (kv.length >= 2) {
+              final k = kv[0].trim();
+              final v = kv.sublist(1).join(':').trim();
+              if (k == 'name') n = v;
+              if (k == 'community_id') c = v;
+            }
+          }
+          if (n.isNotEmpty) {
+            return c.isNotEmpty ? '$n:$c' : n;
+          }
+        }
+        return str;
+      }).where((s) => s.isNotEmpty).toList();
+    } else {
+      parsedRoles = const <String>[];
+    }
+    return ManagedUserSummary(
+      id: _string(value['id']),
+      username: _string(value['username']),
+      nickname: _string(value['nickname']),
+      email: _string(value['email']),
+      status: _string(value['status']),
+      accountType: _string(value['account_type'], fallback: 'email'),
+      createdAt: _date(value['created_at']),
+      roles: parsedRoles,
+      banned: value['banned'] == true,
+      muted: value['muted'] == true,
+    );
+  }
 
   Future<void> updateAdminRoles({
     required String adminId,

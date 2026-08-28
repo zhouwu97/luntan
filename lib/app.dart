@@ -725,7 +725,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     if (platform == null) return;
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
-        builder: (_) => ManagedUserListScreen(repository: platform),
+        builder: (_) => ManagedUserListScreen(
+          repository: platform,
+          onOpenPostId: openPostById,
+        ),
       ),
     );
   }

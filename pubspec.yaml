@@ -92,6 +92,19 @@ flutter:
   #       - asset: fonts/TrajanPro.ttf
   #       - asset: fonts/TrajanPro_Bold.ttf
   #         weight: 700
+
+  # Web 端 CanvasKit 无法读取系统字体；不打包中文字体时 CJK 字形会
+  # 运行时从 fonts.gstatic.com 拉取（国内被墙），导致请求风暴且中文
+  # 整体画不出来。必须本地打包（家族名见 AppTheme.fontFamily）。
+  fonts:
+    - family: LuntanCJK
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.otf
+          weight: 400
+        - asset: assets/fonts/NotoSansSC-Medium.otf
+          weight: 500
+        - asset: assets/fonts/NotoSansSC-Bold.otf
+          weight: 700
   assets:
     - assets/ranking/
     - assets/profile_default_background.png

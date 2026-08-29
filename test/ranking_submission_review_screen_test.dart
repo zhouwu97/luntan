@@ -54,6 +54,8 @@ RankingToySubmission _submission(
       createdAt: DateTime.utc(2026, 8, 29),
       submitterId: 'u-$id',
       submitterNickname: '投稿达人$id',
+      intensity: 'advanced',
+      tags: const ['慢玩', '软糯'],
     );
 
 Widget _wrap(_FakePlatformRepository repository, {void Function(String)? onFeedback}) =>

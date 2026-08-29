@@ -15,6 +15,8 @@ class _CapturingRankingRepository extends RankingRepository {
   int? releaseYear;
   String? description;
   String? coverMediaId;
+  String? intensity;
+  List<String> tags = const [];
   int submitCalls = 0;
 
   @override
@@ -25,6 +27,8 @@ class _CapturingRankingRepository extends RankingRepository {
     int? releaseYear,
     String? description,
     String? coverMediaId,
+    String? intensity,
+    List<String> tags = const [],
   }) async {
     submitCalls++;
     this.name = name;
@@ -33,6 +37,8 @@ class _CapturingRankingRepository extends RankingRepository {
     this.releaseYear = releaseYear;
     this.description = description;
     this.coverMediaId = coverMediaId;
+    this.intensity = intensity;
+    this.tags = tags;
   }
 }
 

@@ -86,14 +86,15 @@ func TestEmailPasswordLoginRoute(t *testing.T) {
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.experience, 0),
 		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at,
-		       a.id, a.credential_hash
+		       a.id, a.credential_hash,
+	       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
 		FROM users u
-		JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password'
+		LEFT JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password' AND a.identifier = $2
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL`)).
-		WithArgs("user@example.com").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "auth_id", "credential_hash"}).
-			AddRow("usr_1", "usr_1", "active", "测试用户", 1, 0, "email", "user@example.com", true, nil, "uam_1", hash))
+		WithArgs("user@example.com", "user@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "auth_id", "credential_hash", "has_password"}).
+			AddRow("usr_1", "usr_1", "active", "测试用户", 1, 0, "email", "user@example.com", true, nil, "uam_1", hash, true))
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE user_auth_methods SET last_used_at = $1 WHERE id = $2`)).
@@ -117,6 +118,53 @@ func TestEmailPasswordLoginRoute(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if resp["access_token"] == nil || resp["user"] == nil {
 		t.Fatalf("unexpected login response: %s", rec.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEmailPasswordLoginPasswordNotSet(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := NewHandler(db)
+
+	// 账号存在但从未设置过密码（旧自动注册遗留）：应返回 PASSWORD_NOT_SET
+	// 而不是笼统的密码错误，前端据此引导用户走验证码登录。
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
+	       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+	       COALESCE(up.experience, 0),
+	       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at,
+	       a.id, a.credential_hash,
+	       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
+		FROM users u
+		LEFT JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password' AND a.identifier = $2
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL`)).
+		WithArgs("legacy@example.com", "legacy@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "auth_id", "credential_hash", "has_password"}).
+			AddRow("usr_2", "usr_2", "active", "老用户", 1, 0, "email", "legacy@example.com", true, nil, nil, nil, false))
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "legacy@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login/password", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409 for password not set, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
+	if errResp["code"] != "PASSWORD_NOT_SET" {
+		t.Fatalf("expected code PASSWORD_NOT_SET, got %v", errResp["code"])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

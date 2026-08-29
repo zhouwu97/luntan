@@ -82,6 +82,17 @@ class AuthController extends ChangeNotifier {
       error = exception;
       user = null;
       return false;
+    } catch (cause) {
+      // 平台层异常（安全存储不可用、插件缺失等）不是 ApiException；若不
+      // 复位状态，status 会永久停在 authenticating，登录按钮一直置灰。
+      status = AuthStatus.error;
+      error = ApiException(
+        type: ApiErrorType.unknown,
+        message: '操作失败，请稍后重试',
+        cause: cause,
+      );
+      user = null;
+      return false;
     } finally {
       notifyListeners();
     }
@@ -107,6 +118,17 @@ class AuthController extends ChangeNotifier {
     } on ApiException catch (exception) {
       status = AuthStatus.error;
       error = exception;
+      user = null;
+      return false;
+    } catch (cause) {
+      // 平台层异常（安全存储不可用、插件缺失等）不是 ApiException；若不
+      // 复位状态，status 会永久停在 authenticating，登录按钮一直置灰。
+      status = AuthStatus.error;
+      error = ApiException(
+        type: ApiErrorType.unknown,
+        message: '操作失败，请稍后重试',
+        cause: cause,
+      );
       user = null;
       return false;
     } finally {
@@ -136,6 +158,17 @@ class AuthController extends ChangeNotifier {
     } on ApiException catch (exception) {
       status = AuthStatus.error;
       error = exception;
+      user = null;
+      return false;
+    } catch (cause) {
+      // 平台层异常（安全存储不可用、插件缺失等）不是 ApiException；若不
+      // 复位状态，status 会永久停在 authenticating，登录按钮一直置灰。
+      status = AuthStatus.error;
+      error = ApiException(
+        type: ApiErrorType.unknown,
+        message: '操作失败，请稍后重试',
+        cause: cause,
+      );
       user = null;
       return false;
     } finally {
@@ -178,6 +211,17 @@ class AuthController extends ChangeNotifier {
       error = exception;
       user = null;
       return false;
+    } catch (cause) {
+      // 平台层异常（安全存储不可用、插件缺失等）不是 ApiException；若不
+      // 复位状态，status 会永久停在 authenticating，登录按钮一直置灰。
+      status = AuthStatus.error;
+      error = ApiException(
+        type: ApiErrorType.unknown,
+        message: '操作失败，请稍后重试',
+        cause: cause,
+      );
+      user = null;
+      return false;
     } finally {
       notifyListeners();
     }
@@ -197,9 +241,44 @@ class AuthController extends ChangeNotifier {
       error = exception;
       user = null;
       return false;
+    } catch (cause) {
+      // 平台层异常（安全存储不可用、插件缺失等）不是 ApiException；若不
+      // 复位状态，status 会永久停在 authenticating，登录按钮一直置灰。
+      status = AuthStatus.error;
+      error = ApiException(
+        type: ApiErrorType.unknown,
+        message: '操作失败，请稍后重试',
+        cause: cause,
+      );
+      user = null;
+      return false;
     } finally {
       notifyListeners();
     }
+  }
+
+  /// 首次设置密码（未设过密码的账号无需旧密码），成功后刷新用户态。
+  Future<void> setPassword({
+    required String password,
+    String? currentPassword,
+  }) async {
+    error = null;
+    try {
+      await _repository.setPassword(
+        password: password,
+        currentPassword: currentPassword,
+      );
+    } on ApiException catch (exception) {
+      error = exception;
+      notifyListeners();
+      rethrow;
+    }
+    try {
+      user = await _repository.me();
+    } catch (_) {
+      // 密码已设置成功，用户态刷新失败不影响本次结果。
+    }
+    notifyListeners();
   }
 
   Future<void> logout() async {
@@ -215,11 +294,11 @@ class AuthController extends ChangeNotifier {
 
   Future<void> _adoptSession(AuthSession session) async {
     user = session.user;
-    // 登录响应负责立即进入主界面；/me 再补齐角色能力，失败时保留
+    // 登录响应负责立即进入主界面；/me 再补齐角色能力，任何失败都保留
     // 登录响应中的基础账号信息，避免权限查询短暂失败把登录判成失败。
     try {
       user = await _repository.me();
-    } on ApiException {
+    } catch (_) {
       // 能力缺失时客户端默认按最小权限处理，后端仍是最终权限边界。
     }
   }

@@ -6,6 +6,27 @@ import '../data/api/publish_repository.dart';
 import '../data/api/ranking_repository.dart';
 import '../theme/app_theme.dart';
 
+class RankingToyIntensityOption {
+  const RankingToyIntensityOption(this.value, this.label);
+
+  final String value;
+  final String label;
+}
+
+const rankingToyIntensityOptions = <RankingToyIntensityOption>[
+  RankingToyIntensityOption('beginner', '慢玩入门'),
+  RankingToyIntensityOption('advanced', '进阶训练'),
+  RankingToyIntensityOption('high_stim', '超高刺激'),
+  RankingToyIntensityOption('juice', '榨汁玩具'),
+];
+
+String rankingToyIntensityLabel(String value) {
+  for (final option in rankingToyIntensityOptions) {
+    if (option.value == value) return option.label;
+  }
+  return value;
+}
+
 class RankingToyCategoryOption {
   const RankingToyCategoryOption(this.value, this.label);
 
@@ -49,7 +70,10 @@ class _RankingToySubmissionScreenState
   final merchantController = TextEditingController();
   final yearController = TextEditingController();
   final descriptionController = TextEditingController();
+  final tagController = TextEditingController();
   String? category;
+  String? intensity;
+  final tags = <String>[];
   _SubmissionCover? cover;
   bool submitting = false;
 
@@ -59,6 +83,7 @@ class _RankingToySubmissionScreenState
     merchantController.dispose();
     yearController.dispose();
     descriptionController.dispose();
+    tagController.dispose();
     super.dispose();
   }
 
@@ -96,6 +121,26 @@ class _RankingToySubmissionScreenState
           ],
         ),
         const SizedBox(height: 16),
+        const Text('刺激度类型', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in rankingToyIntensityOptions)
+              ChoiceChip(
+                key: ValueKey('submission-intensity-chip-${option.value}'),
+                label: Text(option.label),
+                selected: intensity == option.value,
+                onSelected: submitting
+                    ? null
+                    : (selected) => setState(
+                        () => intensity = selected ? option.value : null,
+                      ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
         const Text('品牌', style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         TextField(
@@ -115,6 +160,40 @@ class _RankingToySubmissionScreenState
           maxLength: 4,
           decoration: const InputDecoration(hintText: '选填，如 2026'),
         ),
+        const Text('标签（最多 3 个，每个 4 字内）',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final tag in tags)
+              InputChip(
+                key: ValueKey('submission-tag-chip-$tag'),
+                label: Text(tag),
+                onDeleted: submitting ? null : () => setState(() => tags.remove(tag)),
+              ),
+          ],
+        ),
+        if (tags.length < 3) ...[
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('submission-tag-field'),
+            controller: tagController,
+            enabled: !submitting,
+            maxLength: 4,
+            decoration: const InputDecoration(hintText: '输入标签后点击添加'),
+            onSubmitted: (_) => _addTag(),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const ValueKey('submission-add-tag'),
+              onPressed: submitting ? null : _addTag,
+              child: const Text('添加标签'),
+            ),
+          ),
+        ],
         const Text('介绍', style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         TextField(
@@ -221,6 +300,16 @@ class _RankingToySubmissionScreenState
     if (mounted) setState(() => cover = null);
   }
 
+  void _addTag() {
+    final tag = tagController.text.trim();
+    if (tag.isEmpty) return;
+    if (tags.contains(tag) || tags.length >= 3) return;
+    setState(() {
+      tags.add(tag);
+      tagController.clear();
+    });
+  }
+
   Future<void> _submit() async {
     final name = nameController.text.trim();
     if (name.isEmpty) {
@@ -253,6 +342,8 @@ class _RankingToySubmissionScreenState
         releaseYear: releaseYear,
         description: descriptionController.text.trim(),
         coverMediaId: cover?.mediaId,
+        intensity: intensity,
+        tags: List<String>.unmodifiable(tags),
       );
       if (!mounted) return;
       ScaffoldMessenger.of(

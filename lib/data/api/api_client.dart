@@ -56,6 +56,10 @@ String userFacingApiMessage(Object error, {String fallback = '操作失败，请
       return '该邮箱尚未注册，请先注册';
     case 'INVALID_CREDENTIALS':
       return '邮箱或密码错误';
+    case 'PASSWORD_NOT_SET':
+      return '该账号尚未设置密码，请使用验证码登录';
+    case 'CURRENT_PASSWORD_REQUIRED':
+      return '请输入当前密码后再修改';
     case 'INVALID_PASSWORD':
       return '密码长度不能少于 8 位';
     case 'MAIL_UNAVAILABLE':

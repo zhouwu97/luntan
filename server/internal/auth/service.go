@@ -22,6 +22,8 @@ var (
 	ErrEmailAlreadyRegistered  = errors.New("email is already registered")
 	ErrEmailNotRegistered      = errors.New("email is not registered")
 	ErrPasswordTooShort        = errors.New("password must be at least 8 characters")
+	ErrPasswordNotSet          = errors.New("password is not set for this account")
+	ErrCurrentPasswordRequired = errors.New("current password is required to change password")
 )
 
 const (
@@ -42,6 +44,7 @@ type User struct {
 	EmailVerifiedAt        *time.Time      `json:"email_verified_at,omitempty"`
 	CommentRestricted      bool            `json:"comment_restricted,omitempty"`
 	CommentRestrictedUntil *time.Time      `json:"comment_restricted_until,omitempty"`
+	HasPassword            bool            `json:"has_password"`
 	Capabilities           map[string]bool `json:"capabilities,omitempty"`
 }
 
@@ -124,7 +127,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput, metadata Se
 	}
 
 	now := s.clock().UTC()
-	user := User{ID: newID("usr"), Username: username, Nickname: nickname, Level: 1, Status: "active", AccountType: "email"}
+	user := User{ID: newID("usr"), Username: username, Nickname: nickname, Level: 1, Status: "active", AccountType: "email", HasPassword: true}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)`, user.ID, user.Username, user.Status, now); err != nil {
 		return AuthResponse{}, err
 	}
@@ -189,15 +192,17 @@ func (s *Service) EmailCodeLogin(ctx context.Context, email string, metadata Ses
 	var user User
 	var verifiedAt sql.NullTime
 	var exp int64
+	var hasPassword bool
 	err = tx.QueryRowContext(ctx, `
 		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(u.account_type, 'email'), u.email, u.email_verified, u.email_verified_at,
-		       COALESCE(up.experience, 0)
+		       COALESCE(up.experience, 0),
+		       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL
-		FOR UPDATE OF u`, email).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &exp)
+		FOR UPDATE OF u`, email).Scan(&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &exp, &hasPassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrEmailNotRegistered
 	}
@@ -211,6 +216,7 @@ func (s *Service) EmailCodeLogin(ctx context.Context, email string, metadata Ses
 		user.EmailVerifiedAt = &verifiedAt.Time
 	}
 	user.Experience = exp
+	user.HasPassword = hasPassword
 	user.EmailVerified = true
 	user.Email = email
 	now := s.clock().UTC()
@@ -241,24 +247,26 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 	}
 	var (
 		user           User
-		authMethodID   string
-		credentialHash string
+		authMethodID   sql.NullString
+		credentialHash sql.NullString
 		verifiedAt     sql.NullTime
 		exp            int64
+		hasPassword    bool
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.experience, 0),
 		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at,
-		       a.id, a.credential_hash
+		       a.id, a.credential_hash,
+		       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
 		FROM users u
-		JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password'
+		LEFT JOIN user_auth_methods a ON a.user_id = u.id AND a.provider = 'password' AND a.identifier = $2
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL`, email).Scan(
+		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL`, email, email).Scan(
 		&user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &exp,
 		&user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt,
-		&authMethodID, &credentialHash,
+		&authMethodID, &credentialHash, &hasPassword,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidCredentials
@@ -266,7 +274,15 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 	if err != nil {
 		return AuthResponse{}, err
 	}
-	if s.hasher.Compare(credentialHash, password) != nil {
+	// 账号存在但从未设置过密码（旧自动注册遗留）：与密码错误区分开，
+	// 引导用户走验证码登录后再设置密码。
+	if !authMethodID.Valid {
+		if !hasPassword {
+			return AuthResponse{}, ErrPasswordNotSet
+		}
+		return AuthResponse{}, ErrInvalidCredentials
+	}
+	if s.hasher.Compare(credentialHash.String, password) != nil {
 		return AuthResponse{}, ErrInvalidCredentials
 	}
 	if user.Status != "active" {
@@ -276,6 +292,7 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 		user.EmailVerifiedAt = &verifiedAt.Time
 	}
 	user.Experience = exp
+	user.HasPassword = true
 	user.EmailVerified = true
 	user.Email = email
 
@@ -285,7 +302,7 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 	}
 	defer tx.Rollback()
 	now := s.clock().UTC()
-	if _, err := tx.ExecContext(ctx, `UPDATE user_auth_methods SET last_used_at = $1 WHERE id = $2`, now, authMethodID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE user_auth_methods SET last_used_at = $1 WHERE id = $2`, now, authMethodID.String); err != nil {
 		return AuthResponse{}, err
 	}
 	pair, err := s.createSessionTx(ctx, tx, user.ID, metadata, now)
@@ -296,6 +313,86 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 		return AuthResponse{}, err
 	}
 	return AuthResponse{TokenPair: pair, User: user}, nil
+}
+
+// SetPassword 为已登录用户设置或更新密码。已设置过密码时必须提供当前
+// 密码；首次设置（旧自动注册遗留的无密码账号）无需旧密码，直接生效。
+func (s *Service) SetPassword(ctx context.Context, userID, password, currentPassword string) error {
+	if len([]rune(password)) < 8 {
+		return ErrPasswordTooShort
+	}
+	if s == nil || s.db == nil {
+		return sql.ErrConnDone
+	}
+	hash, err := s.hasher.Hash(password)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var username, email string
+	err = tx.QueryRowContext(ctx, `SELECT username, COALESCE(email, '') FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, userID).Scan(&username, &email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrInvalidToken
+	}
+	if err != nil {
+		return err
+	}
+
+	rows, err := tx.QueryContext(ctx, `SELECT id, identifier, credential_hash FROM user_auth_methods WHERE user_id = $1 AND provider = 'password' FOR UPDATE`, userID)
+	if err != nil {
+		return err
+	}
+	type passwordRow struct {
+		id    string
+		hash  string
+	}
+	var existing []passwordRow
+	for rows.Next() {
+		var row passwordRow
+		if err := rows.Scan(&row.id, new(string), &row.hash); err != nil {
+			rows.Close()
+			return err
+		}
+		existing = append(existing, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	if len(existing) == 0 {
+		identifier := email
+		if identifier == "" {
+			identifier = username
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO user_auth_methods (id, user_id, provider, identifier, credential_hash, created_at) VALUES ($1, $2, 'password', $3, $4, now())`, newID("uam"), userID, identifier, hash); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	if currentPassword == "" {
+		return ErrCurrentPasswordRequired
+	}
+	for _, row := range existing {
+		if s.hasher.Compare(row.hash, currentPassword) != nil {
+			return ErrInvalidCredentials
+		}
+		break
+	}
+	for _, row := range existing {
+		if _, err := tx.ExecContext(ctx, `UPDATE user_auth_methods SET credential_hash = $2 WHERE id = $1`, row.id, hash); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // RegisterWithEmail 为用户注册正式账号。若有 guestUserID 且为有效活跃游客，则原地升级并继承经验；否则新建用户。
@@ -372,6 +469,7 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 				Email:           email,
 				EmailVerified:   true,
 				EmailVerifiedAt: &now,
+				HasPassword:     true,
 			}
 			upgraded = true
 		}
@@ -395,6 +493,7 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 			Email:           email,
 			EmailVerified:   true,
 			EmailVerifiedAt: &now,
+			HasPassword:     true,
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
 			return AuthResponse{}, err
@@ -502,6 +601,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput, metadata SessionM
 		return AuthResponse{}, ErrUserDisabled
 	}
 	user.AccountType = "email"
+	user.HasPassword = true
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -545,12 +645,13 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 		SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.experience, 0),
-		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at, rt.expires_at
+		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at, rt.expires_at,
+		       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
 		FROM refresh_tokens rt
 		JOIN users u ON u.id = rt.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND u.deleted_at IS NULL
-		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.Experience, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &expiresAt)
+		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.Experience, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &expiresAt, &user.HasPassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthResponse{}, ErrInvalidToken
 	}
@@ -630,7 +731,8 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 		SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.experience, 0),
-		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at
+		       COALESCE(u.account_type, 'email'), COALESCE(u.email, ''), u.email_verified, u.email_verified_at,
+		       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -645,6 +747,7 @@ func (s *Service) Me(ctx context.Context, accessToken string) (User, error) {
 		&user.Email,
 		&user.EmailVerified,
 		&verifiedAt,
+		&user.HasPassword,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInvalidToken

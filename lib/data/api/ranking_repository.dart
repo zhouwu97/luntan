@@ -213,6 +213,8 @@ class RankingRepository {
     int? releaseYear,
     String? description,
     String? coverMediaId,
+    String? intensity,
+    List<String> tags = const [],
   }) async {
     await _client.postJson(
       '/api/v1/ranking/submissions',
@@ -223,6 +225,8 @@ class RankingRepository {
         'release_year': ?releaseYear,
         'description': ?description,
         'cover_media_id': ?coverMediaId,
+        'intensity': ?intensity,
+        if (tags.isNotEmpty) 'tags': tags,
       },
     );
   }

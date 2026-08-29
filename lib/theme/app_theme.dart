@@ -64,8 +64,14 @@ class AppTheme {
     end: Alignment.bottomRight,
   );
 
+  // Web 端 CanvasKit 读不到系统字体，必须在 pubspec 打包 LuntanCJK
+  //（Noto Sans SC）并全局指定；fontFamilyFallback 里的系统字体名仅在
+  // 原生平台兜底，web 上不生效。
+  static const fontFamily = 'LuntanCJK';
+
   static ThemeData get light => ThemeData(
     useMaterial3: true,
+    fontFamily: fontFamily,
     scaffoldBackgroundColor: background,
     colorScheme: ColorScheme.fromSeed(
       seedColor: primary,

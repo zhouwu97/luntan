@@ -213,6 +213,15 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 	httpserver.WriteJSON(w, http.StatusOK, mediaResponse(asset))
 }
 
+// mediaInUseExpr 枚举所有会把 deleted 媒体从展示中过滤掉的业务引用。
+// 新增引用媒体的业务表时必须同步补到这里，否则媒体可被绕过业务直接删除。
+const mediaInUseExpr = `EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM comment_media cm WHERE cm.media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM moderation_appeal_media mam WHERE mam.media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM ranking_toy_submissions rts WHERE rts.cover_media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM ranking_toys rt WHERE rt.cover_media_id = ma.id OR rt.hero_media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM ranking_toy_comment_media rtcm WHERE rtcm.media_id = ma.id)`
+
 // deleteMedia 由作者清理尚未关联帖子的已上传媒体（放弃发布或单图删除），
 // 防止 pending/ready 孤儿媒体长期堆积。
 func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID string) {
@@ -236,7 +245,8 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID str
 	var ownerID string
 	var inUse bool
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT ma.owner_id, EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = ma.id)
+		SELECT ma.owner_id, (
+			`+mediaInUseExpr+`)
 		FROM media_assets ma
 		WHERE ma.id = $1 AND ma.deleted_at IS NULL
 		FOR UPDATE OF ma`, mediaID).Scan(&ownerID, &inUse)
@@ -260,8 +270,8 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID str
 		UPDATE media_assets ma
 		SET deleted_at = now(), updated_at = now(), status = 'deleted'
 		WHERE ma.id = $1 AND ma.owner_id = $2 AND ma.deleted_at IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = ma.id)
-		  AND NOT EXISTS (SELECT 1 FROM moderation_appeal_media mam WHERE mam.media_id = ma.id)`, mediaID, user.ID)
+		  AND NOT (
+		  `+mediaInUseExpr+`)`, mediaID, user.ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

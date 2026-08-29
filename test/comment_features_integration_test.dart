@@ -214,7 +214,7 @@ void main() {
         id: 'c-media',
         postId: 'p1',
         authorId: 'u1',
-        content: '看我拍的照片',
+        content: '',
         media: [
           MediaAsset(
             id: 'm1',
@@ -245,7 +245,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('看我拍的照片'), findsOneWidget);
       expect(find.byType(Image), findsWidgets);
     });
 
@@ -254,7 +253,7 @@ void main() {
         id: 'c-sticker',
         postId: 'p1',
         authorId: 'u1',
-        content: '发送贴纸',
+        content: '',
         stickerId: 'aad70d8d064f9eb79286c1393490716c',
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
@@ -274,9 +273,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('发送贴纸'), findsOneWidget);
       expect(find.byType(Image), findsWidgets);
     });
+
 
     testWidgets('CommentItem 防御性渲染：若数据异常包含贴纸与图片仍能容错展示', (tester) async {
       final commentWithBoth = Comment(

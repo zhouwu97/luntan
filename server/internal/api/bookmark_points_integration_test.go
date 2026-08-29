@@ -313,7 +313,7 @@ func TestAwardPointsTxIsIdempotentAgainstConcurrentTransactionsAgainstPostgres(t
 				errs <- err
 				return
 			}
-			if err := awardPointsTx(context.Background(), tx, authResponse.User.ID, "post", "并发奖励", "post:create:"+postID, 10); err != nil {
+			if err := awardPointsTx(context.Background(), tx, authResponse.User.ID, "post", "并发奖励", "post:create:"+postID, 10, 0); err != nil {
 				_ = tx.Rollback()
 				errs <- err
 				return

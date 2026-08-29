@@ -670,7 +670,7 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 			return
 		}
 	}
-	if err := awardPointsTx(r.Context(), tx, user.ID, "comment", "参与回复", "comment:create:"+commentID, s.pointRewards.CommentCreate); err != nil {
+	if err := awardPointsTx(r.Context(), tx, user.ID, "comment", "参与回复", "comment:create:"+commentID, s.pointRewards.CommentCreate, s.pointRewards.DailyEarnLimit); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

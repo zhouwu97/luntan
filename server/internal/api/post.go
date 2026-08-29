@@ -152,7 +152,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	if err := awardPointsTx(r.Context(), tx, user.ID, "post", "发布帖子", "post:create:"+postID, s.pointRewards.PostCreate); err != nil {
+	if err := awardPointsTx(r.Context(), tx, user.ID, "post", "发布帖子", "post:create:"+postID, s.pointRewards.PostCreate, s.pointRewards.DailyEarnLimit); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

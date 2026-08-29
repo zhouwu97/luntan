@@ -76,7 +76,7 @@ void main() {
     final reorderable = tester.widget<ReorderableListView>(
       find.byType(ReorderableListView),
     );
-    // ignore: unnecessary_non_null_assertion
+    // ignore: unnecessary_non_null_assertion, deprecated_member_use
     reorderable.onReorder!(0, 2);
     await tester.pumpAndSettle();
 
@@ -105,7 +105,7 @@ void main() {
     final reorderable = tester.widget<ReorderableListView>(
       find.byType(ReorderableListView),
     );
-    // ignore: unnecessary_non_null_assertion
+    // ignore: unnecessary_non_null_assertion, deprecated_member_use
     reorderable.onReorder!(0, 2);
     await tester.pumpAndSettle();
 

@@ -5,6 +5,8 @@ import 'package:flutter/semantics.dart' show SemanticsBinding;
 import 'app.dart';
 import 'data/repository_provider.dart';
 import 'theme/app_theme.dart';
+import 'widgets/app_network_image.dart';
+import 'widgets/forum_rules_gate.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,6 +26,10 @@ void main() {
 /// 启动页。将仓储构造保持为同步路径，也避免任何异步初始化阻塞首帧。
 Widget buildLuntanRootApp({ForumRepositories Function()? loadRepositories}) {
   try {
+    final apiBaseUrl = apiBaseUrlFromEnvironment(
+      defaultBaseUrl: defaultDevelopmentApiBaseUrl,
+    );
+    configureAppMediaBaseUrl(Uri.tryParse(apiBaseUrl));
     final repositories =
         (loadRepositories ??
         () => ForumRepositories.fromEnvironment(
@@ -37,7 +43,10 @@ Widget buildLuntanRootApp({ForumRepositories Function()? loadRepositories}) {
     } else {
       debugPrint('[LUNTAN ENV] mode=MOCK');
     }
-    return LuntanApp(repositories: repositories);
+    return LuntanApp(
+      repositories: repositories,
+      rulesGate: ForumRulesGateController.withPreferences(),
+    );
   } catch (error) {
     debugPrint('[LUNTAN STARTUP] failed: $error');
     return LuntanStartupErrorApp(error: error);

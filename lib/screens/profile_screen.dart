@@ -14,6 +14,7 @@ import '../data/api/user_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import 'exchange_store_screen.dart';
 import 'bookmark_folders_screen.dart';
 import 'entity_screens.dart';
@@ -24,9 +25,7 @@ import 'settings_screen.dart';
 typedef OpenPostById = void Function(String postId, {String? focusCommentId});
 
 bool _hasUsableAvatarUrl(String? value) {
-  final url = value?.trim().toLowerCase();
-  return url != null &&
-      (url.startsWith('https://') || url.startsWith('http://'));
+  return resolveMediaUrl(value) != null;
 }
 
 class ProfileScreen extends StatelessWidget {
@@ -195,47 +194,54 @@ class ProfileScreen extends StatelessWidget {
       );
     }
     final isGuest = currentUser == null || currentUser?.accountType == 'guest';
-    final userPosts = store.posts
-        .where((p) => p.authorId == (currentUserId ?? ''))
-        .toList();
     final effectiveLevel = isGuest ? 0 : (currentUser?.level ?? 1);
-    return AnimatedBuilder(
-      animation: store,
-      builder: (context, _) => Scaffold(
-        body: SafeArea(
-          bottom: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ProfileTopbar(
-                  onMessages: onOpenMessages,
-                  onSettings: () => _showSettings(context),
-                ),
-                const SizedBox(height: 14),
-                _ProfileCard(
-                  nickname: currentUser?.nickname.isNotEmpty == true
-                      ? currentUser!.nickname
-                      : '游客',
-                  username: currentUser?.username ?? 'guest_user',
-                  level: effectiveLevel,
-                  trustLevel: 'new',
-                  signature: '还没有个性签名，点进主页完善资料',
-                  avatarUrl: null,
-                  postCount: userPosts.length,
-                  commentCount: 0,
-                  followerCount: 0,
-                  followingCount: 0,
-                  isGuest: isGuest,
-                  experience: currentUser?.experience ?? 0,
-                  onRequireAuth: onRequireAuth,
-                  onTapEntry: () => _openHomepage(context),
-                  onTapStat: (label) => _showList(context, label),
-                ),
-                if (!isApiMode) ...[
-                  const SizedBox(height: 12),
-                  _PointsBalanceCard(
+    // 只有帖子数/积分/最近发布这些 store 依赖的局部需要监听 ForumStore，
+    // 静态区域不随任意 store 变化整页重建。
+    return Scaffold(
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _ProfileTopbar(
+                onMessages: onOpenMessages,
+                onSettings: () => _showSettings(context),
+              ),
+              const SizedBox(height: 14),
+              AnimatedBuilder(
+                animation: store,
+                builder: (context, _) {
+                  final userPosts = store.posts
+                      .where((p) => p.authorId == (currentUserId ?? ''))
+                      .toList();
+                  return _ProfileCard(
+                    nickname: currentUser?.nickname.isNotEmpty == true
+                        ? currentUser!.nickname
+                        : '游客',
+                    username: currentUser?.username ?? 'guest_user',
+                    level: effectiveLevel,
+                    trustLevel: 'new',
+                    signature: '还没有个性签名，点进主页完善资料',
+                    avatarUrl: null,
+                    postCount: userPosts.length,
+                    commentCount: 0,
+                    followerCount: 0,
+                    followingCount: 0,
+                    isGuest: isGuest,
+                    experience: currentUser?.experience ?? 0,
+                    onRequireAuth: onRequireAuth,
+                    onTapEntry: () => _openHomepage(context),
+                    onTapStat: (label) => _showList(context, label),
+                  );
+                },
+              ),
+              if (!isApiMode) ...[
+                const SizedBox(height: 12),
+                AnimatedBuilder(
+                  animation: store,
+                  builder: (context, _) => _PointsBalanceCard(
                     balance: store.points,
                     level: effectiveLevel,
                     growth: currentUser?.growth,
@@ -251,20 +257,23 @@ class ProfileScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                ],
-                const SizedBox(height: 18),
-                const _SectionHeader(title: '常用功能'),
-                const SizedBox(height: 10),
-                _ToolsGrid(
-                  onBookmarks: () => _openBookmarks(context),
-                  onLikes: () => _showList(context, '我的点赞'),
-                  onHistory: () => _showHistory(context),
-                  onAppeals: onOpenAppeals ?? () => onFeedback('当前模式暂不支持申诉'),
                 ),
-                // API 未登录状态没有权威的积分余额，禁止展示本地模拟积分入口。
-                if (!isApiMode) ...[
-                  const SizedBox(height: 18),
-                  _ExchangePreview(
+              ],
+              const SizedBox(height: 18),
+              const _SectionHeader(title: '常用功能'),
+              const SizedBox(height: 10),
+              _ToolsGrid(
+                onBookmarks: () => _openBookmarks(context),
+                onLikes: () => _showList(context, '我的点赞'),
+                onHistory: () => _showHistory(context),
+                onAppeals: onOpenAppeals ?? () => onFeedback('当前模式暂不支持申诉'),
+              ),
+              // API 未登录状态没有权威的积分余额，禁止展示本地模拟积分入口。
+              if (!isApiMode) ...[
+                const SizedBox(height: 18),
+                AnimatedBuilder(
+                  animation: store,
+                  builder: (context, _) => _ExchangePreview(
                     store: store,
                     onOpenStore: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -273,36 +282,49 @@ class ProfileScreen extends StatelessWidget {
                     ),
                     onRedeem: (product) => _redeem(context, product),
                   ),
-                ],
-                const SizedBox(height: 20),
-                _SectionHeader(
-                  title: '最近发布',
-                  actionText: userPosts.isNotEmpty ? '查看全部' : null,
-                  onAction: userPosts.isNotEmpty
-                      ? () => _showList(context, '我的发布')
-                      : null,
-                ),
-                const SizedBox(height: 10),
-                _RecentPosts(
-                  store: store,
-                  currentUserId: currentUserId,
-                  isGuest: isGuest,
-                  onOpenPost: onOpenPost,
-                  onOpenHome: onOpenHome,
-                  onOpenComposer: onOpenComposer,
-                  onRequireAuth: onRequireAuth,
-                ),
-                const SizedBox(height: 22),
-                Text(
-                  '圣杯酱 · 把真实的玩具体验留在这里',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppTheme.textSecondary.withValues(alpha: .65),
-                    fontSize: 10.5,
-                  ),
                 ),
               ],
-            ),
+              const SizedBox(height: 20),
+              AnimatedBuilder(
+                animation: store,
+                builder: (context, _) {
+                  final userPosts = store.posts
+                      .where((p) => p.authorId == (currentUserId ?? ''))
+                      .toList();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _SectionHeader(
+                        title: '最近发布',
+                        actionText: userPosts.isNotEmpty ? '查看全部' : null,
+                        onAction: userPosts.isNotEmpty
+                            ? () => _showList(context, '我的发布')
+                            : null,
+                      ),
+                      const SizedBox(height: 10),
+                      _RecentPosts(
+                        store: store,
+                        currentUserId: currentUserId,
+                        isGuest: isGuest,
+                        onOpenPost: onOpenPost,
+                        onOpenHome: onOpenHome,
+                        onOpenComposer: onOpenComposer,
+                        onRequireAuth: onRequireAuth,
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 22),
+              Text(
+                '圣杯酱 · 把真实的玩具体验留在这里',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textSecondary.withValues(alpha: .65),
+                  fontSize: 10.5,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1105,10 +1127,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             child: CircleAvatar(
               radius: 42,
               backgroundColor: AppTheme.surfaceBlue,
-              backgroundImage: avatarBytes == null
-                  ? (_hasUsableAvatarUrl(widget.profile.avatarUrl)
-                        ? NetworkImage(widget.profile.avatarUrl!)
-                        : null)
+              foregroundImage: avatarBytes == null
+                  ? appNetworkImageProvider(
+                      widget.profile.avatarUrl,
+                      maxWidth: 168,
+                    )
                   : MemoryImage(avatarBytes!),
               child:
                   avatarBytes == null &&
@@ -1148,13 +1171,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   if (backgroundBytes != null)
                     Image.memory(backgroundBytes!, fit: BoxFit.cover)
                   else if (_hasUsableAvatarUrl(widget.profile.backgroundUrl))
-                    Image.network(
-                      widget.profile.backgroundUrl!,
+                    AppNetworkImage(
+                      url: widget.profile.backgroundUrl,
                       fit: BoxFit.cover,
                     )
                   else
                     Image.asset(
-                      'assets/profile_default_background.png',
+                      'assets/profile_default_background.jpg',
                       fit: BoxFit.cover,
                     ),
                   const ColoredBox(color: Color(0x330B1422)),
@@ -1620,7 +1643,7 @@ class _ProfileCard extends StatelessWidget {
                     ),
                     child: ClipOval(
                       child: _hasUsableAvatarUrl(avatarUrl)
-                          ? Image.network(avatarUrl!, fit: BoxFit.cover)
+                          ? AppNetworkImage(url: avatarUrl, fit: BoxFit.cover)
                           : Center(
                               child: Text(
                                 nickname.isEmpty

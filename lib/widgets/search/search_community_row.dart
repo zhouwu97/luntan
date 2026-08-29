@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
+import '../app_network_image.dart';
 import 'search_post_row.dart';
 
 class SearchCommunityRow extends StatelessWidget {
@@ -69,7 +70,7 @@ class SearchCommunityRow extends StatelessWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: avatar != null
-                  ? Image.network(avatar!, fit: BoxFit.cover)
+                  ? AppNetworkImage(url: avatar, fit: BoxFit.cover)
                   : Center(
                       child: Text(
                         name.isNotEmpty ? name.characters.first : '板',

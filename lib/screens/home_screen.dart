@@ -597,8 +597,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                     contextMeta: showActivity
                                         ? '💬 最近回复 ${relativeTimeLabel(post.activityAt ?? post.lastCommentAt!)}'
                                         : null,
-                                    interactionListenable:
-                                        widget.interactionController,
+                                    interactionListenable: widget
+                                        .interactionController
+                                        .interactionsFor(post.id),
                                   );
                                 },
                               ),
@@ -789,11 +790,15 @@ class _Header extends StatelessWidget {
                       size: 20,
                     ),
                     SizedBox(width: 8),
-                    Text(
-                      '搜索帖子、用户、板块、榜单',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 13,
+                    Expanded(
+                      child: Text(
+                        '搜索帖子、用户、板块、榜单',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -1624,14 +1629,21 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
           )
         else
           Expanded(
-            child: ListView(
+            child: ListView.builder(
               padding: const EdgeInsets.all(14),
-              children: [
-                if (posts.isNotEmpty) ...[
-                  if (kind == _SearchKind.all)
-                    const _SearchSectionTitle(title: '帖子'),
-                  ...posts.map(
-                    (post) => ForumPostCard(
+              itemCount: (posts.isEmpty ? 0 : (kind == _SearchKind.all ? 1 : 0) + posts.length) +
+                  (users.isEmpty ? 0 : (kind == _SearchKind.all ? 1 : 0) + users.length) +
+                  (communities.isEmpty ? 0 : (kind == _SearchKind.all ? 1 : 0) + communities.length),
+              itemBuilder: (context, index) {
+                var i = index;
+                if (posts.isNotEmpty) {
+                  if (kind == _SearchKind.all) {
+                    if (i == 0) return const _SearchSectionTitle(title: '帖子');
+                    i--;
+                  }
+                  if (i < posts.length) {
+                    final post = posts[i];
+                    return ForumPostCard(
                       post: post,
                       onOpen: () {
                         close(context, null);
@@ -1644,14 +1656,18 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
                       onLike: () => store.toggleLike(post),
                       onBookmark: () => store.toggleBookmark(post),
                       onMenu: null,
-                    ),
-                  ),
-                ],
-                if (users.isNotEmpty) ...[
-                  if (kind == _SearchKind.all)
-                    const _SearchSectionTitle(title: '用户'),
-                  ...users.map(
-                    (user) => ListTile(
+                    );
+                  }
+                  i -= posts.length;
+                }
+                if (users.isNotEmpty) {
+                  if (kind == _SearchKind.all) {
+                    if (i == 0) return const _SearchSectionTitle(title: '用户');
+                    i--;
+                  }
+                  if (i < users.length) {
+                    final user = users[i];
+                    return ListTile(
                       leading: CircleAvatar(
                         backgroundColor: AppTheme.surfaceBlue,
                         child: Text(user.nickname.characters.first),
@@ -1660,14 +1676,18 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
                       subtitle: Text(
                         'Lv.${user.level} · ${user.signature ?? '活跃用户'}',
                       ),
-                    ),
-                  ),
-                ],
-                if (communities.isNotEmpty) ...[
-                  if (kind == _SearchKind.all)
-                    const _SearchSectionTitle(title: '板块'),
-                  ...communities.map(
-                    (community) => ListTile(
+                    );
+                  }
+                  i -= users.length;
+                }
+                if (communities.isNotEmpty) {
+                  if (kind == _SearchKind.all) {
+                    if (i == 0) return const _SearchSectionTitle(title: '板块');
+                    i--;
+                  }
+                  if (i < communities.length) {
+                    final community = communities[i];
+                    return ListTile(
                       leading: const CircleAvatar(
                         backgroundColor: AppTheme.surfaceBlue,
                         child: Icon(
@@ -1685,10 +1705,11 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
                         );
                         close(context, null);
                       },
-                    ),
-                  ),
-                ],
-              ],
+                    );
+                  }
+                }
+                return null;
+              },
             ),
           ),
       ],

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/domain/models.dart';
+import 'package:luntan/widgets/app_network_image.dart';
 import 'package:luntan/widgets/comments/comment_reply_bar.dart';
 import 'package:luntan/widgets/forum_author_row.dart';
 import 'package:luntan/widgets/forum_post_card.dart';
@@ -217,7 +218,7 @@ void main() {
         ),
       );
 
-      expect(find.byType(Image), findsNWidgets(4));
+      expect(find.byType(AppNetworkImage), findsNWidgets(4));
       expect(find.text('+2'), findsOneWidget);
     });
 

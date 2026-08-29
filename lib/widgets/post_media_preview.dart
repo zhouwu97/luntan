@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
+import 'app_network_image.dart';
 
 /// 帖子媒体预览的使用场景。
 enum PostMediaPreviewMode { feed, detail }
@@ -330,46 +331,17 @@ class PostMediaPreview extends StatelessWidget {
 
     final tile = LayoutBuilder(
       builder: (context, constraints) {
-        final dpr = MediaQuery.devicePixelRatioOf(context);
-        final cacheWidth =
-            constraints.maxWidth.isFinite && constraints.maxWidth > 0
-                ? (constraints.maxWidth * dpr).round()
-                : null;
-
         return ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Stack(
             fit: StackFit.expand,
             children: [
               if (imageUrl != null && imageUrl.isNotEmpty)
-                Image.network(
-                  imageUrl,
+                AppNetworkImage(
+                  url: imageUrl,
                   fit: BoxFit.cover,
                   alignment: alignment,
-                  filterQuality: FilterQuality.low,
-                  cacheWidth: cacheWidth,
-                  frameBuilder: (
-                    context,
-                    child,
-                    frame,
-                    wasSynchronouslyLoaded,
-                  ) {
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        const ColoredBox(color: Color(0xFFF4F6F9)),
-                        AnimatedOpacity(
-                          opacity:
-                              frame != null || wasSynchronouslyLoaded ? 1 : 0,
-                          duration: const Duration(milliseconds: 160),
-                          curve: Curves.easeOut,
-                          child: child,
-                        ),
-                      ],
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) =>
-                      _fallback(media),
+                  errorBuilder: (_) => _fallback(media),
                 )
               else
                 _fallback(media),
@@ -552,18 +524,19 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
                               final dpr = MediaQuery.devicePixelRatioOf(
                                 context,
                               );
-                              final cacheWidth =
+                              // 全屏查看支持双指放大，按 2 倍约束解码保证放大清晰度。
+                              final zoomWidth =
                                   constraints.maxWidth.isFinite &&
                                       constraints.maxWidth > 0
-                                  ? (constraints.maxWidth * dpr * 2).round()
+                                  ? (constraints.maxWidth * dpr * 2)
+                                        .round()
+                                        .clamp(1, 8192)
                                   : null;
-                              return Image.network(
-                                imageUrl,
+                              return AppNetworkImage(
+                                url: imageUrl,
                                 fit: BoxFit.contain,
-                                filterQuality: FilterQuality.medium,
-                                cacheWidth: cacheWidth,
-                                errorBuilder: (context, error, stackTrace) =>
-                                    _fallback(image),
+                                memCacheWidth: zoomWidth,
+                                errorBuilder: (_) => _fallback(image),
                               );
                             },
                           ),

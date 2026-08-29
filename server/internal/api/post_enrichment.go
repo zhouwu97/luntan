@@ -196,6 +196,10 @@ func (s *Server) optionalAuthenticatedUser(ctx context.Context, r *http.Request)
 }
 
 func publicMediaURL(objectKey string) string {
+	// 历史导入包曾把完整媒体 URL 写入 object_key；保留该 URL，避免再拼接公开前缀。
+	if strings.HasPrefix(objectKey, "http://") || strings.HasPrefix(objectKey, "https://") {
+		return objectKey
+	}
 	base := strings.TrimRight(strings.TrimSpace(os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL")), "/")
 	if base == "" {
 		return objectKey

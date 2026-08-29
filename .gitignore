@@ -59,3 +59,8 @@ app.*.map.json
 # Local runtime data, test scripts & credentials
 .data/
 
+
+# 源站内容导入产物：CSV 导入包与帖子配图体积大且可由脚本重新生成，
+# 通过 scripts/import_placeholder_content.py 重新下载，不入库。
+assets/imported-media/
+assets/imports/

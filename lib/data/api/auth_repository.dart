@@ -14,6 +14,7 @@ class AuthUser {
     this.email,
     this.emailVerified = false,
     this.emailVerifiedAt,
+    this.hasPassword = false,
     this.commentRestricted = false,
     this.commentRestrictedUntil,
     this.capabilities = const {},
@@ -30,6 +31,7 @@ class AuthUser {
   final String? email;
   final bool emailVerified;
   final DateTime? emailVerifiedAt;
+  final bool hasPassword;
   final bool commentRestricted;
   final DateTime? commentRestrictedUntil;
   final Map<String, bool> capabilities;
@@ -232,6 +234,16 @@ class AuthRepository {
     return _userFromJson(await _client.getJson('/api/v1/me'));
   }
 
+  Future<void> setPassword({required String password, String? currentPassword}) async {
+    await _client.postJson(
+      '/api/v1/me/password',
+      body: {
+        'password': password,
+        'current_password': ?currentPassword,
+      },
+    );
+  }
+
   Future<void> logout() async {
     try {
       final refreshToken = await _tokenStore.readRefreshToken();
@@ -313,6 +325,7 @@ class AuthRepository {
           : null,
       emailVerified: json['email_verified'] == true,
       emailVerifiedAt: _date(json['email_verified_at']),
+      hasPassword: json['has_password'] == true,
       commentRestricted: json['comment_restricted'] == true,
       commentRestrictedUntil: _date(json['comment_restricted_until']),
       capabilities: _capabilities(json['capabilities']),

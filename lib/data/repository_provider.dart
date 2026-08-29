@@ -12,7 +12,7 @@ import 'api/poll_repository.dart';
 import 'api/ranking_repository.dart';
 import 'api/store_repository.dart';
 import 'api/user_repository.dart';
-import 'api/secure_token_store.dart';
+import 'api/secure_token_store.dart' show createDefaultTokenStore;
 import 'mock_forum_data.dart';
 import 'repositories/mock_repositories.dart';
 import '../domain/repositories.dart';
@@ -145,9 +145,9 @@ class ForumRepositories {
   }) {
     final baseUrl = apiBaseUrlFromEnvironment(defaultBaseUrl: defaultBaseUrl);
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
-    // API 模式下未显式注入令牌存储时默认使用平台安全存储，避免进程重启后
-    // 会话丢失；MemoryTokenStore 只应出现在测试注入路径。
-    final actualTokenStore = tokenStore ?? SecureTokenStore();
+    // API 模式下未显式注入令牌存储时按平台选择默认存储；Web 上
+    // flutter_secure_storage 在 HTTP 环境不可用，见 createDefaultTokenStore。
+    final actualTokenStore = tokenStore ?? createDefaultTokenStore();
     final authenticatedClient = ApiClient(
       baseUri: Uri.parse(baseUrl),
       tokenStore: actualTokenStore,
@@ -188,7 +188,7 @@ class ForumRepositories {
   }) async {
     final baseUrl = apiBaseUrlFromEnvironment(defaultBaseUrl: defaultBaseUrl);
     if (baseUrl.trim().isEmpty) return ForumRepositories.mock(store: store);
-    final actualTokenStore = tokenStore ?? await SecureTokenStore.create();
+    final actualTokenStore = tokenStore ?? createDefaultTokenStore();
     return ForumRepositories.fromEnvironment(
       store: store,
       tokenStore: actualTokenStore,

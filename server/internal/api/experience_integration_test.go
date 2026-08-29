@@ -90,13 +90,14 @@ func TestGuestLoginExistingEmailDoesNotMergeGuestExp(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT u.id, u.username, u.status, COALESCE(up.nickname, u.username),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(u.account_type, 'email'), u.email, u.email_verified, u.email_verified_at,
-		       COALESCE(up.experience, 0)
+		       COALESCE(up.experience, 0),
+		       (SELECT EXISTS (SELECT 1 FROM user_auth_methods pa WHERE pa.user_id = u.id AND pa.provider = 'password'))
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		WHERE lower(u.email) = $1 AND u.account_type != 'guest' AND u.deleted_at IS NULL
 		FOR UPDATE OF u`)).WithArgs("existing@example.com").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at", "experience"}).
-			AddRow("usr_existing_456", "existing_user", "active", "老用户", 2, "email", "existing@example.com", true, nil, int64(100)))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "account_type", "email", "email_verified", "email_verified_at", "experience", "has_password"}).
+			AddRow("usr_existing_456", "existing_user", "active", "老用户", 2, "email", "existing@example.com", true, nil, int64(100), false))
 
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET email_verified = true, email_verified_at = COALESCE(email_verified_at, $1), updated_at = $1 WHERE id = $2`)).
 		WithArgs(sqlmock.AnyArg(), "usr_existing_456").WillReturnResult(sqlmock.NewResult(1, 1))

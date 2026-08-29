@@ -262,6 +262,25 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _onAuthSuccess() {
+    final user = widget.controller.user;
+    // 验证码登录的老账号可能从未设置过密码，登录成功后顺手引导设置，
+    // 方便之后用密码登录；跳过也不影响本次会话。
+    if (user != null &&
+        !user.hasPassword &&
+        user.accountType != 'guest' &&
+        mounted) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _SetPasswordDialog(controller: widget.controller),
+      ).whenComplete(() {
+        if (!mounted) return;
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      });
+      return;
+    }
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
@@ -282,6 +301,14 @@ class _AuthScreenState extends State<AuthScreen> {
           '该邮箱已注册，请直接登录',
           actionLabel: '去登录',
           onAction: () => _switchMode(AuthMode.login),
+        );
+        return;
+      }
+      if (error.code == 'PASSWORD_NOT_SET') {
+        _feedbackWithAction(
+          '该账号尚未设置密码，请使用验证码登录',
+          actionLabel: '去验证码登录',
+          onAction: () => _switchLoginMethod(LoginMethod.code),
         );
         return;
       }
@@ -1331,4 +1358,128 @@ class _AuthScreenState extends State<AuthScreen> {
       ],
     );
   }
+}
+
+/// 验证码登录成功后的补设密码弹窗；未设过密码的账号无需旧密码。
+class _SetPasswordDialog extends StatefulWidget {
+  const _SetPasswordDialog({required this.controller});
+
+  final AuthController controller;
+
+  @override
+  State<_SetPasswordDialog> createState() => _SetPasswordDialogState();
+}
+
+class _SetPasswordDialogState extends State<_SetPasswordDialog> {
+  final passwordController = TextEditingController();
+  final confirmPasswordController = TextEditingController();
+  bool submitting = false;
+  String? errorMessage;
+
+  @override
+  void dispose() {
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> submit() async {
+    final password = passwordController.text;
+    if (password.length < 8) {
+      setState(() => errorMessage = '密码长度不能少于 8 位');
+      return;
+    }
+    if (password != confirmPasswordController.text) {
+      setState(() => errorMessage = '两次输入的密码不一致，请重新输入');
+      return;
+    }
+    setState(() {
+      submitting = true;
+      errorMessage = null;
+    });
+    try {
+      await widget.controller.setPassword(password: password);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('密码已设置，下次可用密码登录'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        submitting = false;
+        errorMessage = userFacingApiMessage(error, fallback: '设置失败，请稍后重试');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('设置登录密码'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '设置后下次可以直接用密码登录',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const ValueKey('set-password-field'),
+          controller: passwordController,
+          enabled: !submitting,
+          obscureText: true,
+          decoration: const InputDecoration(
+            hintText: '新密码（至少 8 位）',
+            prefixIcon: Icon(Icons.lock_outline, size: 20),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const ValueKey('set-password-confirm-field'),
+          controller: confirmPasswordController,
+          enabled: !submitting,
+          obscureText: true,
+          decoration: const InputDecoration(
+            hintText: '确认新密码',
+            prefixIcon: Icon(Icons.lock_outline, size: 20),
+          ),
+        ),
+        if (errorMessage != null) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              errorMessage!,
+              style: const TextStyle(color: Color(0xFFE5484D), fontSize: 13),
+            ),
+          ),
+        ],
+      ],
+    ),
+    actions: [
+      TextButton(
+        key: const ValueKey('set-password-skip'),
+        onPressed: submitting ? null : () => Navigator.of(context).pop(),
+        child: const Text('暂不设置'),
+      ),
+      FilledButton(
+        key: const ValueKey('set-password-submit'),
+        onPressed: submitting ? null : submit,
+        child: submitting
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Text('设置密码'),
+      ),
+    ],
+  );
 }

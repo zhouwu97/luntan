@@ -123,6 +123,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/me":
 		s.me(w, r)
 		return
+	case r.Method == http.MethodPost && path == "/api/v1/me/password":
+		s.setPassword(w, r)
+		return
 	case r.Method == http.MethodGet && path == "/api/v1/me/profile":
 		s.profile(w, r)
 		return
@@ -677,6 +680,34 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJSON(w, http.StatusOK, user)
 }
 
+// setPassword 登录用户设置或修改密码；游客账号不支持（应通过注册转正）。
+func (s *Server) setPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if user.AccountType == "guest" {
+		writeAuthError(w, r, ErrRegisteredAccountRequired)
+		return
+	}
+	var input struct {
+		Password        string `json:"password"`
+		CurrentPassword string `json:"current_password"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeAuthError(w, r, auth.ErrInvalidInput)
+		return
+	}
+	if err := s.authService.SetPassword(r.Context(), user.ID, input.Password, input.CurrentPassword); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) authenticatedUser(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
 	token, ok := bearerToken(r.Header.Get("Authorization"))
 	if !ok {
@@ -735,6 +766,10 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "EMAIL_NOT_REGISTERED", Message: "该邮箱尚未注册，请先注册"}
 	case errors.Is(err, auth.ErrPasswordTooShort):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_PASSWORD", Message: "密码长度不能少于 8 位"}
+	case errors.Is(err, auth.ErrPasswordNotSet):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "PASSWORD_NOT_SET", Message: "该账号尚未设置密码，请使用验证码登录"}
+	case errors.Is(err, auth.ErrCurrentPasswordRequired):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "CURRENT_PASSWORD_REQUIRED", Message: "请输入当前密码后再修改"}
 	case errors.Is(err, ErrInvalidEmailCode):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_EMAIL_CODE", Message: "验证码错误或已失效"}
 	case errors.Is(err, ErrEmailCodeExpired):

@@ -186,8 +186,8 @@ func TestGuestCannotCreatePostThroughHTTPRoute(t *testing.T) {
 
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).
-			AddRow("guest-1", "guest_1", "active", "游客", 0, 0, "guest", "", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "has_password"}).
+			AddRow("guest-1", "guest_1", "active", "游客", 0, 0, "guest", "", false, nil, false))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(`{"community_id":"c1","type":"normal","title":"标题","content":"正文"}`))
 	req.Header.Set("Authorization", "Bearer guest-token")
@@ -212,8 +212,8 @@ func TestGuestCannotManageBookmarkThroughHTTPRoute(t *testing.T) {
 
 	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions`).
 		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).
-			AddRow("guest-1", "guest_1", "active", "游客", 0, 0, "guest", "", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "has_password"}).
+			AddRow("guest-1", "guest_1", "active", "游客", 0, 0, "guest", "", false, nil, false))
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/posts/p1/bookmark", nil)
 	req.Header.Set("Authorization", "Bearer guest-token")

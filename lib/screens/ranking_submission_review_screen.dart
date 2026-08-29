@@ -238,6 +238,8 @@ class _RankingSubmissionReviewScreenState
                             Text(
                               [
                                 rankingToyCategoryLabel(item.category),
+                                if (item.intensity.isNotEmpty)
+                                  rankingToyIntensityLabel(item.intensity),
                                 if (item.merchant.isNotEmpty) item.merchant,
                                 if (item.releaseYear != null)
                                   '${item.releaseYear}',
@@ -259,6 +261,30 @@ class _RankingSubmissionReviewScreenState
                       ),
                     ],
                   ),
+                  if (item.tags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final tag in item.tags)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceBlue,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              tag,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                   if (item.description.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(

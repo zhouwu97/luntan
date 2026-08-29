@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,14 @@ var rankingToySubmissionCategories = map[string]struct{}{
 	"large_hip":  {},
 	"half_body":  {},
 	"lubricant":  {},
+}
+
+// 刺激度类型沿用榜单 tabs 的 segments 词汇表，审核通过后写入 ranking_toys.segments。
+var rankingToySubmissionIntensities = map[string]struct{}{
+	"beginner":  {},
+	"advanced":  {},
+	"high_stim": {},
+	"juice":     {},
 }
 
 func newRankingToyID() string {
@@ -42,12 +51,14 @@ func (s *Server) createRankingToySubmission(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var input struct {
-		Name         string `json:"name"`
-		Category     string `json:"category"`
-		Merchant     string `json:"merchant"`
-		ReleaseYear  *int   `json:"release_year"`
-		Description  string `json:"description"`
-		CoverMediaID string `json:"cover_media_id"`
+		Name         string   `json:"name"`
+		Category     string   `json:"category"`
+		Merchant     string   `json:"merchant"`
+		ReleaseYear  *int     `json:"release_year"`
+		Description  string   `json:"description"`
+		CoverMediaID string   `json:"cover_media_id"`
+		Intensity    string   `json:"intensity"`
+		Tags         []string `json:"tags"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "请求体格式错误"})
@@ -58,6 +69,35 @@ func (s *Server) createRankingToySubmission(w http.ResponseWriter, r *http.Reque
 	input.Merchant = strings.TrimSpace(input.Merchant)
 	input.Description = strings.TrimSpace(input.Description)
 	input.CoverMediaID = strings.TrimSpace(input.CoverMediaID)
+	input.Intensity = strings.TrimSpace(input.Intensity)
+
+	if input.Intensity != "" {
+		if _, ok := rankingToySubmissionIntensities[input.Intensity]; !ok {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SUBMISSION_INTENSITY", Message: "刺激度类型无效"})
+			return
+		}
+	}
+	tags := make([]string, 0, len(input.Tags))
+	seenTags := make(map[string]struct{}, len(input.Tags))
+	for _, raw := range input.Tags {
+		tag := strings.TrimSpace(raw)
+		if tag == "" {
+			continue
+		}
+		if runes := len([]rune(tag)); runes > 4 {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SUBMISSION_TAG", Message: "每个标签不能超过 4 个字"})
+			return
+		}
+		if _, dup := seenTags[tag]; dup {
+			continue
+		}
+		seenTags[tag] = struct{}{}
+		tags = append(tags, tag)
+		if len(tags) > 3 {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SUBMISSION_TAG", Message: "标签最多 3 个"})
+			return
+		}
+	}
 
 	if runes := len([]rune(input.Name)); runes < 1 || runes > 50 {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SUBMISSION_NAME", Message: "玩具名称必须为 1 到 50 个字符"})
@@ -102,9 +142,9 @@ func (s *Server) createRankingToySubmission(w http.ResponseWriter, r *http.Reque
 	}
 	id := newRankingToyID()
 	if _, err := s.db.ExecContext(r.Context(), `
-		INSERT INTO ranking_toy_submissions (id, submitter_id, name, category, merchant, release_year, description, cover_media_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''))`,
-		id, user.ID, input.Name, input.Category, input.Merchant, input.ReleaseYear, input.Description, input.CoverMediaID); err != nil {
+		INSERT INTO ranking_toy_submissions (id, submitter_id, name, category, merchant, release_year, description, cover_media_id, intensity, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10::text[])`,
+		id, user.ID, input.Name, input.Category, input.Merchant, input.ReleaseYear, input.Description, input.CoverMediaID, input.Intensity, pqStringArray(tags)); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -129,7 +169,8 @@ func (s *Server) listRankingToySubmissions(w http.ResponseWriter, r *http.Reques
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT sub.id, sub.name, sub.category, sub.merchant, sub.release_year, sub.description,
 		       COALESCE(cover.object_key, ''), sub.status, sub.review_note, sub.reviewed_at,
-		       sub.toy_id, sub.created_at, sub.submitter_id, u.username, COALESCE(up.nickname, u.username)
+		       sub.toy_id, sub.created_at, sub.submitter_id, u.username, COALESCE(up.nickname, u.username),
+		       sub.intensity, array_to_json(sub.tags)
 		FROM ranking_toy_submissions sub
 		JOIN users u ON u.id = sub.submitter_id
 		LEFT JOIN user_profiles up ON up.user_id = sub.submitter_id
@@ -144,17 +185,23 @@ func (s *Server) listRankingToySubmissions(w http.ResponseWriter, r *http.Reques
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var id, name, category, merchant, description, coverKey, itemStatus, submitterID, username, nickname string
+		var id, name, category, merchant, description, coverKey, itemStatus, submitterID, username, nickname, intensity string
 		var releaseYear sql.NullInt64
 		var reviewNote string
 		var reviewedAt sql.NullTime
 		var toyID sql.NullString
 		var createdAt time.Time
+		var tagsRaw []byte
 		if err := rows.Scan(&id, &name, &category, &merchant, &releaseYear, &description,
 			&coverKey, &itemStatus, &reviewNote, &reviewedAt,
-			&toyID, &createdAt, &submitterID, &username, &nickname); err != nil {
+			&toyID, &createdAt, &submitterID, &username, &nickname,
+			&intensity, &tagsRaw); err != nil {
 			writeInternalError(w, r, err)
 			return
+		}
+		tags := []string{}
+		if len(tagsRaw) > 0 {
+			_ = json.Unmarshal(tagsRaw, &tags)
 		}
 		item := map[string]any{
 			"id":           id,
@@ -169,6 +216,8 @@ func (s *Server) listRankingToySubmissions(w http.ResponseWriter, r *http.Reques
 			"reviewed_at":  nullableTime(reviewedAt),
 			"toy_id":       rankingNullableString(toyID),
 			"created_at":   createdAt,
+			"intensity":    intensity,
+			"tags":         tags,
 			"submitter": map[string]any{
 				"id":       submitterID,
 				"username": username,
@@ -223,15 +272,16 @@ func (s *Server) reviewRankingToySubmission(w http.ResponseWriter, r *http.Reque
 	if input.Action == "approve" {
 		newStatus = "approved"
 	}
-	var name, category, merchant, description, coverMediaID string
+	var name, category, merchant, description, coverMediaID, intensity string
 	var releaseYear sql.NullInt64
+	var tagsRaw []byte
 	// 抢占式流转：仅 pending 可被审核，0 行说明已处理或不存在，天然防双审。
 	err = tx.QueryRowContext(r.Context(), `
 		UPDATE ranking_toy_submissions
 		SET status = $2, review_note = $3, reviewed_by = $4, reviewed_at = now(), updated_at = now()
 		WHERE id = $1 AND status = 'pending'
-		RETURNING name, category, merchant, COALESCE(release_year, 2026), description, COALESCE(cover_media_id, '')`,
-		submissionID, newStatus, input.Note, reviewer.ID).Scan(&name, &category, &merchant, &releaseYear, &description, &coverMediaID)
+		RETURNING name, category, merchant, COALESCE(release_year, 2026), description, COALESCE(cover_media_id, ''), intensity, array_to_json(tags)`,
+		submissionID, newStatus, input.Note, reviewer.ID).Scan(&name, &category, &merchant, &releaseYear, &description, &coverMediaID, &intensity, &tagsRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existingStatus string
 		if statusErr := tx.QueryRowContext(r.Context(), `SELECT status FROM ranking_toy_submissions WHERE id = $1`, submissionID).Scan(&existingStatus); errors.Is(statusErr, sql.ErrNoRows) {
@@ -252,10 +302,17 @@ func (s *Server) reviewRankingToySubmission(w http.ResponseWriter, r *http.Reque
 	toyID := ""
 	if input.Action == "approve" {
 		toyID = newRankingToyID()
+		tags := []string{}
+		if len(tagsRaw) > 0 {
+			_ = json.Unmarshal(tagsRaw, &tags)
+		}
+		// 刺激度类型进入榜单 tabs 的筛选词汇表 segments；新玩具无既有 segments，直接整体写入。
 		if _, err := tx.ExecContext(r.Context(), `
-			INSERT INTO ranking_toys (id, rank, name, merchant, release_year, description, category, cover_media_id, asset_key, active)
-			VALUES ($1, COALESCE((SELECT MAX(rank) + 1 FROM ranking_toys), 1), $2, $3, $4, $5, $6, NULLIF($7, ''), '', true)`,
-			toyID, name, merchant, int(releaseYear.Int64), description, category, coverMediaID); err != nil {
+			INSERT INTO ranking_toys (id, rank, name, merchant, release_year, description, category, tags, segments, cover_media_id, asset_key, active)
+			VALUES ($1, COALESCE((SELECT MAX(rank) + 1 FROM ranking_toys), 1), $2, $3, $4, $5, $6, $7::text[],
+			        CASE WHEN $8 <> '' THEN ARRAY[$8]::text[] ELSE ARRAY[]::text[] END,
+			        NULLIF($9, ''), '', true)`,
+			toyID, name, merchant, int(releaseYear.Int64), description, category, pqStringArray(tags), intensity, coverMediaID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

@@ -604,9 +604,11 @@ class RankingToySubmission {
     required this.createdAt,
     required this.submitterId,
     required this.submitterNickname,
+    required this.tags,
     this.releaseYear,
     this.coverUrl,
     this.toyId,
+    this.intensity = '',
   });
 
   final String id;
@@ -622,6 +624,8 @@ class RankingToySubmission {
   final DateTime createdAt;
   final String submitterId;
   final String submitterNickname;
+  final String intensity;
+  final List<String> tags;
 }
 
 class PlatformRepository {
@@ -885,6 +889,10 @@ class PlatformRepository {
           submitter['nickname'],
           fallback: _string(submitter['username']),
         ),
+        intensity: _string(value['intensity']),
+        tags: value['tags'] is List
+            ? value['tags'].whereType<String>().toList()
+            : const <String>[],
       );
     }).toList();
   }

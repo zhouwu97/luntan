@@ -111,7 +111,7 @@ Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为�
 
 ### 远端导入数据与 QA 环境
 
-QA 服务器通过 `http://101.42.27.44/api/v1` 提供客户端 API。服务端已经把源站公开内容导入本地数据库，并把帖子图片下载到自己的媒体目录；作者标识经过脱敏处理，帖子和评论正文来自导入快照。客户端运行时只访问该 API，不直接请求源站。图片通过 `/imported-media/` 公开读取。该 HTTP 地址只用于 QA，API、图片媒体和 Web 正式发布必须统一使用 HTTPS。启动示例：
+QA 服务器通过 `http://101.42.27.44/api/v1` 提供客户端 API。完成下方导入后，客户端运行时只访问本项目 API，帖子、商品、评论与图片均由本项目数据库及媒体存储提供；不在浏览器中直连源站。导入作者使用稳定的脱敏本地账号。图片通过由媒体存储生成的 URL 读取。该 HTTP 地址只用于 QA，API、图片媒体和 Web 正式发布必须统一使用 HTTPS。启动示例：
 
 QA 若没有接入外部对象存储，可设置 `MEDIA_STORAGE_DIR` 和 `OBJECT_STORAGE_SIGNING_SECRET` 启用受 HMAC 签名保护的本地媒体目录，并将 `OBJECT_STORAGE_PUBLIC_BASE_URL` 指向该目录对应的静态访问路径；该兜底仅用于开发/QA，生产环境仍必须配置外部对象存储。
 
@@ -133,7 +133,36 @@ flutter build apk --release \
 
 正式域名还需要由 HTTPS 反向代理统一承载 API、媒体和 Web，并配置证书续期；不要在生产构建中复用 QA 的 `http://101.42.27.44` 地址。
 
-如需重新同步导入快照，使用 `scripts/import_placeholder_content.py`（脚本文件名保留用于兼容已有部署命令）。脚本只写入脱敏后的作者标识，不会保存源站作者用户名；数据库连接应通过远端进程环境中的 `DATABASE_URL` 提供，不要把连接凭据写入仓库。
+如需重新同步导入快照，必须在部署服务器上执行以下导入流程，不能只把前端
+快照打进 APK/Web：
+
+```bash
+# QA 的本地媒体存储示例；生产环境请改为已配置的对象存储。
+export MEDIA_STORAGE_DIR=/var/www/luntan/imported-media
+export OBJECT_STORAGE_PUBLIC_BASE_URL=https://<你的域名>/imported-media
+
+# 1) 帖子、帖子评论与帖子配图：写 posts/comments/media_assets/post_media。
+python3 scripts/import_placeholder_content.py \
+  --output-dir /var/lib/luntan/import/posts \
+  --media-dir /var/www/luntan/imported-media \
+  --public-media-base "$OBJECT_STORAGE_PUBLIC_BASE_URL" \
+  --page-size 100
+
+# 2) 先下载杯友酱公开榜单、商品评价和配图到本地快照。
+pwsh scripts/sync_beiyoujiang_rankings.ps1
+
+# 3) 排行榜商品、商品评价、评价配图与各筛选视图名次：写 ranking_* 与 media_assets。
+# 在 server 目录执行；媒体写入服务端已配置的对象存储，或 QA 的 MEDIA_STORAGE_DIR。
+cd server
+go run ./cmd/ranking-import \
+  -snapshot ../assets/ranking/beiyoujiang_snapshot.json \
+  -assets-root ..
+```
+
+命令使用远端服务进程中的 `DATABASE_URL` 与媒体存储配置。若 QA 使用本地媒体
+目录，须设置 `MEDIA_STORAGE_DIR`，并由反向代理映射该目录；生产环境使用对象
+存储。导入作者不会保留源站昵称、头像或账号 ID；用户后来发布的帖子、评论、
+想冲、买过与评分仍写入同一套数据库，不会被下次源数据同步覆盖。
 
 ## 常用验证命令
 

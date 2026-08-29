@@ -209,13 +209,12 @@ void main() {
       expect(totalCount, 64);
     });
 
-    testWidgets('CommentItem 能够正常渲染贴纸与多张图片附件', (tester) async {
+    testWidgets('CommentItem 能够正常渲染纯图片附件评论', (tester) async {
       final commentWithMedia = Comment(
         id: 'c-media',
         postId: 'p1',
         authorId: 'u1',
-        content: '看我拍的照片和表情包',
-        stickerId: 'aad70d8d064f9eb79286c1393490716c',
+        content: '看我拍的照片',
         media: [
           MediaAsset(
             id: 'm1',
@@ -246,9 +245,75 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('看我拍的照片和表情包'), findsOneWidget);
+      expect(find.text('看我拍的照片'), findsOneWidget);
       expect(find.byType(Image), findsWidgets);
     });
+
+    testWidgets('CommentItem 能够正常渲染纯贴纸附件评论', (tester) async {
+      final commentWithSticker = Comment(
+        id: 'c-sticker',
+        postId: 'p1',
+        authorId: 'u1',
+        content: '发送贴纸',
+        stickerId: 'aad70d8d064f9eb79286c1393490716c',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CommentItem(
+                comment: commentWithSticker,
+                floor: 3,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('发送贴纸'), findsOneWidget);
+      expect(find.byType(Image), findsWidgets);
+    });
+
+    testWidgets('CommentItem 防御性渲染：若数据异常包含贴纸与图片仍能容错展示', (tester) async {
+      final commentWithBoth = Comment(
+        id: 'c-both',
+        postId: 'p1',
+        authorId: 'u1',
+        content: '容错测试',
+        stickerId: 'aad70d8d064f9eb79286c1393490716c',
+        media: [
+          MediaAsset(
+            id: 'm1',
+            type: MediaType.image,
+            url: 'https://example.com/photo1.jpg',
+          ),
+        ],
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CommentItem(
+                comment: commentWithBoth,
+                floor: 4,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('容错测试'), findsOneWidget);
+      expect(find.byType(Image), findsWidgets);
+    });
+
 
     testWidgets('CommentEmojiPanel 支持表情与 4 套贴纸包切换且真实触发选中回调', (tester) async {
       String? selectedEmoji;

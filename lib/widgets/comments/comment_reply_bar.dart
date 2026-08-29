@@ -93,8 +93,11 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _updateMetricsFromView();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateMetricsFromView();
+    });
   }
+
 
   @override
   void didChangeMetrics() {

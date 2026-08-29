@@ -53,7 +53,6 @@ class _CommentEmojiPanelState extends State<CommentEmojiPanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
 
     return Container(
       color: theme.scaffoldBackgroundColor,
@@ -162,7 +161,10 @@ class _CommentEmojiPanelState extends State<CommentEmojiPanel> {
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
-              color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: 0.3),
             ),
             padding: const EdgeInsets.all(6),
             child: Column(
@@ -238,7 +240,9 @@ class _CommentEmojiPanelState extends State<CommentEmojiPanel> {
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
               decoration: BoxDecoration(
-                color: isSelected ? theme.colorScheme.primaryContainer.withOpacity(0.4) : Colors.transparent,
+                color: isSelected
+                    ? theme.colorScheme.primaryContainer.withValues(alpha: 0.4)
+                    : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(child: iconWidget),

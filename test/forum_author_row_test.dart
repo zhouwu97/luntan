@@ -34,4 +34,72 @@ void main() {
     expect(find.textContaining('杂鱼日常 ·'), findsOneWidget);
     expect(find.textContaining('大型拆箱 ·'), findsNothing);
   });
+
+  testWidgets('点击头像或昵称回调作者 id，游客不触发', (tester) async {
+    final now = DateTime.now();
+    final community = const Community(
+      id: 'community-tap',
+      slug: 'tap',
+      name: '点击社区',
+      description: '测试社区',
+      categoryId: 'category-tap',
+    );
+    final tappedIds = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ForumAuthorRow(
+            post: Post(
+              id: 'post-tap-1',
+              authorId: 'user-tap-1',
+              communityId: community.id,
+              community: community,
+              title: '点击测试',
+              content: '内容',
+              createdAt: now,
+              updatedAt: now,
+            ),
+            onAuthorTap: tappedIds.add,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pump();
+    expect(tappedIds, ['user-tap-1']);
+
+    await tester.tap(find.text('匿名用户'));
+    await tester.pump();
+    expect(tappedIds, ['user-tap-1', 'user-tap-1']);
+  });
+
+  testWidgets('游客作者不触发主页跳转', (tester) async {
+    final now = DateTime.now();
+    final tappedIds = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ForumAuthorRow(
+            post: Post(
+              id: 'post-tap-2',
+              authorId: 'guest-abc',
+              communityId: 'community-tap',
+              title: '游客帖子',
+              content: '内容',
+              createdAt: now,
+              updatedAt: now,
+            ),
+            onAuthorTap: tappedIds.add,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pump();
+    expect(tappedIds, isEmpty);
+  });
 }

@@ -13,9 +13,11 @@ class CommentItem extends StatefulWidget {
     required this.floor,
     this.replies = const [],
     this.isHighlighted = false,
+    this.isPostAuthor = false,
     this.onReply,
     this.onReplyTo,
     this.onLike,
+    this.onDislike,
     this.onMore,
     this.onViewAllReplies,
     this.onAuthorTap,
@@ -25,9 +27,11 @@ class CommentItem extends StatefulWidget {
   final int floor;
   final List<Comment> replies;
   final bool isHighlighted;
+  final bool isPostAuthor;
   final VoidCallback? onReply;
   final ValueChanged<Comment>? onReplyTo;
   final VoidCallback? onLike;
+  final VoidCallback? onDislike;
   final VoidCallback? onMore;
   final VoidCallback? onViewAllReplies;
   final ValueChanged<String>? onAuthorTap;
@@ -100,7 +104,7 @@ class _CommentItemState extends State<CommentItem>
               child: Image.network(
                 imageUrl,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Icon(
+                errorBuilder: (_, _, _) => const Icon(
                   Icons.broken_image_outlined,
                   color: Colors.white54,
                   size: 64,
@@ -185,9 +189,30 @@ class _CommentItemState extends State<CommentItem>
                                 ),
                               ),
                             ),
+                            if (widget.isPostAuthor) ...[
+                              const SizedBox(width: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE8F1FD),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  '楼主',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF2F7FE0),
+                                  ),
+                                ),
+                              ),
+                            ],
                             const Spacer(),
                             Text(
-                              '${widget.floor} 楼',
+                              '${comment.floor ?? widget.floor} 楼',
                               style: const TextStyle(
                                 fontSize: 10.5,
                                 color: Color(0xFFA0AFBD),
@@ -233,11 +258,12 @@ class _CommentItemState extends State<CommentItem>
                 spacing: 8,
                 runSpacing: 8,
                 children: comment.media.map((media) {
-                  final imageUrl = media.url ?? media.detail?.url ?? media.thumb?.url ?? '';
+                  final imageUrl = media.previewUrl ?? '';
                   if (imageUrl.isEmpty) return const SizedBox.shrink();
 
                   return GestureDetector(
-                    onTap: () => _openImagePreview(context, imageUrl),
+                    onTap: () => _openImagePreview(
+                        context, media.originalUrl ?? imageUrl),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
@@ -249,7 +275,7 @@ class _CommentItemState extends State<CommentItem>
                         child: Image.network(
                           imageUrl,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Padding(
+                          errorBuilder: (_, _, _) => const Padding(
                             padding: EdgeInsets.all(16),
                             child: Icon(Icons.broken_image_outlined, color: Colors.grey),
                           ),
@@ -292,6 +318,37 @@ class _CommentItemState extends State<CommentItem>
                           color: AppTheme.textSecondary,
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 18),
+                GestureDetector(
+                  onTap: widget.onDislike,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        comment.isDisliked
+                            ? Icons.thumb_down_rounded
+                            : Icons.thumb_down_off_alt_rounded,
+                        size: 14,
+                        color: comment.isDisliked
+                            ? const Color(0xFF5A7B9C)
+                            : AppTheme.textSecondary,
+                      ),
+                      if (comment.dislikeCount > 0) ...[
+                        const SizedBox(width: 3),
+                        Text(
+                          '${comment.dislikeCount}',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: comment.isDisliked
+                                ? const Color(0xFF5A7B9C)
+                                : AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -378,6 +378,10 @@ class Comment {
     this.stickerId,
     this.likeCount = 0,
     this.isLiked = false,
+    this.dislikeCount = 0,
+    this.isDisliked = false,
+    this.floor,
+    this.replyPreview = const [],
     this.replyCount = 0,
     this.publicationStatus = CommentPublicationStatus.published,
     this.moderationStatus = ModerationStatus.normal,
@@ -400,6 +404,14 @@ class Comment {
   final String? stickerId;
   int likeCount;
   bool isLiked;
+  int dislikeCount;
+  bool isDisliked;
+
+  /// 服务端计算的楼层号（仅根评论下发；回复恒为 null）。
+  final int? floor;
+
+  /// 服务端内嵌的前几条回复预览（楼层视图）。
+  List<Comment> replyPreview;
   int replyCount;
   final CommentPublicationStatus publicationStatus;
   final ModerationStatus moderationStatus;

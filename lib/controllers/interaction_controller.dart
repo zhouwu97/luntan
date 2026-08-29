@@ -80,6 +80,12 @@ class InteractionController extends ChangeNotifier {
     final next = !comment.isLiked;
     comment.isLiked = next;
     comment.likeCount = (comment.likeCount + (next ? 1 : -1)).clamp(0, 1 << 30);
+    // 点赞与点踩互斥：激活点赞时同步取消本地点踩状态。
+    final dislikeCleared = next && comment.isDisliked;
+    if (dislikeCleared) {
+      comment.isDisliked = false;
+      comment.dislikeCount = (comment.dislikeCount - 1).clamp(0, 1 << 30);
+    }
     notifyListeners();
     try {
       await _repository.setCommentLike(commentId: comment.id, active: next);
@@ -89,6 +95,45 @@ class InteractionController extends ChangeNotifier {
         0,
         1 << 30,
       );
+      if (dislikeCleared) {
+        comment.isDisliked = true;
+        comment.dislikeCount = (comment.dislikeCount + 1).clamp(0, 1 << 30);
+      }
+      notifyListeners();
+      rethrow;
+    } finally {
+      _inFlight.remove(key);
+    }
+  }
+
+  Future<void> toggleCommentDislike(Comment comment) async {
+    final key = 'comment-dislike:${comment.id}';
+    if (!_inFlight.add(key)) return;
+    final next = !comment.isDisliked;
+    comment.isDisliked = next;
+    comment.dislikeCount = (comment.dislikeCount + (next ? 1 : -1)).clamp(
+      0,
+      1 << 30,
+    );
+    // 点踩与点赞互斥：激活点踩时同步取消本地点赞状态。
+    final likeCleared = next && comment.isLiked;
+    if (likeCleared) {
+      comment.isLiked = false;
+      comment.likeCount = (comment.likeCount - 1).clamp(0, 1 << 30);
+    }
+    notifyListeners();
+    try {
+      await _repository.setCommentDislike(commentId: comment.id, active: next);
+    } catch (_) {
+      comment.isDisliked = !next;
+      comment.dislikeCount = (comment.dislikeCount + (next ? -1 : 1)).clamp(
+        0,
+        1 << 30,
+      );
+      if (likeCleared) {
+        comment.isLiked = true;
+        comment.likeCount = (comment.likeCount + 1).clamp(0, 1 << 30);
+      }
       notifyListeners();
       rethrow;
     } finally {

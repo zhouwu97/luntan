@@ -45,7 +45,7 @@ void main() {
         repository: repository,
         postId: 'p1',
       );
-      final parent = repository._comment('parent', 'parent');
+      final parent = repository.comment('parent', 'parent');
 
       final first = controller.replyTo(parent, 'reply');
       final second = controller.replyTo(parent, 'reply');
@@ -57,9 +57,9 @@ void main() {
   );
 
   test(
-    'CommentsController deduplicates repeated cursor pages and stops',
+    'CommentsController deduplicates repeated offset pages',
     () async {
-      final repository = _FakeCommentRepository()..repeatCursorPage = true;
+      final repository = _FakeCommentRepository()..repeatOffsetPage = true;
       final controller = CommentsController(
         repository: repository,
         postId: 'p1',
@@ -86,28 +86,89 @@ void main() {
     final freshLoad = controller.refresh();
     await freshLoad;
     pending.complete(
-      CommentPage(items: [repository._comment('stale', 'stale')]),
+      CommentPage(items: [repository.comment('stale', 'stale')]),
     );
     await staleLoad;
 
     expect(controller.items, hasLength(1));
     expect(controller.items.single.id, 'fresh');
   });
+
+  test('CommentsController reloads floors with sort and author filter', () async {
+    final repository = _FakeCommentRepository();
+    final controller = CommentsController(repository: repository, postId: 'p1');
+    await controller.load();
+    expect(repository.lastSort, CommentSort.asc);
+    expect(repository.lastAuthorId, isNull);
+    expect(repository.lastOffset, 0);
+
+    controller.setSort(CommentSort.hot);
+    await Future<void>.delayed(Duration.zero);
+    expect(repository.lastSort, CommentSort.hot);
+    expect(controller.sort, CommentSort.hot);
+
+    controller.setAuthorFilter('u9');
+    await Future<void>.delayed(Duration.zero);
+    expect(repository.lastAuthorId, 'u9');
+
+    controller.setAuthorFilter(null);
+    await Future<void>.delayed(Duration.zero);
+    expect(repository.lastAuthorId, isNull);
+  });
+
+  test(
+    'CommentsController syncs reply count and preview on the root floor',
+    () async {
+      final repository = _FakeCommentRepository();
+      final controller = CommentsController(
+        repository: repository,
+        postId: 'p1',
+      );
+      await controller.load();
+      final parent = controller.items.single;
+
+      await controller.replyTo(parent, 'reply');
+
+      expect(controller.items.single.replyCount, 1);
+      expect(controller.items.single.replyPreview, hasLength(1));
+      expect(controller.items.single.replyPreview.single.content, 'reply');
+    },
+  );
+
+  test('CommentsController inserts a new floor by server floor number', () async {
+    final repository = _FakeCommentRepository();
+    final controller = CommentsController(repository: repository, postId: 'p1');
+    await controller.load();
+    await controller.loadMore();
+    // items: c1 (floor 1), c2 (floor 3)
+    repository.nextCreatedFloor = 2;
+    await controller.addComment('inserted');
+
+    expect(controller.items.map((item) => item.id).toList(), [
+      'c1',
+      'c3',
+      'c2',
+    ]);
+  });
 }
 
 class _FakeCommentRepository implements CommentRepository {
   bool failFirstLoad = false;
-  bool repeatCursorPage = false;
+  bool repeatOffsetPage = false;
   Completer<CommentPage>? delayedInitialLoad;
   bool returnFreshOnNextLoad = false;
-  int page = 0;
   int replyCalls = 0;
+  CommentSort? lastSort;
+  String? lastAuthorId;
+  int lastOffset = -1;
+  int? nextCreatedFloor;
 
-  Comment _comment(String id, String content) => Comment(
+  Comment comment(String id, String content, {int? floor}) => Comment(
     id: id,
     postId: 'p1',
     authorId: 'u1',
     content: content,
+    floor: floor,
     createdAt: DateTime.utc(2026, 8, 22),
     updatedAt: DateTime.utc(2026, 8, 22),
   );
@@ -115,38 +176,46 @@ class _FakeCommentRepository implements CommentRepository {
   @override
   Future<CommentPage> listComments({
     required String postId,
-    String? cursor,
     int limit = 20,
+    int offset = 0,
+    CommentSort? sort,
+    String? authorId,
   }) async {
-    if (cursor == null && delayedInitialLoad != null) {
+    lastSort = sort;
+    lastAuthorId = authorId;
+    lastOffset = offset;
+    if (offset == 0 && delayedInitialLoad != null) {
       final pending = delayedInitialLoad!;
       delayedInitialLoad = null;
       return pending.future;
     }
-    if (cursor == null && returnFreshOnNextLoad) {
+    if (offset == 0 && returnFreshOnNextLoad) {
       returnFreshOnNextLoad = false;
-      return CommentPage(items: [_comment('fresh', 'fresh')], hasMore: false);
+      return CommentPage(items: [comment('fresh', 'fresh')], hasMore: false);
     }
     if (failFirstLoad) {
       failFirstLoad = false;
       throw StateError('network');
     }
-    page++;
-    if (page == 1) {
+    if (offset == 0) {
       return CommentPage(
-        items: [_comment('c1', 'first')],
-        nextCursor: 'c1',
+        items: [comment('c1', 'first', floor: 1)],
         hasMore: true,
+        total: 2,
       );
     }
-    if (repeatCursorPage) {
+    if (repeatOffsetPage) {
       return CommentPage(
-        items: [_comment('c1', 'duplicate')],
-        nextCursor: 'c1',
-        hasMore: true,
+        items: [comment('c1', 'duplicate', floor: 1)],
+        hasMore: false,
+        total: 2,
       );
     }
-    return CommentPage(items: [_comment('c2', 'second')], hasMore: false);
+    return CommentPage(
+      items: [comment('c2', 'second', floor: 3)],
+      hasMore: false,
+      total: 3,
+    );
   }
 
   @override
@@ -157,7 +226,7 @@ class _FakeCommentRepository implements CommentRepository {
     String? replyToUserId,
     List<String> mediaIds = const [],
     String? stickerId,
-  }) async => _comment('c3', content);
+  }) async => comment('c3', content, floor: nextCreatedFloor);
 
   @override
   Future<Comment> createReply({
@@ -169,7 +238,7 @@ class _FakeCommentRepository implements CommentRepository {
   }) async {
     replyCalls++;
     await Future<void>.delayed(const Duration(milliseconds: 5));
-    return _comment('c4', content);
+    return comment('c4', content);
   }
 
   @override
@@ -178,7 +247,7 @@ class _FakeCommentRepository implements CommentRepository {
     String? cursor,
     int limit = 20,
   }) async {
-    return CommentPage(items: [_comment('r1', 'thread reply')], hasMore: false);
+    return CommentPage(items: [comment('r1', 'thread reply')], hasMore: false);
   }
 
   @override

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,7 +50,10 @@ type commentResponse struct {
 	StickerID     *string                     `json:"sticker_id,omitempty"`
 	Attachments   []commentAttachmentResponse `json:"attachments,omitempty"`
 	LikeCount     int64                       `json:"like_count"`
+	DislikeCount  int64                       `json:"dislike_count"`
 	ReplyCount    int64                       `json:"reply_count"`
+	Floor         *int                        `json:"floor,omitempty"`
+	ReplyPreview  []commentResponse           `json:"reply_preview,omitempty"`
 	Publication   string                      `json:"publication_status"`
 	Moderation    string                      `json:"moderation_status"`
 	CreatedAt     time.Time                   `json:"created_at"`
@@ -58,7 +62,8 @@ type commentResponse struct {
 }
 
 type viewerCommentState struct {
-	HasLiked bool `json:"has_liked"`
+	HasLiked    bool `json:"has_liked"`
+	HasDisliked bool `json:"has_disliked"`
 }
 
 type commentInput struct {
@@ -75,6 +80,32 @@ type commentCursor struct {
 	ID        string    `json:"id"`
 }
 
+// floorNumberExpr 计算楼层号：对所有可见根评论按发布顺序编号，
+// 在拉黑/只看楼主等过滤之前计算，保证楼层号对任何观看者都稳定。
+const floorNumberExpr = `ROW_NUMBER() OVER (ORDER BY c.created_at ASC, c.id ASC)`
+
+// commentFloorColumns 是楼层/回复共用的 SELECT 列集，
+// 与 (*Server).collectCommentFloorRows 的 Scan 顺序一一对应。
+const commentFloorColumns = `t.id, t.post_id, t.author_id, u.username, COALESCE(up.nickname, u.username),
+		       COALESCE(up.level, 1), COALESCE(ma.object_key, ''), t.content,
+		       t.like_count, t.dislike_count, t.reply_count, t.created_at, t.updated_at,
+		       t.floor_no, COALESCE(t.root_id, t.id), COALESCE(t.parent_id, ''),
+		       COALESCE(t.reply_to_user_id, ''), COALESCE(t.sticker_id, '')`
+
+const commentFloorJoins = `JOIN users u ON u.id = t.author_id
+		LEFT JOIN user_profiles up ON up.user_id = t.author_id
+		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id`
+
+// viewerReactionExprs 生成观看者点赞/点踩存在性表达式，viewerPos 是观看者参数位。
+func viewerReactionExprs(viewerPos int) (string, string) {
+	liked := fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM comment_reactions cr
+			WHERE cr.comment_id = t.id AND cr.user_id = $%d AND cr.reaction_type = 'like'
+		)`, viewerPos)
+	disliked := strings.Replace(liked, "'like'", "'dislike'", 1)
+	return liked, disliked
+}
+
 func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID string) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -82,6 +113,24 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	limit, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
+		return
+	}
+	offset := 0
+	if value := r.URL.Query().Get("offset"); value != "" {
+		parsed, parseErr := strconv.Atoi(value)
+		if parseErr != nil || parsed < 0 || parsed > 1000000 {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_OFFSET", Message: "offset 必须是非负整数"})
+			return
+		}
+		offset = parsed
+	}
+	sortKey := strings.TrimSpace(r.URL.Query().Get("sort"))
+	switch sortKey {
+	case "":
+		sortKey = "asc"
+	case "asc", "desc", "hot":
+	default:
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SORT", Message: "sort 仅支持 asc、desc、hot"})
 		return
 	}
 	var exists string
@@ -94,78 +143,71 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		writeInternalError(w, r, err)
 		return
 	}
-	var cursor *commentCursor
-	if value := r.URL.Query().Get("cursor"); value != "" {
-		decoded, decodeErr := decodeCommentCursor(value)
-		if decodeErr != nil {
-			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
-			return
-		}
-		cursor = &decoded
-	}
+
 	args := []any{postID}
-	viewerExpression := "false"
+	likedExpr, dislikedExpr := "false", "false"
+	filterSQL := ""
 	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
 	if hasViewer {
-		viewerExpression = fmt.Sprintf(`EXISTS (
-			SELECT 1 FROM comment_reactions cr
-			WHERE cr.comment_id = c.id AND cr.user_id = $%d AND cr.reaction_type = 'like'
-		)`, len(args)+1)
+		// 观看者统一绑定一个参数位（EXISTS 表达式与 blocks 过滤复用），
+		// 否则 COUNT 查询里该参数未被引用会导致 42P18 无法推断类型。
+		likedExpr, dislikedExpr = viewerReactionExprs(len(args) + 1)
 		args = append(args, viewer.ID)
-		hasViewer = true
-	}
-	query := fmt.Sprintf(`
-		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
-		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.reply_count, c.publication_status, c.moderation_status,
-		       c.created_at, c.updated_at, %s AS viewer_has_liked
-		FROM comments c
-		JOIN users u ON u.id = c.author_id
-		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE c.post_id = $1 AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'`, viewerExpression)
-	if hasViewer {
-		query += fmt.Sprintf(` AND NOT EXISTS (
+		filterSQL = fmt.Sprintf(` AND NOT EXISTS (
 			SELECT 1 FROM blocks b
-			WHERE (b.blocker_id = $%d AND b.blocked_id = c.author_id)
-			   OR (b.blocker_id = c.author_id AND b.blocked_id = $%d)
-		)`, len(args)+1, len(args)+1)
-		args = append(args, viewer.ID)
+			WHERE (b.blocker_id = $%d AND b.blocked_id = t.author_id)
+			   OR (b.blocker_id = t.author_id AND b.blocked_id = $%d)
+		)`, len(args), len(args))
 	}
-	if cursor != nil {
-		query += fmt.Sprintf(" AND (c.created_at, c.id) > ($%d, $%d)", len(args)+1, len(args)+2)
-		args = append(args, cursor.CreatedAt, cursor.ID)
+	// 只看楼主：客户端传作者的 user id。
+	if authorID := strings.TrimSpace(r.URL.Query().Get("author_id")); authorID != "" {
+		filterSQL += fmt.Sprintf(" AND t.author_id = $%d", len(args)+1)
+		args = append(args, authorID)
 	}
-	limitPosition := len(args) + 1
-	query += fmt.Sprintf(" ORDER BY c.created_at ASC, c.id ASC LIMIT $%d", limitPosition)
-	args = append(args, limit+1)
+
+	orderBy := map[string]string{
+		"asc":  "t.floor_no ASC, t.id ASC",
+		"desc": "t.floor_no DESC, t.id DESC",
+		"hot":  "t.like_count DESC, t.floor_no ASC",
+	}[sortKey]
+
+	baseQuery := fmt.Sprintf(`
+		FROM (
+			SELECT c.id, c.post_id, c.author_id, c.root_id, c.parent_id, c.reply_to_user_id, c.sticker_id,
+			       c.content, c.like_count, c.dislike_count, c.reply_count,
+			       c.created_at, c.updated_at, %s AS floor_no
+			FROM comments c
+			WHERE c.post_id = $1 AND c.deleted_at IS NULL
+			  AND c.publication_status = 'published' AND c.moderation_status = 'normal'
+			  AND (c.root_id IS NULL OR c.root_id = c.id)
+		) t
+		%s
+		WHERE 1 = 1%s`, floorNumberExpr, commentFloorJoins, filterSQL)
+
+	var total int64
+	if err := s.db.QueryRowContext(r.Context(), "SELECT COUNT(*)"+baseQuery, args...).Scan(&total); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	query := fmt.Sprintf(`SELECT %s, %s, %s %s ORDER BY %s OFFSET %d LIMIT %d`,
+		commentFloorColumns, likedExpr, dislikedExpr, baseQuery, orderBy, offset, limit)
 	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	defer rows.Close()
-	items := make([]commentResponse, 0, limit+1)
-	for rows.Next() {
-		var item commentResponse
-		var authorID, rootID, parentID, replyTo, stickerID string
-		var viewerHasLiked bool
-		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rootID, &parentID, &replyTo, &item.Content, &stickerID, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		item.Author.ID = authorID
-		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rootID), optionalString(parentID), optionalString(replyTo)
-		item.StickerID = optionalString(stickerID)
-		if err := enrichReplyToUser(r.Context(), s.db, &item); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if hasViewer {
-			item.ViewerState = &viewerCommentState{HasLiked: viewerHasLiked}
-		}
-		items = append(items, item)
+	items, err := s.collectCommentFloorRows(r.Context(), rows, hasViewer, true)
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
 	}
-	if err := rows.Err(); err != nil {
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	previewReplies, err := s.loadCommentReplyPreviews(r.Context(), items, viewer, hasViewer)
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -173,20 +215,124 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		writeInternalError(w, r, err)
 		return
 	}
-	hasMore := len(items) > limit
-	if hasMore {
-		items = items[:limit]
+	if err := enrichCommentsMedia(r.Context(), s.db, previewReplies); err != nil {
+		writeInternalError(w, r, err)
+		return
 	}
-	var nextCursor any
-	if hasMore && len(items) > 0 {
-		encoded, encodeErr := encodeCommentCursor(commentCursor{CreatedAt: items[len(items)-1].CreatedAt, ID: items[len(items)-1].ID})
-		if encodeErr != nil {
-			writeInternalError(w, r, encodeErr)
-			return
+	attachReplyPreviews(items, previewReplies)
+
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"items":    items,
+		"total":    total,
+		"has_more": int64(offset+len(items)) < total,
+	})
+}
+
+// loadCommentReplyPreviews 为每个楼层取前 3 条回复（按时间正序），
+// 同样应用观看者拉黑过滤。
+func (s *Server) loadCommentReplyPreviews(ctx context.Context, items []commentResponse, viewer auth.User, hasViewer bool) ([]commentResponse, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	replyArgs := make([]any, 0, len(items)+1)
+	placeholders := make([]string, len(items))
+	for i, item := range items {
+		replyArgs = append(replyArgs, item.ID)
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+	likedExpr, dislikedExpr := "false", "false"
+	blockSQL := ""
+	if hasViewer {
+		likedExpr, dislikedExpr = viewerReactionExprs(len(replyArgs) + 1)
+		replyArgs = append(replyArgs, viewer.ID)
+		blockSQL = fmt.Sprintf(` AND NOT EXISTS (
+			SELECT 1 FROM blocks b
+			WHERE (b.blocker_id = $%d AND b.blocked_id = c.author_id)
+			   OR (b.blocker_id = c.author_id AND b.blocked_id = $%d)
+		)`, len(replyArgs), len(replyArgs))
+	}
+	query := fmt.Sprintf(`
+		SELECT %s, %s, %s
+		FROM (
+			SELECT c.*, NULL::bigint AS floor_no, ROW_NUMBER() OVER (PARTITION BY c.root_id ORDER BY c.created_at ASC, c.id ASC) AS rn
+			FROM comments c
+			WHERE c.root_id IN (%s) AND c.id <> c.root_id AND c.deleted_at IS NULL
+			  AND c.publication_status = 'published' AND c.moderation_status = 'normal'%s
+		) t
+		%s
+		WHERE t.rn <= 3
+		ORDER BY t.root_id ASC, t.rn ASC`, commentFloorColumns, likedExpr, dislikedExpr, strings.Join(placeholders, ", "), blockSQL, commentFloorJoins)
+	rows, err := s.db.QueryContext(ctx, query, replyArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.collectCommentFloorRows(ctx, rows, hasViewer, false)
+}
+
+// collectCommentFloorRows 统一扫描楼层/回复行；withFloor 时把 floor_no
+// 写入响应（回复行的 floor_no 恒为 NULL，不写）。
+func (s *Server) collectCommentFloorRows(ctx context.Context, rows *sql.Rows, hasViewer, withFloor bool) ([]commentResponse, error) {
+	items := make([]commentResponse, 0, 16)
+	for rows.Next() {
+		var item commentResponse
+		var postID, authorID, rootID, parentID, replyTo, stickerID, avatarKey string
+		var floorNo sql.NullInt64
+		var hasLiked, hasDisliked bool
+		if err := rows.Scan(
+			&item.ID, &postID, &authorID, &item.Author.Username, &item.Author.Nickname,
+			&item.Author.Level, &avatarKey, &item.Content,
+			&item.LikeCount, &item.DislikeCount, &item.ReplyCount,
+			&item.CreatedAt, &item.UpdatedAt, &floorNo,
+			&rootID, &parentID, &replyTo, &stickerID,
+			&hasLiked, &hasDisliked,
+		); err != nil {
+			return nil, err
 		}
-		nextCursor = encoded
+		item.PostID = postID
+		item.Author.ID = authorID
+		if avatarKey != "" {
+			item.Author.AvatarURL = publicMediaURL(avatarKey)
+		}
+		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rootID), optionalString(parentID), optionalString(replyTo)
+		item.StickerID = optionalString(stickerID)
+		if withFloor && floorNo.Valid {
+			floor := int(floorNo.Int64)
+			item.Floor = &floor
+		}
+		if hasViewer {
+			item.ViewerState = &viewerCommentState{HasLiked: hasLiked, HasDisliked: hasDisliked}
+		}
+		items = append(items, item)
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if err := enrichReplyToUser(ctx, s.db, &items[i]); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// attachReplyPreviews 把预览回复按 root_id 挂到对应楼层。
+func attachReplyPreviews(items []commentResponse, replies []commentResponse) {
+	if len(items) == 0 || len(replies) == 0 {
+		return
+	}
+	byRoot := make(map[string][]commentResponse, len(items))
+	for _, reply := range replies {
+		if reply.RootID == nil {
+			continue
+		}
+		byRoot[*reply.RootID] = append(byRoot[*reply.RootID], reply)
+	}
+	for i := range items {
+		if preview := byRoot[items[i].ID]; len(preview) > 0 {
+			items[i].ReplyPreview = preview
+		}
+	}
 }
 
 func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, commentID string) {
@@ -199,7 +345,7 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		return
 	}
 	var rootID string
-	err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(root_id, id) FROM comments WHERE id = $1 AND deleted_at IS NULL`, commentID).Scan(&rootID)
+	err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(root_id, id) FROM comments WHERE id = $1 AND deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal'`, commentID).Scan(&rootID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrCommentNotFound)
 		return
@@ -218,68 +364,48 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		cursor = &decoded
 	}
 	args := []any{rootID}
-	viewerExpression := "false"
+	likedExpr, dislikedExpr := "false", "false"
+	filterSQL := ""
 	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
 	if hasViewer {
-		viewerExpression = fmt.Sprintf(`EXISTS (
-			SELECT 1 FROM comment_reactions cr
-			WHERE cr.comment_id = c.id AND cr.user_id = $%d AND cr.reaction_type = 'like'
-		)`, len(args)+1)
+		likedExpr, dislikedExpr = viewerReactionExprs(len(args) + 1)
 		args = append(args, viewer.ID)
-	}
-	query := fmt.Sprintf(`
-		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
-		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.reply_count, c.publication_status, c.moderation_status,
-		       c.created_at, c.updated_at, %s AS viewer_has_liked
-		FROM comments c
-		JOIN users u ON u.id = c.author_id
-		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE c.root_id = $1 AND c.id <> $1 AND c.deleted_at IS NULL
-		  AND c.publication_status = 'published' AND c.moderation_status = 'normal'`, viewerExpression)
-	if hasViewer {
-		query += fmt.Sprintf(` AND NOT EXISTS (
+		filterSQL = fmt.Sprintf(` AND NOT EXISTS (
 			SELECT 1 FROM blocks b
-			WHERE (b.blocker_id = $%d AND b.blocked_id = c.author_id)
-			   OR (b.blocker_id = c.author_id AND b.blocked_id = $%d)
+			WHERE (b.blocker_id = $%d AND b.blocked_id = t.author_id)
+			   OR (b.blocker_id = t.author_id AND b.blocked_id = $%d)
 		)`, len(args)+1, len(args)+1)
 		args = append(args, viewer.ID)
 	}
 	if cursor != nil {
-		query += fmt.Sprintf(" AND (c.created_at, c.id) > ($%d, $%d)", len(args)+1, len(args)+2)
+		filterSQL += fmt.Sprintf(" AND (t.created_at, t.id) > ($%d, $%d)", len(args)+1, len(args)+2)
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
 	limitPosition := len(args) + 1
-	query += fmt.Sprintf(" ORDER BY c.created_at ASC, c.id ASC LIMIT $%d", limitPosition)
+	query := fmt.Sprintf(`SELECT %s, %s, %s
+		FROM (
+			SELECT c.id, c.post_id, c.author_id, c.root_id, c.parent_id, c.reply_to_user_id, c.sticker_id,
+			       c.content, c.like_count, c.dislike_count, c.reply_count,
+			       c.created_at, c.updated_at, NULL::bigint AS floor_no
+			FROM comments c
+			WHERE c.root_id = $1 AND c.id <> $1 AND c.deleted_at IS NULL
+			  AND c.publication_status = 'published' AND c.moderation_status = 'normal'
+		) t
+		%s
+		WHERE 1 = 1%s
+		ORDER BY t.created_at ASC, t.id ASC LIMIT $%d`,
+		commentFloorColumns, likedExpr, dislikedExpr, commentFloorJoins, filterSQL, limitPosition)
 	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	defer rows.Close()
-	items := make([]commentResponse, 0, limit+1)
-	for rows.Next() {
-		var item commentResponse
-		var authorID, rowRootID, parentID, replyTo, stickerID string
-		var viewerHasLiked bool
-		if err := rows.Scan(&item.ID, &item.PostID, &authorID, &item.Author.Username, &item.Author.Nickname, &rowRootID, &parentID, &replyTo, &item.Content, &stickerID, &item.LikeCount, &item.ReplyCount, &item.Publication, &item.Moderation, &item.CreatedAt, &item.UpdatedAt, &viewerHasLiked); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		item.Author.ID = authorID
-		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rowRootID), optionalString(parentID), optionalString(replyTo)
-		item.StickerID = optionalString(stickerID)
-		if err := enrichReplyToUser(r.Context(), s.db, &item); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if hasViewer {
-			item.ViewerState = &viewerCommentState{HasLiked: viewerHasLiked}
-		}
-		items = append(items, item)
+	items, err := s.collectCommentFloorRows(r.Context(), rows, hasViewer, false)
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
 	}
-	if err := rows.Err(); err != nil {
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -329,7 +455,7 @@ func (s *Server) createReply(w http.ResponseWriter, r *http.Request, parentID st
 		return
 	}
 	var postID string
-	err := s.db.QueryRowContext(r.Context(), `SELECT post_id FROM comments WHERE id = $1 AND deleted_at IS NULL`, parentID).Scan(&postID)
+	err := s.db.QueryRowContext(r.Context(), `SELECT post_id FROM comments WHERE id = $1 AND deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal'`, parentID).Scan(&postID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrCommentParentNotFound)
 		return
@@ -446,7 +572,7 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 			writeInternalError(w, r, err)
 			return
 		}
-		response, loadErr := loadCommentResponseTx(r.Context(), tx, existingCommentID)
+		response, loadErr := loadCommentResponseTx(r.Context(), tx, existingCommentID, user.ID)
 		if loadErr != nil {
 			writeInternalError(w, r, loadErr)
 			return
@@ -475,7 +601,7 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 	rootID := commentID
 	if parentID != "" {
 		var parentPostID, parentRootID, parentAuthorID string
-		err = tx.QueryRowContext(r.Context(), `SELECT post_id, COALESCE(root_id, id), author_id FROM comments WHERE id = $1 AND deleted_at IS NULL`, parentID).Scan(&parentPostID, &parentRootID, &parentAuthorID)
+		err = tx.QueryRowContext(r.Context(), `SELECT post_id, COALESCE(root_id, id), author_id FROM comments WHERE id = $1 AND deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal'`, parentID).Scan(&parentPostID, &parentRootID, &parentAuthorID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			writeInternalError(w, r, err)
 			return
@@ -485,9 +611,8 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 			return
 		}
 		rootID = parentRootID
-		if input.ReplyToUserID == "" {
-			input.ReplyToUserID = parentAuthorID
-		}
+		// 回复通知目标由服务端按 parent 推导，忽略客户端传值，防止伪造通知接收人。
+		input.ReplyToUserID = parentAuthorID
 	}
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(r.Context(), `UPDATE comment_idempotency_keys SET comment_id = $1 WHERE user_id = $2 AND idempotency_key = $3`, commentID, user.ID, idempotencyKey); err != nil {
@@ -509,7 +634,8 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		}
 	}
 	if parentID != "" {
-		if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET reply_count = reply_count + 1, updated_at = $1 WHERE id = $2`, now, parentID); err != nil {
+		// reply_count 语义：根评论统计楼中楼全部可见后代，与 replies 接口返回集一致。
+		if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET reply_count = reply_count + 1, updated_at = $1 WHERE id = $2`, now, rootID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -533,7 +659,7 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 
-	response, err := loadCommentResponseTx(r.Context(), tx, commentID)
+	response, err := loadCommentResponseTx(r.Context(), tx, commentID, user.ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -546,26 +672,46 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 
-func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID string) (commentResponse, error) {
+func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID string) (commentResponse, error) {
 	var response commentResponse
 	var authorID, rootID, parentID, replyTo, stickerID string
+	var floorNo sql.NullInt64
 	err := tx.QueryRowContext(ctx, `
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
+		       COALESCE(up.level, 1), COALESCE(ma.object_key, ''),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.reply_count, c.publication_status, c.moderation_status,
-		       c.created_at, c.updated_at
+		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.dislike_count, c.reply_count,
+		       c.publication_status, c.moderation_status,
+		       c.created_at, c.updated_at,
+		       CASE WHEN c.root_id = c.id THEN (
+		           SELECT COUNT(*) FROM comments c2
+		           WHERE c2.post_id = c.post_id AND c2.deleted_at IS NULL
+		             AND c2.publication_status = 'published' AND c2.moderation_status = 'normal'
+		             AND (c2.root_id IS NULL OR c2.root_id = c2.id)
+		             AND (c2.created_at, c2.id) <= (c.created_at, c.id)
+		       ) END
 		FROM comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = c.author_id
+		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id
 		WHERE c.id = $1`, commentID).Scan(
 		&response.ID, &response.PostID, &authorID, &response.Author.Username, &response.Author.Nickname,
-		&rootID, &parentID, &replyTo, &response.Content, &stickerID, &response.LikeCount, &response.ReplyCount,
-		&response.Publication, &response.Moderation, &response.CreatedAt, &response.UpdatedAt,
+		&response.Author.Level, &response.Author.AvatarURL,
+		&rootID, &parentID, &replyTo, &response.Content, &stickerID, &response.LikeCount, &response.DislikeCount,
+		&response.ReplyCount, &response.Publication, &response.Moderation, &response.CreatedAt, &response.UpdatedAt,
+		&floorNo,
 	)
 	if err != nil {
 		return commentResponse{}, err
 	}
+	if floorNo.Valid {
+		floor := int(floorNo.Int64)
+		response.Floor = &floor
+	}
 	response.Author.ID = authorID
+	if response.Author.AvatarURL != "" {
+		response.Author.AvatarURL = publicMediaURL(response.Author.AvatarURL)
+	}
 	response.RootID = optionalString(rootID)
 	response.ParentID = optionalString(parentID)
 	response.ReplyToUserID = optionalString(replyTo)
@@ -578,7 +724,18 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID string) (c
 		return commentResponse{}, err
 	}
 	response = responseList[0]
-	response.ViewerState = &viewerCommentState{}
+	if viewerID != "" {
+		var hasLiked, hasDisliked bool
+		if err := tx.QueryRowContext(ctx, `SELECT
+		       EXISTS (SELECT 1 FROM comment_reactions cr WHERE cr.comment_id = c.id AND cr.user_id = $2 AND cr.reaction_type = 'like'),
+		       EXISTS (SELECT 1 FROM comment_reactions cr WHERE cr.comment_id = c.id AND cr.user_id = $2 AND cr.reaction_type = 'dislike')
+		       FROM comments c WHERE c.id = $1`, commentID, viewerID).Scan(&hasLiked, &hasDisliked); err != nil {
+			return commentResponse{}, err
+		}
+		response.ViewerState = &viewerCommentState{HasLiked: hasLiked, HasDisliked: hasDisliked}
+	} else {
+		response.ViewerState = &viewerCommentState{}
+	}
 	return response, nil
 }
 
@@ -812,11 +969,32 @@ func (s *Server) updateComment(w http.ResponseWriter, r *http.Request, commentID
 		writeAuthError(w, r, ErrForbidden)
 		return
 	}
-	if _, err := s.db.ExecContext(r.Context(), `UPDATE comments SET content = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`, input.Content, commentID); err != nil {
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": commentID, "content": input.Content})
+	defer tx.Rollback()
+	result, err := tx.ExecContext(r.Context(), `UPDATE comments SET content = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`, input.Content, commentID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if affected, affErr := result.RowsAffected(); affErr == nil && affected == 0 {
+		writeAuthError(w, r, ErrCommentNotFound)
+		return
+	}
+	// PATCH 与 create/GET 返回同一份完整 Comment DTO，客户端编辑后可直接替换本地状态。
+	response, err := loadCommentResponseTx(r.Context(), tx, commentID, user.ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID string) {
@@ -862,11 +1040,11 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID
 }
 
 // softDeleteCommentTx 是用户删除和审核删除共用的计数守恒入口。
-// 它只在首次软删除时扣减帖子/父评论聚合计数，重复调用不会重复扣减。
+// 它只在首次软删除时扣减帖子/根评论聚合计数，重复调用不会重复扣减。
 func softDeleteCommentTx(ctx context.Context, tx *sql.Tx, commentID, deletedBy, reason, caseID string) (bool, error) {
-	var postID, parentID string
+	var postID, rootID string
 	var deletedAt sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT post_id, COALESCE(parent_id, ''), deleted_at FROM comments WHERE id = $1 FOR UPDATE`, commentID).Scan(&postID, &parentID, &deletedAt)
+	err := tx.QueryRowContext(ctx, `SELECT post_id, COALESCE(root_id, id), deleted_at FROM comments WHERE id = $1 FOR UPDATE`, commentID).Scan(&postID, &rootID, &deletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrCommentNotFound
 	}
@@ -887,8 +1065,8 @@ func softDeleteCommentTx(ctx context.Context, tx *sql.Tx, commentID, deletedBy, 
 	if affected == 0 {
 		return false, nil
 	}
-	if parentID != "" {
-		if _, err := tx.ExecContext(ctx, `UPDATE comments SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now() WHERE id = $1`, parentID); err != nil {
+	if rootID != commentID {
+		if _, err := tx.ExecContext(ctx, `UPDATE comments SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now() WHERE id = $1`, rootID); err != nil {
 			return false, err
 		}
 	}

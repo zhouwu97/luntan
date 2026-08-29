@@ -6,18 +6,27 @@ class CommentPage {
     required this.items,
     this.nextCursor,
     this.hasMore = false,
+    this.total = 0,
   });
 
   final List<Comment> items;
   final String? nextCursor;
   final bool hasMore;
+
+  /// 楼层视图（listComments）返回的楼层总数；回复分页不填。
+  final int total;
 }
+
+/// 评论楼层排序；服务端默认 asc（按楼层正序）。
+enum CommentSort { hot, asc, desc }
 
 abstract interface class CommentRepository {
   Future<CommentPage> listComments({
     required String postId,
-    String? cursor,
     int limit,
+    int offset,
+    CommentSort? sort,
+    String? authorId,
   });
 
   Future<CommentPage> listReplies({
@@ -88,12 +97,19 @@ class ApiCommentRepository
   @override
   Future<CommentPage> listComments({
     required String postId,
-    String? cursor,
     int limit = 20,
+    int offset = 0,
+    CommentSort? sort,
+    String? authorId,
   }) async {
     final payload = await _client.getJson(
       '/api/v1/posts/$postId/comments',
-      queryParameters: {'limit': '$limit', 'cursor': ?cursor},
+      queryParameters: {
+        'limit': '$limit',
+        'offset': '$offset',
+        'sort': ?sort?.name,
+        'author_id': ?authorId,
+      },
     );
     final rawItems = payload['items'];
     final items = rawItems is List
@@ -104,8 +120,8 @@ class ApiCommentRepository
         : <Comment>[];
     return CommentPage(
       items: items,
-      nextCursor: payload['next_cursor'] as String?,
       hasMore: payload['has_more'] == true,
+      total: payload['total'] is num ? (payload['total'] as num).toInt() : 0,
     );
   }
 
@@ -305,6 +321,15 @@ Comment _commentFromJson(Map<String, dynamic> json) {
     stickerId: _nullableString(json['sticker_id']),
     likeCount: _int(json['like_count']),
     isLiked: viewerState['has_liked'] == true,
+    dislikeCount: _int(json['dislike_count']),
+    isDisliked: viewerState['has_disliked'] == true,
+    floor: _nullableInt(json['floor']),
+    replyPreview: json['reply_preview'] is List
+        ? (json['reply_preview'] as List)
+              .whereType<Map>()
+              .map((item) => _commentFromJson(Map<String, dynamic>.from(item)))
+              .toList()
+        : const <Comment>[],
     replyCount: _int(json['reply_count']),
     publicationStatus: _enumByName(
       CommentPublicationStatus.values,

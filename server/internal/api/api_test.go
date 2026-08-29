@@ -213,7 +213,7 @@ func TestCreateCommentRequiresBearerToken(t *testing.T) {
 	}
 }
 
-func TestListCommentsUsesStableCursor(t *testing.T) {
+func TestListCommentsReturnsStableFloors(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -221,13 +221,23 @@ func TestListCommentsUsesStableCursor(t *testing.T) {
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
-	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).WithArgs("p1", 2).WillReturnRows(sqlmock.NewRows([]string{"id", "post_id", "author_id", "username", "nickname", "root_id", "parent_id", "reply_to_user_id", "content", "sticker_id", "like_count", "reply_count", "publication_status", "moderation_status", "created_at", "updated_at", "viewer_has_liked"}).AddRow("cm2", "p1", "u1", "user", "User", "cm2", "", "", "第二条", "", 0, 0, "published", "normal", created, created, false).AddRow("cm1", "p1", "u1", "user", "User", "cm1", "", "", "第一条", "", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute), false))
-	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm`).WithArgs("cm2", "cm1").WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "mime_type", "width", "height", "original_name", "object_key"}))
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)\s*FROM \(.*WHERE 1 = 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{
+		"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
+		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
+	}).AddRow("cm1", "p1", "u1", "user", "User", 1, "", "第一条", 0, 0, 0, created, created, 1, "cm1", "", "", "", false, false))
+	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER \(PARTITION BY c\.root_id.*ORDER BY t\.root_id ASC, t\.rn ASC$`).WithArgs("cm1").WillReturnRows(sqlmock.NewRows([]string{
+		"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
+		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
+	}))
+	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm`).WithArgs("cm1").WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "mime_type", "width", "height", "original_name", "object_key"}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/p1/comments?limit=1", nil)
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"has_more":true`) || !strings.Contains(res.Body.String(), `"next_cursor":"`) {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"has_more":true`) || !strings.Contains(res.Body.String(), `"total":2`) || !strings.Contains(res.Body.String(), `"floor":1`) {
 		t.Fatalf("comments response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -699,16 +709,27 @@ func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
 		WithArgs("p1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
 
-	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).
-		WithArgs("p1", 11).
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)\s*FROM \(.*WHERE 1 = 1$`).
+		WithArgs("p1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 10$`).
+		WithArgs("p1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "post_id", "author_id", "username", "nickname",
-			"root_id", "parent_id", "reply_to_user_id",
-			"content", "sticker_id", "like_count", "reply_count",
-			"publication_status", "moderation_status", "created_at", "updated_at", "viewer_has_liked",
+			"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+			"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
+			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
 		}).
-			AddRow("cm_img", "p1", "u1", "user1", "用户1", "cm_img", "", "", "", "", 0, 0, "published", "normal", created, created, false).
-			AddRow("cm_stk", "p1", "u2", "user2", "用户2", "cm_stk", "", "", "", "mf_01", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute), false))
+			AddRow("cm_img", "p1", "u1", "user1", "用户1", 1, "", "", 0, 0, 0, created, created, 1, "cm_img", "", "", "", false, false).
+			AddRow("cm_stk", "p1", "u2", "user2", "用户2", 1, "", "", 0, 0, 0, created.Add(time.Minute), created.Add(time.Minute), 2, "cm_stk", "", "", "mf_01", false, false))
+
+	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER \(PARTITION BY c\.root_id.*ORDER BY t\.root_id ASC, t\.rn ASC$`).
+		WithArgs("cm_img", "cm_stk").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+			"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
+			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
+		}))
 
 	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm.*JOIN media_assets ma`).
 		WithArgs("cm_img", "cm_stk").

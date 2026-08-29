@@ -4,10 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/data/api/comment_repository.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/domain/models.dart';
-import 'package:luntan/widgets/comments/comment_thread_sheet.dart';
+import 'package:luntan/screens/comment_thread_screen.dart';
 
 void main() {
-  testWidgets('CommentThreadSheet 展示根评论摘要并支持二级回复', (tester) async {
+  testWidgets('CommentThreadScreen 展示根评论摘要并支持二级回复', (tester) async {
     final commentRepo = MockCommentRepository();
     final rootComment = Comment(
       id: 'comment-u4-1',
@@ -29,19 +29,17 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: CommentThreadSheet(
-            rootComment: rootComment,
-            repository: commentRepo,
-            blockedMessage: '禁言中',
-            onReply: (target, content) async {
-              return commentRepo.createReply(
-                commentId: rootComment.id,
-                content: content,
-                replyToUserId: target.authorId,
-              );
-            },
-          ),
+        home: CommentThreadScreen(
+          rootComment: rootComment,
+          repository: commentRepo,
+          blockedMessage: '禁言中',
+          onReply: (target, content) async {
+            return commentRepo.createReply(
+              commentId: rootComment.id,
+              content: content,
+              replyToUserId: target.authorId,
+            );
+          },
         ),
       ),
     );
@@ -68,13 +66,11 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: CommentThreadSheet(
-            rootComment: root,
-            repository: _FailingCommentRepository(),
-            blockedMessage: '暂不能回复',
-            onReply: (_, _) async => throw StateError('not used'),
-          ),
+        home: CommentThreadScreen(
+          rootComment: root,
+          repository: _FailingCommentRepository(),
+          blockedMessage: '暂不能回复',
+          onReply: (_, _) async => throw StateError('not used'),
         ),
       ),
     );
@@ -82,7 +78,7 @@ void main() {
 
     expect(find.text('回复加载失败，请重试'), findsOneWidget);
     expect(find.text('0 条回复'), findsNothing);
-    expect(find.text('回复'), findsWidgets);
+    expect(find.text('点击重试'), findsOneWidget);
   });
 }
 
@@ -90,8 +86,10 @@ class _FailingCommentRepository implements CommentRepository {
   @override
   Future<CommentPage> listComments({
     required String postId,
-    String? cursor,
     int limit = 20,
+    int offset = 0,
+    CommentSort? sort,
+    String? authorId,
   }) => throw StateError('not used');
 
   @override

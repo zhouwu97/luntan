@@ -109,7 +109,7 @@ flutter:
   assets:
     - assets/ranking/
     - assets/profile_default_background.jpg
-    - assets/images/shengbei_chan.jpg
+    - assets/images/
     - assets/images/stickers/mingfeng/
     - assets/images/stickers/mingfeng-daily/
     - assets/images/stickers/mingfeng-ovo/

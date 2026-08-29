@@ -221,11 +221,14 @@ void main() {
     final repository = _PagedHomeFeed(pages);
     final controller = FeedController(repository: repository);
 
+    final semantics = tester.ensureSemantics();
     await tester.pumpWidget(_homeFor(controller, repository));
     await tester.pumpAndSettle();
 
     expect(find.text('综合'), findsNothing);
-    expect(find.text('酱紫社区'), findsOneWidget);
+    // 酱紫社区标签已改为吉祥物图，文本语义保留在 Semantics 节点上。
+    expect(find.bySemanticsLabel('酱紫社区'), findsOneWidget);
+    semantics.dispose();
     expect(repository.calls.first.sort, 'latest');
     expect(repository.calls.first.latestOrder, LatestOrder.post);
     expect(repository.calls, hasLength(5));

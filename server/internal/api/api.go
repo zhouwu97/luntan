@@ -701,7 +701,8 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, auth.ErrInvalidInput)
 		return
 	}
-	if err := s.authService.SetPassword(r.Context(), user.ID, input.Password, input.CurrentPassword); err != nil {
+	accessToken, _ := bearerToken(r.Header.Get("Authorization"))
+	if err := s.authService.SetPassword(r.Context(), user.ID, input.Password, input.CurrentPassword, accessToken); err != nil {
 		writeAuthError(w, r, err)
 		return
 	}

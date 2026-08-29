@@ -9,6 +9,7 @@ import '../controllers/comments_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../controllers/post_detail_controller.dart';
 import '../data/api/api_client.dart';
+import '../data/api/comment_repository.dart';
 import '../data/api/poll_repository.dart';
 import '../data/api/publish_repository.dart';
 import '../data/app_links.dart';
@@ -19,7 +20,7 @@ import '../widgets/comments/comment_composer_controller.dart';
 import '../widgets/comments/comment_item.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
-import '../widgets/comments/comment_thread_sheet.dart';
+import 'comment_thread_screen.dart';
 import '../widgets/forum_author_row.dart';
 import '../widgets/post_media_preview.dart';
 
@@ -218,10 +219,26 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
     final targetId = widget.focusCommentId;
     if (targetId != null) {
-      final target = allComments.cast<Comment?>().firstWhere(
-        (comment) => comment?.id == targetId,
-        orElse: () => null,
-      );
+      // 楼层视图只下发根评论 + 前 3 条回复预览；先在两层内查找目标。
+      Comment? target;
+      Comment? rootComment;
+      bool isNested = false;
+      for (final comment in allComments) {
+        if (comment.id == targetId) {
+          target = comment;
+          rootComment = comment;
+          break;
+        }
+        for (final reply in comment.replyPreview) {
+          if (reply.id == targetId) {
+            target = reply;
+            rootComment = comment;
+            isNested = true;
+            break;
+          }
+        }
+        if (target != null) break;
+      }
       if (target == null &&
           widget.commentsController.hasMore &&
           !widget.commentsController.isLoadingMore) {
@@ -230,16 +247,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
         return;
       }
-      if (target == null) return;
+      if (target == null) {
+        // 目标超出预览范围（深层回复）：退化为滚动到评论区。
+        hasFocusedComments = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final context = commentsKey.currentContext;
+          if (mounted && context != null) {
+            Scrollable.ensureVisible(
+              context,
+              duration: AppMotion.normal,
+              alignment: 0.08,
+            );
+          }
+        });
+        return;
+      }
 
       hasFocusedComments = true;
-      final isNested = target.parentId != null;
       final rootCommentId = target.rootId ?? target.parentId ?? target.id;
-      final rootComment = allComments.cast<Comment?>().firstWhere(
-        (comment) => comment?.id == rootCommentId,
-        orElse: () => null,
-      );
-
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final context = GlobalObjectKey(
           'comment:$rootCommentId',
@@ -251,15 +276,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             alignment: 0.1,
           );
         }
-        if (isNested && rootComment != null) {
+        if (isNested) {
           _threadOpenTimer?.cancel();
           _threadOpenTimer = Timer(const Duration(milliseconds: 350), () {
             if (mounted) {
-              _openReplyThread(rootComment, focusReplyId: targetId);
+              _openReplyThread(rootComment!, focusReplyId: targetId);
             }
           });
-        } else if (!isNested) {
-          setState(() => highlightedCommentId = rootCommentId);
+        } else {
+          setState(() => highlightedCommentId = targetId);
           _highlightTimer?.cancel();
           _highlightTimer = Timer(AppMotion.highlightFade, () {
             if (mounted) setState(() => highlightedCommentId = null);
@@ -282,62 +307,64 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   void _openReplyThread(Comment comment, {String? focusReplyId}) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => CommentThreadSheet(
-        rootComment: comment,
-        repository: widget.commentsController.repository,
-        focusReplyId: focusReplyId,
-        isAuthenticated: widget.isAuthenticated,
-        onRequireAuth: widget.onRequireAuth,
-        canComment: widget.canComment ?? widget.isAuthenticated,
-        blockedMessage: _commentBlockedMessage,
-        onAuthorTap: widget.onOpenUserId,
-        onReplyDraft: (target, draft) async {
-          List<String> mediaIds = const [];
-          if (draft.localImage != null) {
-            final file = draft.localImage!;
-            final bytes = await file.readAsBytes();
-            final lower = file.name.toLowerCase();
-            final mimeType = lower.endsWith('.png')
-                ? 'image/png'
-                : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-            final digest = sha256.convert(bytes).toString();
-            if (widget.publishRepository != null) {
-              final ticket = await widget.publishRepository!.requestMediaUpload(
-                fileName: file.name,
-                mimeType: mimeType,
-                size: bytes.length,
-                sha256: digest,
-              );
-              await widget.publishRepository!.uploadMedia(
-                ticket: ticket,
-                bytes: bytes,
-                size: bytes.length,
-                sha256: digest,
-              );
-              mediaIds = [ticket.mediaId];
-            } else {
-              mediaIds = [file.path];
+    final post = widget.controller.state.detail?.post;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CommentThreadScreen(
+          rootComment: comment,
+          repository: widget.commentsController.repository,
+          postAuthorId: post?.authorId,
+          focusReplyId: focusReplyId,
+          isAuthenticated: widget.isAuthenticated,
+          onRequireAuth: widget.onRequireAuth,
+          canComment: widget.canComment ?? widget.isAuthenticated,
+          blockedMessage: _commentBlockedMessage,
+          onAuthorTap: widget.onOpenUserId,
+          onReplyDraft: (target, draft) async {
+            List<String> mediaIds = const [];
+            if (draft.localImage != null) {
+              final file = draft.localImage!;
+              final bytes = await file.readAsBytes();
+              final lower = file.name.toLowerCase();
+              final mimeType = lower.endsWith('.png')
+                  ? 'image/png'
+                  : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+              final digest = sha256.convert(bytes).toString();
+              if (widget.publishRepository != null) {
+                final ticket = await widget.publishRepository!.requestMediaUpload(
+                  fileName: file.name,
+                  mimeType: mimeType,
+                  size: bytes.length,
+                  sha256: digest,
+                );
+                await widget.publishRepository!.uploadMedia(
+                  ticket: ticket,
+                  bytes: bytes,
+                  size: bytes.length,
+                  sha256: digest,
+                );
+                mediaIds = [ticket.mediaId];
+              } else {
+                mediaIds = [file.path];
+              }
             }
-          }
-          final stickerId = draft.sticker?.id;
-          return widget.commentsController.replyTo(
+            final stickerId = draft.sticker?.id;
+            return widget.commentsController.replyTo(
+              target,
+              draft.text,
+              replyToUserId: target.authorId,
+              mediaIds: mediaIds,
+              stickerId: stickerId,
+            );
+          },
+          onReply: (target, content) => widget.commentsController.replyTo(
             target,
-            draft.text,
+            content,
             replyToUserId: target.authorId,
-            mediaIds: mediaIds,
-            stickerId: stickerId,
-          );
-        },
-        onReply: (target, content) => widget.commentsController.replyTo(
-          target,
-          content,
-          replyToUserId: target.authorId,
+          ),
+          onToggleLike: (reply) => _likeComment(reply),
+          onToggleDislike: (reply) => _dislikeComment(reply),
         ),
-        onToggleLike: (reply) => _likeComment(reply),
       ),
     );
   }
@@ -378,17 +405,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         final post = state.detail!.post;
         final commentsController = widget.commentsController;
         final allComments = commentsController.items;
-        final childrenByParent = <String, List<Comment>>{};
-        for (final comment in allComments) {
-          final parentId = comment.parentId;
-          if (parentId == null) continue;
-          childrenByParent
-              .putIfAbsent(parentId, () => <Comment>[])
-              .add(comment);
-        }
-        final roots = allComments
-            .where((comment) => comment.parentId == null)
-            .toList();
         _focusCommentsIfNeeded(allComments);
 
         return Scaffold(
@@ -430,6 +446,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ForumAuthorRow(
                               post: post,
                               onMenu: () => _showPostMenu(post),
+                              onAuthorTap: widget.onOpenUserId,
                             ),
                             const SizedBox(height: 12),
                             if (post.isPinned ||
@@ -556,9 +573,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             Container(
                               key: commentsKey,
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     '评论 ${post.comments}',
@@ -568,12 +584,52 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
-                                  const Text(
-                                    '按发布时间',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 11,
-                                    ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      _CommentSortChip(
+                                        label: '热门',
+                                        selected:
+                                            commentsController.sort ==
+                                            CommentSort.hot,
+                                        onTap: () => commentsController
+                                            .setSort(CommentSort.hot),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      _CommentSortChip(
+                                        label: '顺序',
+                                        selected:
+                                            commentsController.sort ==
+                                            CommentSort.asc,
+                                        onTap: () => commentsController
+                                            .setSort(CommentSort.asc),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      _CommentSortChip(
+                                        label: '倒序',
+                                        selected:
+                                            commentsController.sort ==
+                                            CommentSort.desc,
+                                        onTap: () => commentsController
+                                            .setSort(CommentSort.desc),
+                                      ),
+                                      const Spacer(),
+                                      if (post.authorId.isNotEmpty)
+                                        _CommentSortChip(
+                                          label: '只看楼主',
+                                          selected:
+                                              commentsController.authorFilter !=
+                                              null,
+                                          onTap: () => commentsController
+                                              .setAuthorFilter(
+                                                commentsController
+                                                            .authorFilter ==
+                                                        null
+                                                    ? post.authorId
+                                                    : null,
+                                              ),
+                                        ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -589,12 +645,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               _CommentError(onRetry: commentsController.load),
                             if (allComments.isEmpty &&
                                 !commentsController.isLoading)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 40),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 40,
+                                ),
                                 child: Center(
                                   child: Text(
-                                    '还没有回复，来抢沙发吧',
-                                    style: TextStyle(
+                                    commentsController.authorFilter != null
+                                        ? '楼主还没有回复'
+                                        : '还没有回复，来抢沙发吧',
+                                    style: const TextStyle(
                                       color: AppTheme.textSecondary,
                                       fontSize: 13,
                                     ),
@@ -607,7 +667,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
 
                     // 一级评论列表
-                    if (roots.isNotEmpty)
+                    if (allComments.isNotEmpty)
                       SliverPadding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         sliver: SliverToBoxAdapter(
@@ -622,7 +682,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             child: ListView.separated(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
-                              itemCount: roots.length,
+                              itemCount: allComments.length,
                               separatorBuilder: (context, index) =>
                                   const Divider(
                                     height: 1,
@@ -630,9 +690,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                     color: Color(0xFFEDF2F6),
                                   ),
                               itemBuilder: (context, index) {
-                                final comment = roots[index];
-                                final children =
-                                    childrenByParent[comment.id] ?? const [];
+                                final comment = allComments[index];
                                 final isHighlighted =
                                     highlightedCommentId == comment.id;
 
@@ -640,8 +698,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   key: GlobalObjectKey('comment:${comment.id}'),
                                   comment: comment,
                                   floor: index + 2,
-                                  replies: children,
+                                  replies: comment.replyPreview,
                                   isHighlighted: isHighlighted,
+                                  isPostAuthor:
+                                      post.authorId == comment.authorId,
                                   onAuthorTap: widget.onOpenUserId,
                                   onReply: () {
                                     setState(() => replyTarget = comment);
@@ -660,6 +720,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                     );
                                   },
                                   onLike: () => _likeComment(comment),
+                                  onDislike: () => _dislikeComment(comment),
                                   onMore: () => _showCommentMenu(comment),
                                   onViewAllReplies: () =>
                                       _openReplyThread(comment),
@@ -799,6 +860,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
     try {
       await widget.interactionController.toggleCommentLike(comment);
+    } catch (error) {
+      if (mounted) widget.onFeedback(userFacingApiMessage(error));
+    }
+  }
+
+  Future<void> _dislikeComment(Comment comment) async {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
+    if (widget.canLike == false) {
+      widget.onFeedback('当前身份暂不能点踩，请登录邮箱账号后重试');
+      return;
+    }
+    try {
+      await widget.interactionController.toggleCommentDislike(comment);
     } catch (error) {
       if (mounted) widget.onFeedback(userFacingApiMessage(error));
     }
@@ -1344,6 +1421,38 @@ class _CommentError extends StatelessWidget {
         const Text('评论加载失败', style: TextStyle(color: AppTheme.textSecondary)),
         TextButton(onPressed: onRetry, child: const Text('重试')),
       ],
+    ),
+  );
+}
+
+class _CommentSortChip extends StatelessWidget {
+  const _CommentSortChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: selected ? AppTheme.primary : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: selected ? Colors.white : AppTheme.textSecondary,
+        ),
+      ),
     ),
   );
 }

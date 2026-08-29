@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../data/api/comment_repository.dart';
 import '../domain/models.dart';
 
+/// 楼层制评论控制器：items 只含服务端排好序的根评论楼层，
+/// 回复通过 Comment.replyPreview 内嵌或楼中楼视图独立分页拉取。
 class CommentsController extends ChangeNotifier {
   CommentsController({
     required CommentRepository repository,
@@ -15,7 +17,11 @@ class CommentsController extends ChangeNotifier {
   /// 暴露给楼中楼视图做独立的分页拉取。
   CommentRepository get repository => _repository;
   final List<Comment> items = [];
-  String? nextCursor;
+  CommentSort sort = CommentSort.asc;
+
+  /// 只看楼主：作者 user id，null 表示查看全部楼层。
+  String? authorFilter;
+  int total = 0;
   bool hasMore = true;
   bool isLoading = false;
   bool isLoadingMore = false;
@@ -25,6 +31,19 @@ class CommentsController extends ChangeNotifier {
   final Map<String, Future<Comment>> _replyInFlight = {};
   final Map<String, String> _pendingReplyIdempotencyKeys = {};
   int _generation = 0;
+  int _nextOffset = 0;
+
+  void setSort(CommentSort value) {
+    if (sort == value) return;
+    sort = value;
+    load(force: true);
+  }
+
+  void setAuthorFilter(String? authorId) {
+    if (authorFilter == authorId) return;
+    authorFilter = authorId;
+    load(force: true);
+  }
 
   Future<void> load({bool force = false}) async {
     if (isLoading && !force) return;
@@ -34,11 +53,16 @@ class CommentsController extends ChangeNotifier {
     errorMessage = null;
     notifyListeners();
     try {
-      final page = await _repository.listComments(postId: postId);
+      final page = await _repository.listComments(
+        postId: postId,
+        sort: sort,
+        authorId: authorFilter,
+      );
       if (requestGeneration != _generation) return;
       _replaceItems(page.items);
-      nextCursor = page.nextCursor;
-      hasMore = page.hasMore && page.nextCursor != null;
+      total = page.total;
+      hasMore = page.hasMore;
+      _nextOffset = items.length;
     } catch (error) {
       if (requestGeneration != _generation) return;
       errorMessage = '评论加载失败，请重试';
@@ -54,21 +78,24 @@ class CommentsController extends ChangeNotifier {
   Future<void> refresh() => load(force: true);
 
   Future<void> loadMore() async {
-    if (isLoading || isLoadingMore || !hasMore || nextCursor == null) return;
+    if (isLoading || isLoadingMore || !hasMore) return;
     final requestGeneration = _generation;
-    final cursor = nextCursor!;
+    final offset = _nextOffset;
     isLoadingMore = true;
     errorMessage = null;
     notifyListeners();
     try {
       final page = await _repository.listComments(
         postId: postId,
-        cursor: cursor,
+        offset: offset,
+        sort: sort,
+        authorId: authorFilter,
       );
-      if (requestGeneration != _generation || cursor != nextCursor) return;
+      if (requestGeneration != _generation) return;
       _mergeItems(page.items);
-      nextCursor = page.nextCursor;
-      hasMore = page.hasMore && page.nextCursor != cursor;
+      total = page.total;
+      hasMore = page.hasMore;
+      _nextOffset = offset + page.items.length;
     } catch (error) {
       if (requestGeneration != _generation) return;
       errorMessage = '更多评论加载失败，请重试';
@@ -81,24 +108,23 @@ class CommentsController extends ChangeNotifier {
     }
   }
 
+  /// 楼层顺序由服务端决定，客户端只按 id 去重、保持服务端顺序。
   void _replaceItems(Iterable<Comment> next) {
+    final byId = <String, Comment>{for (final item in next) item.id: item};
     items
       ..clear()
-      ..addAll(next);
-    _sortAndDedupe();
+      ..addAll(byId.values);
   }
 
   void _mergeItems(Iterable<Comment> next) {
-    items.addAll(next);
-    _sortAndDedupe();
-  }
-
-  void _sortAndDedupe() {
-    final byId = <String, Comment>{for (final item in items) item.id: item};
-    items
-      ..clear()
-      ..addAll(byId.values)
-      ..sort(_compareByCreatedAt);
+    for (final item in next) {
+      final index = items.indexWhere((existing) => existing.id == item.id);
+      if (index == -1) {
+        items.add(item);
+      } else {
+        items[index] = item;
+      }
+    }
   }
 
   Future<Comment> addComment(
@@ -128,7 +154,8 @@ class CommentsController extends ChangeNotifier {
     future = create
         .then((comment) {
           _pendingCommentIdempotencyKey = null;
-          _mergeItems([comment]);
+          _insertFloorItem(comment);
+          total += 1;
           notifyListeners();
           return comment;
         })
@@ -137,6 +164,30 @@ class CommentsController extends ChangeNotifier {
         });
     _addInFlight = future;
     return future;
+  }
+
+  /// 新楼层按服务端楼层号插入到正确位置；hot 排序或缺失楼层号时追加尾部。
+  void _insertFloorItem(Comment comment) {
+    final existingIndex = items.indexWhere((item) => item.id == comment.id);
+    if (existingIndex != -1) {
+      items[existingIndex] = comment;
+      return;
+    }
+    final floor = comment.floor;
+    if (floor == null || sort == CommentSort.hot) {
+      items.add(comment);
+      return;
+    }
+    final index = items.indexWhere((item) {
+      final itemFloor = item.floor;
+      if (itemFloor == null) return false;
+      return sort == CommentSort.desc ? itemFloor < floor : itemFloor > floor;
+    });
+    if (index == -1) {
+      items.add(comment);
+    } else {
+      items.insert(index, comment);
+    }
   }
 
   Future<Comment> replyTo(
@@ -172,12 +223,12 @@ class CommentsController extends ChangeNotifier {
     future = create
         .then((comment) {
           _pendingReplyIdempotencyKeys.remove(parent.id);
-          _mergeItems([comment]);
-          // 服务端返回新回复，不会重复返回父评论；本地同步楼中楼入口数量。
-          parent.replyCount += 1;
+          // 服务端返回新回复；本地同步楼层回复计数与预览。
+          final rootId = parent.rootId ?? parent.id;
           for (final item in items) {
-            if (item.id == parent.id && !identical(item, parent)) {
+            if (item.id == rootId) {
               item.replyCount += 1;
+              item.replyPreview = [...item.replyPreview, comment];
             }
           }
           notifyListeners();
@@ -197,7 +248,21 @@ class CommentsController extends ChangeNotifier {
 
   Future<void> delete(Comment comment) async {
     await _repository.deleteComment(comment.id);
-    items.removeWhere((item) => item.id == comment.id);
+    final index = items.indexWhere((item) => item.id == comment.id);
+    if (index >= 0) {
+      items.removeAt(index);
+      total = (total - 1).clamp(0, 1 << 30);
+    } else if (comment.parentId != null) {
+      final rootId = comment.rootId ?? comment.parentId;
+      for (final item in items) {
+        if (item.id == rootId) {
+          item.replyCount = (item.replyCount - 1).clamp(0, 1 << 30);
+          item.replyPreview = item.replyPreview
+              .where((reply) => reply.id != comment.id)
+              .toList();
+        }
+      }
+    }
     notifyListeners();
   }
 
@@ -210,13 +275,23 @@ class CommentsController extends ChangeNotifier {
       content: content,
     );
     final index = items.indexWhere((item) => item.id == comment.id);
-    if (index >= 0) items[index] = updated;
+    if (index >= 0) {
+      if (updated.replyPreview.isEmpty && comment.replyPreview.isNotEmpty) {
+        updated.replyPreview = comment.replyPreview;
+      }
+      items[index] = updated;
+    } else {
+      for (final item in items) {
+        final replyIndex = item.replyPreview.indexWhere(
+          (reply) => reply.id == comment.id,
+        );
+        if (replyIndex >= 0) {
+          item.replyPreview = [...item.replyPreview];
+          item.replyPreview[replyIndex] = updated;
+        }
+      }
+    }
     notifyListeners();
     return updated;
-  }
-
-  int _compareByCreatedAt(Comment a, Comment b) {
-    final byTime = a.createdAt.compareTo(b.createdAt);
-    return byTime == 0 ? a.id.compareTo(b.id) : byTime;
   }
 }

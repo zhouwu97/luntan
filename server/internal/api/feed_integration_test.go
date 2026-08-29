@@ -522,7 +522,7 @@ func TestCommentsExposeViewerLikeStateAgainstPostgres(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+viewer.AccessToken)
 	res := httptest.NewRecorder()
 	NewHandler(s.db).ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"viewer_state":{"has_liked":true}`) {
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"viewer_state":{"has_liked":true,"has_disliked":false}`) {
 		t.Fatalf("comments viewer state: status=%d body=%s", res.Code, res.Body.String())
 	}
 }
@@ -544,9 +544,9 @@ func TestCommentAttachmentsPostgresRoundTrip(t *testing.T) {
 
 	mediaID := "itest-media-" + suffix
 	if _, err := s.db.Exec(`
-		INSERT INTO media_assets (id, owner_id, status, mime_type, file_size, sha256_hash, width, height, original_name, object_key, created_at, updated_at)
-		VALUES ($1, $2, 'ready', 'image/png', 2048, $3, 1024, 768, 'test_image.png', 'media/test/test_image.png', now(), now())`,
-		mediaID, userSession.User.ID, "hash-"+suffix); err != nil {
+		INSERT INTO media_assets (id, owner_id, status, mime_type, size, sha256, width, height, original_name, object_key, created_at, updated_at)
+		VALUES ($1, $2, 'ready', 'image/png', 2048, $3, 1024, 768, 'test_image.png', $4, now(), now())`,
+		mediaID, userSession.User.ID, "hash-"+suffix, "media/test/test_image_"+suffix+".png"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -643,6 +643,186 @@ func TestCommentAttachmentsPostgresRoundTrip(t *testing.T) {
 	}
 	if len(foundStickerComment.Attachments) != 1 || foundStickerComment.Attachments[0].Type != "sticker" || foundStickerComment.Attachments[0].StickerID != stickerID {
 		t.Fatalf("expected attachments to contain sticker attachment, got %+v", foundStickerComment.Attachments)
+	}
+}
+
+func TestUpdateCommentReturnsFullCommentResponse(t *testing.T) {
+	s := feedIntegrationServer(t)
+	_, postIDs := insertFeedFixtures(t, s)
+	postID := postIDs["p1"]
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	session, err := auth.NewService(s.db).Register(context.Background(), auth.RegisterInput{
+		Username: "comment_editor_" + suffix,
+		Password: "安全密码12345",
+		Nickname: "评论编辑者",
+	}, auth.SessionMetadata{UserAgent: "comment-edit-test", IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mediaID := "edit-media-" + suffix
+	if _, err := s.db.Exec(`
+		INSERT INTO media_assets (id, owner_id, status, mime_type, size, sha256, width, height, original_name, object_key, created_at, updated_at)
+		VALUES ($1, $2, 'ready', 'image/png', 2048, $3, 1024, 768, 'test_image.png', $4, now(), now())`,
+		mediaID, session.User.ID, "hash-edit-"+suffix, "media/test/edit_image_"+suffix+".png"); err != nil {
+		t.Fatal(err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", strings.NewReader(fmt.Sprintf(`{"content":"原始内容","media_ids":["%s"]}`, mediaID)))
+	createReq.Header.Set("Authorization", "Bearer "+session.AccessToken)
+	createReq.Header.Set("Idempotency-Key", "key-edit-"+suffix)
+	createRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create comment failed: status=%d body=%s", createRes.Code, createRes.Body.String())
+	}
+	var created commentResponse
+	if err := json.Unmarshal(createRes.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created comment failed: %v", err)
+	}
+
+	likeReq := httptest.NewRequest(http.MethodPut, "/api/v1/comments/"+created.ID+"/like", nil)
+	likeReq.Header.Set("Authorization", "Bearer "+session.AccessToken)
+	likeRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(likeRes, likeReq)
+	if likeRes.Code != http.StatusOK {
+		t.Fatalf("like own comment failed: status=%d body=%s", likeRes.Code, likeRes.Body.String())
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/v1/comments/"+created.ID, strings.NewReader(`{"content":"编辑后的内容"}`))
+	patchReq.Header.Set("Authorization", "Bearer "+session.AccessToken)
+	patchRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(patchRes, patchReq)
+	if patchRes.Code != http.StatusOK {
+		t.Fatalf("patch comment failed: status=%d body=%s", patchRes.Code, patchRes.Body.String())
+	}
+	var updated commentResponse
+	if err := json.Unmarshal(patchRes.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal patched comment failed: %v", err)
+	}
+	if updated.ID != created.ID || updated.Content != "编辑后的内容" {
+		t.Fatalf("unexpected patched comment: %+v", updated)
+	}
+	if updated.PostID != postID {
+		t.Fatalf("expected post_id=%s, got %q", postID, updated.PostID)
+	}
+	if updated.Author.ID != session.User.ID || updated.Author.Nickname != "评论编辑者" {
+		t.Fatalf("expected full author summary, got %+v", updated.Author)
+	}
+	if len(updated.Media) != 1 || updated.Media[0].ID != mediaID {
+		t.Fatalf("expected media preserved after edit, got %+v", updated.Media)
+	}
+	if updated.CreatedAt.IsZero() {
+		t.Fatal("expected created_at in patch response")
+	}
+	if updated.ViewerState == nil || !updated.ViewerState.HasLiked {
+		t.Fatalf("expected viewer_state.has_liked=true after self-like, got %+v", updated.ViewerState)
+	}
+}
+
+func TestReplyToUserDerivedFromParent(t *testing.T) {
+	s := feedIntegrationServer(t)
+	_, postIDs := insertFeedFixtures(t, s)
+	postID := postIDs["p1"]
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	register := func(name string) auth.AuthResponse {
+		session, err := auth.NewService(s.db).Register(context.Background(), auth.RegisterInput{
+			Username: name + "_" + suffix,
+			Password: "安全密码12345",
+			Nickname: name,
+		}, auth.SessionMetadata{UserAgent: "reply-target-test", IPAddress: "127.0.0.1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	author := register("楼层作者")
+	replier := register("回复者")
+	outsider := register("无关用户")
+
+	rootReq := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", strings.NewReader(`{"content":"根评论"}`))
+	rootReq.Header.Set("Authorization", "Bearer "+author.AccessToken)
+	rootReq.Header.Set("Idempotency-Key", "key-root-"+suffix)
+	rootRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(rootRes, rootReq)
+	if rootRes.Code != http.StatusCreated {
+		t.Fatalf("create root comment failed: status=%d body=%s", rootRes.Code, rootRes.Body.String())
+	}
+	var root commentResponse
+	if err := json.Unmarshal(rootRes.Body.Bytes(), &root); err != nil {
+		t.Fatalf("unmarshal root comment failed: %v", err)
+	}
+
+	replyReq := httptest.NewRequest(http.MethodPost, "/api/v1/comments/"+root.ID+"/replies", strings.NewReader(fmt.Sprintf(`{"content":"伪造回复目标","reply_to_user_id":"%s"}`, outsider.User.ID)))
+	replyReq.Header.Set("Authorization", "Bearer "+replier.AccessToken)
+	replyReq.Header.Set("Idempotency-Key", "key-reply-"+suffix)
+	replyRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(replyRes, replyReq)
+	if replyRes.Code != http.StatusCreated {
+		t.Fatalf("create reply failed: status=%d body=%s", replyRes.Code, replyRes.Body.String())
+	}
+	var reply commentResponse
+	if err := json.Unmarshal(replyRes.Body.Bytes(), &reply); err != nil {
+		t.Fatalf("unmarshal reply failed: %v", err)
+	}
+	if reply.ReplyToUserID == nil || *reply.ReplyToUserID != author.User.ID {
+		t.Fatalf("expected reply_to_user_id derived from parent author %s, got %v", author.User.ID, reply.ReplyToUserID)
+	}
+	var dbReplyTo string
+	if err := s.db.QueryRow(`SELECT COALESCE(reply_to_user_id, '') FROM comments WHERE id = $1`, reply.ID).Scan(&dbReplyTo); err != nil || dbReplyTo != author.User.ID {
+		t.Fatalf("expected db reply_to_user_id=%s, got err=%v value=%q", author.User.ID, err, dbReplyTo)
+	}
+}
+
+func TestReplyToHiddenCommentRejected(t *testing.T) {
+	s := feedIntegrationServer(t)
+	_, postIDs := insertFeedFixtures(t, s)
+	postID := postIDs["p1"]
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	register := func(name string) auth.AuthResponse {
+		session, err := auth.NewService(s.db).Register(context.Background(), auth.RegisterInput{
+			Username: name + "_" + suffix,
+			Password: "安全密码12345",
+			Nickname: name,
+		}, auth.SessionMetadata{UserAgent: "hidden-parent-test", IPAddress: "127.0.0.1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	author := register("楼层作者")
+	replier := register("回复者")
+
+	rootReq := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", strings.NewReader(`{"content":"将被隐藏的评论"}`))
+	rootReq.Header.Set("Authorization", "Bearer "+author.AccessToken)
+	rootReq.Header.Set("Idempotency-Key", "key-hidden-root-"+suffix)
+	rootRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(rootRes, rootReq)
+	if rootRes.Code != http.StatusCreated {
+		t.Fatalf("create root comment failed: status=%d body=%s", rootRes.Code, rootRes.Body.String())
+	}
+	var root commentResponse
+	if err := json.Unmarshal(rootRes.Body.Bytes(), &root); err != nil {
+		t.Fatalf("unmarshal root comment failed: %v", err)
+	}
+	if _, err := s.db.Exec(`UPDATE comments SET publication_status = 'hidden' WHERE id = $1`, root.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	replyReq := httptest.NewRequest(http.MethodPost, "/api/v1/comments/"+root.ID+"/replies", strings.NewReader(`{"content":"不应成功"}`))
+	replyReq.Header.Set("Authorization", "Bearer "+replier.AccessToken)
+	replyReq.Header.Set("Idempotency-Key", "key-hidden-reply-"+suffix)
+	replyRes := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(replyRes, replyReq)
+	if replyRes.Code != http.StatusNotFound {
+		t.Fatalf("expected reply to hidden comment to be rejected with 404, got status=%d body=%s", replyRes.Code, replyRes.Body.String())
+	}
+	var replyCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM comments WHERE author_id = $1 AND deleted_at IS NULL`, replier.User.ID).Scan(&replyCount); err != nil || replyCount != 0 {
+		t.Fatalf("expected no reply persisted, got err=%v count=%d", err, replyCount)
 	}
 }
 

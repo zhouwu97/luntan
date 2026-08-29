@@ -8,12 +8,14 @@ class ForumAuthorRow extends StatelessWidget {
     super.key,
     required this.post,
     this.onMenu,
+    this.onAuthorTap,
     this.avatarRadius = 19.0,
     this.showCommunity = true,
   });
 
   final Post post;
   final VoidCallback? onMenu;
+  final void Function(String userId)? onAuthorTap;
   final double avatarRadius;
   final bool showCommunity;
 
@@ -44,45 +46,60 @@ class ForumAuthorRow extends StatelessWidget {
         ? '$communityLabel · ${post.time}'
         : post.time;
 
+    final authorTapHandler = onAuthorTap == null
+        ? null
+        : () {
+            if (post.authorId.isNotEmpty && !post.authorId.startsWith('guest')) {
+              onAuthorTap!(post.authorId);
+            }
+          };
+
     return Row(
       children: [
-        _buildAvatar(context, avatarUrl, initialChar),
+        GestureDetector(
+          onTap: authorTapHandler,
+          child: _buildAvatar(context, avatarUrl, initialChar),
+        ),
         const SizedBox(width: 10),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      displayName,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        height: 1.25,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: authorTapHandler,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        displayName,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          height: 1.25,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  _LevelBadge(level: post.level, color: levelColor),
-                ],
-              ),
-              const SizedBox(height: 2.5),
-              Text(
-                metaText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 11,
-                  height: 1.2,
+                    const SizedBox(width: 6),
+                    _LevelBadge(level: post.level, color: levelColor),
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 2.5),
+                Text(
+                  metaText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         if (onMenu != null)

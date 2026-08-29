@@ -153,12 +153,85 @@ func (s *Server) toggleCommentLike(w http.ResponseWriter, r *http.Request, comme
 		writeInternalError(w, r, err)
 		return
 	}
-	if changed {
+	likeChanged := changed
+	if changed && active {
+		// 点赞与点踩互斥：激活点赞时移除点踩。
+		removed, err := setCommentReaction(r.Context(), tx, commentID, user.ID, "dislike", false)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if removed {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET dislike_count = GREATEST(dislike_count - 1, 0) WHERE id = $1`, commentID); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		}
+	}
+	if likeChanged {
 		operator := "+ 1"
 		if !active {
 			operator = "- 1"
 		}
 		if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET like_count = GREATEST(like_count `+operator+`, 0), updated_at = now() WHERE id = $1`, commentID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"active": active})
+}
+
+func (s *Server) toggleCommentDislike(w http.ResponseWriter, r *http.Request, commentID string, active bool) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.requireCapability(w, r, user, capLike) {
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	if err := lockCommentForInteraction(r.Context(), tx, commentID); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
+	changed, err := setCommentReaction(r.Context(), tx, commentID, user.ID, "dislike", active)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	dislikeChanged := changed
+	if changed && active {
+		// 点踩与点赞互斥：激活点踩时移除点赞。
+		removed, err := setCommentReaction(r.Context(), tx, commentID, user.ID, "like", false)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if removed {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET like_count = GREATEST(like_count - 1, 0) WHERE id = $1`, commentID); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		}
+	}
+	if dislikeChanged {
+		operator := "+ 1"
+		if !active {
+			operator = "- 1"
+		}
+		if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET dislike_count = GREATEST(dislike_count `+operator+`, 0), updated_at = now() WHERE id = $1`, commentID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

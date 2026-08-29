@@ -6,6 +6,10 @@ abstract interface class InteractionRepository {
     required String commentId,
     required bool active,
   });
+  Future<void> setCommentDislike({
+    required String commentId,
+    required bool active,
+  });
   Future<void> setBookmark({required String postId, required bool active});
   Future<void> setUserFollow({required String userId, required bool active});
   Future<void> setCommunityFollow({
@@ -32,6 +36,12 @@ class ApiInteractionRepository implements InteractionRepository {
     required String commentId,
     required bool active,
   }) => _toggle('/api/v1/comments/$commentId/like', active);
+
+  @override
+  Future<void> setCommentDislike({
+    required String commentId,
+    required bool active,
+  }) => _toggle('/api/v1/comments/$commentId/dislike', active);
 
   @override
   Future<void> setBookmark({required String postId, required bool active}) =>

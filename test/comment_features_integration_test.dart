@@ -4,9 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/domain/models.dart';
+import 'package:luntan/screens/comment_thread_screen.dart';
 import 'package:luntan/widgets/comments/comment_item.dart';
 import 'package:luntan/widgets/comments/comment_reply_preview.dart';
-import 'package:luntan/widgets/comments/comment_thread_sheet.dart';
 import 'package:luntan/widgets/comments/comment_composer_controller.dart';
 import 'package:luntan/widgets/comments/emoji/comment_emoji_panel.dart';
 import 'package:luntan/widgets/comments/emoji/sticker_catalog.dart';
@@ -146,7 +146,7 @@ void main() {
       expect(tappedIds.length, 2);
     });
 
-    testWidgets('CommentThreadSheet 根评论与二级回复头像昵称点击触发 onAuthorTap', (tester) async {
+    testWidgets('CommentThreadScreen 根评论与二级回复头像昵称点击触发 onAuthorTap', (tester) async {
       String? tappedUserId;
       final commentRepo = MockCommentRepository();
       final rootComment = Comment(
@@ -169,20 +169,18 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: CommentThreadSheet(
-              rootComment: rootComment,
-              repository: commentRepo,
-              blockedMessage: '禁言中',
-              onAuthorTap: (id) => tappedUserId = id,
-              onReply: (target, content) async {
-                return commentRepo.createReply(
-                  commentId: rootComment.id,
-                  content: content,
-                  replyToUserId: target.authorId,
-                );
-              },
-            ),
+          home: CommentThreadScreen(
+            rootComment: rootComment,
+            repository: commentRepo,
+            blockedMessage: '禁言中',
+            onAuthorTap: (id) => tappedUserId = id,
+            onReply: (target, content) async {
+              return commentRepo.createReply(
+                commentId: rootComment.id,
+                content: content,
+                replyToUserId: target.authorId,
+              );
+            },
           ),
         ),
       );

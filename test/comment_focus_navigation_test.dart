@@ -4,9 +4,9 @@ import 'package:luntan/controllers/comments_controller.dart';
 import 'package:luntan/controllers/interaction_controller.dart';
 import 'package:luntan/controllers/post_detail_controller.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
+import 'package:luntan/screens/comment_thread_screen.dart';
 import 'package:luntan/screens/post_detail_screen.dart';
 import 'package:luntan/widgets/comments/comment_item.dart';
-import 'package:luntan/widgets/comments/comment_thread_sheet.dart';
 
 void main() {
   testWidgets('指定 focusCommentId 为一级评论时正确定位并高亮', (tester) async {
@@ -82,8 +82,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
 
-    // 楼中楼 Sheet 应该已自动弹出
-    expect(find.byType(CommentThreadSheet), findsOneWidget);
+    // 楼中楼页面应该已自动打开
+    expect(find.byType(CommentThreadScreen), findsOneWidget);
 
     // 消耗高亮计时器
     await tester.pump(const Duration(seconds: 2));

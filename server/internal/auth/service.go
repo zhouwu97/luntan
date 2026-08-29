@@ -317,7 +317,8 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 
 // SetPassword 为已登录用户设置或更新密码。已设置过密码时必须提供当前
 // 密码；首次设置（旧自动注册遗留的无密码账号）无需旧密码，直接生效。
-func (s *Service) SetPassword(ctx context.Context, userID, password, currentPassword string) error {
+// 修改成功后撤销该用户除当前会话外的全部会话与 refresh token。
+func (s *Service) SetPassword(ctx context.Context, userID, password, currentPassword, currentAccessToken string) error {
 	if len([]rune(password)) < 8 {
 		return ErrPasswordTooShort
 	}
@@ -349,8 +350,8 @@ func (s *Service) SetPassword(ctx context.Context, userID, password, currentPass
 		return err
 	}
 	type passwordRow struct {
-		id    string
-		hash  string
+		id   string
+		hash string
 	}
 	var existing []passwordRow
 	for rows.Next() {
@@ -392,7 +393,44 @@ func (s *Service) SetPassword(ctx context.Context, userID, password, currentPass
 			return err
 		}
 	}
+	if err := revokeOtherSessionsTx(ctx, tx, userID, currentAccessToken); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// revokeOtherSessionsTx 在修改密码后撤销该用户除当前会话外的全部会话与
+// refresh token；当前会话按 access token hash 定位，定位失败（含空 token）
+// 时退化为全量撤销，宁可让本人重新登录也不能放过已泄漏的旧凭据。
+func revokeOtherSessionsTx(ctx context.Context, tx *sql.Tx, userID, currentAccessToken string) error {
+	revokeAll := func() error {
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
+			return err
+		}
+		return nil
+	}
+	token := strings.TrimSpace(currentAccessToken)
+	if token == "" {
+		return revokeAll()
+	}
+	var currentSessionID string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM sessions WHERE user_id = $1 AND access_token_hash = $2 AND revoked_at IS NULL`, userID, tokenHash(token)).Scan(&currentSessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return revokeAll()
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND revoked_at IS NULL AND id <> $2`, userID, currentSessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = $1 AND revoked_at IS NULL AND session_id <> $2`, userID, currentSessionID); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RegisterWithEmail 为用户注册正式账号。若有 guestUserID 且为有效活跃游客，则原地升级并继承经验；否则新建用户。

@@ -586,14 +586,14 @@ func TestAPIUsesDatabaseErrorsAsInternalError(t *testing.T) {
 	}
 }
 
-func TestCreateCommentValidationAllowsMediaOrStickerAlone(t *testing.T) {
+func TestCreateCommentValidationRejectsEmpty(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
-	// Empty content, no media, no sticker -> 401 unauthenticated
+	// 1. 未认证且空内容 -> 401
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/p1/comments", strings.NewReader(`{"content":""}`))
 	req.Header.Set("Idempotency-Key", "test-key-1")
 	res := httptest.NewRecorder()
@@ -601,10 +601,30 @@ func TestCreateCommentValidationAllowsMediaOrStickerAlone(t *testing.T) {
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 on unauthenticated comment create, got %d", res.Code)
 	}
+
+	// 2. 已认证但空内容且无附件 -> 400
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at"}).
+			AddRow("u1", "user", "active", "用户", 1, 0, "email", "test@test.com", true, time.Now()))
+	mock.ExpectQuery(`(?s)SELECT ends_at FROM restrictions WHERE user_id = \$1 AND restriction_type = 'mute'`).
+		WithArgs("u1").
+		WillReturnError(sql.ErrNoRows)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/posts/p1/comments", strings.NewReader(`{"content":""}`))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Idempotency-Key", "test-key-2")
+	res = httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on authenticated empty comment without attachments, got %d", res.Code)
+	}
+
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
+
 
 func TestCreateCommentEnforcesAttachmentConstraints(t *testing.T) {
 	db, mock, err := sqlmock.New()

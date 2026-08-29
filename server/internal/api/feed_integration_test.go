@@ -526,3 +526,123 @@ func TestCommentsExposeViewerLikeStateAgainstPostgres(t *testing.T) {
 		t.Fatalf("comments viewer state: status=%d body=%s", res.Code, res.Body.String())
 	}
 }
+
+func TestCommentAttachmentsPostgresRoundTrip(t *testing.T) {
+	s := feedIntegrationServer(t)
+	_, postIDs := insertFeedFixtures(t, s)
+	postID := postIDs["p1"]
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userSession, err := auth.NewService(s.db).Register(context.Background(), auth.RegisterInput{
+		Username: "attachment_user_" + suffix,
+		Password: "安全密码12345",
+		Nickname: "附件测试员",
+	}, auth.SessionMetadata{UserAgent: "attachment-roundtrip-test", IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mediaID := "itest-media-" + suffix
+	if _, err := s.db.Exec(`
+		INSERT INTO media_assets (id, owner_id, status, mime_type, file_size, sha256_hash, width, height, original_name, object_key, created_at, updated_at)
+		VALUES ($1, $2, 'ready', 'image/png', 2048, $3, 1024, 768, 'test_image.png', 'media/test/test_image.png', now(), now())`,
+		mediaID, userSession.User.ID, "hash-"+suffix); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 测试纯图片评论创建 -> 201 -> DB 校验
+	reqImage := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", strings.NewReader(fmt.Sprintf(`{"content":"","media_ids":["%s"]}`, mediaID)))
+	reqImage.Header.Set("Authorization", "Bearer "+userSession.AccessToken)
+	reqImage.Header.Set("Idempotency-Key", "key-img-"+suffix)
+	resImage := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(resImage, reqImage)
+	if resImage.Code != http.StatusCreated {
+		t.Fatalf("create image-only comment failed: status=%d body=%s", resImage.Code, resImage.Body.String())
+	}
+	var createdImageComment commentResponse
+	if err := json.Unmarshal(resImage.Body.Bytes(), &createdImageComment); err != nil {
+		t.Fatalf("unmarshal created comment failed: %v", err)
+	}
+	if createdImageComment.ID == "" {
+		t.Fatal("expected non-empty created comment ID")
+	}
+
+	// 校验 comments 与 comment_media 数据库记录
+	var dbContent string
+	if err := s.db.QueryRow(`SELECT content FROM comments WHERE id = $1`, createdImageComment.ID).Scan(&dbContent); err != nil || dbContent != "" {
+		t.Fatalf("expected empty db content, got err=%v content=%s", err, dbContent)
+	}
+	var dbMediaCount int
+	if err := s.db.QueryRow(`SELECT count(*) FROM comment_media WHERE comment_id = $1 AND media_id = $2`, createdImageComment.ID, mediaID).Scan(&dbMediaCount); err != nil || dbMediaCount != 1 {
+		t.Fatalf("expected 1 comment_media entry, got err=%v count=%d", err, dbMediaCount)
+	}
+
+	// 2. 测试纯贴纸评论创建 -> 201 -> DB 校验
+	stickerID := "aad70d8d064f9eb79286c1393490716c"
+	reqSticker := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", strings.NewReader(fmt.Sprintf(`{"content":"","sticker_id":"%s"}`, stickerID)))
+	reqSticker.Header.Set("Authorization", "Bearer "+userSession.AccessToken)
+	reqSticker.Header.Set("Idempotency-Key", "key-stk-"+suffix)
+	resSticker := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(resSticker, reqSticker)
+	if resSticker.Code != http.StatusCreated {
+		t.Fatalf("create sticker-only comment failed: status=%d body=%s", resSticker.Code, resSticker.Body.String())
+	}
+	var createdStickerComment commentResponse
+	if err := json.Unmarshal(resSticker.Body.Bytes(), &createdStickerComment); err != nil {
+		t.Fatalf("unmarshal created sticker comment failed: %v", err)
+	}
+	var dbStickerID string
+	if err := s.db.QueryRow(`SELECT sticker_id FROM comments WHERE id = $1`, createdStickerComment.ID).Scan(&dbStickerID); err != nil || dbStickerID != stickerID {
+		t.Fatalf("expected db sticker_id=%s, got err=%v sticker_id=%s", stickerID, err, dbStickerID)
+	}
+
+	// 3. GET /posts/:id/comments 列表正向回查并断言媒体与贴纸数据结构
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/posts/"+postID+"/comments?limit=20", nil)
+	reqGet.Header.Set("Authorization", "Bearer "+userSession.AccessToken)
+	resGet := httptest.NewRecorder()
+	NewHandler(s.db).ServeHTTP(resGet, reqGet)
+	if resGet.Code != http.StatusOK {
+		t.Fatalf("get comments failed: status=%d body=%s", resGet.Code, resGet.Body.String())
+	}
+
+	var listPayload struct {
+		Items []commentResponse `json:"items"`
+	}
+	if err := json.Unmarshal(resGet.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("unmarshal comments list failed: %v", err)
+	}
+
+	var foundImageComment, foundStickerComment *commentResponse
+	for i := range listPayload.Items {
+		if listPayload.Items[i].ID == createdImageComment.ID {
+			foundImageComment = &listPayload.Items[i]
+		}
+		if listPayload.Items[i].ID == createdStickerComment.ID {
+			foundStickerComment = &listPayload.Items[i]
+		}
+	}
+
+	if foundImageComment == nil {
+		t.Fatalf("created image comment %s not found in list", createdImageComment.ID)
+	}
+	if len(foundImageComment.Media) != 1 || foundImageComment.Media[0].ID != mediaID {
+		t.Fatalf("expected image comment media to contain %s, got %+v", mediaID, foundImageComment.Media)
+	}
+	if foundImageComment.Media[0].Type != "image" || foundImageComment.Media[0].Width != 1024 || foundImageComment.Media[0].Height != 768 {
+		t.Fatalf("unexpected media metadata: %+v", foundImageComment.Media[0])
+	}
+	if len(foundImageComment.Attachments) != 1 || foundImageComment.Attachments[0].ID != mediaID {
+		t.Fatalf("expected attachments to contain image attachment, got %+v", foundImageComment.Attachments)
+	}
+
+	if foundStickerComment == nil {
+		t.Fatalf("created sticker comment %s not found in list", createdStickerComment.ID)
+	}
+	if foundStickerComment.StickerID == nil || *foundStickerComment.StickerID != stickerID {
+		t.Fatalf("expected sticker comment sticker_id=%s, got %v", stickerID, foundStickerComment.StickerID)
+	}
+	if len(foundStickerComment.Attachments) != 1 || foundStickerComment.Attachments[0].Type != "sticker" || foundStickerComment.Attachments[0].StickerID != stickerID {
+		t.Fatalf("expected attachments to contain sticker attachment, got %+v", foundStickerComment.Attachments)
+	}
+}
+

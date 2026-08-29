@@ -424,4 +424,68 @@ void main() {
       expect(page.items.any((c) => c.id == mediaComment.id), isTrue);
     });
   });
+
+  group('根评论删除墓碑渲染测试', () {
+    testWidgets('CommentItem 已删除墓碑只显示占位并保留回复预览', (tester) async {
+      final comment = Comment(
+        id: 'c-deleted',
+        postId: 'p1',
+        authorId: 'user-xyz',
+        author: User(
+          id: 'user-xyz',
+          username: 'tester',
+          nickname: '测试达人',
+          level: 4,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+        content: '',
+        replyCount: 2,
+        replyPreview: [
+          Comment(
+            id: 'r1',
+            postId: 'p1',
+            authorId: 'user-abc',
+            author: User(
+              id: 'user-abc',
+              username: 'abc',
+              nickname: '回复者',
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            ),
+            rootId: 'c-deleted',
+            parentId: 'c-deleted',
+            content: '回复还在',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        ],
+        publicationStatus: CommentPublicationStatus.deleted,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommentItem(
+              comment: comment,
+              floor: 3,
+              replies: comment.replyPreview,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('该评论已删除'), findsOneWidget);
+      expect(find.text('3 楼'), findsOneWidget);
+      // 回复预览继续可见。
+      expect(find.text('回复者'), findsOneWidget);
+      expect(find.text('展开 2 条回复 ›'), findsOneWidget);
+      // 原作者信息与操作栏不再渲染。
+      expect(find.text('测试达人'), findsNothing);
+      expect(find.text('回复'), findsNothing);
+    });
+  });
 }

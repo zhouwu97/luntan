@@ -58,6 +58,15 @@ func TestDeleteRootCommentKeepsTombstoneAgainstPostgres(t *testing.T) {
 	rootWithoutReplies := "tombstone-root-b-" + suffix
 	insertComment(rootWithoutReplies, rootWithoutReplies, "", "无回复楼层", now.Add(2*time.Minute))
 
+	// reply_count 与 posts.comment_count 由应用层维护，裸 SQL 插入不经过该路径，
+	// 这里按创建 4 条评论后的真实状态补齐。
+	if _, err := s.db.Exec(`UPDATE comments SET reply_count = 2 WHERE id = $1`, rootWithReplies); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE posts SET comment_count = 4 WHERE id = $1`, postID); err != nil {
+		t.Fatal(err)
+	}
+
 	deleteComment := func(commentID string) int {
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/comments/"+commentID, nil)
 		req.Header.Set("Authorization", "Bearer "+session.AccessToken)

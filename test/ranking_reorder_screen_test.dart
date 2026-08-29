@@ -76,7 +76,8 @@ void main() {
     final reorderable = tester.widget<ReorderableListView>(
       find.byType(ReorderableListView),
     );
-    reorderable.onReorder(0, 2);
+    // ignore: unnecessary_non_null_assertion
+    reorderable.onReorder!(0, 2);
     await tester.pumpAndSettle();
 
     expect(platform.reorderedIds, ['t2', 't1', 't3']);
@@ -104,7 +105,8 @@ void main() {
     final reorderable = tester.widget<ReorderableListView>(
       find.byType(ReorderableListView),
     );
-    reorderable.onReorder(0, 2);
+    // ignore: unnecessary_non_null_assertion
+    reorderable.onReorder!(0, 2);
     await tester.pumpAndSettle();
 
     expect(feedback, contains('榜单有更新，请刷新后重试'));

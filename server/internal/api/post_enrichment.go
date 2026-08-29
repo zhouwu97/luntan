@@ -200,11 +200,14 @@ func publicMediaURL(objectKey string) string {
 	if strings.HasPrefix(objectKey, "http://") || strings.HasPrefix(objectKey, "https://") {
 		return objectKey
 	}
+	key := strings.TrimLeft(objectKey, "/")
 	base := strings.TrimRight(strings.TrimSpace(os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL")), "/")
-	if base == "" {
-		return objectKey
+	if base != "" {
+		return base + "/" + key
 	}
-	return base + "/" + strings.TrimLeft(objectKey, "/")
+	// 未配置对象存储公开域名时退回 API 自带的媒体下载兜底路由；根相对
+	// 地址由客户端按 API base 补全，浏览器同源访问时也能直接命中。
+	return "/api/v1/media-file/" + key
 }
 
 func includePostDetails(r *http.Request) bool {

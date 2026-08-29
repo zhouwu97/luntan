@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -348,4 +350,44 @@ func newMediaID() (string, error) {
 		return "", errors.New("generate media id failed")
 	}
 	return "media_" + hex.EncodeToString(raw[:]), nil
+}
+
+// serveMediaFile 处理 GET/HEAD /api/v1/media-file/{objectKey} 的媒体下载兜底。
+// 未配置 OBJECT_STORAGE_PUBLIC_BASE_URL 时，publicMediaURL 返回该路由的根
+// 相对地址。免鉴权与公开 Feed 对齐；路径安全由存储层 objectPath 校验。
+// 媒体对象内容不可变（写入时经 SHA256 校验），响应下发一年期 immutable
+// 缓存头供浏览器/CDN 长缓存；本地存储返回 *os.File 时由 http.ServeContent
+// 额外提供 Range 与条件请求支持。
+func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKey string) {
+	backend := s.mediaStorage
+	if backend == nil {
+		writeAuthError(w, r, ErrStorageUnavailable)
+		return
+	}
+	rc, size, contentType, err := backend.Get(r.Context(), objectKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrObjectNotFound):
+			writeAuthError(w, r, ErrMediaNotFound)
+		case errors.Is(err, storage.ErrInvalidMedia):
+			writeAuthError(w, r, ErrInvalidMedia)
+		default:
+			writeAuthError(w, r, ErrStorageUnavailable)
+		}
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	if rs, ok := rc.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = io.Copy(w, rc)
 }

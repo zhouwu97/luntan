@@ -10,7 +10,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path $PSScriptRoot '..\assets\ranking\beiyoujiang_snapshot.json')
+    [string]$OutputPath = (Join-Path $PSScriptRoot '..\server\seeds\beiyoujiang_snapshot.json')
 )
 
 $ErrorActionPreference = 'Stop'

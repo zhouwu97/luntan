@@ -895,6 +895,10 @@ class _SectionTabs extends StatelessWidget {
                       (community) => Expanded(
                         child: _CommunityTab(
                           label: community.name,
+                          imageAsset:
+                              community.name.trim() == '酱紫社区'
+                              ? 'assets/images/mascot_community.png'
+                              : null,
                           active: selectedCommunityId == community.id,
                           onTap: () => onChanged(community.id),
                         ),
@@ -912,33 +916,53 @@ class _CommunityTab extends StatelessWidget {
     required this.label,
     required this.active,
     required this.onTap,
+    this.imageAsset,
   });
 
   final String label;
   final bool active;
   final VoidCallback onTap;
+  final String? imageAsset;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 2),
     child: GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: AppMotion.duration(context, AppMotion.normal),
-        curve: AppMotion.emphasized,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: active ? AppTheme.textPrimary : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? Colors.white : AppTheme.textSecondary,
-            fontSize: 13,
-            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+      child: Semantics(
+        button: true,
+        selected: active,
+        label: label,
+        child: AnimatedContainer(
+          duration: AppMotion.duration(context, AppMotion.normal),
+          curve: AppMotion.emphasized,
+          alignment: Alignment.center,
+          padding: imageAsset == null
+              ? const EdgeInsets.symmetric(horizontal: 8)
+              : const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: active ? AppTheme.textPrimary : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
           ),
+          child: imageAsset == null
+              ? Text(
+                  label,
+                  style: TextStyle(
+                    color: active ? Colors.white : AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                )
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    imageAsset!,
+                    fit: BoxFit.cover,
+                    // 吉祥物立牌在画面中略低于中线，取景向下偏移让“酱紫社区”字样落在标签内。
+                    alignment: const Alignment(0, 0.2),
+                    filterQuality: FilterQuality.medium,
+                  ),
+                ),
         ),
       ),
     ),

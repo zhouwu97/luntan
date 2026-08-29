@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
+
 
 func TestAPIWithoutDatabaseReturns503(t *testing.T) {
 	for _, path := range []string{"/api/v1/community-categories", "/api/v1/communities", "/api/v1/feed/latest", "/api/v1/posts/p1", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/me"} {
@@ -684,5 +686,77 @@ func TestCreateCommentEnforcesAttachmentConstraints(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	created := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).
+		WithArgs("p1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
+
+	mock.ExpectQuery(`(?s)SELECT c\.id, c\.post_id.*ORDER BY c\.created_at ASC, c\.id ASC LIMIT \$2`).
+		WithArgs("p1", 11).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "post_id", "author_id", "username", "nickname",
+			"root_id", "parent_id", "reply_to_user_id",
+			"content", "sticker_id", "like_count", "reply_count",
+			"publication_status", "moderation_status", "created_at", "updated_at", "viewer_has_liked",
+		}).
+			AddRow("cm_img", "p1", "u1", "user1", "用户1", "cm_img", "", "", "", "", 0, 0, "published", "normal", created, created, false).
+			AddRow("cm_stk", "p1", "u2", "user2", "用户2", "cm_stk", "", "", "", "mf_01", 0, 0, "published", "normal", created.Add(time.Minute), created.Add(time.Minute), false))
+
+	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm.*JOIN media_assets ma`).
+		WithArgs("cm_img", "cm_stk").
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "mime_type", "width", "height", "original_name", "object_key"}).
+			AddRow("cm_img", "m1", "image/png", 1024, 768, "img.png", "media/img.png"))
+
+	mock.ExpectQuery(`(?s)SELECT mv\.media_id, mv\.variant, mv\.object_key, mv\.mime_type, mv\.width, mv\.height, mv\.size_bytes FROM media_variants mv`).
+		WithArgs("m1").
+		WillReturnRows(sqlmock.NewRows([]string{"media_id", "variant", "object_key", "mime_type", "width", "height", "size_bytes"}).
+			AddRow("m1", "thumb", "media/img_thumb.png", "image/png", 320, 240, int64(1024)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/p1/comments?limit=10", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", res.Code, res.Body.String())
+	}
+
+	var payload struct {
+		Items []commentResponse `json:"items"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if len(payload.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(payload.Items))
+	}
+
+	imgComment := payload.Items[0]
+	if len(imgComment.Media) != 1 || imgComment.Media[0].ID != "m1" {
+		t.Fatalf("expected image comment to have media m1, got %+v", imgComment.Media)
+	}
+	if len(imgComment.Attachments) != 1 || imgComment.Attachments[0].Type != "image" || imgComment.Attachments[0].ID != "m1" {
+		t.Fatalf("expected image attachment, got %+v", imgComment.Attachments)
+	}
+
+	stkComment := payload.Items[1]
+	if stkComment.StickerID == nil || *stkComment.StickerID != "mf_01" {
+		t.Fatalf("expected sticker_id mf_01, got %v", stkComment.StickerID)
+	}
+	if len(stkComment.Attachments) != 1 || stkComment.Attachments[0].Type != "sticker" || stkComment.Attachments[0].StickerID != "mf_01" {
+		t.Fatalf("expected sticker attachment, got %+v", stkComment.Attachments)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 
 

@@ -225,12 +225,12 @@ func TestListCommentsReturnsStableFloors(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{
 		"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
 		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
-		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
-	}).AddRow("cm1", "p1", "u1", "user", "User", 1, "", "第一条", 0, 0, 0, created, created, 1, "cm1", "", "", "", false, false))
+		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
+	}).AddRow("cm1", "p1", "u1", "user", "User", 1, "", "第一条", 0, 0, 0, created, created, 1, "cm1", "", "", "", "published", false, false))
 	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER \(PARTITION BY c\.root_id.*ORDER BY t\.root_id ASC, t\.rn ASC$`).WithArgs("cm1").WillReturnRows(sqlmock.NewRows([]string{
 		"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
 		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
-		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
+		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
 	}))
 	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm`).WithArgs("cm1").WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "mime_type", "width", "height", "original_name", "object_key"}))
 
@@ -718,17 +718,17 @@ func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
 			"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
-			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
+			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
 		}).
-			AddRow("cm_img", "p1", "u1", "user1", "用户1", 1, "", "", 0, 0, 0, created, created, 1, "cm_img", "", "", "", false, false).
-			AddRow("cm_stk", "p1", "u2", "user2", "用户2", 1, "", "", 0, 0, 0, created.Add(time.Minute), created.Add(time.Minute), 2, "cm_stk", "", "", "mf_01", false, false))
+			AddRow("cm_img", "p1", "u1", "user1", "用户1", 1, "", "", 0, 0, 0, created, created, 1, "cm_img", "", "", "", "published", false, false).
+			AddRow("cm_stk", "p1", "u2", "user2", "用户2", 1, "", "", 0, 0, 0, created.Add(time.Minute), created.Add(time.Minute), 2, "cm_stk", "", "", "mf_01", "published", false, false))
 
 	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER \(PARTITION BY c\.root_id.*ORDER BY t\.root_id ASC, t\.rn ASC$`).
 		WithArgs("cm_img", "cm_stk").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
 			"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
-			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "has_liked", "has_disliked",
+			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
 		}))
 
 	mock.ExpectQuery(`(?s)SELECT cm\.comment_id, ma\.id.*FROM comment_media cm.*JOIN media_assets ma`).

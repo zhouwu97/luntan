@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsBinding;
 
 import 'app.dart';
 import 'data/repository_provider.dart';
@@ -6,6 +8,13 @@ import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // 浏览器端到端验收（快照/读屏）通过 ?a11y=1 显式开启语义树。
+  if (kIsWeb && Uri.base.queryParameters['a11y'] == '1') {
+    SemanticsBinding.instance.ensureSemantics();
+    debugPrint(
+      '[A11Y] ensureSemantics done, enabled=${SemanticsBinding.instance.semanticsEnabled}',
+    );
+  }
   runApp(buildLuntanRootApp());
 }
 

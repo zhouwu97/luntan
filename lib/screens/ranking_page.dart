@@ -5,7 +5,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/api/api_client.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
-import '../data/beiyoujiang_catalog.dart';
 import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
@@ -111,6 +110,20 @@ class RankingItem {
   }
 }
 
+/// 源站的“想冲”人数文案：千位以上缩写为 k，与源站展示一致。
+String rankingWantCountText(int count) {
+  if (count < 1000) return '${count}人想冲';
+  final k = count / 1000;
+  final text = k == k.roundToDouble()
+      ? k.toStringAsFixed(0)
+      : k.toStringAsFixed(1);
+  return '${text}k人想冲';
+}
+
+/// 判断接口错误是否为未登录（401），用于写操作失败后引导登录。
+bool _isUnauthorized(Object error) =>
+    error is ApiException && error.statusCode == 401;
+
 Widget _rankingImage(
   RankingItem item, {
   required double width,
@@ -125,8 +138,29 @@ Widget _rankingImage(
       height: height,
       fit: fit,
       filterQuality: FilterQuality.medium,
-      errorBuilder: (_, _, _) =>
-          Image.asset(item.asset, width: width, height: height, fit: fit),
+      errorBuilder: (_, _, _) => _rankingImageFallback(item, width, height, fit),
+    );
+  }
+  return _rankingImageFallback(item, width, height, fit);
+}
+
+Widget _rankingImageFallback(
+  RankingItem item,
+  double width,
+  double height,
+  BoxFit fit,
+) {
+  if (item.asset.isEmpty) {
+    return Container(
+      width: width,
+      height: height,
+      color: const Color(0xFFEFF2F7),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.image_outlined,
+        size: 20,
+        color: Color(0xFFB7C2D4),
+      ),
     );
   }
   return Image.asset(item.asset, width: width, height: height, fit: fit);
@@ -396,7 +430,6 @@ class RankingPage extends StatefulWidget {
     this.canVote = false,
     this.onRequireAuth,
     this.cache,
-    this.useBeiyoujiangCatalog = false,
   });
 
   final RankingRepository? repository;
@@ -406,7 +439,6 @@ class RankingPage extends StatefulWidget {
   final bool canVote;
   final VoidCallback? onRequireAuth;
   final RankingCacheStore? cache;
-  final bool useBeiyoujiangCatalog;
 
   @override
   State<RankingPage> createState() => _RankingPageState();
@@ -418,11 +450,11 @@ class _RankingPageState extends State<RankingPage> {
   int _selectedTab = 0;
   int _selectedCategory = -1;
   List<RankingItem>? _remoteItems;
+  RankingItem? _weeklyTopItem;
+  List<RankingItem>? _allRemoteItems;
   DateTime? _remoteUpdatedAt;
   Object? _remoteError;
   bool _loadingRemote = false;
-  BeiyoujiangCatalog? _beiyoujiangCatalog;
-  Object? _catalogError;
 
   static const _sourceTabKeys = ['', 'ENTRY', 'ADVANCED', 'HIGH', 'EXTREME'];
   static const _sourceCategoryKeys = [
@@ -436,9 +468,7 @@ class _RankingPageState extends State<RankingPage> {
   @override
   void initState() {
     super.initState();
-    if (widget.useBeiyoujiangCatalog) {
-      _loadBeiyoujiangCatalog();
-    } else if (widget.repository != null) {
+    if (widget.repository != null) {
       _loadRemoteRanking();
     }
   }
@@ -449,28 +479,44 @@ class _RankingPageState extends State<RankingPage> {
     super.dispose();
   }
 
+  String get _selectedTabKey => _sourceTabKeys[_selectedTab];
+
+  String? get _selectedCategoryKey => _selectedCategory < 0
+      ? null
+      : _sourceCategoryKeys[_selectedCategory];
+
   Future<void> _loadRemoteRanking() async {
     if (_loadingRemote) return;
     _loadingRemote = true;
+    final isDefaultView = _selectedTabKey.isEmpty && _selectedCategoryKey == null;
     final cache = widget.cache ?? await RankingCache.create();
-    final cached = await cache.read();
-    if (mounted && cached != null) {
-      setState(() {
-        _remoteItems = cached.items;
-        _remoteUpdatedAt = cached.updatedAt;
-      });
+    if (isDefaultView) {
+      final cached = await cache.read();
+      if (mounted && cached != null) {
+        setState(() {
+          _remoteItems = cached.items;
+          _remoteUpdatedAt = cached.updatedAt;
+        });
+      }
     }
     try {
-      final products = await widget.repository!.list();
-      final items = products.map(_itemFromRemote).toList();
-      if (items.isNotEmpty) {
+      final list = await widget.repository!.list(
+        tab: _selectedTabKey.isEmpty ? null : _selectedTabKey,
+        category: _selectedCategoryKey,
+      );
+      final items = list.items.map(_itemFromRemote).toList();
+      if (isDefaultView && items.isNotEmpty) {
         await cache.write(items, updatedAt: DateTime.now().toUtc());
       }
       if (!mounted) return;
       setState(() {
         _remoteItems = items;
+        _weeklyTopItem = list.weeklyTop == null
+            ? null
+            : _itemFromRemote(list.weeklyTop!, useHero: true);
         _remoteUpdatedAt = DateTime.now().toUtc();
         _remoteError = null;
+        _allRemoteItems = isDefaultView ? items : _allRemoteItems;
       });
     } catch (error) {
       if (mounted) {
@@ -479,93 +525,67 @@ class _RankingPageState extends State<RankingPage> {
     } finally {
       _loadingRemote = false;
     }
-  }
-
-  Future<void> _loadBeiyoujiangCatalog() async {
-    try {
-      final catalog = await BeiyoujiangCatalog.load();
-      if (!mounted) return;
-      setState(() {
-        _beiyoujiangCatalog = catalog;
-        _catalogError = null;
-      });
-    } catch (error) {
-      if (mounted) setState(() => _catalogError = error);
+    // 全量条目用于站内搜索；失败时只影响搜索结果。
+    if (_allRemoteItems == null) {
+      try {
+        final all = await widget.repository!.list();
+        if (!mounted) return;
+        setState(() {
+          _allRemoteItems = all.items.map(_itemFromRemote).toList();
+        });
+      } catch (_) {
+        // 搜索数据缺失时保留当前视图数据。
+      }
     }
   }
 
-  RankingItem _itemFromRemote(RankingToy toy) {
+  /// 源站的“想冲”人数文案：千位以上缩写为 k，与源站展示一致。
+  RankingItem _itemFromRemote(RankingToy toy, {bool useHero = false}) {
     final score = toy.score == toy.score.roundToDouble()
         ? toy.score.toStringAsFixed(0)
         : toy.score.toStringAsFixed(1);
-    final asset = toy.rank == 1
-        ? 'assets/ranking/hero.webp'
-        : 'assets/ranking/${toy.assetKey}';
+    final remoteUrl = useHero
+        ? (toy.heroUrl ?? toy.coverUrl)
+        : toy.coverUrl;
     return RankingItem(
       id: toy.id,
       rank: toy.rank,
       name: toy.name,
-      hot: '${toy.wantCount}人想冲',
+      hot: rankingWantCountText(toy.wantCount),
       tags: toy.tags,
       ratings: '${toy.ratingCount}人评分',
       score: score,
-      asset: asset,
+      asset: '',
       merchant: toy.merchant,
       releaseYear: toy.releaseYear,
       description: toy.description,
       category: toy.category,
       segments: toy.segments,
-    );
-  }
-
-  RankingItem _itemFromBeiyoujiang(BeiyoujiangCatalogItem item) {
-    final score = item.score == item.score.roundToDouble()
-        ? item.score.toStringAsFixed(0)
-        : item.score.toStringAsFixed(1);
-    return RankingItem(
-      id: 'beiyoujiang-${item.id}',
-      rank: item.rank,
-      name: item.name,
-      hot: item.wantCountText,
-      tags: item.tags,
-      ratings: '${item.reviewCount}人评分',
-      score: score,
-      asset: 'assets/ranking/thumb_02.webp',
-      merchant: item.merchant,
-      releaseYear: item.releaseYear,
-      description: item.description,
-      category: item.category,
-      segments: [item.stimulation],
-      remoteImageUrl: item.imageUrlFor(),
-      couponUrl: item.shopLink,
-      sourceUrl: item.detailUrl,
+      remoteImageUrl: remoteUrl,
+      couponUrl: toy.couponUrl,
+      sourceUrl: toy.sourceUrl,
     );
   }
 
   List<RankingItem> get _allSourceItems {
-    final catalog = _beiyoujiangCatalog;
-    if (widget.useBeiyoujiangCatalog && catalog != null) {
-      return catalog.searchableItems.map(_itemFromBeiyoujiang).toList();
-    }
-    if (widget.repository != null) return _remoteItems ?? const [];
+    if (widget.repository != null) return _allRemoteItems ?? _remoteItems ?? const [];
     return [_topRankingItem, ..._mainRankingItems];
-  }
-
-  BeiyoujiangRankingView? get _selectedSourceView {
-    final catalog = _beiyoujiangCatalog;
-    if (!widget.useBeiyoujiangCatalog || catalog == null) return null;
-    final tab = _sourceTabKeys[_selectedTab];
-    final category = _selectedCategory < 0
-        ? ''
-        : _sourceCategoryKeys[_selectedCategory];
-    return catalog.viewFor(tab: tab, category: category);
   }
 
   List<RankingItem> get _filteredItems {
     final query = _searchQuery.trim().toLowerCase();
-    final sourceView = _selectedSourceView;
-    if (query.isEmpty && sourceView != null) {
-      return sourceView.items.map(_itemFromBeiyoujiang).toList();
+    if (widget.repository != null) {
+      final source = query.isEmpty ? (_remoteItems ?? const <RankingItem>[]) : _allSourceItems;
+      if (query.isEmpty) return source;
+      return source.where((item) {
+        final matchesName = item.name.toLowerCase().contains(query);
+        final matchesMerchant = item.merchant.toLowerCase().contains(query);
+        final matchesDesc = item.description.toLowerCase().contains(query);
+        final matchesTags = item.tags.any(
+          (t) => t.toLowerCase().contains(query),
+        );
+        return matchesName || matchesMerchant || matchesDesc || matchesTags;
+      }).toList();
     }
     return _allSourceItems.where((item) {
       if (query.isNotEmpty) {
@@ -611,8 +631,17 @@ class _RankingPageState extends State<RankingPage> {
   }
 
   RankingItem get _topItem {
-    final sourceTop = _selectedSourceView?.weeklyTop;
-    if (sourceTop != null) return _itemFromBeiyoujiang(sourceTop);
+    if (widget.repository != null) {
+      if (_searchQuery.trim().isEmpty && _weeklyTopItem != null) {
+        return _weeklyTopItem!;
+      }
+      final items = _filteredItems;
+      if (items.isEmpty) return _topRankingItem;
+      return items.firstWhere(
+        (item) => item.rank == 1,
+        orElse: () => items.first,
+      );
+    }
     final items = _filteredItems;
     if (items.isEmpty) return _topRankingItem;
     return items.firstWhere(
@@ -660,21 +689,10 @@ class _RankingPageState extends State<RankingPage> {
   );
 
   Widget _rankingScrollView() {
-    if (widget.useBeiyoujiangCatalog && _beiyoujiangCatalog == null) {
-      if (_catalogError != null) {
-        return _RankingLoadError(onRetry: _loadBeiyoujiangCatalog);
-      }
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (widget.repository != null &&
-        !widget.useBeiyoujiangCatalog &&
-        _remoteError != null &&
-        _remoteItems == null) {
+    if (widget.repository != null && _remoteError != null && _remoteItems == null) {
       return _RankingLoadError(onRetry: _loadRemoteRanking);
     }
-    if (widget.repository != null &&
-        !widget.useBeiyoujiangCatalog &&
-        _remoteItems == null) {
+    if (widget.repository != null && _remoteItems == null) {
       return const Center(child: CircularProgressIndicator());
     }
     final query = _searchQuery.trim();
@@ -720,7 +738,7 @@ class _RankingPageState extends State<RankingPage> {
     }
 
     final showTopBanner =
-        _selectedSourceView?.weeklyTop != null ||
+        (_searchQuery.trim().isEmpty && _weeklyTopItem != null) ||
         (_selectedTab == 0 && items.any((i) => i.rank == 1));
     final listItems = showTopBanner
         ? items.where((i) => i.id != _topItem.id).toList()
@@ -728,7 +746,7 @@ class _RankingPageState extends State<RankingPage> {
 
     return ListView(
       children: [
-        if (!widget.useBeiyoujiangCatalog &&
+        if (widget.repository != null &&
             _remoteError != null &&
             _remoteItems != null)
           _RankingStaleBanner(
@@ -737,26 +755,28 @@ class _RankingPageState extends State<RankingPage> {
           ),
         _RankingTabs(
           selectedIndex: _selectedTab,
-          onTap: (index) => setState(() {
-            _selectedTab = index;
-            if (widget.useBeiyoujiangCatalog &&
-                index > 0 &&
-                _selectedCategory < 0) {
-              _selectedCategory = 0;
-            }
-          }),
+          onTap: (index) {
+            setState(() {
+              _selectedTab = index;
+              if (index > 0 && _selectedCategory < 0) {
+                _selectedCategory = 0;
+              }
+            });
+            if (widget.repository != null) _loadRemoteRanking();
+          },
         ),
         _CategoryGrid(
           selectedIndex: _selectedCategory,
-          onTap: (index) => setState(() {
-            if (widget.useBeiyoujiangCatalog &&
-                _selectedTab == 0 &&
-                index == _selectedCategory) {
-              _selectedCategory = -1;
-            } else {
-              _selectedCategory = index;
-            }
-          }),
+          onTap: (index) {
+            setState(() {
+              if (_selectedTab == 0 && index == _selectedCategory) {
+                _selectedCategory = -1;
+              } else {
+                _selectedCategory = index;
+              }
+            });
+            if (widget.repository != null) _loadRemoteRanking();
+          },
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1325,7 +1345,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       id: toy.id,
       rank: toy.rank,
       name: toy.name,
-      hot: '${toy.wantCount}人想冲',
+      hot: rankingWantCountText(toy.wantCount),
       tags: toy.tags,
       ratings: '${toy.ratingCount}人评分',
       score: _scoreText(toy.score),
@@ -1337,9 +1357,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       segments: toy.segments,
       ratingDistribution:
           _remoteDetail?.ratingDistribution ?? item.ratingDistribution,
-      remoteImageUrl: item.remoteImageUrl,
-      couponUrl: item.couponUrl,
-      sourceUrl: item.sourceUrl,
+      remoteImageUrl: toy.heroUrl ?? toy.coverUrl ?? item.remoteImageUrl,
+      couponUrl: toy.couponUrl ?? item.couponUrl,
+      sourceUrl: toy.sourceUrl ?? item.sourceUrl,
     );
   }
 
@@ -1413,16 +1433,17 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
-  bool _requireCapability(bool allowed, String message) {
-    if (!_hasServer || allowed) return true;
-    if (!widget.isAuthenticated) {
+  /// 登录态可能在本页面创建后才建立（弹层登录不会重建已推入的路由），
+  /// 因此写操作直接尝试服务器，仅在返回 401 时引导登录。
+  void _handleWriteError(Object error, {String fallback = '操作失败，请重试'}) {
+    if (!mounted) return;
+    if (_isUnauthorized(error)) {
       widget.onRequireAuth?.call();
-    } else if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      return;
     }
-    return false;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error, fallback: fallback))));
   }
 
   void _replaceToy(RankingToy toy) {
@@ -1524,9 +1545,6 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _openRatingDialog() async {
-    if (!_requireCapability(widget.canVote, '当前身份暂不能评分，请登录邮箱账号后重试')) {
-      return;
-    }
     if (!_hasServer) {
       ScaffoldMessenger.of(
         context,
@@ -1583,13 +1601,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         ).showSnackBar(const SnackBar(content: Text('评分已保存')));
       }
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(userFacingApiMessage(error, fallback: '评分保存失败')),
-          ),
-        );
-      }
+      _handleWriteError(error, fallback: '评分保存失败');
     }
   }
 
@@ -1601,9 +1613,6 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
 
   Future<void> _submitComment(String value) async {
     if (value.trim().isEmpty) return;
-    if (!_requireCapability(widget.canComment, '当前身份暂不能评论，请登录邮箱账号后重试')) {
-      return;
-    }
     if (!_hasServer) {
       _commentController.clear();
       FocusScope.of(context).unfocus();
@@ -1632,20 +1641,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         context,
       ).showSnackBar(const SnackBar(content: Text('评论已提交')));
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(userFacingApiMessage(error, fallback: '评论提交失败')),
-          ),
-        );
-      }
+      _handleWriteError(error, fallback: '评论提交失败');
     }
   }
 
   Future<void> _toggleServerCommentLike(RankingToyComment comment) async {
-    if (!_requireCapability(widget.canLike, '当前身份暂不能点赞，请登录邮箱账号后重试')) {
-      return;
-    }
     if (!_hasServer) return;
     try {
       final count = await widget.repository!.setCommentLike(
@@ -1670,11 +1670,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         _remoteDetail = _remoteDetail!.copyWith(comments: comments);
       });
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
-      }
+      _handleWriteError(error, fallback: '点赞失败，请重试');
     }
   }
 
@@ -2601,6 +2597,8 @@ class _ReviewCard extends StatelessWidget {
     this.level = 1,
     this.authorRating,
   }) : liked = false,
+       media = const [],
+       avatarUrl = null,
        onLike = null,
        replies = const [],
        onReply = null,
@@ -2618,6 +2616,8 @@ class _ReviewCard extends StatelessWidget {
   }) : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
        likes = '${comment.likeCount}',
        content = comment.content,
+       media = comment.media,
+       avatarUrl = comment.avatarUrl,
        reply = null,
        replyDate = null,
        avatarColor = const Color(0xFFE3EEFF),
@@ -2629,6 +2629,8 @@ class _ReviewCard extends StatelessWidget {
   final String user;
   final String likes;
   final String content;
+  final List<RankingToyCommentMedia> media;
+  final String? avatarUrl;
   final String? reply;
   final String? replyDate;
   final Color avatarColor;
@@ -2656,11 +2658,24 @@ class _ReviewCard extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(color: const Color(0xFFE8ECF2)),
           ),
-          child: const Icon(
-            Icons.person_outline_rounded,
-            size: 22,
-            color: Color(0xFF7D8BA3),
-          ),
+          clipBehavior: Clip.antiAlias,
+          child: avatarUrl != null && avatarUrl!.isNotEmpty
+              ? Image.network(
+                  avatarUrl!,
+                  width: 40,
+                  height: 40,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const Icon(
+                    Icons.person_outline_rounded,
+                    size: 22,
+                    color: Color(0xFF7D8BA3),
+                  ),
+                )
+              : const Icon(
+                  Icons.person_outline_rounded,
+                  size: 22,
+                  color: Color(0xFF7D8BA3),
+                ),
         ),
         const SizedBox(width: 11),
         Expanded(
@@ -2773,6 +2788,31 @@ class _ReviewCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (media.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final item in media)
+                        GestureDetector(
+                          onTap: onReply,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              item.url,
+                              width: 96,
+                              height: 96,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  const SizedBox.shrink(),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               if (onReply != null)
                 TextButton(
                   onPressed: onReply,

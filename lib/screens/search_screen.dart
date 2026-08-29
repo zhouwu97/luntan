@@ -284,11 +284,14 @@ class _SearchScreenState extends State<SearchScreen> {
       id: toy.id,
       rank: toy.rank,
       name: toy.name,
-      hot: '${toy.wantCount}人想冲',
+      hot: rankingWantCountText(toy.wantCount),
       tags: toy.tags,
       ratings: '${toy.ratingCount}人评分',
       score: scoreStr,
       asset: asset,
+      remoteImageUrl: toy.coverUrl,
+      couponUrl: toy.couponUrl,
+      sourceUrl: toy.sourceUrl,
       merchant: toy.merchant,
       releaseYear: toy.releaseYear,
       description: toy.description,
@@ -1100,17 +1103,37 @@ class _SearchToyCard extends StatelessWidget {
                   child: SizedBox(
                     width: 64,
                     height: 64,
-                    child: Image.asset(
-                      assetPath,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        color: const Color(0xFFF3F4F6),
-                        child: const Icon(
-                          Icons.toys_outlined,
-                          color: Color(0xFF9CA3AF),
-                        ),
-                      ),
-                    ),
+                    child: toy.coverUrl != null && toy.coverUrl!.isNotEmpty
+                        ? Image.network(
+                            toy.coverUrl!,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) =>
+                                Image.asset(
+                                  assetPath,
+                                  fit: BoxFit.contain,
+                                  errorBuilder:
+                                      (context, error, stackTrace) =>
+                                          Container(
+                                            color: const Color(0xFFF3F4F6),
+                                            child: const Icon(
+                                              Icons.toys_outlined,
+                                              color: Color(0xFF9CA3AF),
+                                            ),
+                                          ),
+                                ),
+                          )
+                        : Image.asset(
+                            assetPath,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) =>
+                                Container(
+                                  color: const Color(0xFFF3F4F6),
+                                  child: const Icon(
+                                    Icons.toys_outlined,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                ),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 12),

@@ -398,8 +398,12 @@ func (s *Server) searchToys(r *http.Request, query string, limit int, rawCursor 
 		       array_to_json(t.tags), t.asset_key, t.want_count,
 		       t.rating_total_centi, t.rating_count,
 		       t.category, array_to_json(t.segments),
+		       COALESCE(cover.object_key, ''), COALESCE(hero.object_key, ''),
+		       t.coupon_url, t.source_url, t.source_provider,
 		       `+rankExpression+` AS search_rank
 		FROM ranking_toys t
+		LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
+		LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
 		WHERE `+where+`
 		ORDER BY `+rankExpression+` DESC, t.rank ASC, t.id ASC
 		LIMIT $`+strconv.Itoa(limitPosition), args...)
@@ -426,6 +430,11 @@ func (s *Server) searchToys(r *http.Request, query string, limit int, rawCursor 
 			&item.RatingCount,
 			&item.Category,
 			&segmentsRaw,
+			&item.CoverObjectKey,
+			&item.HeroObjectKey,
+			&item.CouponURL,
+			&item.SourceURL,
+			&item.SourceProvider,
 			&rank,
 		); err != nil {
 			return searchPage{}, err

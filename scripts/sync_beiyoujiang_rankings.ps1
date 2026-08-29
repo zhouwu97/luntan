@@ -20,13 +20,15 @@ $categories = @('', 'CUP', 'SMALL_MOLD', 'LARGE_MOLD', 'HALF_BODY', 'LUBE')
 $segments = @('', 'ENTRY', 'ADVANCED', 'HIGH', 'EXTREME')
 $views = [ordered]@{}
 $reviews = [ordered]@{}
+$byjUsers = [ordered]@{}
 $imageDirectory = Join-Path $PSScriptRoot '..\assets\ranking\beiyoujiang'
 $downloadedImages = @{}
 
 function Save-SourceImage {
     param(
         [Parameter(Mandatory = $true)][string]$Key,
-        [Parameter(Mandatory = $true)][string]$FileName
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [string]$BasePath = 'ToyImg'
     )
 
     if ([string]::IsNullOrWhiteSpace($Key)) {
@@ -37,7 +39,7 @@ function Save-SourceImage {
         $destination = Join-Path $imageDirectory $FileName
         if (-not (Test-Path -LiteralPath $destination) -or (Get-Item -LiteralPath $destination).Length -eq 0) {
             $extension = [IO.Path]::GetExtension($Key)
-            $imageUrl = "https://beiyoujiang.com/ToyImg/$([uri]::EscapeDataString($Key))"
+            $imageUrl = "https://beiyoujiang.com/$BasePath/$([uri]::EscapeDataString($Key))"
             & curl.exe --http1.1 --retry 3 --retry-delay 1 --tlsv1.2 -sS -L $imageUrl -o $destination
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $destination) -or (Get-Item -LiteralPath $destination).Length -eq 0) {
                 # 源站历史配图可能已被删除；跳过而不是让整个同步失败。
@@ -84,6 +86,27 @@ function Add-LocalImagePaths {
     $Toy | Add-Member -NotePropertyName 'hero_asset_path' -NotePropertyValue $heroPath -Force
 }
 
+function Invoke-SourceJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Body
+    )
+
+    # curl 输出直接进入管道时 PowerShell 会按控制台代码页解码，中文
+    # 多字节字符会被破坏进而导致 JSON 解析失败；先落盘再按 UTF-8 读取。
+    $tempFile = New-Item -ItemType File -Path (Join-Path ([IO.Path]::GetTempPath()) ("byj-" + [Guid]::NewGuid().ToString('N') + ".json")) -Force
+    try {
+        & curl.exe --http1.1 --retry 3 --retry-delay 1 --tlsv1.2 -sS `
+            -X POST $Url -H 'Content-Type: application/json' --data $Body -o $tempFile.FullName
+        if ($LASTEXITCODE -ne 0) {
+            throw "杯友酱请求失败：$Url"
+        }
+        return Get-Content -LiteralPath $tempFile.FullName -Raw -Encoding UTF8
+    } finally {
+        Remove-Item -LiteralPath $tempFile.FullName -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-RankingView {
     param(
         [AllowEmptyString()][string]$Type,
@@ -98,11 +121,7 @@ function Get-RankingView {
         pageSize = 100
     } | ConvertTo-Json -Compress
 
-    $raw = & curl.exe --http1.1 --retry 3 --retry-delay 1 --tlsv1.2 -sS `
-        -X POST $endpoint -H 'Content-Type: application/json' --data $request
-    if ($LASTEXITCODE -ne 0) {
-        throw "杯友酱榜单请求失败：type=$Type classify=$Classify"
-    }
+    $raw = Invoke-SourceJson -Url $endpoint -Body $request
 
     $response = $raw | ConvertFrom-Json
     if ($response.code -ne 200 -or $null -eq $response.data) {
@@ -126,15 +145,43 @@ function Get-RankingView {
     }
 }
 
+function Save-UserAvatar {
+    param([AllowNull()]$User)
+
+    if ($null -eq $User -or [int]$User.id -le 0) {
+        return
+    }
+    $userId = [int]$User.id
+    if (-not $byjUsers.Contains("$userId")) {
+        $byjUsers["$userId"] = [ordered]@{
+            id = $userId
+            username = "$($User.username)"
+            level = [int]$User.level
+            avatar_asset_path = $null
+        }
+    }
+    if ($byjUsers["$userId"]['avatar_asset_path']) {
+        return
+    }
+    $photo = "$($User.photo)"
+    if ([string]::IsNullOrWhiteSpace($photo)) {
+        return
+    }
+    $extension = [IO.Path]::GetExtension($photo)
+    if ([string]::IsNullOrWhiteSpace($extension) -or $extension.Length -gt 8) {
+        $extension = '.webp'
+    }
+    $path = Save-SourceImage -Key $photo -FileName "byj_avatar$userId$extension" -BasePath 'headPortrait'
+    if ($path) {
+        $byjUsers["$userId"]['avatar_asset_path'] = $path
+    }
+}
+
 function Get-ToyReviews {
     param([Parameter(Mandatory = $true)][int]$ToyId)
 
     $request = [ordered]@{ toyId = $ToyId } | ConvertTo-Json -Compress
-    $raw = & curl.exe --http1.1 --retry 3 --retry-delay 1 --tlsv1.2 -sS `
-        -X POST $reviewEndpoint -H 'Content-Type: application/json' --data $request
-    if ($LASTEXITCODE -ne 0) {
-        throw "杯友酱评价请求失败：toyId=$ToyId"
-    }
+    $raw = Invoke-SourceJson -Url $reviewEndpoint -Body $request
     $response = $raw | ConvertFrom-Json
     if ($response.code -ne 200) {
         throw "杯友酱评价返回异常：toyId=$ToyId"
@@ -142,6 +189,10 @@ function Get-ToyReviews {
 
     $result = @()
     foreach ($review in @($response.data)) {
+        Save-UserAvatar -User $review.user
+        foreach ($reply in @($review.replies)) {
+            Save-UserAvatar -User (New-Object PSObject -Property @{ id = $reply.userId; username = $reply.username; level = $reply.level; photo = $reply.photo })
+        }
         $paths = @()
         $index = 0
         foreach ($imageKey in @($review.images)) {
@@ -207,6 +258,7 @@ $snapshot = [ordered]@{
     }
     views = $views
     reviews = $reviews
+    users = $byjUsers
 }
 
 $destination = [IO.Path]::GetFullPath($OutputPath)

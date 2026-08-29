@@ -126,6 +126,9 @@ class SearchToy {
     required this.score,
     required this.category,
     required this.segments,
+    this.coverUrl,
+    this.couponUrl,
+    this.sourceUrl,
   });
 
   final String id;
@@ -141,6 +144,9 @@ class SearchToy {
   final double score;
   final String category;
   final List<String> segments;
+  final String? coverUrl;
+  final String? couponUrl;
+  final String? sourceUrl;
 }
 
 class SearchPost {
@@ -689,6 +695,9 @@ class PlatformRepository {
                   .map((e) => '$e')
                   .where((e) => e.isNotEmpty)
                   .toList(),
+              coverUrl: _nullableString(value['cover_url']),
+              couponUrl: _nullableString(value['coupon_url']),
+              sourceUrl: _nullableString(value['source_url']),
             ),
           )
           .toList(),
@@ -1275,6 +1284,9 @@ class PlatformRepository {
 
   String _string(dynamic value, {String fallback = ''}) =>
       value is String && value.isNotEmpty ? value : fallback;
+
+  String? _nullableString(dynamic value) =>
+      value is String && value.isNotEmpty ? value : null;
 
   int _int(dynamic value, {int fallback = 0}) =>
       value is num ? value.toInt() : int.tryParse('$value') ?? fallback;

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../data/api/api_client.dart' show ApiException;
 import '../../data/api/ranking_repository.dart';
 import '../../domain/models.dart' show relativeTimeLabel;
 import '../../theme/app_motion.dart';
@@ -8,6 +9,10 @@ import '../../theme/app_theme.dart';
 import 'comment_skeleton.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
+
+/// 未登录（401）时引导登录，而不是按创建时的登录快照拦截写操作。
+bool _isUnauthorizedReply(Object error) =>
+    error is ApiException && error.statusCode == 401;
 
 /// 榜单评论楼中楼。
 ///
@@ -159,15 +164,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   Future<void> _sendReply() async {
     final content = inputController.text.trim();
     if (content.isEmpty || sending) return;
-    if (!widget.isAuthenticated) {
-      widget.onRequireAuth?.call();
-      return;
-    }
-    if (!widget.canComment) {
-      _showMessage(widget.blockedMessage);
-      return;
-    }
-
+    // 登录态可能在弹层创建后才建立，直接尝试服务器，401 时再引导登录。
     final target = replyTarget ?? widget.rootComment;
     setState(() => sending = true);
     try {
@@ -195,6 +192,10 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     } catch (error) {
       if (!mounted) return;
       setState(() => sending = false);
+      if (_isUnauthorizedReply(error)) {
+        widget.onRequireAuth?.call();
+        return;
+      }
       _showMessage('回复失败，请重试');
     }
   }
@@ -594,14 +595,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   }
 
   Future<void> _toggleLike(RankingToyComment reply) async {
-    if (!widget.isAuthenticated) {
-      widget.onRequireAuth?.call();
-      return;
-    }
-    if (!widget.canLike || widget.onToggleLike == null) {
-      _showMessage('当前身份暂不能点赞，请登录邮箱账号后重试');
-      return;
-    }
+    if (widget.onToggleLike == null) return;
     try {
       final active = !reply.isLiked;
       final count = await widget.onToggleLike!(reply, active);
@@ -612,8 +606,13 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
           replies[index] = reply.copyWith(likeCount: count, isLiked: active);
         });
       }
-    } catch (_) {
-      if (mounted) _showMessage('点赞失败，请重试');
+    } catch (error) {
+      if (!mounted) return;
+      if (_isUnauthorizedReply(error)) {
+        widget.onRequireAuth?.call();
+        return;
+      }
+      _showMessage('点赞失败，请重试');
     }
   }
 

@@ -56,6 +56,7 @@ type rankingToyComment struct {
 	AuthorID       string
 	Username       string
 	Nickname       string
+	AvatarURL      string
 	Level          int
 	Content        string
 	LikeCount      int64
@@ -116,6 +117,14 @@ const rankingToyCommentMediaSelect = `COALESCE((
 	WHERE links.comment_id = c.id AND media.status = 'ready' AND media.deleted_at IS NULL
 ), '[]'::json)`
 
+// rankingToyCommentAvatarSelect 取评论作者头像的对象键；与作者资料一起
+// JOIN，空键表示该作者未设置头像。
+const rankingToyCommentAvatarSelect = `COALESCE(am.object_key, '')`
+
+func scanRankingToyCommentAvatar(item *rankingToyComment, avatarKey string) {
+	item.AvatarURL = mediaURLOrEmpty(avatarKey)
+}
+
 func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -174,7 +183,35 @@ func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	response := map[string]any{"items": items}
+	if weeklyTop := s.loadWeeklyTopToy(r.Context(), viewerID, tabKey, categoryKey); weeklyTop != nil {
+		response["weekly_top"] = weeklyTop.response()
+	}
+	httpserver.WriteJSON(w, http.StatusOK, response)
+}
+
+// loadWeeklyTopToy 返回视图在源站的置顶主推位；综合热榜视图的键为
+// tab/category 双空，与快照保持一致。
+func (s *Server) loadWeeklyTopToy(ctx context.Context, viewerID, tabKey, categoryKey string) *rankingToyRecord {
+	var toyID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT t.id
+		FROM ranking_toy_rankings source_rank
+		JOIN ranking_toys t ON t.id = source_rank.toy_id
+		WHERE source_rank.source_provider = 'beiyoujiang'
+		  AND source_rank.tab_key = $1 AND source_rank.category_key = $2
+		  AND source_rank.is_weekly_top = true
+		  AND t.active = true
+		ORDER BY source_rank.rank ASC
+		LIMIT 1`, tabKey, categoryKey).Scan(&toyID)
+	if err != nil {
+		return nil
+	}
+	item, err := s.loadRankingToy(ctx, toyID, viewerID)
+	if err != nil {
+		return nil
+	}
+	return &item
 }
 
 func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID string) {
@@ -326,8 +363,8 @@ func (item rankingToyRecord) response() map[string]any {
 		"description":  item.Description,
 		"tags":         item.Tags,
 		"asset_key":    item.AssetKey,
-		"cover_url":    publicMediaURL(item.CoverObjectKey),
-		"hero_url":     publicMediaURL(item.HeroObjectKey),
+		"cover_url":    mediaURLOrEmpty(item.CoverObjectKey),
+		"hero_url":     mediaURLOrEmpty(item.HeroObjectKey),
 		"coupon_url":   item.CouponURL,
 		"source_url":   item.SourceURL,
 		"source":       item.SourceProvider,
@@ -342,6 +379,15 @@ func (item rankingToyRecord) response() map[string]any {
 			"rating": nullableInt(item.Rating),
 		},
 	}
+}
+
+// mediaURLOrEmpty 对未配置封面的商品返回空串，而不是把对象存储根地址
+// 当成图片地址下发给客户端。
+func mediaURLOrEmpty(objectKey string) string {
+	if strings.TrimSpace(objectKey) == "" {
+		return ""
+	}
+	return publicMediaURL(objectKey)
 }
 
 func (item rankingToyRecord) score() float64 {
@@ -430,10 +476,11 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
 	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
-	                 aus.rating, ` + rankingToyCommentMediaSelect + `
+	                 aus.rating, ` + rankingToyCommentMediaSelect + `, ` + rankingToyCommentAvatarSelect + `
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
+	          LEFT JOIN media_assets am ON am.id = up.avatar_media_id
 	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
 		          WHERE c.toy_id = $1 AND c.deleted_at IS NULL AND c.parent_id IS NULL`
 	args := []any{toyID, viewerID}
@@ -459,6 +506,7 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	for rows.Next() {
 		var item rankingToyComment
 		var mediaRaw []byte
+		var avatarKey string
 		if err := rows.Scan(
 			&item.ID,
 			&item.AuthorID,
@@ -475,9 +523,11 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 			&item.ReplyCount,
 			&item.AuthorRating,
 			&mediaRaw,
+			&avatarKey,
 		); err != nil {
 			return rankingToyCommentPage{}, err
 		}
+		scanRankingToyCommentAvatar(&item, avatarKey)
 		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 		if err != nil {
 			return rankingToyCommentPage{}, err
@@ -565,10 +615,11 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $3),
 	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
-	                 aus.rating, ` + rankingToyCommentMediaSelect + `
+	                 aus.rating, ` + rankingToyCommentMediaSelect + `, ` + rankingToyCommentAvatarSelect + `
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
+	          LEFT JOIN media_assets am ON am.id = up.avatar_media_id
 	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
 	          WHERE c.toy_id = $1 AND COALESCE(c.root_id, c.id) = $2 AND c.id <> $2 AND c.deleted_at IS NULL`
 	args := []any{toyID, rootID, viewerID}
@@ -589,15 +640,18 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 	for rows.Next() {
 		var item rankingToyComment
 		var mediaRaw []byte
+		var avatarKey string
 		if err := rows.Scan(
 			&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 			&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 			&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
 			&item.AuthorRating,
 			&mediaRaw,
+			&avatarKey,
 		); err != nil {
 			return rankingToyCommentPage{}, err
 		}
+		scanRankingToyCommentAvatar(&item, avatarKey)
 		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 		if err != nil {
 			return rankingToyCommentPage{}, err
@@ -651,6 +705,7 @@ func (item rankingToyComment) response() map[string]any {
 			"nickname":      item.Nickname,
 			"level":         item.Level,
 			"author_rating": nullableInt(item.AuthorRating),
+			"avatar_url":    item.AvatarURL,
 		},
 		"viewer_state": map[string]any{"has_liked": item.ViewerHasLiked},
 	}
@@ -957,25 +1012,28 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID string) (rankingToyComment, error) {
 	var item rankingToyComment
 	var mediaRaw []byte
+	var avatarKey string
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), c.content, c.like_count,
 		       EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
 		       c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
-		       aus.rating, `+rankingToyCommentMediaSelect+`
+		       aus.rating, `+rankingToyCommentMediaSelect+`, `+rankingToyCommentAvatarSelect+`
 		FROM ranking_toy_comments c
 		JOIN users u ON u.id = c.author_id
 		LEFT JOIN user_profiles up ON up.user_id = c.author_id
+		LEFT JOIN media_assets am ON am.id = up.avatar_media_id
 		LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
 		WHERE c.id = $1 AND c.deleted_at IS NULL`, commentID, viewerID).Scan(
 		&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 		&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 		&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
-		&item.AuthorRating, &mediaRaw,
+		&item.AuthorRating, &mediaRaw, &avatarKey,
 	)
 	if err != nil {
 		return item, err
 	}
+	scanRankingToyCommentAvatar(&item, avatarKey)
 	item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 	if err != nil {
 		return item, err

@@ -177,7 +177,8 @@ class _FailingListRankingRepository extends RankingRepository {
   _FailingListRankingRepository() : super(_FakeApiClient());
 
   @override
-  Future<List<RankingToy>> list() => Future.error(StateError('network down'));
+  Future<RankingList> list({String? tab, String? category}) =>
+      Future.error(StateError('network down'));
 }
 
 class _SortFailureApiClient extends _FakeApiClient {
@@ -227,7 +228,7 @@ void main() {
     });
 
     test('RankingRepository.list parses category and segments', () async {
-      final items = await rankingRepo.list();
+      final items = (await rankingRepo.list()).items;
       expect(items.length, 2);
       expect(items[0].id, 'toy-butter-2');
       expect(items[0].category, 'cup');

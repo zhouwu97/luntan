@@ -18,6 +18,10 @@ class RankingToy {
     this.category = 'cup',
     this.segments = const [],
     this.rating,
+    this.coverUrl,
+    this.heroUrl,
+    this.couponUrl,
+    this.sourceUrl,
   });
 
   final String id;
@@ -36,6 +40,33 @@ class RankingToy {
   final String category;
   final List<String> segments;
   final int? rating;
+  final String? coverUrl;
+  final String? heroUrl;
+  final String? couponUrl;
+  final String? sourceUrl;
+}
+
+/// 一次榜单拉取的结果：items 为当前视图的有序榜单，weeklyTop 为源站
+/// 置顶主推位（可能与榜单条目重复，也可能独立存在）。
+class RankingList {
+  const RankingList({required this.items, this.weeklyTop});
+
+  final List<RankingToy> items;
+  final RankingToy? weeklyTop;
+}
+
+class RankingToyCommentMedia {
+  const RankingToyCommentMedia({
+    required this.url,
+    this.width = 0,
+    this.height = 0,
+    this.mimeType = '',
+  });
+
+  final String url;
+  final int width;
+  final int height;
+  final String mimeType;
 }
 
 class RankingToyComment {
@@ -55,6 +86,8 @@ class RankingToyComment {
     this.replyToUserId,
     this.replyToUserNickname,
     this.replyCount = 0,
+    this.media = const [],
+    this.avatarUrl,
   });
 
   final String id;
@@ -72,6 +105,8 @@ class RankingToyComment {
   final String? replyToUserId;
   final String? replyToUserNickname;
   int replyCount;
+  final List<RankingToyCommentMedia> media;
+  final String? avatarUrl;
 
   RankingToyComment copyWith({
     String? id,
@@ -89,6 +124,8 @@ class RankingToyComment {
     String? replyToUserId,
     String? replyToUserNickname,
     int? replyCount,
+    List<RankingToyCommentMedia>? media,
+    String? avatarUrl,
   }) {
     return RankingToyComment(
       id: id ?? this.id,
@@ -106,6 +143,8 @@ class RankingToyComment {
       replyToUserId: replyToUserId ?? this.replyToUserId,
       replyToUserNickname: replyToUserNickname ?? this.replyToUserNickname,
       replyCount: replyCount ?? this.replyCount,
+      media: media ?? this.media,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
     );
   }
 }
@@ -167,14 +206,25 @@ class RankingRepository {
 
   final ApiClient _client;
 
-  Future<List<RankingToy>> list() async {
-    final payload = await _client.getJson('/api/v1/ranking/toys');
+  Future<RankingList> list({String? tab, String? category}) async {
+    final payload = await _client.getJson(
+      '/api/v1/ranking/toys',
+      queryParameters: {
+        if (tab != null && tab.isNotEmpty) 'tab': tab,
+        if (category != null && category.isNotEmpty) 'category': category,
+      },
+    );
     final raw = payload['items'];
-    if (raw is! List) return const [];
-    return raw
-        .whereType<Map>()
-        .map((item) => _toyFromJson(Map<String, dynamic>.from(item)))
-        .toList();
+    final items = raw is! List
+        ? const <RankingToy>[]
+        : raw
+              .whereType<Map>()
+              .map((item) => _toyFromJson(Map<String, dynamic>.from(item)))
+              .toList();
+    final weeklyTop = payload['weekly_top'] is Map
+        ? _toyFromJson(Map<String, dynamic>.from(payload['weekly_top'] as Map))
+        : null;
+    return RankingList(items: items, weeklyTop: weeklyTop);
   }
 
   Future<RankingToyDetail> detail(
@@ -335,6 +385,8 @@ RankingToy _toyFromJson(Map<String, dynamic> json) {
             .where((value) => value.isNotEmpty)
             .toList()
       : const <String>[];
+  String? nullableUrl(dynamic value) =>
+      value is String && value.isNotEmpty ? value : null;
   return RankingToy(
     id: _string(json['id']),
     rank: _int(json['rank']),
@@ -352,6 +404,10 @@ RankingToy _toyFromJson(Map<String, dynamic> json) {
     wanted: viewerState['wanted'] == true,
     owned: viewerState['owned'] == true,
     rating: _nullableInt(viewerState['rating']),
+    coverUrl: nullableUrl(json['cover_url']),
+    heroUrl: nullableUrl(json['hero_url']),
+    couponUrl: nullableUrl(json['coupon_url']),
+    sourceUrl: nullableUrl(json['source_url']),
   );
 }
 
@@ -359,6 +415,21 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
   final author = json['author'] is Map
       ? Map<String, dynamic>.from(json['author'] as Map)
       : const <String, dynamic>{};
+  final rawMedia = json['media'];
+  final media = rawMedia is List
+      ? rawMedia
+            .whereType<Map>()
+            .map(
+              (item) => RankingToyCommentMedia(
+                url: _string(Map<String, dynamic>.from(item)['url']),
+                width: _int(Map<String, dynamic>.from(item)['width']),
+                height: _int(Map<String, dynamic>.from(item)['height']),
+                mimeType: _string(Map<String, dynamic>.from(item)['mime_type']),
+              ),
+            )
+            .where((item) => item.url.isNotEmpty)
+            .toList()
+      : const <RankingToyCommentMedia>[];
   return RankingToyComment(
     id: _string(json['id']),
     authorId: _string(author['id']),
@@ -379,6 +450,8 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
     replyToUserId: _nullableString(json['reply_to_user_id']),
     replyToUserNickname: _replyToUserNickname(json['reply_to_user']),
     replyCount: _int(json['reply_count']),
+    media: media,
+    avatarUrl: _nullableString(author['avatar_url']),
   );
 }
 

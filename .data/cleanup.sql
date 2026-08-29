@@ -1,1 +1,0 @@
-DELETE FROM ranking_toy_comments WHERE author_id IN (SELECT id FROM users WHERE username LIKE usr_% AND id NOT LIKE byj-%);

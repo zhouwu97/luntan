@@ -250,8 +250,29 @@ class CommentsController extends ChangeNotifier {
     await _repository.deleteComment(comment.id);
     final index = items.indexWhere((item) => item.id == comment.id);
     if (index >= 0) {
-      items.removeAt(index);
-      total = (total - 1).clamp(0, 1 << 30);
+      if (comment.parentId == null && comment.replyCount > 0) {
+        // 服务端对有楼中楼的根评论保留墓碑占位，回复继续可见。
+        items[index] = Comment(
+          id: comment.id,
+          postId: comment.postId,
+          authorId: comment.authorId,
+          author: comment.author,
+          rootId: comment.rootId,
+          parentId: comment.parentId,
+          content: '',
+          likeCount: comment.likeCount,
+          dislikeCount: comment.dislikeCount,
+          floor: comment.floor,
+          replyPreview: comment.replyPreview,
+          replyCount: comment.replyCount,
+          publicationStatus: CommentPublicationStatus.deleted,
+          createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+        );
+      } else {
+        items.removeAt(index);
+        total = (total - 1).clamp(0, 1 << 30);
+      }
     } else if (comment.parentId != null) {
       final rootId = comment.rootId ?? comment.parentId;
       for (final item in items) {

@@ -90,7 +90,7 @@ const commentFloorColumns = `t.id, t.post_id, t.author_id, u.username, COALESCE(
 		       COALESCE(up.level, 1), COALESCE(ma.object_key, ''), t.content,
 		       t.like_count, t.dislike_count, t.reply_count, t.created_at, t.updated_at,
 		       t.floor_no, COALESCE(t.root_id, t.id), COALESCE(t.parent_id, ''),
-		       COALESCE(t.reply_to_user_id, ''), COALESCE(t.sticker_id, '')`
+		       COALESCE(t.reply_to_user_id, ''), COALESCE(t.sticker_id, ''), t.publication_status`
 
 const commentFloorJoins = `JOIN users u ON u.id = t.author_id
 		LEFT JOIN user_profiles up ON up.user_id = t.author_id
@@ -174,11 +174,18 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	baseQuery := fmt.Sprintf(`
 		FROM (
 			SELECT c.id, c.post_id, c.author_id, c.root_id, c.parent_id, c.reply_to_user_id, c.sticker_id,
-			       c.content, c.like_count, c.dislike_count, c.reply_count,
-			       c.created_at, c.updated_at, %s AS floor_no
+			       CASE WHEN c.publication_status = 'deleted' THEN '' ELSE c.content END AS content,
+			       c.like_count, c.dislike_count, c.reply_count,
+			       c.created_at, c.updated_at, c.publication_status, %s AS floor_no
 			FROM comments c
-			WHERE c.post_id = $1 AND c.deleted_at IS NULL
-			  AND c.publication_status = 'published' AND c.moderation_status = 'normal'
+			WHERE c.post_id = $1 AND (
+				    (c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal')
+				 OR (c.deleted_at IS NOT NULL AND c.publication_status = 'deleted' AND EXISTS (
+					SELECT 1 FROM comments cr
+					WHERE cr.root_id = c.id AND cr.id <> c.id
+					  AND cr.deleted_at IS NULL
+					  AND cr.publication_status = 'published' AND cr.moderation_status = 'normal'))
+			 )
 			  AND (c.root_id IS NULL OR c.root_id = c.id)
 		) t
 		%s
@@ -220,6 +227,17 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		return
 	}
 	attachReplyPreviews(items, previewReplies)
+
+	for i := range items {
+		if items[i].Publication == "deleted" {
+			items[i].Content = ""
+			items[i].StickerID = nil
+			items[i].Media = nil
+			items[i].Attachments = nil
+			items[i].ReplyToUser = nil
+			items[i].ReplyToUserID = nil
+		}
+	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"items":    items,
@@ -284,7 +302,7 @@ func (s *Server) collectCommentFloorRows(ctx context.Context, rows *sql.Rows, ha
 			&item.Author.Level, &avatarKey, &item.Content,
 			&item.LikeCount, &item.DislikeCount, &item.ReplyCount,
 			&item.CreatedAt, &item.UpdatedAt, &floorNo,
-			&rootID, &parentID, &replyTo, &stickerID,
+			&rootID, &parentID, &replyTo, &stickerID, &item.Publication,
 			&hasLiked, &hasDisliked,
 		); err != nil {
 			return nil, err
@@ -345,7 +363,9 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		return
 	}
 	var rootID string
-	err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(root_id, id) FROM comments WHERE id = $1 AND deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal'`, commentID).Scan(&rootID)
+	err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(root_id, id) FROM comments WHERE id = $1 AND (
+		(deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal')
+	 OR (deleted_at IS NOT NULL AND publication_status = 'deleted'))`, commentID).Scan(&rootID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrCommentNotFound)
 		return
@@ -386,7 +406,7 @@ func (s *Server) listCommentReplies(w http.ResponseWriter, r *http.Request, comm
 		FROM (
 			SELECT c.id, c.post_id, c.author_id, c.root_id, c.parent_id, c.reply_to_user_id, c.sticker_id,
 			       c.content, c.like_count, c.dislike_count, c.reply_count,
-			       c.created_at, c.updated_at, NULL::bigint AS floor_no
+			       c.created_at, c.updated_at, c.publication_status, NULL::bigint AS floor_no
 			FROM comments c
 			WHERE c.root_id = $1 AND c.id <> $1 AND c.deleted_at IS NULL
 			  AND c.publication_status = 'published' AND c.moderation_status = 'normal'

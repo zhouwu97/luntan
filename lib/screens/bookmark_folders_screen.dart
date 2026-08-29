@@ -136,6 +136,8 @@ class _BookmarkFoldersScreenState extends State<BookmarkFoldersScreen> {
                 itemCount:
                     folders.length +
                     (_loadingMore || _loadMoreError != null ? 1 : 0),
+                // 3.41.8 无 onReorderItem，待 SDK 统一后迁移
+                // ignore: deprecated_member_use
                 onReorder: (oldIndex, newIndex) =>
                     _reorderFolders(folders, oldIndex, newIndex),
                 itemBuilder: (context, index) {

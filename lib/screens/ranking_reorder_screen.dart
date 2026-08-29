@@ -161,6 +161,8 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
             child: ReorderableListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               itemCount: items.length,
+              // 3.41.8 无 onReorderItem，待 SDK 统一后迁移
+              // ignore: deprecated_member_use
               onReorder: _reorder,
               buildDefaultDragHandles: false,
               itemBuilder: (context, index) {

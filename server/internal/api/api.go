@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -174,6 +175,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		postID := strings.TrimPrefix(path, "/api/v1/admin/recommendations/")
 		s.removeHomeRecommendation(w, r, postID)
 		return
+	case r.Method == http.MethodPost && path == "/api/v1/ranking/submissions":
+		s.createRankingToySubmission(w, r)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/ranking/submissions":
+		s.listRankingToySubmissions(w, r)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/ranking/submissions/") && strings.HasSuffix(path, "/review"):
+		submissionID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/ranking/submissions/"), "/review")
+		s.reviewRankingToySubmission(w, r, submissionID)
+		return
+	case r.Method == http.MethodPut && path == "/api/v1/admin/ranking/reorder":
+		s.reorderRankingToys(w, r)
+		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admins/"):
 		s.getAdmin(w, r, strings.TrimPrefix(path, "/api/v1/admins/"))
 		return
@@ -282,6 +296,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/like"):
 		s.toggleCommentLike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/like"), false)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/dislike"):
+		s.toggleCommentDislike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/dislike"), true)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/comments/") && strings.HasSuffix(path, "/dislike"):
+		s.toggleCommentDislike(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/comments/"), "/dislike"), false)
 		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/comments/"):
 		s.deleteComment(w, r, strings.TrimPrefix(path, "/api/v1/comments/"))
@@ -836,5 +856,6 @@ func (s *Server) requireDatabase(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func writeInternalError(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("internal_error method=%s path=%s err=%v", r.Method, r.URL.Path, err)
 	httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusInternalServerError, Code: "INTERNAL_ERROR", Message: "服务暂时不可用", Details: nil})
 }

@@ -97,6 +97,7 @@ class GovernanceCenterScreen extends StatelessWidget {
     this.onOpenModeration,
     this.onOpenAppeals,
     this.onOpenRecommendations,
+    this.onOpenRankingSubmissions,
     this.onOpenAdmins,
     this.onOpenUsers,
     this.onOpenRisk,
@@ -107,6 +108,7 @@ class GovernanceCenterScreen extends StatelessWidget {
   final VoidCallback? onOpenModeration;
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenRecommendations;
+  final VoidCallback? onOpenRankingSubmissions;
   final VoidCallback? onOpenAdmins;
   final VoidCallback? onOpenUsers;
   final VoidCallback? onOpenRisk;
@@ -117,6 +119,7 @@ class GovernanceCenterScreen extends StatelessWidget {
       onOpenModeration != null ||
       onOpenAppeals != null ||
       onOpenRecommendations != null ||
+      onOpenRankingSubmissions != null ||
       onOpenAdmins != null ||
       onOpenUsers != null ||
       onOpenRisk != null ||
@@ -135,7 +138,8 @@ class GovernanceCenterScreen extends StatelessWidget {
     final hasModerationGroup =
         onOpenModeration != null ||
         onOpenAppeals != null ||
-        onOpenRecommendations != null;
+        onOpenRecommendations != null ||
+        onOpenRankingSubmissions != null;
     final hasUserGroup = onOpenUsers != null || onOpenAdmins != null;
     final hasSecurityGroup =
         onOpenRisk != null || onOpenIPRestrictions != null || onOpenLogs != null;
@@ -210,6 +214,14 @@ class GovernanceCenterScreen extends StatelessWidget {
                 title: '首页推荐',
                 subtitle: '管理首页人工精选与推荐排序',
                 onTap: onOpenRecommendations!,
+              ),
+            if (onOpenRankingSubmissions != null)
+              _entry(
+                icon: Icons.toys_outlined,
+                title: '玩具提交审核',
+                subtitle: '审核用户投稿的榜单玩具，通过后进入综合热榜',
+                badgeText: '超管',
+                onTap: onOpenRankingSubmissions!,
               ),
             const SizedBox(height: 12),
           ],

@@ -612,22 +612,89 @@ class MockCommentRepository
   @override
   Future<CommentPage> listComments({
     required String postId,
-    String? cursor,
     int limit = 20,
+    int offset = 0,
+    CommentSort? sort,
+    String? authorId,
   }) async {
-    final comments = [...(_store.commentsByPost[postId] ?? const <Comment>[])]
+    final all = [...(_store.commentsByPost[postId] ?? const <Comment>[])]
       ..sort((a, b) {
         final byTime = a.createdAt.compareTo(b.createdAt);
         return byTime == 0 ? a.id.compareTo(b.id) : byTime;
       });
-    final start = int.tryParse(cursor ?? '') ?? 0;
-    final end = (start + limit.clamp(1, 50)).clamp(0, comments.length).toInt();
+    final children = <String, List<Comment>>{};
+    for (final comment in all) {
+      final parentId = comment.parentId;
+      if (parentId == null || parentId.isEmpty) continue;
+      children.putIfAbsent(parentId, () => <Comment>[]).add(comment);
+    }
+    final floors = <Comment>[];
+    var floorNo = 0;
+    for (final comment in all) {
+      if (comment.parentId != null) continue;
+      if (authorId != null && comment.authorId != authorId) continue;
+      floorNo += 1;
+      final replies = children[comment.id] ?? const <Comment>[];
+      floors.add(
+        _copyComment(
+          comment,
+          floor: floorNo,
+          replyCount: replies.length,
+          replyPreview: replies.take(3).toList(),
+        ),
+      );
+    }
+    switch (sort ?? CommentSort.asc) {
+      case CommentSort.hot:
+        floors.sort((a, b) {
+          final byLikes = b.likeCount.compareTo(a.likeCount);
+          return byLikes == 0
+              ? (a.floor ?? 0).compareTo(b.floor ?? 0)
+              : byLikes;
+        });
+      case CommentSort.desc:
+        floors.sort((a, b) => (b.floor ?? 0).compareTo(a.floor ?? 0));
+      case CommentSort.asc:
+        break;
+    }
+    final safeOffset = offset.clamp(0, floors.length).toInt();
+    final end = (safeOffset + limit.clamp(1, 50)).clamp(0, floors.length).toInt();
     return CommentPage(
-      items: comments.sublist(start, end),
-      nextCursor: end < comments.length ? '$end' : null,
-      hasMore: end < comments.length,
+      items: floors.sublist(safeOffset, end),
+      hasMore: end < floors.length,
+      total: floors.length,
     );
   }
+
+  Comment _copyComment(
+    Comment comment, {
+    int? floor,
+    int? replyCount,
+    List<Comment> replyPreview = const [],
+  }) => Comment(
+    id: comment.id,
+    postId: comment.postId,
+    authorId: comment.authorId,
+    author: comment.author,
+    rootId: comment.rootId,
+    parentId: comment.parentId,
+    replyToUserId: comment.replyToUserId,
+    replyToUser: comment.replyToUser,
+    content: comment.content,
+    media: comment.media,
+    stickerId: comment.stickerId,
+    likeCount: comment.likeCount,
+    isLiked: comment.isLiked,
+    dislikeCount: comment.dislikeCount,
+    isDisliked: comment.isDisliked,
+    floor: floor,
+    replyPreview: replyPreview,
+    replyCount: replyCount ?? comment.replyCount,
+    publicationStatus: comment.publicationStatus,
+    moderationStatus: comment.moderationStatus,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+  );
 
   @override
   Future<CommentPage> listReplies({
@@ -758,6 +825,12 @@ class MockInteractionRepository implements InteractionRepository {
 
   @override
   Future<void> setCommentLike({
+    required String commentId,
+    required bool active,
+  }) async {}
+
+  @override
+  Future<void> setCommentDislike({
     required String commentId,
     required bool active,
   }) async {}

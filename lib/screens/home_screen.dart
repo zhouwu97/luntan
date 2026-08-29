@@ -7,6 +7,7 @@ import '../controllers/feed_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
+import '../data/api/publish_repository.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/api/store_repository.dart';
 import '../data/app_links.dart';
@@ -106,6 +107,8 @@ class HomeScreen extends StatefulWidget {
     this.postRepository,
     this.rankingRepository,
     this.storeRepository,
+    this.publishRepository,
+    this.canManageRanking = false,
     this.onRefreshCompleted,
   });
 
@@ -135,6 +138,8 @@ class HomeScreen extends StatefulWidget {
   final PostRepository? postRepository;
   final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
+  final PublishRepository? publishRepository;
+  final bool canManageRanking;
 
   /// 首页内容刷新后通知应用层同步未读数。
   final Future<void> Function()? onRefreshCompleted;
@@ -472,6 +477,8 @@ class _HomeScreenState extends State<HomeScreen> {
           postRepository: widget.postRepository,
           rankingRepository: widget.rankingRepository,
           storeRepository: widget.storeRepository,
+          publishRepository: widget.publishRepository,
+          canManageRanking: widget.canManageRanking,
           isAuthenticated: widget.isAuthenticated,
           canComment: widget.canComment,
           canLike: widget.canLike,

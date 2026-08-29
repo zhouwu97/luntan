@@ -5,6 +5,7 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
 import '../data/api/platform_repository.dart';
+import '../data/api/publish_repository.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
@@ -39,10 +40,12 @@ class FeaturePage extends StatefulWidget {
     this.postRepository,
     this.rankingRepository,
     this.storeRepository,
+    this.publishRepository,
     this.isAuthenticated = false,
     this.canComment = false,
     this.canLike = false,
     this.canVote = false,
+    this.canManageRanking = false,
     this.onRequireAuth,
   });
 
@@ -58,10 +61,12 @@ class FeaturePage extends StatefulWidget {
   final PostRepository? postRepository;
   final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
+  final PublishRepository? publishRepository;
   final bool isAuthenticated;
   final bool canComment;
   final bool canLike;
   final bool canVote;
+  final bool canManageRanking;
   final VoidCallback? onRequireAuth;
 
   @override
@@ -158,10 +163,13 @@ class _FeaturePageState extends State<FeaturePage> {
     if (type == FeatureType.ranking) {
       return RankingPage(
         repository: rankingRepository,
+        platformRepository: platformRepository,
+        publishRepository: widget.publishRepository,
         isAuthenticated: isAuthenticated,
         canComment: canComment,
         canLike: canLike,
         canVote: canVote,
+        canManageRanking: widget.canManageRanking,
         onRequireAuth: onRequireAuth,
       );
     }

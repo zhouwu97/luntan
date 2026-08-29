@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import 'ranking_toy_submission_screen.dart';
 
 class RankingSubmissionReviewScreen extends StatefulWidget {
@@ -208,10 +209,10 @@ class _RankingSubmissionReviewScreenState
                                     color: AppTheme.textSecondary,
                                   ),
                                 )
-                              : Image.network(
-                                  item.coverUrl!,
+                              : AppNetworkImage(
+                                  url: item.coverUrl,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => const ColoredBox(
+                                  errorBuilder: (_) => const ColoredBox(
                                     color: AppTheme.surfaceBlue,
                                     child: Icon(
                                       Icons.toys_outlined,

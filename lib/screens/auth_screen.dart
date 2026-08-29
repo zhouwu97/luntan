@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -49,7 +50,9 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _obscureConfirmPassword = true;
 
   Timer? countdownTimer;
-  int retryAfter = 0;
+  // 倒计时秒数用 ValueNotifier 承载，只有重发按钮监听它，
+  // 避免每秒重建整个登录页。
+  final ValueNotifier<int> retryAfterNotifier = ValueNotifier<int>(0);
   String? devCode;
   bool isRequestingCode = false;
   bool isSubmitting = false;
@@ -75,6 +78,7 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     countdownTimer?.cancel();
+    retryAfterNotifier.dispose();
     emailController.removeListener(_onFieldChanged);
     codeController.removeListener(_onFieldChanged);
     passwordController.removeListener(_onFieldChanged);
@@ -140,7 +144,7 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() {
         isRequestingCode = false;
         if (challenge != null) {
-          retryAfter = challenge.retryAfter;
+          retryAfterNotifier.value = challenge.retryAfter;
           devCode = challenge.devCode;
         }
       });
@@ -331,11 +335,11 @@ class _AuthScreenState extends State<AuthScreen> {
     countdownTimer?.cancel();
     countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      if (retryAfter <= 1) {
+      if (retryAfterNotifier.value <= 1) {
         countdownTimer?.cancel();
-        setState(() => retryAfter = 0);
+        retryAfterNotifier.value = 0;
       } else {
-        setState(() => retryAfter--);
+        retryAfterNotifier.value--;
       }
     });
   }
@@ -971,28 +975,11 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
             suffixIcon: Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: TextButton(
-                onPressed: busy || retryAfter > 0 ? null : requestCode,
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-                child: isRequestingCode
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(
-                        retryAfter > 0 ? '${retryAfter}s 后重发' : '获取验证码',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: retryAfter > 0
-                              ? AppTheme.textSecondary
-                              : AppTheme.primary,
-                        ),
-                      ),
+              child: _ResendCodeButton(
+                retryAfter: retryAfterNotifier,
+                busy: busy,
+                requesting: isRequestingCode,
+                onRequest: requestCode,
               ),
             ),
           ),
@@ -1482,4 +1469,51 @@ class _SetPasswordDialogState extends State<_SetPasswordDialog> {
       ),
     ],
   );
+}
+
+/// 验证码重发按钮：倒计时秒数独立监听，避免每秒 setState 重建整个登录页。
+class _ResendCodeButton extends StatelessWidget {
+  const _ResendCodeButton({
+    required this.retryAfter,
+    required this.busy,
+    required this.requesting,
+    required this.onRequest,
+  });
+
+  final ValueListenable<int> retryAfter;
+  final bool busy;
+  final bool requesting;
+  final VoidCallback onRequest;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: retryAfter,
+      builder: (context, seconds, _) {
+        return TextButton(
+          onPressed: busy || seconds > 0 ? null : onRequest,
+          style: TextButton.styleFrom(
+            foregroundColor: AppTheme.primary,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+          ),
+          child: requesting
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(
+                  seconds > 0 ? '${seconds}s 后重发' : '获取验证码',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: seconds > 0
+                        ? AppTheme.textSecondary
+                        : AppTheme.primary,
+                  ),
+                ),
+        );
+      },
+    );
+  }
 }

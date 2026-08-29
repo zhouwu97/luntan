@@ -309,4 +309,20 @@ void main() {
 
     expect(platform.removeCalled, isTrue);
   });
+
+  testWidgets('窄屏下顶栏搜索框提示文字截断而不溢出', (tester) async {
+    tester.view.physicalSize = const Size(280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final repository = _PagedHomeFeed([
+      FeedPage(items: [_post('1')], hasMore: false),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(_homeFor(controller, repository));
+    await tester.pumpAndSettle();
+
+    // 溢出会直接让测试报 RenderFlex 异常；这里再确认提示文字仍在。
+    expect(find.text('搜索帖子、用户、板块、榜单'), findsOneWidget);
+  });
 }

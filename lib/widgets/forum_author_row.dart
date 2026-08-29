@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
+import 'app_network_image.dart';
 
 class ForumAuthorRow extends StatelessWidget {
   const ForumAuthorRow({
@@ -150,19 +151,13 @@ class ForumAuthorRow extends StatelessWidget {
       child: SizedBox(
         width: diameter,
         height: diameter,
-        child: Image.network(
-          avatarUrl,
+        child: AppNetworkImage(
+          url: avatarUrl,
           fit: BoxFit.cover,
           width: diameter,
           height: diameter,
-          cacheWidth: (diameter * MediaQuery.devicePixelRatioOf(context)).round(),
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded || frame != null) {
-              return child;
-            }
-            return placeholder;
-          },
-          errorBuilder: (context, error, stackTrace) => placeholder,
+          placeholder: (_) => placeholder,
+          errorBuilder: (_) => placeholder,
         ),
       ),
     );

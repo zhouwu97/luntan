@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/models.dart';
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
+import '../app_network_image.dart';
 import 'comment_reply_preview.dart';
 import 'emoji/sticker_catalog.dart';
 
@@ -101,10 +102,10 @@ class _CommentItemState extends State<CommentItem>
           ),
           body: Center(
             child: InteractiveViewer(
-              child: Image.network(
-                imageUrl,
+              child: AppNetworkImage(
+                url: imageUrl,
                 fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => const Icon(
+                errorBuilder: (_) => const Icon(
                   Icons.broken_image_outlined,
                   color: Colors.white54,
                   size: 64,
@@ -281,10 +282,10 @@ class _CommentItemState extends State<CommentItem>
                           maxHeight: 200,
                         ),
                         color: const Color(0xFFEAF0F6),
-                        child: Image.network(
-                          imageUrl,
+                        child: AppNetworkImage(
+                          url: imageUrl,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const Padding(
+                          errorBuilder: (_) => const Padding(
                             padding: EdgeInsets.all(16),
                             child: Icon(
                               Icons.broken_image_outlined,
@@ -520,20 +521,13 @@ class _CommentItemState extends State<CommentItem>
       child: SizedBox(
         width: diameter,
         height: diameter,
-        child: Image.network(
-          avatarUrl,
+        child: AppNetworkImage(
+          url: avatarUrl,
           fit: BoxFit.cover,
           width: diameter,
           height: diameter,
-          cacheWidth: (diameter * MediaQuery.devicePixelRatioOf(context))
-              .round(),
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded || frame != null) {
-              return child;
-            }
-            return placeholder;
-          },
-          errorBuilder: (context, error, stackTrace) => placeholder,
+          placeholder: (_) => placeholder,
+          errorBuilder: (_) => placeholder,
         ),
       ),
     );

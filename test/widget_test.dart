@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -219,10 +220,12 @@ void main() {
 
     final image = tester.widget<Image>(find.byType(Image));
     expect(image.fit, BoxFit.cover);
-    // 解码只约束目标宽度，避免把容器的横向比例错误传给图片解码器。
+    // 解码尺寸按布局约束计算，宽高比与实际显示区域一致，cover 裁切下不会被压扁。
     final provider = image.image;
     expect(provider, isA<ResizeImage>());
-    expect((provider as ResizeImage).height, isNull);
+    final resize = provider as ResizeImage;
+    final size = tester.getSize(find.byType(Image));
+    expect(resize.width! / resize.height!, closeTo(size.width / size.height, 0.02));
   });
 
   testWidgets('帖子详情媒体预览允许竖图使用更高的 detail 区域', (tester) async {
@@ -317,7 +320,7 @@ void main() {
     final detailProvider =
         tester.widget<Image>(find.byType(Image)).image as ResizeImage;
     expect(
-      (detailProvider.imageProvider as NetworkImage).url,
+      (detailProvider.imageProvider as CachedNetworkImageProvider).url,
       'https://example.com/detail.jpg',
     );
     await tester.tap(find.text('查看原图'));
@@ -327,7 +330,7 @@ void main() {
     final originalProvider =
         tester.widget<Image>(find.byType(Image)).image as ResizeImage;
     expect(
-      (originalProvider.imageProvider as NetworkImage).url,
+      (originalProvider.imageProvider as CachedNetworkImageProvider).url,
       'https://example.com/original.jpg',
     );
   });

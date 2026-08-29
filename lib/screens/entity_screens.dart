@@ -11,13 +11,12 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/forum_post_card.dart';
 import 'profile_screen.dart';
 
 bool _hasUsableAvatar(String? value) {
-  final url = value?.trim().toLowerCase();
-  return url != null &&
-      (url.startsWith('https://') || url.startsWith('http://'));
+  return resolveMediaUrl(value) != null;
 }
 
 /// 个人主页优先展示用户上传的背景，未上传时使用项目内置的默认背景。
@@ -29,17 +28,17 @@ class _ProfileHeroBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (_hasUsableAvatar(imageUrl)) {
-      return Image.network(
-        imageUrl!,
+      return AppNetworkImage(
+        url: imageUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => Image.asset(
-          'assets/profile_default_background.png',
+        errorBuilder: (_) => Image.asset(
+          'assets/profile_default_background.jpg',
           fit: BoxFit.cover,
         ),
       );
     }
     return Image.asset(
-      'assets/profile_default_background.png',
+      'assets/profile_default_background.jpg',
       fit: BoxFit.cover,
     );
   }
@@ -562,8 +561,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               ),
                               child: ClipOval(
                                 child: _hasUsableAvatar(avatarUrl)
-                                    ? Image.network(
-                                        avatarUrl!,
+                                    ? AppNetworkImage(
+                                        url: avatarUrl,
                                         fit: BoxFit.cover,
                                       )
                                     : Center(
@@ -1889,7 +1888,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               onLike: () => widget.onToggleLike(post),
               onBookmark: () => widget.onToggleBookmark(post),
               onMenu: () => widget.onFeedback('更多操作请在帖子详情中进行'),
-              interactionListenable: widget.interactionController,
+              interactionListenable:
+                  widget.interactionController.interactionsFor(post.id),
             );
           }, childCount: feed.items.length),
         ),

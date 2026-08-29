@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
+import '../app_network_image.dart';
 
 /// 搜索高亮文本构建工具
 List<InlineSpan> buildHighlightedSpans({
@@ -120,6 +121,10 @@ class SearchPostRow extends StatelessWidget {
       height: 1.5,
     );
 
+    final authorAvatarImage = appNetworkImageProvider(
+      authorAvatar,
+      maxWidth: 56,
+    );
     final subMetaParts = <String>[];
     if (communityName.isNotEmpty) subMetaParts.add(communityName);
     if (timeLabel.isNotEmpty) subMetaParts.add(timeLabel);
@@ -139,10 +144,8 @@ class SearchPostRow extends StatelessWidget {
                 CircleAvatar(
                   radius: 14,
                   backgroundColor: AppTheme.surfaceBlue,
-                  backgroundImage: authorAvatar != null
-                      ? NetworkImage(authorAvatar!)
-                      : null,
-                  child: authorAvatar == null
+                  backgroundImage: authorAvatarImage,
+                  child: authorAvatarImage == null
                       ? Text(
                           authorName.isNotEmpty
                               ? authorName.characters.first

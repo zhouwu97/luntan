@@ -270,7 +270,8 @@ class _FeaturePageState extends State<FeaturePage> {
     onBookmark: () => onBookmark?.call(post),
     // 专题页暂不提供帖子菜单，不渲染一个没有行为的省略号入口。
     onMenu: null,
-    interactionListenable: widget.interactionController,
+    interactionListenable:
+        widget.interactionController.interactionsFor(post.id),
   );
 
   String _description(FeatureType type) => switch (type) {

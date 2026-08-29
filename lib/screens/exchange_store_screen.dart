@@ -55,6 +55,15 @@ class ExchangeStoreScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 5),
                         const Text(
+                          '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
+                          style: TextStyle(
+                            color: Color(0xE6FFFFFF),
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        const Text(
                           '积分只用于社区周边，不接现金、充值、提现和红包。',
                           style: TextStyle(
                             color: Color(0xE6FFFFFF),
@@ -175,13 +184,27 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                     gradient: AppTheme.primaryGradient,
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: Text(
-                    '论坛周边兑换    ${balance.data ?? '…'} 积分',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '论坛周边兑换    ${balance.data ?? '…'} 积分',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
+                        style: TextStyle(
+                          color: Color(0xE6FFFFFF),
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

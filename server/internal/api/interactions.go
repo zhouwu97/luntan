@@ -61,6 +61,11 @@ func (s *Server) togglePostLike(w http.ResponseWriter, r *http.Request, postID s
 				writeInternalError(w, r, err)
 				return
 			}
+			// 点赞奖励发给点赞者本人；同一用户对同一帖子重复点赞只按事件幂等记一次分。
+			if err := awardPointsTx(r.Context(), tx, user.ID, "like", "点赞帖子", "post:like:"+postID+":"+user.ID, s.pointRewards.LikeCreate, s.pointRewards.DailyEarnLimit); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -176,6 +181,12 @@ func (s *Server) toggleCommentLike(w http.ResponseWriter, r *http.Request, comme
 		if _, err := tx.ExecContext(r.Context(), `UPDATE comments SET like_count = GREATEST(like_count `+operator+`, 0), updated_at = now() WHERE id = $1`, commentID); err != nil {
 			writeInternalError(w, r, err)
 			return
+		}
+		if active {
+			if err := awardPointsTx(r.Context(), tx, user.ID, "like", "点赞评论", "comment:like:"+commentID+":"+user.ID, s.pointRewards.LikeCreate, s.pointRewards.DailyEarnLimit); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {

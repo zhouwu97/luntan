@@ -8,31 +8,55 @@ import (
 	"strings"
 )
 
-// PointRewardRules 将奖励数值集中在一个配置对象中。默认值保持为 0，
-// 等产品确认规则后只需通过环境变量调整，不把业务数字散落在发帖/评论事务里。
+// PointRewardRules 集中管理积分奖励与每日获取上限。
+// 产品已确认：发帖 +5、点赞 +1、评论 +1，每日最多获得 20 积分；默认值即上线值，
+// 环境变量 POINT_REWARD_* 仍可覆盖（显式设 0 表示关闭该项）。
 type PointRewardRules struct {
-	PostCreate    int64
-	CommentCreate int64
+	PostCreate     int64
+	CommentCreate  int64
+	LikeCreate     int64
+	DailyEarnLimit int64
+}
+
+func defaultPointRewardRules() PointRewardRules {
+	return PointRewardRules{
+		PostCreate:     5,
+		CommentCreate:  1,
+		LikeCreate:     1,
+		DailyEarnLimit: 20,
+	}
 }
 
 func pointRewardRulesFromEnv() PointRewardRules {
-	return PointRewardRules{
-		PostCreate:    envInt64("POINT_REWARD_POST_CREATE"),
-		CommentCreate: envInt64("POINT_REWARD_COMMENT_CREATE"),
+	rules := defaultPointRewardRules()
+	if value, ok := envInt64("POINT_REWARD_POST_CREATE"); ok {
+		rules.PostCreate = value
 	}
+	if value, ok := envInt64("POINT_REWARD_COMMENT_CREATE"); ok {
+		rules.CommentCreate = value
+	}
+	if value, ok := envInt64("POINT_REWARD_LIKE_CREATE"); ok {
+		rules.LikeCreate = value
+	}
+	if value, ok := envInt64("POINT_REWARD_DAILY_LIMIT"); ok {
+		rules.DailyEarnLimit = value
+	}
+	return rules
 }
 
-func envInt64(key string) int64 {
+func envInt64(key string) (int64, bool) {
 	value, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(key)), 10, 64)
 	if err != nil || value < 0 {
-		return 0
+		return 0, false
 	}
-	return value
+	return value, true
 }
 
 // awardPointsTx 在调用方事务内完成余额更新与流水落库。
 // idempotencyKey 必须由业务事件 ID 构成，弱网重试只会命中已有流水而不会重复加分。
-func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idempotencyKey string, delta int64) error {
+// dailyEarnLimit 为每日正向奖励上限（0 表示不限制）；兑换扣分是负向流水，不占用额度，
+// 当日剩余额度不足时按剩余额度发放。
+func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idempotencyKey string, delta int64, dailyEarnLimit int64) error {
 	if delta == 0 {
 		return nil
 	}
@@ -49,6 +73,20 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 	}
 	if err != sql.ErrNoRows {
 		return err
+	}
+	if dailyEarnLimit > 0 && delta > 0 {
+		var earnedToday int64
+		// 自然日按北京时间计算，与用户感知的“一天”一致；
+		// 双重 AT TIME ZONE 把上海零点正确还原成 timestamptz，不受会话时区影响。
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID).Scan(&earnedToday); err != nil {
+			return err
+		}
+		if earnedToday >= dailyEarnLimit {
+			return nil
+		}
+		if remaining := dailyEarnLimit - earnedToday; remaining < delta {
+			delta = remaining
+		}
 	}
 	newBalance := balance + delta
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`, newBalance, userID); err != nil {

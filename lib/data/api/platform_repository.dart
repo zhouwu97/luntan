@@ -592,6 +592,38 @@ class HomeRecommendation {
   final String communityName;
 }
 
+class RankingToySubmission {
+  const RankingToySubmission({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.merchant,
+    required this.description,
+    required this.status,
+    required this.reviewNote,
+    required this.createdAt,
+    required this.submitterId,
+    required this.submitterNickname,
+    this.releaseYear,
+    this.coverUrl,
+    this.toyId,
+  });
+
+  final String id;
+  final String name;
+  final String category;
+  final String merchant;
+  final int? releaseYear;
+  final String description;
+  final String? coverUrl;
+  final String status;
+  final String reviewNote;
+  final String? toyId;
+  final DateTime createdAt;
+  final String submitterId;
+  final String submitterNickname;
+}
+
 class PlatformRepository {
   PlatformRepository(this._client);
 
@@ -818,6 +850,63 @@ class PlatformRepository {
             {'post_id': postIds[index], 'position': index},
         ],
       },
+    );
+  }
+
+  Future<List<RankingToySubmission>> listRankingSubmissions({
+    String status = 'pending',
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/admin/ranking/submissions',
+      queryParameters: {'status': status},
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <RankingToySubmission>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      final submitter = value['submitter'] is Map
+          ? Map<String, dynamic>.from(value['submitter'] as Map)
+          : const <String, dynamic>{};
+      final releaseYear = value['release_year'];
+      return RankingToySubmission(
+        id: _string(value['id']),
+        name: _string(value['name']),
+        category: _string(value['category']),
+        merchant: _string(value['merchant']),
+        releaseYear: releaseYear is num ? releaseYear.toInt() : null,
+        description: _string(value['description']),
+        coverUrl: _nullableString(value['cover_url']),
+        status: _string(value['status'], fallback: 'pending'),
+        reviewNote: _string(value['review_note']),
+        toyId: _nullableString(value['toy_id']),
+        createdAt: _date(value['created_at']),
+        submitterId: _string(submitter['id']),
+        submitterNickname: _string(
+          submitter['nickname'],
+          fallback: _string(submitter['username']),
+        ),
+      );
+    }).toList();
+  }
+
+  Future<void> reviewRankingSubmission({
+    required String id,
+    required bool approve,
+    String? note,
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/ranking/submissions/$id/review',
+      body: {
+        'action': approve ? 'approve' : 'reject',
+        'note': ?note,
+      },
+    );
+  }
+
+  Future<void> reorderRankingToys(List<String> toyIds) async {
+    await _client.putJson(
+      '/api/v1/admin/ranking/reorder',
+      body: {'toy_ids': toyIds},
     );
   }
 

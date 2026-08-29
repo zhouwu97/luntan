@@ -33,6 +33,7 @@ import 'screens/moderation_notice_detail_screen.dart';
 import 'screens/moderation_appeals_screen.dart';
 import 'screens/my_appeals_screen.dart';
 import 'screens/governance_screens.dart';
+import 'screens/ranking_submission_review_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
@@ -619,6 +620,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               ? openModerationAppeals
               : null,
           onOpenRecommendations: canModerate ? openHomeRecommendations : null,
+          onOpenRankingSubmissions:
+              apiMode && canManageAdmins ? openRankingSubmissionReview : null,
           onOpenAdmins: canManageAdmins ? openAdmins : null,
           onOpenUsers: canManageUsers ? openUserManagement : null,
           onOpenRisk: canViewAdminLogs ? openRiskCenter : null,
@@ -642,6 +645,23 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           repository: platform,
           onFeedback: _showQuickFeedback,
           onOpenPostId: openPostById,
+        ),
+      ),
+    );
+  }
+
+  void openRankingSubmissionReview() {
+    if (apiMode && !canManageAdmins) {
+      _showQuickFeedback('只有超级管理员可以审核玩具投稿');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => RankingSubmissionReviewScreen(
+          platformRepository: platform,
+          onFeedback: _showQuickFeedback,
         ),
       ),
     );
@@ -960,6 +980,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
                 ? repositories.ranking
                 : null,
             storeRepository: repositories.isApiMode ? repositories.store : null,
+            publishRepository: repositories.publish,
+            canManageRanking: apiMode && canManageAdmins,
             canComment: canComment,
             canLike: canLike,
             canVote: canVote,

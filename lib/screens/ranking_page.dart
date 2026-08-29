@@ -3,12 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/api/api_client.dart';
+import '../data/api/platform_repository.dart';
+import '../data/api/publish_repository.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
 import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
 import '../widgets/comments/comment_skeleton.dart';
+import 'ranking_reorder_screen.dart';
+import 'ranking_toy_submission_screen.dart';
 
 /// `rankingList` 网页上的一条玩具排行数据。
 class RankingItem {
@@ -112,7 +116,7 @@ class RankingItem {
 
 /// 源站的“想冲”人数文案：千位以上缩写为 k，与源站展示一致。
 String rankingWantCountText(int count) {
-  if (count < 1000) return '${count}人想冲';
+  if (count < 1000) return '$count人想冲';
   final k = count / 1000;
   final text = k == k.roundToDouble()
       ? k.toStringAsFixed(0)
@@ -424,19 +428,25 @@ class RankingPage extends StatefulWidget {
   const RankingPage({
     super.key,
     this.repository,
+    this.platformRepository,
+    this.publishRepository,
     this.isAuthenticated = false,
     this.canComment = false,
     this.canLike = false,
     this.canVote = false,
+    this.canManageRanking = false,
     this.onRequireAuth,
     this.cache,
   });
 
   final RankingRepository? repository;
+  final PlatformRepository? platformRepository;
+  final PublishRepository? publishRepository;
   final bool isAuthenticated;
   final bool canComment;
   final bool canLike;
   final bool canVote;
+  final bool canManageRanking;
   final VoidCallback? onRequireAuth;
   final RankingCacheStore? cache;
 
@@ -666,6 +676,38 @@ class _RankingPageState extends State<RankingPage> {
     );
   }
 
+  void _openSubmissionForm() {
+    if (!widget.isAuthenticated) {
+      widget.onRequireAuth?.call();
+      return;
+    }
+    Navigator.of(context)
+        .push<bool>(
+          MaterialPageRoute<bool>(
+            builder: (_) => RankingToySubmissionScreen(
+              rankingRepository: widget.repository!,
+              publishRepository: widget.publishRepository!,
+            ),
+          ),
+        )
+        .then((submitted) {
+          if (submitted == true) {
+            _loadRemoteRanking();
+          }
+        });
+  }
+
+  void _openReorderScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RankingReorderScreen(
+          rankingRepository: widget.repository!,
+          platformRepository: widget.platformRepository!,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: const Color(0xFFF2F1F6),
@@ -681,6 +723,35 @@ class _RankingPageState extends State<RankingPage> {
               _searchController.clear();
               setState(() => _searchQuery = '');
             },
+            actions: [
+              if (widget.repository != null &&
+                  widget.publishRepository != null)
+                Tooltip(
+                  message: '投稿新玩具',
+                  child: IconButton(
+                    onPressed: _openSubmissionForm,
+                    icon: const Icon(
+                      Icons.add_circle_outline,
+                      size: 24,
+                      color: Color(0xFFF25B91),
+                    ),
+                  ),
+                ),
+              if (widget.canManageRanking &&
+                  widget.repository != null &&
+                  widget.platformRepository != null)
+                Tooltip(
+                  message: '调整榜单名次',
+                  child: IconButton(
+                    onPressed: _openReorderScreen,
+                    icon: const Icon(
+                      Icons.swap_vert,
+                      size: 22,
+                      color: Color(0xFF263238),
+                    ),
+                  ),
+                ),
+            ],
           ),
           Expanded(child: _rankingScrollView()),
         ],
@@ -880,12 +951,14 @@ class _RankingHeader extends StatelessWidget {
     required this.searchController,
     required this.onSearchChanged,
     required this.onClearSearch,
+    this.actions = const <Widget>[],
   });
 
   final VoidCallback onBack;
   final TextEditingController searchController;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onClearSearch;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -960,6 +1033,7 @@ class _RankingHeader extends StatelessWidget {
               ),
             ),
           ),
+          ...actions,
         ],
       ),
     ),

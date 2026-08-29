@@ -206,6 +206,27 @@ class RankingRepository {
 
   final ApiClient _client;
 
+  Future<void> submitToy({
+    required String name,
+    required String category,
+    String? merchant,
+    int? releaseYear,
+    String? description,
+    String? coverMediaId,
+  }) async {
+    await _client.postJson(
+      '/api/v1/ranking/submissions',
+      body: {
+        'name': name,
+        'category': category,
+        'merchant': ?merchant,
+        'release_year': ?releaseYear,
+        'description': ?description,
+        'cover_media_id': ?coverMediaId,
+      },
+    );
+  }
+
   Future<RankingList> list({String? tab, String? category}) async {
     final payload = await _client.getJson(
       '/api/v1/ranking/toys',

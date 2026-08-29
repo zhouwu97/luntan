@@ -25,6 +25,7 @@
 - 治理：账号处罚详情、申诉、管理员列表 / 详情 / 角色范围管理、风控中心、IP 限制、不可篡改审计日志
 - 兑换商店：商品、积分余额、事务兑换单
 - 投票：选项、服务端投票和票数
+- 排行榜：榜单浏览、评分与「想冲」、商品评价树（含配图）、玩具投稿与超管审核、榜单重排
 - 导航：`首页` / `+` / `我的`
 
 首页快捷入口保留产品名称：`排行榜`、`热门帖子`、`穿搭分享`、`活动`、`玩法分享`。`玩法分享`同时作为发布类型和内容入口。
@@ -109,18 +110,25 @@ flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:8080
 
 Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为电脑在局域网中的 IP，并确认服务监听和防火墙规则允许访问。
 
-### 远端导入数据与 QA 环境
+### 远端 QA 环境与导入数据
 
-QA 服务器通过 `http://101.42.27.44/api/v1` 提供客户端 API。完成下方导入后，客户端运行时只访问本项目 API，帖子、商品、评论与图片均由本项目数据库及媒体存储提供；不在浏览器中直连源站。导入作者使用稳定的脱敏本地账号。图片通过由媒体存储生成的 URL 读取。该 HTTP 地址只用于 QA，API、图片媒体和 Web 正式发布必须统一使用 HTTPS。启动示例：
+QA 服务器 `101.42.27.44` 运行完整后端与 Web 客户端，用于联调与验收：
 
-QA 若没有接入外部对象存储，可设置 `MEDIA_STORAGE_DIR` 和 `OBJECT_STORAGE_SIGNING_SECRET` 启用受 HMAC 签名保护的本地媒体目录，并将 `OBJECT_STORAGE_PUBLIC_BASE_URL` 指向该目录对应的静态访问路径；该兜底仅用于开发/QA，生产环境仍必须配置外部对象存储。
+- API：`http://101.42.27.44/api/v1`，健康检查 `/ready`
+- Web：`http://101.42.27.44/forum/`
+- 媒体：源站图片已全部下载到服务器本地媒体目录，由 nginx 通过 `/imported-media/` 提供，URL 保存在 `media_assets` 表
+- 数据：帖子、评论、榜单商品与评价均来自导入快照，作者为稳定的脱敏本地账号，客户端运行时不直连源站
+
+QA 数据现状（2026-08-29）：90 个榜单商品、1245 条商品评价；310 篇帖子、2284 条评论，全部位于正式板块（酱紫社区 284 / 大型拆箱 14 / 杂鱼日常 12）。QA 为 HTTP 明文环境，仅限联调；生产构建必须声明 `APP_ENV=production` 并使用 HTTPS 地址（客户端会拒绝 HTTP API），由 HTTPS 反向代理统一承载 API、媒体和 Web，不要复用 QA 地址。
+
+连接 QA 启动示例：
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://101.42.27.44
 flutter build apk --debug --dart-define=API_BASE_URL=http://101.42.27.44
 ```
 
-生产构建必须同时声明 `APP_ENV=production`；客户端会拒绝 HTTP API 地址：
+生产构建示例：
 
 ```bash
 flutter build web --release --base-href /forum/ \
@@ -131,38 +139,79 @@ flutter build apk --release \
   --dart-define=API_BASE_URL=https://forum.example.com
 ```
 
-正式域名还需要由 HTTPS 反向代理统一承载 API、媒体和 Web，并配置证书续期；不要在生产构建中复用 QA 的 `http://101.42.27.44` 地址。
+QA 服务端通过 `/opt/luntan-qa/.env` 注入配置，关键项：`DATABASE_URL`、`APP_ENV=qa`、`MEDIA_STORAGE_DIR`（本地媒体目录兜底，dev/QA 可用）、`OBJECT_STORAGE_PUBLIC_BASE_URL`（指向 nginx 映射的 `/imported-media/` 公开路径）、`OBJECT_STORAGE_SIGNING_SECRET`；生产环境必须使用外部对象存储。环境矩阵见 [`docs/deployment/environments.md`](docs/deployment/environments.md)。
 
-如需重新同步导入快照，必须在部署服务器上执行以下导入流程，不能只把前端
-快照打进 APK/Web：
+#### 重新同步导入快照
+
+导入必须在部署服务器上执行，不能只把前端快照打进 APK/Web：
 
 ```bash
-# QA 的本地媒体存储示例；生产环境请改为已配置的对象存储。
-export MEDIA_STORAGE_DIR=/var/www/luntan/imported-media
-export OBJECT_STORAGE_PUBLIC_BASE_URL=https://<你的域名>/imported-media
+# 与服务进程一致的环境；以下为 QA 示例，生产环境改为已配置的对象存储。
+export DATABASE_URL="postgres://.../luntan_qa?sslmode=disable"
+export MEDIA_STORAGE_DIR=/opt/luntan-qa/imported-media/user-media
 
-# 1) 帖子、帖子评论与帖子配图：写 posts/comments/media_assets/post_media。
-python3 scripts/import_placeholder_content.py \
-  --output-dir /var/lib/luntan/import/posts \
-  --media-dir /var/www/luntan/imported-media \
-  --public-media-base "$OBJECT_STORAGE_PUBLIC_BASE_URL" \
-  --page-size 100
-
-# 2) 先下载杯友酱公开榜单、商品评价和配图到本地快照。
+# 1) 下载杯友酱公开榜单、商品评价和配图到本地快照。
 pwsh scripts/sync_beiyoujiang_rankings.ps1
 
-# 3) 排行榜商品、商品评价、评价配图与各筛选视图名次：写 ranking_* 与 media_assets。
-# 在 server 目录执行；媒体写入服务端已配置的对象存储，或 QA 的 MEDIA_STORAGE_DIR。
+# 2) 导入榜单商品、评价、配图与各筛选视图名次：写 ranking_* 与 media_assets。
 cd server
 go run ./cmd/ranking-import \
   -snapshot ../assets/ranking/beiyoujiang_snapshot.json \
   -assets-root ..
+cd ..
+
+# 3) 导入帖子、帖子评论与帖子配图：写 posts/comments/media_assets/post_media。
+# --media-dir 必须与 nginx 映射到 /imported-media/ 的目录一致；
+# --public-media-base 即写入库中的公开前缀（QA 帖子图为 http://101.42.27.44/imported-media）。
+python3 scripts/import_placeholder_content.py \
+  --output-dir /var/lib/luntan/import/posts \
+  --media-dir /opt/luntan-qa/imported-media \
+  --public-media-base "http://101.42.27.44/imported-media" \
+  --page-size 100
 ```
 
-命令使用远端服务进程中的 `DATABASE_URL` 与媒体存储配置。若 QA 使用本地媒体
-目录，须设置 `MEDIA_STORAGE_DIR`，并由反向代理映射该目录；生产环境使用对象
-存储。导入作者不会保留源站昵称、头像或账号 ID；用户后来发布的帖子、评论、
-想冲、买过与评分仍写入同一套数据库，不会被下次源数据同步覆盖。
+导入语义：
+
+- 幂等：帖子、评论、媒体均使用确定性 ID 配合 `ON CONFLICT` 更新，重复执行不产生重复数据；评论按导入批次清理重建。
+- 自动审核兼容：含淘宝链接等关键词的历史内容会命中迁移 000026 的防灌水触发器进入待审核，导入脚本已内置恢复段，导入完成后自动放行并关闭对应 auto_rule 案例。
+- 隔离：导入作者不保留源站昵称、头像或账号 ID；用户之后发布的帖子、评论、想冲、买过与评分写入同一套数据库，不会被下次同步覆盖。
+
+#### QA 部署速查
+
+后端（源码上传后在服务器构建；服务器 Go 工具链需设置 `GOPROXY=https://goproxy.cn,direct`）：
+
+1. 先执行 `luntan-migrate` 预应用迁移（迁移均增量幂等，旧进程可继续运行）
+2. 备份旧二进制 → 停止旧进程 → 安装新 `luntan-api` / `luntan-worker` → 刷新 `migrations/` 目录
+3. 注入 `/opt/luntan-qa/.env` 后启动，验证 `/ready` 与新增路由；发布与恢复演练流程见 [`docs/deployment/release-runbook.md`](docs/deployment/release-runbook.md)
+
+Web 发布：
+
+```bash
+flutter build web --release --base-href=/forum/ \
+  --dart-define=API_BASE_URL=http://101.42.27.44 \
+  --dart-define=APP_ENV=qa
+```
+
+- QA 为 HTTP，必须显式传 `APP_ENV=qa`：release 构建缺省时客户端按 production 规则强制校验 HTTPS，启动即报「应用配置异常」。
+- `web/flutter_bootstrap.js` 为入库的自定义引导模板，canvaskit 从应用本地目录加载而不请求 gstatic（国内拉取 wasm 易超时导致白屏），部署时不要删除。
+- 产物解压到新发布目录并切换 `/opt/luntan-qa/web` 符号链接，回滚时把链接指回旧目录即可；nginx 对 `/forum/` 已配置协商缓存，发布后浏览器直接拉到新版。
+
+## 配置速查
+
+| 变量 | 作用 | 端 |
+| --- | --- | --- |
+| `DATABASE_URL` | PostgreSQL 连接串，服务启动时自动执行迁移 | 服务端 |
+| `HTTP_PORT` | API 监听端口，默认 `8080` | 服务端 |
+| `APP_ENV` | `dev` / `qa` / `staging` / `production`；`production` 要求 HTTPS、SMTP 与对象存储配置齐备 | 双端 |
+| `API_BASE_URL` | 客户端 API 地址（编译期 dart-define），开发默认 `http://101.42.27.44` | 客户端 |
+| `WEB_BASE_URL` | 分享链接域名，默认 `https://luntan.app` | 客户端 |
+| `MEDIA_STORAGE_DIR` | 本地媒体目录兜底（dev/QA），生产使用外部对象存储 | 服务端 |
+| `OBJECT_STORAGE_PUBLIC_BASE_URL` | 媒体公开访问前缀 | 服务端 |
+| `OBJECT_STORAGE_UPLOAD_BASE_URL` / `OBJECT_STORAGE_SIGNING_SECRET` | 媒体上传地址与 HMAC 签名 | 服务端 |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮箱验证码发送；生产缺失时 API 拒绝启动 | 服务端 |
+| `PUSH_WEBHOOK_URL` / `PUSH_WEBHOOK_SECRET` | 通知投递到站外推送，未配置时仅持久化站内通知 | 服务端 |
+
+环境隔离矩阵与密钥管理约束见 [`docs/deployment/environments.md`](docs/deployment/environments.md)。
 
 ## 常用验证命令
 
@@ -179,6 +228,7 @@ Go API：
 
 ```bash
 cd server
+go vet ./...
 go test ./...
 ```
 
@@ -223,7 +273,14 @@ lib/
     └── composer_sheet.dart
 
 server/
-├── cmd/api/main.go                     # Go 服务入口
+├── cmd/
+│   ├── api/                            # Go API 服务入口
+│   ├── worker/                         # 后台任务（outbox 通知投递等）
+│   ├── migrate/                        # 独立迁移工具
+│   ├── ranking-import/                 # 榜单快照导入
+│   ├── media-backfill/                 # 媒体补录
+│   ├── bootstrap-admin/                # 初始化管理员
+│   └── smtp-test/                      # SMTP 连通性自检
 ├── internal/api/                       # HTTP 路由和业务处理
 ├── internal/auth/                      # 认证服务
 ├── internal/platform/                  # 配置、数据库、日志、HTTP 中间件
@@ -241,14 +298,14 @@ test/                                   # Flutter 单元测试和 Widget Test
 - 社区：分类、社区列表、社区详情、关注、加入 / 退出
 - 信息流：最新 Feed、帖子详情
 - 帖子：创建、更新、删除、点赞、收藏
-- 回复：列表、发表、回复、编辑、删除、点赞
+- 回复：列表、发表、回复、编辑、删除、点赞、点踩；楼中楼支持独立线程页
 - 媒体：上传凭证、媒体完成回调
 - 搜索：帖子、用户、社区和 300ms 防抖搜索
 - 通知：列表、未读数、标记已读、全部已读
 - 个人中心：资料聚合、发帖 / 回帖 / 点赞 / 收藏 / 历史列表
 - 举报：帖子和评论举报落库
 - 治理：`/me/account-status`、`/admins`、`/admins/{id}/roles`、`/admin/risk`、`/admin/logs`、`/admin/ip-restrictions`；自动规则识别微信群 / QQ 群 / 手机号 / 淘宝链接 / 外链并进入待审核
-- 增长功能：投票、排行榜、积分商品和事务兑换；历史市场表仅保留用于数据兼容，不再创建或展示市场帖子
+- 增长功能：投票、排行榜（含玩具投稿、超管审核与榜单重排）、积分商品和事务兑换；历史市场表仅保留用于数据兼容，不再创建或展示市场帖子
 
 客户端 API 仓储位于 `lib/data/api/`，运行时默认 API、测试时 Mock 的切换逻辑位于 `lib/data/repository_provider.dart`。
 

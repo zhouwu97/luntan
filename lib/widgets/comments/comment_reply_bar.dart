@@ -61,7 +61,7 @@ class CommentReplyBar extends StatefulWidget {
   State<CommentReplyBar> createState() => _CommentReplyBarState();
 }
 
-class _CommentReplyBarState extends State<CommentReplyBar> {
+class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingObserver {
   CommentComposerController? _internalComposer;
   final ImagePicker _picker = ImagePicker();
   bool _isEditing = false;
@@ -72,6 +72,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.composerController == null) {
       _internalComposer = CommentComposerController();
     }
@@ -90,6 +91,28 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _updateMetricsFromView();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _updateMetricsFromView();
+  }
+
+  void _updateMetricsFromView() {
+    if (!mounted) return;
+    final view = View.maybeOf(context);
+    if (view == null) return;
+    final pixelRatio = view.devicePixelRatio;
+    if (pixelRatio <= 0) return;
+    final bottomInset = view.viewInsets.bottom / pixelRatio;
+    _composer.updateKeyboardMetrics(bottomInset);
+  }
+
+  @override
   void didUpdateWidget(CommentReplyBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.target != null && oldWidget.target == null) {
@@ -101,6 +124,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _composer.removeListener(_handleComposerChange);
     _internalComposer?.dispose();
     super.dispose();
@@ -154,9 +178,6 @@ class _CommentReplyBarState extends State<CommentReplyBar> {
 
   @override
   Widget build(BuildContext context) {
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    _composer.updateKeyboardMetrics(keyboardInset);
-
     final targetUser = widget.target?.author?.nickname ??
         (widget.target?.authorId.isNotEmpty == true ? '用户' : null);
 

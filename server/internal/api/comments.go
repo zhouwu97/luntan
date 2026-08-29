@@ -385,11 +385,15 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeAuthError(w, r, ErrInvalidComment)
 		return
 	}
+	if len(mediaIDs) > 9 || len(stickerID) > 128 || (len(mediaIDs) > 0 && stickerID != "") {
+		writeAuthError(w, r, ErrInvalidComment)
+		return
+	}
 
 	for _, mid := range mediaIDs {
-		var ownerID, status string
-		err := s.db.QueryRowContext(r.Context(), `SELECT owner_id, status FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mid).Scan(&ownerID, &status)
-		if errors.Is(err, sql.ErrNoRows) || ownerID != user.ID || status != "ready" {
+		var ownerID, status, mimeType string
+		err := s.db.QueryRowContext(r.Context(), `SELECT owner_id, status, mime_type FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mid).Scan(&ownerID, &status, &mimeType)
+		if errors.Is(err, sql.ErrNoRows) || ownerID != user.ID || status != "ready" || !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
 			writeAuthError(w, r, ErrInvalidMedia)
 			return
 		}

@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
@@ -51,18 +50,14 @@ class CommentReplyPreview extends StatelessWidget {
                             reply.replyToUser?.username ??
                             '用户');
 
-                  final authorTapRecognizer = (onAuthorTap != null &&
-                          reply.authorId.isNotEmpty &&
-                          !reply.authorId.startsWith('guest'))
-                      ? (TapGestureRecognizer()..onTap = () => onAuthorTap!(reply.authorId))
-                      : null;
+                  final canTapAuthor = onAuthorTap != null &&
+                      reply.authorId.isNotEmpty &&
+                      !reply.authorId.startsWith('guest');
 
-                  final replyToTapRecognizer = (onAuthorTap != null &&
-                          reply.replyToUserId != null &&
-                          reply.replyToUserId!.isNotEmpty &&
-                          !reply.replyToUserId!.startsWith('guest'))
-                      ? (TapGestureRecognizer()..onTap = () => onAuthorTap!(reply.replyToUserId!))
-                      : null;
+                  final canTapReplyTo = onAuthorTap != null &&
+                      reply.replyToUserId != null &&
+                      reply.replyToUserId!.isNotEmpty &&
+                      !reply.replyToUserId!.startsWith('guest');
 
                   return InkWell(
                     onTap: () {
@@ -75,33 +70,49 @@ class CommentReplyPreview extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2.5),
-                      child: RichText(
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        text: TextSpan(
+                      child: Text.rich(
+                        TextSpan(
                           style: const TextStyle(
                             fontSize: 12.5,
                             color: Color(0xFF5F7488),
                             height: 1.5,
                           ),
                           children: [
-                            TextSpan(
-                              text: author,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF385A79),
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.baseline,
+                              baseline: TextBaseline.alphabetic,
+                              child: GestureDetector(
+                                onTap: canTapAuthor
+                                    ? () => onAuthorTap!(reply.authorId)
+                                    : null,
+                                child: Text(
+                                  author,
+                                  style: const TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF385A79),
+                                  ),
+                                ),
                               ),
-                              recognizer: authorTapRecognizer,
                             ),
                             if (replyTo != null) ...[
                               const TextSpan(text: ' 回复 '),
-                              TextSpan(
-                                text: '@$replyTo',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.primary,
+                              WidgetSpan(
+                                alignment: PlaceholderAlignment.baseline,
+                                baseline: TextBaseline.alphabetic,
+                                child: GestureDetector(
+                                  onTap: canTapReplyTo
+                                      ? () => onAuthorTap!(reply.replyToUserId!)
+                                      : null,
+                                  child: Text(
+                                    '@$replyTo',
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
                                 ),
-                                recognizer: replyToTapRecognizer,
                               ),
                             ],
                             const TextSpan(
@@ -114,6 +125,8 @@ class CommentReplyPreview extends StatelessWidget {
                             TextSpan(text: reply.content),
                           ],
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   );

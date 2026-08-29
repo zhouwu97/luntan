@@ -154,6 +154,7 @@ class _CommentEmojiPanelState extends State<CommentEmojiPanel> {
       itemBuilder: (context, index) {
         final sticker = group.items[index];
         return InkWell(
+          key: ValueKey('sticker_item_${sticker.id}'),
           borderRadius: BorderRadius.circular(10),
           onTap: widget.enabled && widget.onStickerSelected != null
               ? () => widget.onStickerSelected!(sticker)
@@ -230,6 +231,7 @@ class _CommentEmojiPanelState extends State<CommentEmojiPanel> {
           }
 
           return InkWell(
+            key: ValueKey('emoji_tab_$index'),
             onTap: () => _selectTab(index),
             borderRadius: BorderRadius.circular(8),
             child: Container(

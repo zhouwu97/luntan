@@ -44,6 +44,38 @@ func TestCORSPreflight(t *testing.T) {
 	}
 }
 
+func TestConfiguredCORSAllowsCredentialsOnlyForMatchingOrigin(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler, err := NewHandlerWithAPIOptions(nil, logger, nil, Options{
+		AllowedOrigin: "https://app.example.com",
+	})
+	if err != nil {
+		t.Fatalf("create handler: %v", err)
+	}
+
+	allowedReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	allowedReq.Header.Set("Origin", "https://app.example.com")
+	allowedRes := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRes, allowedReq)
+	if allowedRes.Header().Get("Access-Control-Allow-Origin") != "https://app.example.com" {
+		t.Fatalf("allowed origin = %q", allowedRes.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if allowedRes.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("allowed credentials = %q, want true", allowedRes.Header().Get("Access-Control-Allow-Credentials"))
+	}
+
+	otherReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	otherReq.Header.Set("Origin", "https://other.example.com")
+	otherRes := httptest.NewRecorder()
+	handler.ServeHTTP(otherRes, otherReq)
+	if otherRes.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("other origin = %q, want wildcard", otherRes.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if otherRes.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("other credentials = %q, want empty", otherRes.Header().Get("Access-Control-Allow-Credentials"))
+	}
+}
+
 func TestVersion(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	res := httptest.NewRecorder()

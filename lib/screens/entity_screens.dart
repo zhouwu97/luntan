@@ -131,7 +131,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _loadPoints() async {
-    if (widget.storeRepository == null) return;
+    // /me/points 是当前登录用户的余额，不能挂到他人主页的经验信息旁边。
+    if (widget.storeRepository == null || !widget.isSelf) return;
     try {
       final overview = await widget.storeRepository!.overview();
       if (mounted) setState(() => _pointsBalance = overview.balance);
@@ -517,9 +518,22 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             _selfSummary?.backgroundUrl ?? profile?.backgroundUrl;
         final growth = _selfSummary?.growth ?? profile?.growth;
         final experience = _selfSummary?.experience ?? profile?.experience ?? 0;
-        final expInLevel = growth?.experienceInLevel ?? 0;
-        final expReq = growth?.experienceRequiredInLevel ?? 50;
         final isLocked = isGuestSelf || growth?.levelLocked == true;
+        // 文案使用累计经验与下一级累计阈值；本级内经验只负责绘制进度条。
+        final currentExperience = growth?.experience ?? experience;
+        final expInLevel = growth?.experienceInLevel ?? currentExperience;
+        final nextLevelThreshold =
+            growth?.nextLevelExperience ??
+            (!isLocked && level == 1 ? 50 : null);
+        final expReq =
+            growth?.experienceRequiredInLevel ??
+            (nextLevelThreshold == null
+                ? null
+                : nextLevelThreshold - (growth?.levelStartExperience ?? 0));
+        final factor = expReq != null && expReq > 0
+            ? (expInLevel / expReq).clamp(0.05, 1.0)
+            : 0.5;
+        final isMaxLevel = !isLocked && nextLevelThreshold == null;
         final publicUserId = [_selfSummary?.publicId, profile?.publicId]
             .whereType<String>()
             .map((value) => value.trim())
@@ -908,13 +922,34 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 const SizedBox(width: 9),
                                 Expanded(
                                   child: Text(
-                                    '累计经验 $experience EXP · 🔒 注册后解锁等级',
+                                    '累计经验 $currentExperience EXP · 🔒 注册后解锁等级',
                                     style: TextStyle(
                                       color: Colors.white.withValues(
                                         alpha: 0.9,
                                       ),
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ] else if (isMaxLevel) ...[
+                                Text(
+                                  'Lv.$level',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(width: 9),
+                                Expanded(
+                                  child: Text(
+                                    '经验 $currentExperience EXP · 已达最高等级',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.82,
+                                      ),
+                                      fontSize: 11,
                                     ),
                                   ),
                                 ),
@@ -938,12 +973,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                       ),
                                       alignment: Alignment.centerLeft,
                                       child: FractionallySizedBox(
-                                        widthFactor: expReq > 0
-                                            ? (expInLevel / expReq).clamp(
-                                                0.05,
-                                                1.0,
-                                              )
-                                            : 0.5,
+                                        widthFactor: factor,
                                         child: Container(
                                           decoration: BoxDecoration(
                                             color: const Color(0xFF64B6DF),
@@ -958,14 +988,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 ),
                                 const SizedBox(width: 9),
                                 Text(
-                                  '$expInLevel / $expReq EXP',
+                                  '经验 $currentExperience / ${nextLevelThreshold!} EXP',
                                   style: TextStyle(
                                     color: Colors.white.withValues(alpha: 0.82),
                                     fontSize: 11,
                                   ),
                                 ),
                               ],
-                              if (_pointsBalance != null) ...[
+                              if (widget.isSelf && _pointsBalance != null) ...[
                                 const SizedBox(width: 10),
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -977,7 +1007,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     ),
                                     const SizedBox(width: 3),
                                     Text(
-                                      '$_pointsBalance',
+                                      '积分 $_pointsBalance',
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 12,

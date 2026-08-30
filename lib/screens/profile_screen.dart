@@ -1873,10 +1873,21 @@ class _PointsBalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final expInLevel = growth?.experienceInLevel ?? 0;
-    final expReq = growth?.experienceRequiredInLevel ?? 50;
     final isLocked = level == 0 || growth?.levelLocked == true;
-    final factor = expReq > 0 ? (expInLevel / expReq).clamp(0.05, 1.0) : 0.18;
+    // 经验展示使用累计值与下一级累计阈值；本级内经验仅用于计算进度条宽度。
+    final currentExperience = growth?.experience ?? experience;
+    final expInLevel = growth?.experienceInLevel ?? currentExperience;
+    final nextLevelThreshold =
+        growth?.nextLevelExperience ?? (!isLocked && level == 1 ? 50 : null);
+    final expReq =
+        growth?.experienceRequiredInLevel ??
+        (nextLevelThreshold == null
+            ? null
+            : nextLevelThreshold - (growth?.levelStartExperience ?? 0));
+    final factor = expReq != null && expReq > 0
+        ? (expInLevel / expReq).clamp(0.05, 1.0)
+        : 0.18;
+    final isMaxLevel = !isLocked && nextLevelThreshold == null;
 
     return Container(
       decoration: BoxDecoration(
@@ -1973,7 +1984,7 @@ class _PointsBalanceCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // 等级经验进度行
+          // 等级经验进度行：积分余额与经验进度是两套独立数据。
           if (isLocked)
             Row(
               children: [
@@ -1998,7 +2009,7 @@ class _PointsBalanceCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '累计经验 $experience EXP · 🔒 注册后解锁等级',
+                    '累计经验 $currentExperience EXP · 🔒 注册后解锁等级',
                     style: const TextStyle(
                       color: Color(0xFF6D84A0),
                       fontSize: 11,
@@ -2008,9 +2019,50 @@ class _PointsBalanceCard extends StatelessWidget {
                 ),
               ],
             )
+          else if (isMaxLevel)
+            Row(
+              children: [
+                const Text(
+                  '等级经验',
+                  style: TextStyle(
+                    color: Color(0xFF6D84A0),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Lv.$level',
+                  style: const TextStyle(
+                    color: Color(0xFF6D84A0),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    '$currentExperience EXP · 已达最高等级',
+                    style: const TextStyle(
+                      color: Color(0xFF8598AA),
+                      fontSize: 9.5,
+                    ),
+                  ),
+                ),
+              ],
+            )
           else
             Row(
               children: [
+                Text(
+                  '等级经验',
+                  style: const TextStyle(
+                    color: Color(0xFF6D84A0),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Text(
                   'Lv.$level',
                   style: const TextStyle(
@@ -2043,7 +2095,7 @@ class _PointsBalanceCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 9),
                 Text(
-                  '$expInLevel / $expReq EXP',
+                  '$currentExperience / ${nextLevelThreshold!} EXP',
                   style: const TextStyle(
                     color: Color(0xFF8598AA),
                     fontSize: 9.5,

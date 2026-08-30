@@ -1,8 +1,36 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// 正式包必须使用独立发布密钥；key.properties 只保存在本机，CI 可通过环境变量注入。
+val releaseSigningProperties = Properties()
+val releaseSigningPropertiesFile = rootProject.file("key.properties")
+if (releaseSigningPropertiesFile.isFile) {
+    FileInputStream(releaseSigningPropertiesFile).use { releaseSigningProperties.load(it) }
+}
+
+fun releaseSigningValue(propertyName: String, environmentName: String): String? =
+    releaseSigningProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(environmentName)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFilePath = releaseSigningValue("storeFile", "ANDROID_RELEASE_STORE_FILE")
+val releaseStoreFile = releaseStoreFilePath?.let { rootProject.file(it) }
+val releaseStoreType = releaseSigningValue("storeType", "ANDROID_RELEASE_STORE_TYPE") ?: "PKCS12"
+val releaseStorePassword = releaseSigningValue("storePassword", "ANDROID_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = releaseSigningValue("keyAlias", "ANDROID_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = releaseSigningValue("keyPassword", "ANDROID_RELEASE_KEY_PASSWORD")
+val releaseSigningConfigured = releaseStoreFile?.isFile == true &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+val releaseTaskRequested = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
 }
 
 android {
@@ -30,11 +58,27 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storeType = releaseStoreType
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = when {
+                releaseSigningConfigured -> signingConfigs.getByName("release")
+                releaseTaskRequested -> throw GradleException(
+                    "缺少正式 Android 签名配置：请提供 android/key.properties 或 ANDROID_RELEASE_* 环境变量。",
+                )
+                else -> signingConfigs.getByName("debug")
+            }
         }
     }
 }

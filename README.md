@@ -220,17 +220,18 @@ flutter build web --release --base-href=/forum/ \
 “检查更新”和 APK 下载都由 Go API 提供，不依赖网页下载页。先构建 APK，再生成服务端可校验的发布清单：
 
 ```powershell
-flutter build apk --release --build-name 1.1.0 --build-number 2 `
+flutter build apk --release --build-name 0.01 --build-number 1 `
   --dart-define=APP_ENV=production `
-  --dart-define=API_BASE_URL=https://forum.example.com
+  --dart-define=API_BASE_URL=https://shengbeijiang.com `
+  --dart-define=WEB_BASE_URL=https://shengbeijiang.com
 
 .\scripts\prepare_app_release.ps1 `
   -ApkPath .\build\app\outputs\flutter-apk\app-release.apk `
   -OutputDirectory .\artifacts\app-release `
-  -VersionName 1.1.0 `
-  -VersionCode 2 `
+  -VersionName 0.01 `
+  -VersionCode 1 `
   -MinimumSupportedVersionCode 1 `
-  -Title '圣杯酱 1.1.0' `
+  -Title '圣杯酱 0.01' `
   -Changelog '优化检查更新与安装体验。'
 ```
 

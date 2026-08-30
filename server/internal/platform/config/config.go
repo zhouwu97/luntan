@@ -16,6 +16,7 @@ type Config struct {
 	ObjectStorageUploadBaseURL string
 	ObjectStoragePublicBaseURL string
 	ObjectStorageSigningSecret string
+	WebOrigin                  string
 	RateLimitEnabled           bool
 	TrustedProxyCIDRs          []string
 	AppReleaseManifestPath     string
@@ -32,6 +33,7 @@ func Load() Config {
 		ObjectStorageUploadBaseURL: os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"),
 		ObjectStoragePublicBaseURL: os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL"),
 		ObjectStorageSigningSecret: os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
+		WebOrigin:                  strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
 		RateLimitEnabled:           valueOrDefault("RATE_LIMIT_ENABLED", "false") == "true",
 		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
 		AppReleaseManifestPath:     strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),

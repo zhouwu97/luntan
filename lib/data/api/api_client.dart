@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'http_client.dart';
+
 enum ApiErrorType {
   networkUnavailable,
   timeout,
@@ -151,7 +153,7 @@ class ApiClient {
     TokenStore? tokenStore,
     this.onSessionInvalidated,
   }) : _baseUri = baseUri,
-       _client = client ?? http.Client(),
+       _client = client ?? createHttpClient(),
        _tokenStore = tokenStore;
 
   final Uri _baseUri;
@@ -380,8 +382,9 @@ class ApiClient {
       final refreshToken = await store.readRefreshToken();
       // Web 端本地没有 refresh token（由 HttpOnly cookie 携带），body 里
       // 省略该字段，服务端回退读取 cookie。
-      final bodyToken =
-          (refreshToken == null || refreshToken.isEmpty) ? null : refreshToken;
+      final bodyToken = (refreshToken == null || refreshToken.isEmpty)
+          ? null
+          : refreshToken;
       final payload = await _request(
         method: 'POST',
         path: '/api/v1/auth/refresh',

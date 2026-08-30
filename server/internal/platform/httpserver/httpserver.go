@@ -29,6 +29,9 @@ type Options struct {
 	RateLimitEnabled  bool
 	RateLimitStore    RateLimitStore
 	TrustedProxyCIDRs []string
+	// AllowedOrigin 是 Web 端的精确来源。配置后仅对该来源开放带 Cookie 的跨域请求；
+	// 未配置时保留公开 API 的通配符 CORS 行为，但不允许跨域凭证。
+	AllowedOrigin string
 	// ReadinessCheck 用于检查 API 依赖的非数据库资源，例如对象存储。
 	// 留空表示只检查数据库，兼容没有业务 API 的基础 HTTP server。
 	ReadinessCheck func(context.Context) error
@@ -115,15 +118,21 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 		root = newRateLimiter(options.RateLimitStore).middleware(root)
 	}
 	root = clientIPMiddleware(root, resolver)
-	root = corsMiddleware(root)
+	root = corsMiddleware(root, options.AllowedOrigin)
 	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger)), nil
 }
 
 // corsMiddleware 让公开 Feed、榜单和媒体元数据可以被 Flutter Web 跨域读取。
 // 互动请求仍由 API 自身的认证与权限逻辑保护；这里仅处理浏览器预检和响应头。
-func corsMiddleware(next http.Handler) http.Handler {
+func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if allowedOrigin != "" && origin == allowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set(
 			"Access-Control-Allow-Headers",
@@ -185,7 +194,7 @@ func loggingMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 		status := recorder.statusCode()
 		latency := time.Since(started)
 		metrics.observe(status, latency)
-		metrics.observeBusiness(r.URL.Path, status)
+		metrics.observeBusiness(r.Method, r.URL.Path, status)
 		logger.Info("http_request", "timestamp", time.Now().UTC().Format(time.RFC3339Nano), "request_id", requestID(r.Context()), "method", r.Method, "path", r.URL.Path, "status", status, "latency_ms", latency.Milliseconds(), "error_code", errorCodeForStatus(status))
 	})
 }

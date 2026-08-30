@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/domain/models.dart';
 import 'package:luntan/widgets/app_network_image.dart';
+import 'package:luntan/widgets/comments/comment_composer_controller.dart';
 import 'package:luntan/widgets/comments/comment_reply_bar.dart';
 import 'package:luntan/widgets/forum_author_row.dart';
 import 'package:luntan/widgets/forum_post_card.dart';
@@ -638,6 +639,38 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.close_rounded));
       expect(cancelled, isTrue);
+    });
+
+    testWidgets('13. 单行输入保持单行高度，多行时才按内容扩展', (tester) async {
+      final composer = CommentComposerController();
+      addTearDown(composer.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            bottomNavigationBar: CommentReplyBar(
+              composerController: composer,
+              isSheetMode: true,
+              blockedMessage: '你已被禁言',
+              onFeedback: (_) {},
+              onCancelTarget: () {},
+              onSubmit: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final input = find.byType(TextField);
+      final singleLineHeight = tester.getSize(input).height;
+      expect(singleLineHeight, lessThan(60));
+
+      await tester.enterText(input, '第一行\n第二行\n第三行\n第四行');
+      await tester.pump();
+
+      final multiLineHeight = tester.getSize(input).height;
+      expect(multiLineHeight, greaterThan(singleLineHeight));
+      expect(multiLineHeight, lessThanOrEqualTo(100));
     });
   });
 }

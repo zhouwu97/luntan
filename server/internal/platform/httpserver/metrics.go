@@ -48,16 +48,16 @@ func (m *requestMetrics) observe(status int, latency time.Duration) {
 	m.buckets[len(m.buckets)-1].Add(1)
 }
 
-func (m *requestMetrics) observeBusiness(path string, status int) {
+func (m *requestMetrics) observeBusiness(method, path string, status int) {
 	metric := (*businessMetric)(nil)
 	switch {
-	case path == "/api/v1/auth/login":
+	case method == http.MethodPost && path == "/api/v1/auth/login":
 		metric = &m.login
-	case path == "/api/v1/posts":
+	case method == http.MethodPost && path == "/api/v1/posts":
 		metric = &m.publish
-	case path == "/api/v1/media/upload-token":
+	case method == http.MethodPost && path == "/api/v1/media/upload-token":
 		metric = &m.upload
-	case pathContainsCommentRoute(path):
+	case method == http.MethodPost && pathContainsCommentRoute(path):
 		metric = &m.comment
 	}
 	if metric == nil {

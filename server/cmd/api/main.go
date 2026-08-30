@@ -80,6 +80,7 @@ func main() {
 		RateLimitEnabled:  cfg.RateLimitEnabled,
 		RateLimitStore:    rateLimitStore,
 		TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+		AllowedOrigin:     cfg.WebOrigin,
 		ReadinessCheck:    api.ReadinessCheck(apiHandler),
 		AppRelease:        appRelease,
 	})

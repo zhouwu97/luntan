@@ -46,10 +46,13 @@ func levelForExperience(exp int64) int {
 
 // GrowthState 提供统一的经验与等级计算结果。
 type GrowthState struct {
-	Level                     int      `json:"level"`
-	Experience                int64    `json:"experience"`
-	LevelStartExperience      int64    `json:"level_start_experience"`
-	NextLevelExperience       *int64   `json:"next_level_experience"`
+	Level      int   `json:"level"`
+	Experience int64 `json:"experience"`
+	// LevelStartExperience 是当前等级的累计经验起点。
+	LevelStartExperience int64 `json:"level_start_experience"`
+	// NextLevelExperience 是下一级的累计经验阈值，不是每日经验上限。
+	NextLevelExperience *int64 `json:"next_level_experience"`
+	// 以下两个字段只服务于当前等级进度条，不作为积分余额。
 	ExperienceInLevel         int64    `json:"experience_in_level"`
 	ExperienceRequiredInLevel *int64   `json:"experience_required_in_level"`
 	LevelProgress             *float64 `json:"level_progress"`

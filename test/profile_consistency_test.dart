@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/auth_repository.dart';
 import 'package:luntan/data/api/profile_repository.dart';
+import 'package:luntan/data/api/store_repository.dart';
 import 'package:luntan/data/api/user_repository.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/domain/models.dart';
@@ -37,6 +38,16 @@ class _MockProfileRepo extends ProfileRepository {
     }
     return ProfileListPage(items: posts);
   }
+}
+
+class _MockStoreRepository extends StoreRepository {
+  _MockStoreRepository(this.result)
+    : super(ApiClient(baseUri: Uri.parse('https://example.com')));
+
+  final PointsOverview result;
+
+  @override
+  Future<PointsOverview> overview() async => result;
 }
 
 class _MockUserRepository implements UserRepository {
@@ -255,6 +266,75 @@ void main() {
       expect(find.text('ID：10000'), findsOneWidget);
       expect(find.textContaining('信任 trusted'), findsNothing);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('积分与经验分离，经验展示累计值到下一级累计阈值', (tester) async {
+      const growth = GrowthState(
+        level: 2,
+        experience: 80,
+        levelStartExperience: 50,
+        nextLevelExperience: 150,
+        experienceInLevel: 30,
+        experienceRequiredInLevel: 100,
+        progress: 0.3,
+        levelLocked: false,
+      );
+      const summary = ProfileSummary(
+        id: 'user_growth',
+        username: 'growth_user',
+        nickname: '成长用户',
+        level: 2,
+        experience: 80,
+        growth: growth,
+        trustLevel: 'new',
+        signature: '',
+        postCount: 0,
+        commentCount: 0,
+        likeReceivedCount: 0,
+        followerCount: 0,
+        followingCount: 0,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            store: ForumStore.uiOnly(),
+            isApiMode: true,
+            profileRepository: _MockProfileRepo(summary: summary),
+            storeRepository: _MockStoreRepository(
+              const PointsOverview(balance: 5, transactions: []),
+            ),
+            currentUser: const AuthUser(
+              id: 'user_growth',
+              username: 'growth_user',
+              nickname: '成长用户',
+              level: 2,
+              experience: 80,
+              growth: growth,
+              status: 'active',
+            ),
+            currentUserId: 'user_growth',
+            onOpenPost: (_) {},
+            onOpenHome: () {},
+            onOpenComposer: () {},
+            onOpenMessages: () {},
+            onFeedback: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('5 积分'), findsOneWidget);
+      expect(find.text('等级经验'), findsOneWidget);
+      expect(find.text('80 / 150 EXP'), findsOneWidget);
+      expect(find.text('30 / 100 EXP'), findsNothing);
+
+      await tester.tap(find.text('个人主页'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('经验 80 / 150 EXP'), findsOneWidget);
+      expect(find.text('积分 5'), findsOneWidget);
+      expect(find.text('30 / 100 EXP'), findsNothing);
     });
 
     testWidgets('游客可进入公共设置，但个人资料设置仍要求绑定邮箱', (tester) async {

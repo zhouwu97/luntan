@@ -302,7 +302,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   void _openPostEditor({required String initialCommunityId}) {
     final currentUserId =
         authController?.user?.id ?? (apiMode ? 'anonymous' : 'mock-user');
-    final draftStorageFuture = ComposerDraftStorage.create(userId: currentUserId);
+    final draftStorageFuture = ComposerDraftStorage.create(
+      userId: currentUserId,
+    );
     final availableCommunitiesFuture = apiMode
         ? _loadPublishCommunities()
         : null;
@@ -679,8 +681,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               : null,
           onOpenRecommendations: canModerate ? openHomeRecommendations : null,
           onOpenActivities: canModerate ? openActivityManagement : null,
-          onOpenRankingSubmissions:
-              apiMode && canManageAdmins ? openRankingSubmissionReview : null,
+          onOpenRankingSubmissions: apiMode && canManageAdmins
+              ? openRankingSubmissionReview
+              : null,
           onOpenAdmins: canManageAdmins ? openAdmins : null,
           onOpenUsers: canManageUsers ? openUserManagement : null,
           onOpenRisk: canViewAdminLogs ? openRiskCenter : null,

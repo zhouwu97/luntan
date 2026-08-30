@@ -64,9 +64,13 @@ class GrowthState {
 
   final int level;
   final int experience;
+  /// 达到当前等级所需的累计经验阈值。
   final int levelStartExperience;
+  /// 达到下一级所需的累计经验阈值。
   final int? nextLevelExperience;
+  /// 当前等级起点之后获得的经验，仅用于计算本级进度条。
   final int experienceInLevel;
+  /// 当前等级区间的经验跨度，仅用于计算本级进度条。
   final int? experienceRequiredInLevel;
   final double? progress;
   final bool levelLocked;

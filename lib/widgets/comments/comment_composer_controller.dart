@@ -5,17 +5,10 @@ import 'package:image_picker/image_picker.dart';
 
 import 'emoji/sticker_catalog.dart';
 
-enum CommentBottomPanel {
-  none,
-  keyboard,
-  emoji,
-}
+enum CommentBottomPanel { none, keyboard, emoji }
 
 /// Emoji → Keyboard 切换时的平滑过渡交接状态。
-enum CommentInputHandoff {
-  none,
-  emojiToKeyboard,
-}
+enum CommentInputHandoff { none, emojiToKeyboard }
 
 class CommentDraft {
   const CommentDraft({
@@ -39,6 +32,12 @@ class CommentDraft {
 }
 
 class CommentComposerController extends ChangeNotifier {
+  CommentComposerController() {
+    // TextEditingController 的值变化不会自动冒泡到本控制器；同步转发后，
+    // 发送按钮、字数和附件布局可以随用户输入立即重建。
+    textController.addListener(_handleTextChanged);
+  }
+
   final TextEditingController textController = TextEditingController();
   final FocusNode focusNode = FocusNode();
 
@@ -72,13 +71,13 @@ class CommentComposerController extends ChangeNotifier {
   XFile? get localImage => _localImage;
 
   CommentDraft get draft => CommentDraft(
-        text: textController.text.trim(),
-        parentCommentId: _parentCommentId,
-        replyToUserId: _replyToUserId,
-        replyToName: _replyToName,
-        sticker: _sticker,
-        localImage: _localImage,
-      );
+    text: textController.text.trim(),
+    parentCommentId: _parentCommentId,
+    replyToUserId: _replyToUserId,
+    replyToName: _replyToName,
+    sticker: _sticker,
+    localImage: _localImage,
+  );
 
   void updateKeyboardMetrics(double inset) {
     final normalizedInset = inset < 0 ? 0.0 : inset;
@@ -111,7 +110,8 @@ class CommentComposerController extends ChangeNotifier {
           _hasObservedKeyboardHeight = true;
         }
       }
-      final canShowKeyboardPanel = _isOpen ||
+      final canShowKeyboardPanel =
+          _isOpen ||
           focusNode.hasFocus ||
           _bottomPanel == CommentBottomPanel.keyboard;
       if (_bottomPanel != CommentBottomPanel.emoji && canShowKeyboardPanel) {
@@ -220,7 +220,9 @@ class CommentComposerController extends ChangeNotifier {
       final newText = text.replaceRange(selection.start, selection.end, emoji);
       textController.value = TextEditingValue(
         text: newText,
-        selection: TextSelection.collapsed(offset: selection.start + emoji.length),
+        selection: TextSelection.collapsed(
+          offset: selection.start + emoji.length,
+        ),
       );
     }
   }
@@ -245,6 +247,10 @@ class CommentComposerController extends ChangeNotifier {
         selection: TextSelection.collapsed(offset: selection.start),
       );
     }
+  }
+
+  void _handleTextChanged() {
+    if (!_disposing) notifyListeners();
   }
 
   TextRange _previousCharacterRange(String text, int offset) {
@@ -354,6 +360,7 @@ class CommentComposerController extends ChangeNotifier {
   void dispose() {
     _disposing = true;
     _cancelHandoff();
+    textController.removeListener(_handleTextChanged);
     textController.dispose();
     focusNode.dispose();
     super.dispose();

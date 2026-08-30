@@ -80,25 +80,30 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> _enrichAvatar() async {
-    if (user == null) return;
-    if (user!.avatarUrl != null && user!.avatarUrl!.isNotEmpty) {
-      UserAvatarCache.set(user!.id, user!.avatarUrl);
+    final currentUser = user;
+    if (currentUser == null) return;
+    if (currentUser.avatarUrl != null && currentUser.avatarUrl!.isNotEmpty) {
+      UserAvatarCache.set(currentUser.id, currentUser.avatarUrl);
       return;
     }
-    final cached = UserAvatarCache.get(user!.id);
+    final cached = UserAvatarCache.get(currentUser.id);
     if (cached != null && cached.isNotEmpty) {
-      user = user!.copyWith(avatarUrl: cached);
+      if (user?.id == currentUser.id) {
+        user = currentUser.copyWith(avatarUrl: cached);
+      }
       return;
     }
     if (_profileRepository != null) {
       try {
-        final profile = await _profileRepository!.getProfile();
-        if (profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty) {
-          user = user!.copyWith(
+        final profile = await _profileRepository.getProfile();
+        if (profile.avatarUrl != null &&
+            profile.avatarUrl!.isNotEmpty &&
+            user?.id == currentUser.id) {
+          user = currentUser.copyWith(
             avatarUrl: profile.avatarUrl,
             avatarMediaId: profile.avatarMediaId,
           );
-          UserAvatarCache.set(user!.id, profile.avatarUrl);
+          UserAvatarCache.set(currentUser.id, profile.avatarUrl);
         }
       } catch (_) {}
     }

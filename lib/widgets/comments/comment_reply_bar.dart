@@ -468,7 +468,10 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
               focusNode: _composer.focusNode,
               controller: _composer.textController,
               enabled: !widget.sending,
-              maxLines: null,
+              // null 会让 RenderEditable 在父级 maxHeight 约束下直接撑满，
+              // 导致单行输入也显示成高输入框；显式限制行数后按内容渐进增高。
+              minLines: 1,
+              maxLines: 4,
               style: const TextStyle(
                 fontSize: 13.5,
                 color: AppTheme.textPrimary,

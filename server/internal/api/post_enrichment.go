@@ -142,12 +142,22 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	}
 
 	response.Author.Level = 1
+	var avatarMediaID, objectKey sql.NullString
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END
+		SELECT CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(up.avatar_media_id, ''),
+		       COALESCE(ma.object_key, '')
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		WHERE u.id = $1`, response.Author.ID).Scan(&response.Author.Level); err != nil && err != sql.ErrNoRows {
+		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
+		WHERE u.id = $1`, response.Author.ID).Scan(&response.Author.Level, &avatarMediaID, &objectKey); err != nil && err != sql.ErrNoRows {
 		return err
+	}
+	if avatarMediaID.Valid && avatarMediaID.String != "" {
+		response.Author.AvatarMediaID = avatarMediaID.String
+	}
+	if objectKey.Valid && objectKey.String != "" {
+		response.Author.AvatarURL = publicMediaURL(objectKey.String)
 	}
 	if !includeViewer {
 		return nil

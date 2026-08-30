@@ -418,7 +418,7 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 	// 否则用户看到「发布成功」却在详情页、个人主页和搜索里都找不到自己的帖子。
 	if row.Publication != "published" || row.Moderation != "normal" {
 		viewer, ok := resolveOptionalViewer(s, r)
-		canReview := ok && viewer.ID != "" && s.hasAnyPermission(r, viewer.ID, "report.review")
+		canReview := ok && viewer.ID != "" && s.hasScopedPermission(r, viewer.ID, "report.review", row.Community.ID)
 		if !ok || (viewer.ID != row.Author.ID && !canReview) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "帖子不存在"})
 			return

@@ -42,6 +42,46 @@ class AuthUser {
 
   String? get avatar => avatarUrl;
 
+  AuthUser copyWith({
+    String? id,
+    String? username,
+    String? nickname,
+    int? level,
+    int? experience,
+    String? avatarMediaId,
+    String? avatarUrl,
+    GrowthState? growth,
+    String? status,
+    String? accountType,
+    String? email,
+    bool? emailVerified,
+    DateTime? emailVerifiedAt,
+    bool? hasPassword,
+    bool? commentRestricted,
+    DateTime? commentRestrictedUntil,
+    Map<String, bool>? capabilities,
+  }) {
+    return AuthUser(
+      id: id ?? this.id,
+      username: username ?? this.username,
+      nickname: nickname ?? this.nickname,
+      level: level ?? this.level,
+      experience: experience ?? this.experience,
+      avatarMediaId: avatarMediaId ?? this.avatarMediaId,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      growth: growth ?? this.growth,
+      status: status ?? this.status,
+      accountType: accountType ?? this.accountType,
+      email: email ?? this.email,
+      emailVerified: emailVerified ?? this.emailVerified,
+      emailVerifiedAt: emailVerifiedAt ?? this.emailVerifiedAt,
+      hasPassword: hasPassword ?? this.hasPassword,
+      commentRestricted: commentRestricted ?? this.commentRestricted,
+      commentRestrictedUntil: commentRestrictedUntil ?? this.commentRestrictedUntil,
+      capabilities: capabilities ?? this.capabilities,
+    );
+  }
+
   bool capability(String name, {bool fallback = false}) =>
       capabilities[name] ?? fallback;
 

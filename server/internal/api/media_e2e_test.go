@@ -181,10 +181,10 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 			AddRow("media_e2e_123", "detail", objectKey+"_detail.jpg", "image/jpeg", 1440, 960, int64(len(detailBytes))).
 			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes))))
 
-	// Query user profile level
+	// Query user profile level and avatar
 	mock.ExpectQuery(`SELECT CASE WHEN u\.account_type = 'guest' THEN 0 ELSE COALESCE\(up\.level, 1\) END`).
 		WithArgs(testUser.ID).
-		WillReturnRows(sqlmock.NewRows([]string{"level"}).AddRow(1))
+		WillReturnRows(sqlmock.NewRows([]string{"level", "avatar_media_id", "object_key"}).AddRow(1, "", ""))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/post-1?include_details=1", nil)
 	if err := mockServer.enrichPostResponse(context.Background(), req, postResp, false); err != nil {

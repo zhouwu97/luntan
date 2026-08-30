@@ -49,6 +49,27 @@
 }
 ```
 
+Web 端请求必须带与服务端 `WEB_ORIGIN`（默认 `https://shengbeijiang.com`）完全一致的
+`Origin`。此时 `refresh_token` 字段为空，长期令牌只通过 `HttpOnly`、`SameSite=Lax`
+的 Cookie 下发和轮换；`/auth/refresh` 不再接受 JSON 中的 refresh token。原生端不带该
+Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 refresh Cookie。
+
+### 活动 Activities
+
+| 方法 | 路径 | 登录 | 说明 |
+|---|---|---|---|
+| GET | `/activities` | 否 | 只返回已发布活动 |
+| GET | `/admin/activities` | 平台管理员 | 管理活动，可按 `status` 筛选 |
+| POST | `/admin/activities` | 平台管理员 | 创建活动 |
+| PUT | `/admin/activities/{id}` | 平台管理员 | 更新活动 |
+| POST | `/admin/activities/{id}/publish` | 平台管理员 | 发布活动 |
+| POST | `/admin/activities/{id}/offline` | 平台管理员 | 下架活动 |
+| DELETE | `/admin/activities/{id}` | 平台管理员 | 软删除活动 |
+
+活动响应同时返回 `publication_status`（`draft|published|offline`）和
+`phase`（已发布时为 `upcoming|active|ended`）。兼容字段 `status` 在草稿/下架时表示
+发布状态，在已发布时表示按 `start_at/end_at` 动态计算的阶段；时间阶段不会写回发布状态。
+
 ### Feed
 
 | 方法 | 路径 | 登录 | 说明 |
@@ -273,6 +294,7 @@ pending，服务端有清理接口。
 | `USERNAME_TAKEN` | 409 | 用户名不可用 |
 | `USER_DISABLED` | 403 | 账户当前不可用 |
 | `FORBIDDEN` / `PERMISSION_DENIED` | 403 | 无权限 |
+| `TARGET_ROLE_PROTECTED` | 403 | 操作者不能处罚同级或更高角色账号 |
 | `COMMUNITY_NOT_FOUND` | 404 | 社区不存在或不可用 |
 | `POST_NOT_FOUND` | 404 | 帖子不存在 |
 | `COMMENT_NOT_FOUND` / `COMMENT_PARENT_NOT_FOUND` | 404 | 评论/回复目标不存在 |

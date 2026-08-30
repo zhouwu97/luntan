@@ -25,7 +25,11 @@ func (s *Server) writeAuthResponse(w http.ResponseWriter, r *http.Request, statu
 		s.setRefreshTokenCookie(w, r, response.RefreshToken)
 		response.RefreshToken = ""
 	}
-	applyBaseCapabilities(&response.User)
+	if s.db != nil && response.User.ID != "" {
+		_ = s.populateUserCapabilities(r.Context(), &response.User)
+	} else {
+		applyBaseCapabilities(&response.User)
+	}
 	httpserver.WriteJSON(w, status, response)
 }
 

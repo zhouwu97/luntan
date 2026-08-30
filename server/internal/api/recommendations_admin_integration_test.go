@@ -187,6 +187,35 @@ func TestActivityAdminFiltersAndEndedPublishValidation(t *testing.T) {
 
 	now := time.Now().UTC()
 
+	// 写入接口收到旧客户端可能提交的 phase 值时，数据库只保存发布状态，
+	// 读取接口再根据时间计算 phase，验证写入和读取不会互相矛盾。
+	createCode, createBody := callBusinessAPI(handler, http.MethodPost, "/api/v1/admin/activities", token, map[string]any{
+		"title":  "状态机写读一致性活动",
+		"status": "ended",
+	}, nil)
+	if createCode != http.StatusCreated {
+		t.Fatalf("创建活动应返回 201，实际 %d：%s", createCode, createBody)
+	}
+	var created struct {
+		ID                string `json:"id"`
+		Status            string `json:"status"`
+		PublicationStatus string `json:"publication_status"`
+		Phase             string `json:"phase"`
+	}
+	if err := json.Unmarshal(createBody, &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == "" || created.Status != "active" || created.PublicationStatus != "published" || created.Phase != "active" {
+		t.Fatalf("活动写入响应状态不一致：%s", createBody)
+	}
+	var storedStatus, storedPublicationStatus string
+	if err := s.db.QueryRow(`SELECT status, publication_status FROM activities WHERE id = $1`, created.ID).Scan(&storedStatus, &storedPublicationStatus); err != nil {
+		t.Fatal(err)
+	}
+	if storedStatus != "active" || storedPublicationStatus != "published" {
+		t.Fatalf("活动数据库状态不一致：status=%q publication_status=%q", storedStatus, storedPublicationStatus)
+	}
+
 	// 1. 创建已结束活动草稿（end_at 在过去）
 	endedActID := fmt.Sprintf("act-ended-%d", suffix%100000)
 	pastStart := now.Add(-48 * time.Hour)
@@ -210,8 +239,8 @@ func TestActivityAdminFiltersAndEndedPublishValidation(t *testing.T) {
 	activeActID := fmt.Sprintf("act-active-%d", suffix%100000)
 	futureEnd := now.Add(24 * time.Hour)
 	_, err = s.db.Exec(`
-		INSERT INTO activities (id, title, description, start_at, end_at, status, created_by, published_at, created_at, updated_at)
-		VALUES ($1, '进行中活动', '描述', $2, $3, 'active', $4, $5, $5, $5)`,
+		INSERT INTO activities (id, title, description, start_at, end_at, status, publication_status, created_by, published_at, created_at, updated_at)
+		VALUES ($1, '进行中活动', '描述', $2, $3, 'active', 'published', $4, $5, $5, $5)`,
 		activeActID, pastStart, futureEnd, adminID, now,
 	)
 	if err != nil {
@@ -230,8 +259,8 @@ func TestActivityAdminFiltersAndEndedPublishValidation(t *testing.T) {
 	for _, it := range items {
 		if m, ok := it.(map[string]any); ok && m["id"] == activeActID {
 			found = true
-			if m["status"] != "active" {
-				t.Fatalf("活动状态应派生为 active，实际 %v", m["status"])
+			if m["status"] != "active" || m["publication_status"] != "published" || m["phase"] != "active" {
+				t.Fatalf("活动状态应派生为 active，实际 status=%v publication_status=%v phase=%v", m["status"], m["publication_status"], m["phase"])
 			}
 		}
 	}
@@ -252,4 +281,3 @@ func TestActivityAdminFiltersAndEndedPublishValidation(t *testing.T) {
 		}
 	}
 }
-

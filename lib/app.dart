@@ -143,7 +143,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     publishController = PublishController(repository: repositories.publish!);
     final auth = repositories.auth;
     if (auth != null) {
-      authController = AuthController(repository: auth);
+      authController = AuthController(
+        repository: auth,
+        profileRepository: repositories.isApiMode ? repositories.profile : null,
+      );
       repositories.apiClient?.onSessionInvalidated = _handleSessionInvalidated;
       authInitialization = authController!.initialize().then((_) async {
         if (authController?.status == AuthStatus.authenticated) {

@@ -12,22 +12,22 @@ import (
 )
 
 type activityResponse struct {
-	ID           string     `json:"id"`
-	Title        string     `json:"title"`
-	Description  string     `json:"description"`
-	CoverMediaID string     `json:"cover_media_id,omitempty"`
-	CoverURL     string     `json:"cover_url,omitempty"`
-	StartAt      *time.Time `json:"start_at,omitempty"`
-	EndAt        *time.Time `json:"end_at,omitempty"`
-	Location     string     `json:"location,omitempty"`
-	Status       string     `json:"status"`
-	PublicationStatus string `json:"publication_status"`
-	Phase        string     `json:"phase,omitempty"`
-	CreatedBy    string     `json:"created_by"`
-	AuthorName   string     `json:"author_name,omitempty"`
-	PublishedAt  *time.Time `json:"published_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID                string     `json:"id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description"`
+	CoverMediaID      string     `json:"cover_media_id,omitempty"`
+	CoverURL          string     `json:"cover_url,omitempty"`
+	StartAt           *time.Time `json:"start_at,omitempty"`
+	EndAt             *time.Time `json:"end_at,omitempty"`
+	Location          string     `json:"location,omitempty"`
+	Status            string     `json:"status"`
+	PublicationStatus string     `json:"publication_status"`
+	Phase             string     `json:"phase,omitempty"`
+	CreatedBy         string     `json:"created_by"`
+	AuthorName        string     `json:"author_name,omitempty"`
+	PublishedAt       *time.Time `json:"published_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type createActivityInput struct {
@@ -102,7 +102,7 @@ func activityStatusForResponse(publicationStatus string, startAt, endAt *time.Ti
 	return deriveActivityPhase(startAt, endAt, now)
 }
 
-func nullableTime(value sql.NullTime) *time.Time {
+func activityNullableTime(value sql.NullTime) *time.Time {
 	if !value.Valid {
 		return nil
 	}
@@ -131,7 +131,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasAnyPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -205,7 +205,7 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasAnyPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -262,7 +262,7 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 			start_at, end_at, location, status, publication_status, created_by, published_at, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, NULLIF($4, ''), $5,
-			$6, $7, $8, $9, $10, $11, $12, $12, $12
+			$6, $7, $8, $9, $10, $11, $12, $13, $13
 		)`,
 		activityID, title, strings.TrimSpace(input.Description), coverMediaID, coverURL,
 		input.StartAt, input.EndAt, strings.TrimSpace(input.Location), responseStatus, publicationStatus, user.ID, publishedAt, now,
@@ -287,7 +287,7 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasAnyPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -366,7 +366,7 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasAnyPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -397,7 +397,7 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
-	newStatus := deriveActivityPhase(nullableTime(startAt), nullableTime(endAt), now)
+	newStatus := deriveActivityPhase(activityNullableTime(startAt), activityNullableTime(endAt), now)
 
 	_, err = s.db.ExecContext(r.Context(), `
 		UPDATE activities
@@ -417,7 +417,7 @@ func (s *Server) offlineAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasAnyPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -451,7 +451,7 @@ func (s *Server) deleteAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasAnyPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}

@@ -34,7 +34,12 @@ class ForumAuthorRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final avatarUrl = post.author?.avatar?.trim();
+    var avatarUrl = post.author?.avatar?.trim();
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      avatarUrl = UserAvatarCache.get(post.authorId);
+    } else {
+      UserAvatarCache.set(post.authorId, avatarUrl);
+    }
     final nickname = post.author?.nickname.trim();
     final initialChar = (nickname != null && nickname.isNotEmpty)
         ? nickname.characters.first

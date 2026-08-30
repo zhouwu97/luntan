@@ -172,8 +172,12 @@ func (s *Server) hasPermission(r *http.Request, userID, caseID, permission strin
 }
 
 func (s *Server) hasScopedPermission(r *http.Request, userID, permission, communityID string) bool {
+	return hasScopedPermissionQuery(r.Context(), s.db, userID, permission, communityID)
+}
+
+func hasScopedPermissionQuery(ctx context.Context, queryer queryRowContext, userID, permission, communityID string) bool {
 	var allowed bool
-	err := s.db.QueryRowContext(r.Context(), `
+	err := queryer.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM user_roles ur
 			JOIN role_permissions rp ON rp.role_id = ur.role_id
@@ -192,6 +196,20 @@ func (s *Server) hasAnyPermission(r *http.Request, userID, permission string) bo
 			JOIN role_permissions rp ON rp.role_id = ur.role_id
 			JOIN permissions p ON p.id = rp.permission_id
 			WHERE ur.user_id = $1 AND p.name = $2
+		)`, userID, permission).Scan(&allowed)
+	return err == nil && allowed
+}
+
+// hasGlobalPermission 只接受未绑定社区的角色权限，用于平台级管理接口。
+// 社区角色即使拥有同名能力，也必须经过带 community_id 的作用域校验，不能借此访问全局资源。
+func (s *Server) hasGlobalPermission(r *http.Request, userID, permission string) bool {
+	var allowed bool
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1 FROM user_roles ur
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = $1 AND p.name = $2 AND ur.community_id IS NULL
 		)`, userID, permission).Scan(&allowed)
 	return err == nil && allowed
 }

@@ -131,7 +131,12 @@ class _CommentItemState extends State<CommentItem>
         (comment.authorId.startsWith('guest') || comment.authorId.isEmpty
             ? 0
             : 1);
-    final avatar = comment.author?.avatar?.trim();
+    var avatar = comment.author?.avatar?.trim();
+    if (avatar == null || avatar.isEmpty) {
+      avatar = UserAvatarCache.get(comment.authorId);
+    } else {
+      UserAvatarCache.set(comment.authorId, avatar);
+    }
 
     return AnimatedBuilder(
       animation: _highlightAnimation,

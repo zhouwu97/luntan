@@ -208,7 +208,7 @@ func (s *Server) listModerationAppeals(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
-	items, hasMore, err := s.queryAppeals(r.Context(), s.db, "", strings.TrimSpace(r.URL.Query().Get("status")), limit)
+	items, hasMore, err := s.queryModerationAppeals(r.Context(), s.db, user.ID, strings.TrimSpace(r.URL.Query().Get("status")), limit)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -235,6 +235,19 @@ func (s *Server) getModerationAppeal(w http.ResponseWriter, r *http.Request, app
 	}
 	if err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+	communityID, err := moderationAppealCommunityID(r.Context(), s.db, appealID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeAuthError(w, r, ErrAppealNotFound)
+			return
+		}
+		writeInternalError(w, r, err)
+		return
+	}
+	if !s.hasScopedPermission(r, user.ID, "report.review", communityID) {
+		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
 	delete(item, "user_id")
@@ -270,6 +283,19 @@ func (s *Server) reviewAppeal(w http.ResponseWriter, r *http.Request, appealID s
 		return
 	} else if err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+	communityID, err := moderationAppealCommunityID(r.Context(), tx, appealID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeAuthError(w, r, ErrAppealNotFound)
+			return
+		}
+		writeInternalError(w, r, err)
+		return
+	}
+	if !hasScopedPermissionQuery(r.Context(), tx, user.ID, "report.review", communityID) {
+		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
 	if status != "pending" && status != "reviewing" {
@@ -348,20 +374,42 @@ func (s *Server) moderationActionJSON(ctx context.Context, queryer sqlQueryer, r
 }
 
 func (s *Server) queryAppeals(ctx context.Context, queryer sqlQueryer, userID, status string, limit int) ([]map[string]any, bool, error) {
+	return s.queryAppealsScoped(ctx, queryer, userID, "", status, limit)
+}
+
+func (s *Server) queryModerationAppeals(ctx context.Context, queryer sqlQueryer, reviewerID, status string, limit int) ([]map[string]any, bool, error) {
+	return s.queryAppealsScoped(ctx, queryer, "", reviewerID, status, limit)
+}
+
+func (s *Server) queryAppealsScoped(ctx context.Context, queryer sqlQueryer, userID, reviewerID, status string, limit int) ([]map[string]any, bool, error) {
 	args := []any{}
-	where := ""
+	conditions := []string{}
+	if reviewerID != "" {
+		args = append(args, reviewerID)
+		conditions = append(conditions, `EXISTS (
+			SELECT 1
+			FROM user_roles ur
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions perm ON perm.id = rp.permission_id
+			LEFT JOIN posts scoped_post ON a.target_type = 'post' AND scoped_post.id = a.target_id
+			LEFT JOIN comments scoped_comment ON a.target_type = 'comment' AND scoped_comment.id = a.target_id
+			LEFT JOIN posts scoped_comment_post ON scoped_comment_post.id = scoped_comment.post_id
+			WHERE ur.user_id = $1
+			  AND perm.name = 'report.review'
+			  AND (ur.community_id IS NULL OR ur.community_id = COALESCE(scoped_post.community_id, scoped_comment_post.community_id, ''))
+		)`)
+	}
 	if userID != "" {
 		args = append(args, userID)
-		where += " WHERE a.user_id = $1"
+		conditions = append(conditions, "a.user_id = $"+strconv.Itoa(len(args)))
 	}
 	if status != "" {
-		if where == "" {
-			where = " WHERE a.status = $1"
-			args = append(args, status)
-		} else {
-			where += " AND a.status = $2"
-			args = append(args, status)
-		}
+		args = append(args, status)
+		conditions = append(conditions, "a.status = $"+strconv.Itoa(len(args)))
+	}
+	where := ""
+	if len(conditions) > 0 {
+		where = " WHERE " + strings.Join(conditions, " AND ")
 	}
 	limitPosition := len(args) + 1
 	args = append(args, limit+1)
@@ -387,6 +435,18 @@ func (s *Server) queryAppeals(ctx context.Context, queryer sqlQueryer, userID, s
 		items = items[:limit]
 	}
 	return items, hasMore, nil
+}
+
+func moderationAppealCommunityID(ctx context.Context, queryer queryRowContext, appealID string) (string, error) {
+	var communityID string
+	err := queryer.QueryRowContext(ctx, `
+		SELECT COALESCE(p.community_id, cp.community_id, '')
+		FROM moderation_appeals a
+		LEFT JOIN posts p ON a.target_type = 'post' AND p.id = a.target_id
+		LEFT JOIN comments c ON a.target_type = 'comment' AND c.id = a.target_id
+		LEFT JOIN posts cp ON cp.id = c.post_id
+		WHERE a.id = $1`, appealID).Scan(&communityID)
+	return communityID, err
 }
 
 func (s *Server) loadAppeal(ctx context.Context, queryer sqlQueryer, appealID string) (map[string]any, error) {

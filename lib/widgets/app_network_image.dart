@@ -32,6 +32,24 @@ String? resolveMediaUrl(String? raw) {
   return resolved.toString();
 }
 
+/// 用户头像全局运行时缓存，避免旧版接口未联表返回头像时出现空白。
+class UserAvatarCache {
+  static final Map<String, String> _cache = <String, String>{};
+
+  static String? get(String? userId) {
+    if (userId == null || userId.isEmpty) return null;
+    return _cache[userId];
+  }
+
+  static void set(String? userId, String? avatarUrl) {
+    if (userId == null || userId.isEmpty) return;
+    final trimmed = avatarUrl?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      _cache[userId] = trimmed;
+    }
+  }
+}
+
 /// 网络图片的统一封装。
 ///
 /// - 基于 [CachedNetworkImage] 提供磁盘缓存：重启后无需重新下载；

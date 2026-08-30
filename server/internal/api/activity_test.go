@@ -11,13 +11,13 @@ func TestActivityPublicationStatusAndPhaseAreIndependent(t *testing.T) {
 	past := now.Add(-time.Hour)
 
 	tests := []struct {
-		name             string
-		requestedStatus  string
-		startAt          *time.Time
-		endAt            *time.Time
-		wantPublication  string
-		wantStatus       string
-		wantPhase        string
+		name            string
+		requestedStatus string
+		startAt         *time.Time
+		endAt           *time.Time
+		wantPublication string
+		wantStatus      string
+		wantPhase       string
 	}{
 		{name: "draft remains unpublished", requestedStatus: "draft", startAt: &future, wantPublication: "draft", wantStatus: "draft"},
 		{name: "offline remains unpublished", requestedStatus: "offline", startAt: &past, wantPublication: "offline", wantStatus: "offline"},
@@ -38,4 +38,3 @@ func TestActivityPublicationStatusAndPhaseAreIndependent(t *testing.T) {
 		})
 	}
 }
-

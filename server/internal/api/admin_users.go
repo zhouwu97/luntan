@@ -26,7 +26,7 @@ func (s *Server) requireUserManager(w http.ResponseWriter, r *http.Request) (aut
 	if !ok {
 		return auth.User{}, false
 	}
-	if !s.hasAnyPermission(r, user.ID, "user.manage") {
+	if !s.hasGlobalPermission(r, user.ID, "user.manage") {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return auth.User{}, false
 	}

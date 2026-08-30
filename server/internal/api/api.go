@@ -707,7 +707,11 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		s.setRefreshTokenCookie(w, r, response.RefreshToken)
 		response.RefreshToken = ""
 	}
-	applyBaseCapabilities(&response.User)
+	if s.db != nil && response.User.ID != "" {
+		_ = s.populateUserCapabilities(r.Context(), &response.User)
+	} else {
+		applyBaseCapabilities(&response.User)
+	}
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 

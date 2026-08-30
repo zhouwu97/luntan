@@ -1504,6 +1504,8 @@ class ActivityItem {
     this.endAt,
     this.location = '',
     required this.status,
+    this.publicationStatus = 'draft',
+    this.phase,
     required this.createdBy,
     this.authorName = '',
     this.publishedAt,
@@ -1520,6 +1522,8 @@ class ActivityItem {
   final DateTime? endAt;
   final String location;
   final String status;
+  final String publicationStatus;
+  final String? phase;
   final String createdBy;
   final String authorName;
   final DateTime? publishedAt;
@@ -1546,6 +1550,9 @@ class ActivityItem {
       endAt: json['end_at'] != null ? DateTime.tryParse(json['end_at'].toString()) : null,
       location: json['location'] as String? ?? '',
       status: json['status'] as String? ?? 'draft',
+      publicationStatus: json['publication_status'] as String? ??
+          ((json['status'] == 'draft' || json['status'] == 'offline') ? json['status'] as String : 'published'),
+      phase: json['phase'] as String?,
       createdBy: json['created_by'] as String? ?? '',
       authorName: json['author_name'] as String? ?? '',
       publishedAt: json['published_at'] != null ? DateTime.tryParse(json['published_at'].toString()) : null,

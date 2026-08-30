@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 
-import '../data/api/auth_repository.dart';
 import '../data/api/api_client.dart';
+import '../data/api/auth_repository.dart';
+import '../data/api/profile_repository.dart';
+import '../widgets/app_network_image.dart';
 
 enum AuthStatus {
   unknown,
@@ -12,10 +14,14 @@ enum AuthStatus {
 }
 
 class AuthController extends ChangeNotifier {
-  AuthController({required AuthRepository repository})
-    : _repository = repository;
+  AuthController({
+    required AuthRepository repository,
+    ProfileRepository? profileRepository,
+  }) : _repository = repository,
+       _profileRepository = profileRepository;
 
   final AuthRepository _repository;
+  final ProfileRepository? _profileRepository;
   AuthStatus status = AuthStatus.unknown;
   AuthUser? user;
   ApiException? error;
@@ -35,6 +41,7 @@ class AuthController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       user = await _repository.me();
+      await _enrichAvatar();
       status = AuthStatus.authenticated;
       error = null;
     } on ApiException catch (exception) {
@@ -67,8 +74,41 @@ class AuthController extends ChangeNotifier {
     try {
       final updated = await _repository.me();
       user = updated;
+      await _enrichAvatar();
       notifyListeners();
     } catch (_) {}
+  }
+
+  Future<void> _enrichAvatar() async {
+    if (user == null) return;
+    if (user!.avatarUrl != null && user!.avatarUrl!.isNotEmpty) {
+      UserAvatarCache.set(user!.id, user!.avatarUrl);
+      return;
+    }
+    final cached = UserAvatarCache.get(user!.id);
+    if (cached != null && cached.isNotEmpty) {
+      user = user!.copyWith(avatarUrl: cached);
+      return;
+    }
+    if (_profileRepository != null) {
+      try {
+        final profile = await _profileRepository!.getProfile();
+        if (profile.avatarUrl != null && profile.avatarUrl!.isNotEmpty) {
+          user = user!.copyWith(
+            avatarUrl: profile.avatarUrl,
+            avatarMediaId: profile.avatarMediaId,
+          );
+          UserAvatarCache.set(user!.id, profile.avatarUrl);
+        }
+      } catch (_) {}
+    }
+  }
+
+  void updateAvatar(String? avatarUrl, [String? avatarMediaId]) {
+    if (user == null) return;
+    UserAvatarCache.set(user!.id, avatarUrl);
+    user = user!.copyWith(avatarUrl: avatarUrl, avatarMediaId: avatarMediaId);
+    notifyListeners();
   }
 
   Future<bool> loginWithPassword({
@@ -307,8 +347,10 @@ class AuthController extends ChangeNotifier {
     // 登录响应中的基础账号信息，避免权限查询短暂失败把登录判成失败。
     try {
       user = await _repository.me();
+      await _enrichAvatar();
     } catch (_) {
       // 能力缺失时客户端默认按最小权限处理，后端仍是最终权限边界。
+      await _enrichAvatar();
     }
   }
 }

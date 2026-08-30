@@ -456,7 +456,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           children: [
                             ForumAuthorRow(
                               post: post,
-                              onMenu: () => _showPostMenu(post),
                               onAuthorTap: widget.onOpenUserId,
                             ),
                             const SizedBox(height: 12),

@@ -18,6 +18,7 @@ import '../widgets/app_network_image.dart';
 import 'exchange_store_screen.dart';
 import 'bookmark_folders_screen.dart';
 import 'entity_screens.dart';
+import 'history_screen.dart';
 import 'points_screen.dart';
 import 'profile_list_screen.dart';
 import 'settings_screen.dart';
@@ -222,6 +223,7 @@ class ProfileScreen extends StatelessWidget {
         isGuest: isGuest,
         accountSubtitle: isGuest ? '游客模式' : (currentUser?.email ?? '邮箱账号已登录'),
         onRequireAuth: onRequireAuth,
+        onProfileUpdated: onProfileUpdated,
         refreshToken: refreshToken,
       );
     }
@@ -547,53 +549,12 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showHistory(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: SizedBox(
-          height: 360,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  '浏览历史',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: store.history.isEmpty
-                    ? const Center(
-                        child: Text(
-                          '还没有浏览记录',
-                          style: TextStyle(color: AppTheme.textSecondary),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: store.history.length,
-                        itemBuilder: (_, index) => ListTile(
-                          title: Text(
-                            store.history[index].title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(store.history[index].section.label),
-                          onTap: () {
-                            Navigator.pop(context);
-                            onOpenPost(store.history[index]);
-                          },
-                        ),
-                      ),
-              ),
-            ],
-          ),
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HistoryScreen(
+          store: store,
+          onOpenPost: onOpenPost,
+          onOpenHome: onOpenHome,
         ),
       ),
     );
@@ -633,6 +594,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onRequireAuth,
     this.publishRepository,
     this.canManageProfile = true,
+    this.onProfileUpdated,
     required this.refreshToken,
   });
 
@@ -662,6 +624,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final OpenPostById? onOpenPostById;
   final PublishRepository? publishRepository;
   final bool canManageProfile;
+  final VoidCallback? onProfileUpdated;
 
   @override
   State<_ApiProfileScreen> createState() => _ApiProfileScreenState();
@@ -675,7 +638,10 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   @override
   void initState() {
     super.initState();
-    profileFuture = widget.repository.getProfile();
+    profileFuture = widget.repository.getProfile().then((summary) {
+      UserAvatarCache.set(summary.id, summary.avatarUrl);
+      return summary;
+    });
     pointsFuture = widget.storeRepository?.overview();
     recentPostsFuture = widget.repository.list(
       'posts',
@@ -707,7 +673,8 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       recentPostsFuture = recent;
     });
     try {
-      await profile;
+      final summary = await profile;
+      UserAvatarCache.set(summary.id, summary.avatarUrl);
     } catch (_) {
       // FutureBuilder 保留错误态；下拉刷新本身不再向上抛异常。
     }
@@ -736,10 +703,14 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
               publishRepository: widget.publishRepository,
               storeRepository: widget.storeRepository,
               isSelf: true,
+              onProfileUpdated: widget.onProfileUpdated,
             ),
           ),
         )
-        .then((_) => _refresh());
+        .then((_) {
+          _refresh();
+          widget.onProfileUpdated?.call();
+        });
   }
 
   @override
@@ -854,7 +825,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
             _ToolsGrid(
               onBookmarks: () => _openBookmarks(),
               onLikes: () => _openLikes(),
-              onHistory: () => _showList('浏览历史'),
+              onHistory: () => _openHistory(),
               onAppeals:
                   widget.onOpenAppeals ?? () => widget.onFeedback('当前模式暂不支持申诉'),
             ),
@@ -889,6 +860,19 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     ),
   );
 
+  void _openHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HistoryScreen(
+          repository: widget.repository,
+          onOpenPost: widget.onOpenPost,
+          onOpenPostById: widget.onOpenPostById,
+          onOpenHome: widget.onOpenHome,
+        ),
+      ),
+    );
+  }
+
   void _openLikes() {
     if (widget.isGuest || widget.currentUser?.canLike == false) {
       if (widget.onRequireAuth != null) {
@@ -902,6 +886,10 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
   }
 
   Future<void> _showList(String label) async {
+    if (label == '浏览历史') {
+      _openHistory();
+      return;
+    }
     final kind = switch (label) {
       '我的发布' || '我的发帖' => 'posts',
       '我的评论' || '我的回帖' => 'comments',

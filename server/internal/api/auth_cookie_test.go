@@ -184,6 +184,28 @@ func TestRefreshViaCookieOmitsBodyRefreshToken(t *testing.T) {
 	}
 }
 
+func TestWebRefreshIgnoresBodyRefreshToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := NewHandlerWithMail(db, nil, "production")
+	body, _ := json.Marshal(map[string]string{"refresh_token": "body-token-must-not-be-used"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewReader(body))
+	req.Header.Set("Origin", defaultWebOrigin)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Web refresh 无 Cookie 时不得接受 JSON token，实际 %d：%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("拒绝 body token 不应触发数据库访问：%v", err)
+	}
+}
+
 func TestRefreshWithoutBodyTokenOrCookieIsRejected(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

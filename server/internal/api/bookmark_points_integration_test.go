@@ -97,9 +97,13 @@ func businessIntegrationFixture(t *testing.T, rules PointRewardRules) (*Server, 
 
 func callBusinessAPI(handler http.Handler, method, path, token string, payload any, headers map[string]string) (int, []byte) {
 	var body *bytes.Reader
-	if payload == nil {
+	switch p := payload.(type) {
+	case nil:
 		body = bytes.NewReader(nil)
-	} else {
+	case []byte:
+		// 已序列化的 JSON 原样发送；encoding/json 会把 []byte 编码成 base64 字符串。
+		body = bytes.NewReader(p)
+	default:
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return http.StatusInternalServerError, []byte(err.Error())

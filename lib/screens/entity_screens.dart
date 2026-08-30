@@ -63,6 +63,7 @@ class UserProfileScreen extends StatefulWidget {
     this.storeRepository,
     this.isSelf = false,
     this.profileSummary,
+    this.onProfileUpdated,
   });
 
   final UserRepository repository;
@@ -79,6 +80,7 @@ class UserProfileScreen extends StatefulWidget {
   final StoreRepository? storeRepository;
   final bool isSelf;
   final ProfileSummary? profileSummary;
+  final VoidCallback? onProfileUpdated;
 
   @override
   State<UserProfileScreen> createState() => _UserProfileScreenState();
@@ -339,6 +341,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
     if (updated == true && mounted) {
       widget.onFeedback('个人资料已更新');
+      widget.onProfileUpdated?.call();
       _future = _load();
       _postsFuture = _loadInitialPosts();
     }
@@ -439,6 +442,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       );
       if (mounted) {
         widget.onFeedback(isAvatar ? '头像已更新' : '主页背景已更新');
+        widget.onProfileUpdated?.call();
         setState(() { _future = _load(); });
       }
     } catch (error, stackTrace) {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"time"
 
 	"github.com/zhouwu97/luntan/server/internal/growth"
 )
@@ -13,6 +14,8 @@ const maxUserLevel = growth.MaxUserLevel
 
 // ExperienceRewardRules 集中管理经验奖励与每日上限。
 type ExperienceRewardRules struct {
+	DailyLogin              int64
+	DailyLoginDailyLimit    int
 	PostCreate              int64
 	PostCreateDailyLimit    int
 	CommentCreate           int64
@@ -21,6 +24,8 @@ type ExperienceRewardRules struct {
 
 func defaultExperienceRewardRules() ExperienceRewardRules {
 	return ExperienceRewardRules{
+		DailyLogin:              10,
+		DailyLoginDailyLimit:    1,
 		PostCreate:              20,
 		PostCreateDailyLimit:    3,
 		CommentCreate:           5,
@@ -175,4 +180,30 @@ func awardExperienceTx(ctx context.Context, tx *sql.Tx, userID, source, reason, 
 		INSERT INTO experience_transactions (id, user_id, source, delta, experience_after, reason, idempotency_key, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, now())`, txID, userID, source, delta, newExp, reason, idempotencyKey)
 	return err
+}
+
+// claimDailyLoginExperience 处理每日首次登录/打开应用的经验奖励。
+// 每日首次增加经验，严格幂等，积分完全不变更。
+func (s *Server) claimDailyLoginExperience(ctx context.Context, userID string) error {
+	if s == nil || s.db == nil || userID == "" {
+		return nil
+	}
+	shanghaiLoc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		shanghaiLoc = time.FixedZone("CST", 8*3600)
+	}
+	todayStr := time.Now().In(shanghaiLoc).Format("2006-01-02")
+	idempotencyKey := "daily_login:" + userID + ":" + todayStr
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := awardExperienceTx(ctx, tx, userID, "daily_login", "每日登录", idempotencyKey, s.experienceRewards.DailyLogin, s.experienceRewards.DailyLoginDailyLimit); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }

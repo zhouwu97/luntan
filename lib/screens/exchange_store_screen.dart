@@ -7,6 +7,8 @@ import '../data/mock_forum_data.dart';
 import '../data/api/api_client.dart';
 import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/points_wallet_card.dart';
+import 'points_screen.dart';
 
 class ExchangeStoreScreen extends StatelessWidget {
   const ExchangeStoreScreen({super.key, this.store, this.apiRepository});
@@ -27,34 +29,15 @@ class ExchangeStoreScreen extends StatelessWidget {
         body: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '论坛周边兑换    ${localStore.points} 积分',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
+            PointsWalletCard(
+              balance: localStore.points,
+              onOpenDetails: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PointsCenterScreen(store: localStore),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
-                    style: TextStyle(
-                      color: Color(0xE6FFFFFF),
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
             const SizedBox(height: 20),
             const Text(
@@ -172,34 +155,19 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
             children: [
               FutureBuilder<int>(
                 future: balanceFuture,
-                builder: (context, balance) => Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '论坛周边兑换    ${balance.data ?? '…'} 积分',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
+                builder: (context, balance) => PointsWalletCard(
+                  balance: balance.data ?? 0,
+                  balanceLoading:
+                      balance.connectionState != ConnectionState.done,
+                  onOpenDetails: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => PointsCenterScreen(
+                          apiRepository: widget.repository,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
-                        style: TextStyle(
-                          color: Color(0xE6FFFFFF),
-                          fontSize: 12,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 20),

@@ -62,6 +62,15 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 主动刷新当前登录用户资料（如头像、昵称、等级更新后）。
+  Future<void> refreshUser() async {
+    try {
+      final updated = await _repository.me();
+      user = updated;
+      notifyListeners();
+    } catch (_) {}
+  }
+
   Future<bool> loginWithPassword({
     required String email,
     required String password,

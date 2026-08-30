@@ -50,6 +50,8 @@ class AppNetworkImage extends StatelessWidget {
     this.errorBuilder,
     this.memCacheWidth,
     this.memCacheHeight,
+    this.aspectRatio,
+    this.autoMemCacheSize = true,
     this.fadeInDuration = const Duration(milliseconds: 160),
   });
 
@@ -63,6 +65,19 @@ class AppNetworkImage extends StatelessWidget {
   final int? memCacheWidth;
   final int? memCacheHeight;
   final Duration fadeInDuration;
+
+  /// 原图宽高比（width / height）。
+  ///
+  /// 提供后自动解码高度按原图比例展开，而不是按布局框高度双轴
+  /// 精确缩放——否则长图位图会先被压成预览框的形状再进入显示。
+  final double? aspectRatio;
+
+  /// 是否按布局约束自动推导解码尺寸。
+  ///
+  /// 设为 false 时只使用显式 [memCacheWidth]/[memCacheHeight]：
+  /// 已知 [aspectRatio] 时高度按比例展开；比例未知时仅按宽度降采样，
+  /// 由 ResizeImage 按原图比例推断高度，避免双轴精确缩放压扁位图。
+  final bool autoMemCacheSize;
 
   @override
   Widget build(BuildContext context) {
@@ -79,16 +94,24 @@ class AppNetworkImage extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
-        final autoWidth = _autoCacheSide(
-          constraints.maxWidth,
-          dpr,
-          memCacheWidth,
-        );
-        final autoHeight = _autoCacheSide(
-          constraints.maxHeight,
-          dpr,
-          memCacheHeight,
-        );
+        var autoWidth = memCacheWidth;
+        var autoHeight = memCacheHeight;
+        if (autoMemCacheSize) {
+          autoWidth ??= _autoCacheSide(constraints.maxWidth, dpr);
+          autoHeight ??= _autoCacheSide(constraints.maxHeight, dpr);
+        }
+        final ratio = aspectRatio;
+        if (ratio != null && ratio > 0 && autoWidth != null) {
+          // 解码目标按原图比例展开、长边封顶；比例正确的位图交给
+          // cover/contain 去裁切或留白，而不是在解码阶段被压扁。
+          final rawHeight = (autoWidth / ratio).round();
+          if (rawHeight > 4096) {
+            autoHeight = 4096;
+            autoWidth = (4096 * ratio).round().clamp(1, 4096);
+          } else {
+            autoHeight = rawHeight.clamp(1, 4096);
+          }
+        }
 
         return CachedNetworkImage(
           imageUrl: resolved,
@@ -125,12 +148,9 @@ class AppNetworkImage extends StatelessWidget {
     );
   }
 
-  /// 约束有限且未显式指定解码宽度时，按约束 × DPR 降采样；
+  /// 约束有限时按约束 × DPR 降采样；
   /// 传出值限制在合理像素范围内，避免极端布局产生超大位图。
-  static int? _autoCacheSide(double constraint, double dpr, int? explicit) {
-    if (explicit != null) {
-      return explicit;
-    }
+  static int? _autoCacheSide(double constraint, double dpr) {
     if (!constraint.isFinite || constraint <= 0) {
       return null;
     }

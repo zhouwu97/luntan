@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../controllers/feed_controller.dart';
 import '../controllers/interaction_controller.dart';
 import '../data/api/api_client.dart';
+import '../data/api/auth_repository.dart';
 import '../data/api/platform_repository.dart';
 import '../data/api/publish_repository.dart';
 import '../data/api/ranking_repository.dart';
@@ -16,6 +17,7 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/forum_post_card.dart';
 import 'package:share_plus/share_plus.dart';
 import 'feature_page.dart';
@@ -109,6 +111,7 @@ class HomeScreen extends StatefulWidget {
     this.storeRepository,
     this.publishRepository,
     this.canManageRanking = false,
+    this.currentUser,
     this.onRefreshCompleted,
   });
 
@@ -140,6 +143,7 @@ class HomeScreen extends StatefulWidget {
   final StoreRepository? storeRepository;
   final PublishRepository? publishRepository;
   final bool canManageRanking;
+  final AuthUser? currentUser;
 
   /// 首页内容刷新后通知应用层同步未读数。
   final Future<void> Function()? onRefreshCompleted;
@@ -528,6 +532,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           onSearch: openSearch,
                           onMessages: widget.onOpenMessages,
                           unread: widget.unread ?? 0,
+                          currentUser: widget.currentUser,
                         ),
                       ),
                       SliverToBoxAdapter(
@@ -743,12 +748,61 @@ class _Header extends StatelessWidget {
     required this.onSearch,
     required this.onMessages,
     required this.unread,
+    this.currentUser,
   });
 
   final VoidCallback onProfile;
   final VoidCallback onSearch;
   final VoidCallback onMessages;
   final int unread;
+  final AuthUser? currentUser;
+
+  Widget _buildAvatar(BuildContext context) {
+    const radius = 21.0;
+    const diameter = radius * 2;
+    final nickname = currentUser?.nickname.trim();
+    final initialChar = (nickname != null && nickname.isNotEmpty)
+        ? nickname.characters.first
+        : (currentUser?.accountType == 'guest' ? '游' : '理');
+    final avatarUrl = currentUser?.avatar?.trim();
+
+    final placeholder = Container(
+      width: diameter,
+      height: diameter,
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceBlue,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initialChar,
+        style: const TextStyle(
+          color: AppTheme.primary,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return placeholder;
+    }
+
+    return ClipOval(
+      child: SizedBox(
+        width: diameter,
+        height: diameter,
+        child: AppNetworkImage(
+          url: avatarUrl,
+          fit: BoxFit.cover,
+          width: diameter,
+          height: diameter,
+          placeholder: (_) => placeholder,
+          errorBuilder: (_) => placeholder,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -759,17 +813,7 @@ class _Header extends StatelessWidget {
           InkResponse(
             onTap: onProfile,
             radius: 26,
-            child: const CircleAvatar(
-              radius: 21,
-              backgroundColor: AppTheme.surfaceBlue,
-              child: Text(
-                '理',
-                style: TextStyle(
-                  color: AppTheme.primary,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
+            child: _buildAvatar(context),
           ),
           const SizedBox(width: 10),
           Expanded(

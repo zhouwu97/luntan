@@ -671,6 +671,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                     value: 'activity',
                     child: Text('活动'),
                   ),
+                  DropdownMenuItem<String?>(
+                    value: 'game_share',
+                    child: Text('玩法分享'),
+                  ),
                 ],
                 onChanged: submitting
                     ? null
@@ -679,46 +683,18 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                         _scheduleDraftSave();
                       },
               ),
-              const SizedBox(height: 12),
-              const Text(
-                '图片',
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: submitting || !_canUploadSelectedCommunity
-                        ? null
-                        : (_usesRealUpload
-                              ? _pickImages
-                              : widget.enableSampleMedia
-                              ? _addSampleImage
-                              : _pickImages),
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    label: Text(
-                      _usesRealUpload
-                          ? '选择图片'
-                          : widget.enableSampleMedia
-                          ? '添加示例图'
-                          : '选择图片',
+                  const Text(
+                    '图片',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  if (!_canUploadSelectedCommunity)
-                    const Expanded(
-                      child: Text(
-                        '当前社区不允许图片',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
                   Text(
                     _usesRealUpload
                         ? '${images.length} / $maxImages'
@@ -726,78 +702,83 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                     style: const TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
               ),
-              if (_usesRealUpload && images.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 104,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: images.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 10),
-                    itemBuilder: (_, index) {
-                      final image = images[index];
-                      return _DraftImageThumb(
-                        image: image,
-                        onRetry: () => _enqueueUpload(image),
-                        onDelete: () => _deleteImage(image),
-                      );
-                    },
+              if (!_canUploadSelectedCommunity)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    '当前社区暂不允许上传图片',
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                   ),
                 ),
-              ],
-              if (!_usesRealUpload && selectedMedia.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 86,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: selectedMedia.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (_, index) => Stack(
-                      children: [
-                        SizedBox(
-                          width: 86,
-                          height: 86,
-                          // 发帖器缩略图是固定方框的满铺预览，不走 feed 宽度优先规则。
-                          child: PostMediaPreview(
-                            images: [selectedMedia[index]],
-                            mode: PostMediaPreviewMode.detail,
-                          ),
-                        ),
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: IconButton(
-                            onPressed: submitting
-                                ? null
-                                : () {
-                                    setState(
-                                      () =>
-                                          selectedMedia = [...selectedMedia]
-                                            ..removeAt(index),
-                                    );
-                                    _scheduleDraftSave();
-                                  },
-                            icon: const Icon(
-                              Icons.cancel,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              const SizedBox(height: 10),
+              _buildImagesGrid(),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildImagesGrid() {
+    final count = _usesRealUpload
+        ? (images.length < maxImages && _canUploadSelectedCommunity
+            ? images.length + 1
+            : images.length)
+        : (selectedMedia.length < maxImages
+            ? selectedMedia.length + 1
+            : selectedMedia.length);
+
+    if (count == 0) return const SizedBox.shrink();
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 1.0,
+      ),
+      itemCount: count,
+      itemBuilder: (context, index) {
+        if (_usesRealUpload) {
+          if (index < images.length) {
+            final image = images[index];
+            return _DraftImageGridThumb(
+              image: image,
+              onRetry: () => _enqueueUpload(image),
+              onDelete: () => _deleteImage(image),
+            );
+          }
+          return _AddImageGridTile(
+            onTap: submitting || !_canUploadSelectedCommunity ? null : _pickImages,
+            count: images.length,
+          );
+        } else {
+          if (index < selectedMedia.length) {
+            return _SampleMediaGridThumb(
+              media: selectedMedia[index],
+              onDelete: () {
+                setState(
+                  () => selectedMedia = [...selectedMedia]..removeAt(index),
+                );
+                _scheduleDraftSave();
+              },
+            );
+          }
+          return _AddImageGridTile(
+            onTap: submitting
+                ? null
+                : (widget.enableSampleMedia ? _addSampleImage : _pickImages),
+            count: selectedMedia.length,
+          );
+        }
+      },
     );
   }
 }
@@ -926,8 +907,8 @@ class _CommunitySegment extends StatelessWidget {
   );
 }
 
-class _DraftImageThumb extends StatelessWidget {
-  const _DraftImageThumb({
+class _DraftImageGridThumb extends StatelessWidget {
+  const _DraftImageGridThumb({
     required this.image,
     required this.onRetry,
     required this.onDelete,
@@ -952,99 +933,173 @@ class _DraftImageThumb extends StatelessWidget {
                 color: AppTheme.surfaceBlue,
                 alignment: Alignment.center,
                 child: snapshot.hasError
-                    ? const Icon(Icons.broken_image_outlined, size: 20)
+                    ? const Icon(
+                        Icons.broken_image_outlined,
+                        size: 22,
+                        color: AppTheme.textSecondary,
+                      )
                     : const SizedBox(
-                        width: 18,
-                        height: 18,
+                        width: 20,
+                        height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
               );
             },
           )
         : Image.memory(bytes, fit: BoxFit.cover);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 86,
-          height: 68,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: preview,
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          preview,
+          if (status == _DraftImageStatus.uploading)
+            Container(
+              color: Colors.black38,
+              alignment: Alignment.center,
+              child: const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
               ),
-              if (status == _DraftImageStatus.done)
-                const Positioned(
-                  right: 4,
-                  top: 4,
-                  child: _StatusDot(color: AppTheme.mint, icon: Icons.check),
-                )
-              else if (status == _DraftImageStatus.failed)
-                Positioned(
-                  right: 4,
-                  top: 4,
-                  child: GestureDetector(
-                    onTap: onRetry,
-                    child: const _StatusDot(
-                      color: AppTheme.pink,
-                      icon: Icons.refresh,
+            )
+          else if (status == _DraftImageStatus.failed)
+            GestureDetector(
+              onTap: onRetry,
+              child: Container(
+                color: Colors.black54,
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.refresh, color: Colors.white, size: 22),
+                    SizedBox(height: 2),
+                    Text(
+                      '重试',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 4),
-        SizedBox(
-          width: 86,
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _statusLabel(status),
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: AppTheme.textSecondary,
-                  ),
+                  ],
                 ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed: onDelete,
-                iconSize: 16,
-                icon: const Icon(
+            ),
+          Positioned(
+            right: 4,
+            top: 4,
+            child: GestureDetector(
+              onTap: onDelete,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
                   Icons.close_rounded,
-                  color: AppTheme.textSecondary,
+                  color: Colors.white,
+                  size: 14,
                 ),
               ),
-            ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-class _StatusDot extends StatelessWidget {
-  const _StatusDot({required this.color, required this.icon});
-  final Color color;
-  final IconData icon;
+class _AddImageGridTile extends StatelessWidget {
+  const _AddImageGridTile({required this.onTap, this.count = 0});
+
+  final VoidCallback? onTap;
+  final int count;
+
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    padding: const EdgeInsets.all(2),
-    child: Icon(icon, color: Colors.white, size: 12),
-  );
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Ink(
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceBlue,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.border),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(
+              Icons.add_photo_alternate_outlined,
+              size: 28,
+              color: AppTheme.textSecondary,
+            ),
+            SizedBox(height: 4),
+            Text(
+              '添加图片',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-String _statusLabel(_DraftImageStatus status) => switch (status) {
-  _DraftImageStatus.pending => '等待上传',
-  _DraftImageStatus.uploading => '上传中…',
-  _DraftImageStatus.done => '上传成功',
-  _DraftImageStatus.failed => '上传失败',
-};
+class _SampleMediaGridThumb extends StatelessWidget {
+  const _SampleMediaGridThumb({
+    required this.media,
+    required this.onDelete,
+  });
+
+  final MediaAsset media;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          PostMediaPreview(
+            images: [media],
+            mode: PostMediaPreviewMode.detail,
+          ),
+          Positioned(
+            right: 4,
+            top: 4,
+            child: GestureDetector(
+              onTap: onDelete,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close_rounded,
+                  color: Colors.white,
+                  size: 14,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 String _sha256Hex(Uint8List bytes) => sha256.convert(bytes).toString();
 

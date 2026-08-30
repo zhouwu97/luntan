@@ -46,6 +46,20 @@ Size calculateFeedSingleImageSize({
   return Size(width, height);
 }
 
+/// 媒体元数据里的宽高比（width / height），缺失或非法时返回 null。
+double? mediaAssetRatio(PostMedia media) {
+  final width = media.width?.toDouble();
+  final height = media.height?.toDouble();
+  if (width == null ||
+      height == null ||
+      !width.isFinite ||
+      !height.isFinite) {
+    return null;
+  }
+  if (width <= 0 || height <= 0) return null;
+  return width / height;
+}
+
 /// 帖子媒体预览。
 ///
 /// Feed 场景（贴吧式信息流）：
@@ -145,7 +159,7 @@ class PostMediaPreview extends StatelessWidget {
   Widget _buildFeedSingleImage(BuildContext context, PostMedia media) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final rawRatio = _rawRatio(media);
+        final rawRatio = mediaAssetRatio(media);
         final size = calculateFeedSingleImageSize(
           availableWidth: constraints.maxWidth,
           aspectRatio: rawRatio,
@@ -219,21 +233,8 @@ class PostMediaPreview extends StatelessWidget {
   // ---------------------------------------------------------------------------
   // 比例与辅助工具
   // ---------------------------------------------------------------------------
-  double? _rawRatio(PostMedia media) {
-    final width = media.width?.toDouble();
-    final height = media.height?.toDouble();
-    if (width == null ||
-        height == null ||
-        !width.isFinite ||
-        !height.isFinite) {
-      return null;
-    }
-    if (width <= 0 || height <= 0) return null;
-    return width / height;
-  }
-
   double _naturalRatio(PostMedia media, {double fallback = 4.0 / 3.0}) {
-    final raw = _rawRatio(media);
+    final raw = mediaAssetRatio(media);
     if (raw == null) return fallback;
     return raw.clamp(0.1, 4.0).toDouble();
   }
@@ -267,6 +268,7 @@ class PostMediaPreview extends StatelessWidget {
                   url: imageUrl,
                   fit: fit,
                   alignment: alignment,
+                  aspectRatio: mediaAssetRatio(media),
                   errorBuilder: (_) => _fallback(media),
                 )
               else
@@ -458,10 +460,15 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
                                         .round()
                                         .clamp(1, 8192)
                                   : null;
+                              // 已知比例时解码高度按原图比例展开；未知比例时
+                              // 只按宽度降采样、由 ResizeImage 按原图比例推断
+                              // 高度——绝不能按显示框双轴精确缩放压扁位图。
                               return AppNetworkImage(
                                 url: imageUrl,
                                 fit: BoxFit.contain,
+                                aspectRatio: mediaAssetRatio(image),
                                 memCacheWidth: zoomWidth,
+                                autoMemCacheSize: false,
                                 errorBuilder: (_) => _fallback(image),
                               );
                             },

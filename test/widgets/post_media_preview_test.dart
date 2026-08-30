@@ -82,6 +82,12 @@ void main() {
       expect(image.alignment, Alignment.topCenter);
       expect(find.text('长图'), findsOneWidget);
       expect(tester.getSize(find.byType(Image)).width, closeTo(250, 0.5));
+
+      // 解码按原图比例 0.5625 展开，而不是 3:4 预览框比例，避免位图被压扁。
+      final provider = image.image;
+      expect(provider, isA<ResizeImage>());
+      final resize = provider as ResizeImage;
+      expect(resize.width! / resize.height!, closeTo(90 / 160, 0.01));
     });
   });
 
@@ -205,6 +211,49 @@ void main() {
       expect(size.height, closeTo(1022, 2.0));
       expect(tester.getSize(find.byType(Image).at(0)).width, closeTo(360, 0.5));
       expect(tester.getSize(find.byType(Image).at(1)).width, closeTo(360, 0.5));
+    });
+  });
+
+  group('全屏查看器解码', () {
+    testWidgets('已知比例：解码目标按原图比例展开，长边封顶后比例不变', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaGalleryScreen(
+            images: [asset('viewer-9-16', 90, 160)],
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final provider = tester.widget<Image>(find.byType(Image)).image;
+      expect(provider, isA<ResizeImage>());
+      final resize = provider as ResizeImage;
+      // 测试面 800×600、dpr 3 → zoomWidth = 4800，高度超 4096 封顶后
+      // 按原图比例回推宽度，比例必须保持 90/160。
+      expect(resize.width! / resize.height!, closeTo(90 / 160, 0.01));
+    });
+
+    testWidgets('缺失尺寸：只按宽度降采样，高度交给原图比例推断', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: MediaGalleryScreen(
+            images: [
+              MediaAsset(
+                id: 'viewer-mystery',
+                type: MediaType.image,
+                url: 'https://example.com/mystery.jpg',
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final provider = tester.widget<Image>(find.byType(Image)).image;
+      expect(provider, isA<ResizeImage>());
+      final resize = provider as ResizeImage;
+      expect(resize.width, 4800);
+      expect(resize.height, isNull);
     });
   });
 }

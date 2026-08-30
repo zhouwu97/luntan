@@ -9,6 +9,7 @@ import '../data/api/publish_repository.dart';
 import '../data/api/ranking_repository.dart';
 import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/forum_post_card.dart';
 import 'ranking_page.dart';
 
@@ -77,6 +78,7 @@ class FeaturePage extends StatefulWidget {
 
 class _FeaturePageState extends State<FeaturePage> {
   Future<List<Post>>? remoteFuture;
+  Future<List<ActivityItem>>? activityFuture;
 
   FeatureType get type => widget.type;
   ForumStore get store => widget.store;
@@ -97,14 +99,20 @@ class _FeaturePageState extends State<FeaturePage> {
   @override
   void initState() {
     super.initState();
-    if (type != FeatureType.ranking && feedRepository != null) {
+    if (type == FeatureType.activity && platformRepository != null) {
+      activityFuture = platformRepository!.listPublicActivities();
+    } else if (type != FeatureType.ranking && feedRepository != null) {
       remoteFuture = _remotePosts();
     }
   }
 
   void _retry() {
     setState(() {
-      remoteFuture = _remotePosts();
+      if (type == FeatureType.activity && platformRepository != null) {
+        activityFuture = platformRepository!.listPublicActivities();
+      } else {
+        remoteFuture = _remotePosts();
+      }
     });
   }
 
@@ -175,6 +183,38 @@ class _FeaturePageState extends State<FeaturePage> {
         onRequireAuth: onRequireAuth,
       );
     }
+    if (type == FeatureType.activity && activityFuture != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: FutureBuilder<List<ActivityItem>>(
+          future: activityFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      '活动列表加载失败',
+                      style: TextStyle(color: AppTheme.textSecondary),
+                    ),
+                    TextButton(onPressed: _retry, child: const Text('返回重试')),
+                  ],
+                ),
+              );
+            }
+            final activities = snapshot.data ?? const <ActivityItem>[];
+            if (activities.isNotEmpty) {
+              return _activitiesBody(activities);
+            }
+            return _body(_posts());
+          },
+        ),
+      );
+    }
     if (feedRepository != null) {
       return Scaffold(
         appBar: AppBar(title: Text(title)),
@@ -207,6 +247,136 @@ class _FeaturePageState extends State<FeaturePage> {
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: _body(posts),
+    );
+  }
+
+  Widget _activitiesBody(List<ActivityItem> activities) => CustomScrollView(
+    slivers: [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+        sliver: SliverToBoxAdapter(child: _postIntro()),
+      ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => _activityPublicCard(activities[index]),
+            childCount: activities.length,
+          ),
+        ),
+      ),
+      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+    ],
+  );
+
+  Widget _activityPublicCard(ActivityItem item) {
+    final statusColor = switch (item.status) {
+      'active' => AppTheme.primary,
+      'upcoming' => AppTheme.orange,
+      'ended' => Colors.blueGrey,
+      _ => AppTheme.textSecondary,
+    };
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppTheme.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (item.coverUrl != null && item.coverUrl!.isNotEmpty) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  height: 140,
+                  width: double.infinity,
+                  child: AppNetworkImage(
+                    url: item.coverUrl!,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    item.title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    item.statusLabel,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (item.description.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                item.description,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            if (item.startAt != null || item.location.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  if (item.startAt != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.access_time_rounded, size: 14, color: AppTheme.textSecondary),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${item.startAt!.month}/${item.startAt!.day} 开始',
+                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  if (item.location.isNotEmpty)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.location_on_outlined, size: 14, color: AppTheme.textSecondary),
+                        const SizedBox(width: 4),
+                        Text(
+                          item.location,
+                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 

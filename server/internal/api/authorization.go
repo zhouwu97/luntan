@@ -135,6 +135,30 @@ func (s *Server) populateUserCapabilities(ctx context.Context, user *auth.User) 
 	if user == nil {
 		return sql.ErrNoRows
 	}
+	var avatarMediaID, objectKey sql.NullString
+	var exp int64
+	var level int
+	var accountType string
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(up.avatar_media_id, ''), COALESCE(ma.object_key, ''),
+		       COALESCE(up.experience, 0),
+		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
+		       COALESCE(u.account_type, 'email')
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
+		WHERE u.id = $1`, user.ID).Scan(&avatarMediaID, &objectKey, &exp, &level, &accountType); err == nil {
+		if avatarMediaID.Valid && avatarMediaID.String != "" {
+			user.AvatarMediaID = avatarMediaID.String
+		}
+		if objectKey.Valid && objectKey.String != "" {
+			user.AvatarURL = publicMediaURL(objectKey.String)
+		}
+		user.Experience = exp
+		user.Level = level
+		user.AccountType = accountType
+	}
+
 	caps := capabilitiesForUser(*user)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT rl.name, p.name

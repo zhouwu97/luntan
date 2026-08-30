@@ -177,6 +177,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/admin/recommendations/"):
 		postID := strings.TrimPrefix(path, "/api/v1/admin/recommendations/")
 		s.removeHomeRecommendation(w, r, postID)
+	case r.Method == http.MethodGet && path == "/api/v1/admin/activities":
+		s.listAdminActivities(w, r)
+		return
+	case r.Method == http.MethodPost && path == "/api/v1/admin/activities":
+		s.createAdminActivity(w, r)
+		return
+	case (r.Method == http.MethodPost || r.Method == http.MethodPut) && strings.HasPrefix(path, "/api/v1/admin/activities/") && strings.HasSuffix(path, "/publish"):
+		activityID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/activities/"), "/publish")
+		s.publishAdminActivity(w, r, activityID)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/activities/") && strings.HasSuffix(path, "/offline"):
+		activityID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/activities/"), "/offline")
+		s.offlineAdminActivity(w, r, activityID)
+		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admin/activities/"):
+		activityID := strings.TrimPrefix(path, "/api/v1/admin/activities/")
+		s.updateAdminActivity(w, r, activityID)
+		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/admin/activities/"):
+		activityID := strings.TrimPrefix(path, "/api/v1/admin/activities/")
+		s.deleteAdminActivity(w, r, activityID)
+		return
+	case r.Method == http.MethodGet && path == "/api/v1/activities":
+		s.listPublicActivities(w, r)
 		return
 	case r.Method == http.MethodPost && path == "/api/v1/ranking/submissions":
 		s.createRankingToySubmission(w, r)
@@ -679,6 +703,9 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {
 		return
+	}
+	if user.AccountType != "guest" {
+		_ = s.claimDailyLoginExperience(r.Context(), user.ID)
 	}
 	if err := s.populateUserCapabilities(r.Context(), &user); err != nil {
 		writeInternalError(w, r, err)

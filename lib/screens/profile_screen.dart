@@ -85,6 +85,7 @@ class ProfileScreen extends StatelessWidget {
     this.onOpenAdmins,
     this.onOpenGovernance,
     this.onOpenRelations,
+    this.onProfileUpdated,
     this.refreshToken = 0,
   });
 
@@ -114,6 +115,7 @@ class ProfileScreen extends StatelessWidget {
   final VoidCallback? onOpenAdmins;
   final VoidCallback? onOpenGovernance;
   final void Function(String userId, bool followers)? onOpenRelations;
+  final VoidCallback? onProfileUpdated;
   final int refreshToken;
 
   void _openHomepage(BuildContext context) {
@@ -138,6 +140,7 @@ class ProfileScreen extends StatelessWidget {
             publishRepository: publishRepository,
             storeRepository: storeRepository,
             isSelf: true,
+            onProfileUpdated: onProfileUpdated,
           ),
         ),
       );

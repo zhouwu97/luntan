@@ -97,6 +97,7 @@ class GovernanceCenterScreen extends StatelessWidget {
     this.onOpenModeration,
     this.onOpenAppeals,
     this.onOpenRecommendations,
+    this.onOpenActivities,
     this.onOpenRankingSubmissions,
     this.onOpenAdmins,
     this.onOpenUsers,
@@ -108,6 +109,7 @@ class GovernanceCenterScreen extends StatelessWidget {
   final VoidCallback? onOpenModeration;
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenRecommendations;
+  final VoidCallback? onOpenActivities;
   final VoidCallback? onOpenRankingSubmissions;
   final VoidCallback? onOpenAdmins;
   final VoidCallback? onOpenUsers;
@@ -119,6 +121,7 @@ class GovernanceCenterScreen extends StatelessWidget {
       onOpenModeration != null ||
       onOpenAppeals != null ||
       onOpenRecommendations != null ||
+      onOpenActivities != null ||
       onOpenRankingSubmissions != null ||
       onOpenAdmins != null ||
       onOpenUsers != null ||
@@ -139,6 +142,7 @@ class GovernanceCenterScreen extends StatelessWidget {
         onOpenModeration != null ||
         onOpenAppeals != null ||
         onOpenRecommendations != null ||
+        onOpenActivities != null ||
         onOpenRankingSubmissions != null;
     final hasUserGroup = onOpenUsers != null || onOpenAdmins != null;
     final hasSecurityGroup =
@@ -214,6 +218,14 @@ class GovernanceCenterScreen extends StatelessWidget {
                 title: '首页推荐',
                 subtitle: '管理首页人工精选与推荐排序',
                 onTap: onOpenRecommendations!,
+              ),
+            if (onOpenActivities != null)
+              _entry(
+                icon: Icons.event_available_outlined,
+                title: '活动管理',
+                subtitle: '创建、编辑、发布、下架与删除社区活动',
+                badgeText: '运营',
+                onTap: onOpenActivities!,
               ),
             if (onOpenRankingSubmissions != null)
               _entry(

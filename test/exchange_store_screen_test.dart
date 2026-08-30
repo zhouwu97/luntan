@@ -30,7 +30,16 @@ void main() {
     expect(find.text('60 积分'), findsOneWidget);
     expect(find.text('300 积分'), findsOneWidget);
     expect(find.text('600 积分'), findsOneWidget);
-    expect(find.text('发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分'), findsOneWidget);
+    // 规则行是 Text.rich（金色加成数字），按纯文本整体匹配。
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            (widget.data ?? widget.textSpan?.toPlainText()) ==
+                '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('主题贴纸包'), findsNothing);
     expect(find.text('校园钥匙扣'), findsNothing);
     expect(find.text('校园帆布袋'), findsNothing);

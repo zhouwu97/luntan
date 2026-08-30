@@ -221,12 +221,11 @@ void main() {
     final image = tester.widget<Image>(find.byType(Image));
     expect(image.fit, BoxFit.cover);
     expect(image.alignment, Alignment.topCenter);
-    // 解码尺寸按布局约束计算，宽高比与实际显示区域一致，cover 裁切下不会被压扁。
+    // 解码按原图比例 0.5 展开（800x1600），而不是 3:4 预览框比例，避免位图被压扁。
     final provider = image.image;
     expect(provider, isA<ResizeImage>());
     final resize = provider as ResizeImage;
-    final size = tester.getSize(find.byType(Image));
-    expect(resize.width! / resize.height!, closeTo(size.width / size.height, 0.02));
+    expect(resize.width! / resize.height!, closeTo(800 / 1600, 0.02));
   });
 
   testWidgets('帖子详情媒体预览允许竖图使用更高的 detail 区域', (tester) async {

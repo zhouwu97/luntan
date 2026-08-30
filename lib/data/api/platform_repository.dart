@@ -1379,6 +1379,92 @@ class PlatformRepository {
     }
   }
 
+  Future<List<ActivityItem>> listAdminActivities({String? status}) async {
+    final query = status != null && status.isNotEmpty ? '?status=$status' : '';
+    final response = await _client.getJson('/api/v1/admin/activities$query');
+    final items = response['items'] is List
+        ? (response['items'] as List)
+            .whereType<Map>()
+            .map((item) => ActivityItem.fromJson(Map<String, dynamic>.from(item)))
+            .toList()
+        : <ActivityItem>[];
+    return items;
+  }
+
+  Future<void> createAdminActivity({
+    required String title,
+    String description = '',
+    String? coverMediaId,
+    String? coverUrl,
+    DateTime? startAt,
+    DateTime? endAt,
+    String location = '',
+    String status = 'draft',
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/activities',
+      body: {
+        'title': title,
+        'description': description,
+        if (coverMediaId != null && coverMediaId.isNotEmpty) 'cover_media_id': coverMediaId,
+        if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+        if (startAt != null) 'start_at': startAt.toUtc().toIso8601String(),
+        if (endAt != null) 'end_at': endAt.toUtc().toIso8601String(),
+        'location': location,
+        'status': status,
+      },
+    );
+  }
+
+  Future<void> updateAdminActivity({
+    required String id,
+    required String title,
+    String description = '',
+    String? coverMediaId,
+    String? coverUrl,
+    DateTime? startAt,
+    DateTime? endAt,
+    String location = '',
+    String status = 'draft',
+  }) async {
+    await _client.putJson(
+      '/api/v1/admin/activities/$id',
+      body: {
+        'title': title,
+        'description': description,
+        if (coverMediaId != null && coverMediaId.isNotEmpty) 'cover_media_id': coverMediaId,
+        if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+        if (startAt != null) 'start_at': startAt.toUtc().toIso8601String(),
+        if (endAt != null) 'end_at': endAt.toUtc().toIso8601String(),
+        'location': location,
+        'status': status,
+      },
+    );
+  }
+
+  Future<void> publishAdminActivity(String id) async {
+    await _client.postJson('/api/v1/admin/activities/$id/publish', body: const <String, dynamic>{});
+  }
+
+  Future<void> offlineAdminActivity(String id) async {
+    await _client.postJson('/api/v1/admin/activities/$id/offline', body: const <String, dynamic>{});
+  }
+
+  Future<void> deleteAdminActivity(String id) async {
+    await _client.deleteJson('/api/v1/admin/activities/$id');
+  }
+
+  Future<List<ActivityItem>> listPublicActivities() async {
+    final response = await _client.getJson('/api/v1/activities');
+    final items = response['items'] is List
+        ? (response['items'] as List)
+            .whereType<Map>()
+            .map((item) => ActivityItem.fromJson(Map<String, dynamic>.from(item)))
+            .toList()
+        : <ActivityItem>[];
+    return items;
+  }
+
   String _string(dynamic value, {String fallback = ''}) =>
       value is String && value.isNotEmpty ? value : fallback;
 
@@ -1405,6 +1491,68 @@ class PlatformRepository {
 
   DateTime? _nullableDate(dynamic value) =>
       value is String ? DateTime.tryParse(value) : null;
+}
+
+class ActivityItem {
+  const ActivityItem({
+    required this.id,
+    required this.title,
+    this.description = '',
+    this.coverMediaId,
+    this.coverUrl,
+    this.startAt,
+    this.endAt,
+    this.location = '',
+    required this.status,
+    required this.createdBy,
+    this.authorName = '',
+    this.publishedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String title;
+  final String description;
+  final String? coverMediaId;
+  final String? coverUrl;
+  final DateTime? startAt;
+  final DateTime? endAt;
+  final String location;
+  final String status;
+  final String createdBy;
+  final String authorName;
+  final DateTime? publishedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  String get statusLabel => switch (status) {
+    'draft' => '草稿',
+    'upcoming' => '未开始',
+    'active' => '进行中',
+    'ended' => '已结束',
+    'offline' => '已下架',
+    _ => status,
+  };
+
+  factory ActivityItem.fromJson(Map<String, dynamic> json) {
+    return ActivityItem(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      coverMediaId: json['cover_media_id'] as String?,
+      coverUrl: json['cover_url'] as String?,
+      startAt: json['start_at'] != null ? DateTime.tryParse(json['start_at'].toString()) : null,
+      endAt: json['end_at'] != null ? DateTime.tryParse(json['end_at'].toString()) : null,
+      location: json['location'] as String? ?? '',
+      status: json['status'] as String? ?? 'draft',
+      createdBy: json['created_by'] as String? ?? '',
+      authorName: json['author_name'] as String? ?? '',
+      publishedAt: json['published_at'] != null ? DateTime.tryParse(json['published_at'].toString()) : null,
+      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
+      updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now() : DateTime.now(),
+    );
+  }
 }
 
 class ApiPlatformRepository extends PlatformRepository {

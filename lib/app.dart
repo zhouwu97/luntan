@@ -37,6 +37,7 @@ import 'screens/moderation_notice_detail_screen.dart';
 import 'screens/moderation_appeals_screen.dart';
 import 'screens/my_appeals_screen.dart';
 import 'screens/governance_screens.dart';
+import 'screens/activity_management_screen.dart';
 import 'screens/ranking_submission_review_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
@@ -424,6 +425,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               onReport: apiMode ? report : null,
               pollRepository: repositories.poll,
               publishRepository: repositories.publish,
+              platformRepository: repositories.platform,
+              canModerate: canModerate,
               onOpenUserId: openUserProfile,
             ),
           ),
@@ -669,6 +672,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               ? openModerationAppeals
               : null,
           onOpenRecommendations: canModerate ? openHomeRecommendations : null,
+          onOpenActivities: canModerate ? openActivityManagement : null,
           onOpenRankingSubmissions:
               apiMode && canManageAdmins ? openRankingSubmissionReview : null,
           onOpenAdmins: canManageAdmins ? openAdmins : null,
@@ -676,6 +680,23 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           onOpenRisk: canViewAdminLogs ? openRiskCenter : null,
           onOpenIPRestrictions: canBanIP ? openIPRestrictions : null,
           onOpenLogs: canViewAdminLogs ? openAdminLogs : null,
+        ),
+      ),
+    );
+  }
+
+  void openActivityManagement() {
+    if (apiMode && !canModerate) {
+      _showQuickFeedback('你暂时没有管理活动的权限');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ActivityManagementScreen(
+          repository: platform,
+          onFeedback: _showQuickFeedback,
         ),
       ),
     );
@@ -1031,6 +1052,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
             storeRepository: repositories.isApiMode ? repositories.store : null,
             publishRepository: repositories.publish,
             canManageRanking: apiMode && canManageAdmins,
+            currentUser: currentUser,
             canComment: canComment,
             canLike: canLike,
             canVote: canVote,
@@ -1071,6 +1093,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
             bookmarkRepository: repositories.bookmarks,
             onOpenPostId: openPostById,
             onOpenPostById: openPostById,
+            onProfileUpdated: () => authController?.refreshUser(),
           ),
         ],
       ),

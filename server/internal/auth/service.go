@@ -39,6 +39,8 @@ type User struct {
 	Nickname               string          `json:"nickname"`
 	Level                  int             `json:"level"`
 	Experience             int64           `json:"experience"`
+	AvatarMediaID          string          `json:"avatar_media_id,omitempty"`
+	AvatarURL              string          `json:"avatar_url,omitempty"`
 	Status                 string          `json:"status"`
 	AccountType            string          `json:"account_type"`
 	Email                  string          `json:"email,omitempty"`

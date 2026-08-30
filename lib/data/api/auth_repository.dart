@@ -8,6 +8,8 @@ class AuthUser {
     required this.nickname,
     required this.level,
     this.experience = 0,
+    this.avatarMediaId,
+    this.avatarUrl,
     this.growth,
     required this.status,
     this.accountType = 'email',
@@ -25,6 +27,8 @@ class AuthUser {
   final String nickname;
   final int level;
   final int experience;
+  final String? avatarMediaId;
+  final String? avatarUrl;
   final GrowthState? growth;
   final String status;
   final String accountType;
@@ -35,6 +39,8 @@ class AuthUser {
   final bool commentRestricted;
   final DateTime? commentRestrictedUntil;
   final Map<String, bool> capabilities;
+
+  String? get avatar => avatarUrl;
 
   bool capability(String name, {bool fallback = false}) =>
       capabilities[name] ?? fallback;
@@ -318,6 +324,12 @@ class AuthRepository {
       nickname: _string(json['nickname']),
       level: growth.level,
       experience: experience,
+      avatarMediaId: json['avatar_media_id'] is String && (json['avatar_media_id'] as String).isNotEmpty
+          ? json['avatar_media_id'] as String
+          : null,
+      avatarUrl: json['avatar_url'] is String && (json['avatar_url'] as String).isNotEmpty
+          ? json['avatar_url'] as String
+          : null,
       growth: growth,
       status: _string(json['status']),
       accountType: accountType,

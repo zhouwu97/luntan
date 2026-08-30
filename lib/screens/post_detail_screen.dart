@@ -10,6 +10,7 @@ import '../controllers/interaction_controller.dart';
 import '../controllers/post_detail_controller.dart';
 import '../data/api/api_client.dart';
 import '../data/api/comment_repository.dart';
+import '../data/api/platform_repository.dart';
 import '../data/api/poll_repository.dart';
 import '../data/api/publish_repository.dart';
 import '../data/app_links.dart';
@@ -50,6 +51,8 @@ class PostDetailScreen extends StatefulWidget {
     this.onReport,
     this.pollRepository,
     this.publishRepository,
+    this.platformRepository,
+    this.canModerate = false,
     this.onOpenUserId,
   });
 
@@ -78,6 +81,8 @@ class PostDetailScreen extends StatefulWidget {
   final Future<void> Function(String targetType, String targetId)? onReport;
   final PollRepository? pollRepository;
   final PublishRepository? publishRepository;
+  final PlatformRepository? platformRepository;
+  final bool canModerate;
   final ValueChanged<String>? onOpenUserId;
 
   @override
@@ -954,6 +959,39 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 }
               },
             ),
+            if (widget.platformRepository != null && widget.canModerate)
+              ListTile(
+                leading: Icon(
+                  post.isRecommended
+                      ? Icons.remove_circle_outline
+                      : Icons.push_pin_outlined,
+                  color: AppTheme.primary,
+                ),
+                title: Text(post.isRecommended ? '移出首页推荐' : '加入首页推荐'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  try {
+                    if (post.isRecommended) {
+                      await widget.platformRepository!.removeHomeRecommendation(post.id);
+                    } else {
+                      await widget.platformRepository!.setHomeRecommendation(
+                        postId: post.id,
+                      );
+                    }
+                    if (!mounted) return;
+                    widget.onFeedback(
+                      post.isRecommended ? '已移出首页推荐' : '已加入首页推荐',
+                    );
+                    await widget.controller.load();
+                  } catch (error) {
+                    if (mounted) {
+                      widget.onFeedback(
+                        userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
+                      );
+                    }
+                  }
+                },
+              ),
             if (widget.onReport != null)
               ListTile(
                 leading: const Icon(

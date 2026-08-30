@@ -4,7 +4,6 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 
 import 'controllers/app_update_coordinator.dart';
 import 'controllers/auth_controller.dart';
@@ -15,7 +14,6 @@ import 'controllers/interaction_controller.dart';
 import 'controllers/post_detail_controller.dart';
 import 'controllers/publish_controller.dart';
 import 'data/api/api_client.dart';
-import 'data/api/app_update_service.dart';
 import 'data/api/auth_repository.dart';
 import 'data/api/publish_repository.dart';
 import 'data/api/platform_repository.dart';
@@ -177,9 +175,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     try {
       await Future<void>.delayed(const Duration(seconds: 3));
       if (!mounted) return;
-      final info = await updateCoordinator.checkUpdate(manual: false);
+      await updateCoordinator.checkUpdate(manual: false);
       if (!mounted) return;
-      if (info != null && info.updateAvailable && info.isRequired) {
+      if (updateCoordinator.isRequired) {
         await showAppUpdateSheet(
           appContext,
           force: true,
@@ -196,9 +194,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     try {
       await updateCoordinator.onAppForeground();
       if (!mounted) return;
-      if (updateCoordinator.info != null &&
-          updateCoordinator.info!.updateAvailable &&
-          updateCoordinator.info!.isRequired) {
+      if (updateCoordinator.isRequired) {
         await showAppUpdateSheet(
           appContext,
           force: true,
@@ -1125,6 +1121,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
             onOpenPostId: openPostById,
             onOpenPostById: openPostById,
             onProfileUpdated: () => authController?.refreshUser(),
+            updateCoordinator: updateCoordinator,
           ),
         ],
       ),

@@ -43,7 +43,8 @@ class AppUpdateSheet extends StatefulWidget {
   State<AppUpdateSheet> createState() => _AppUpdateSheetState();
 }
 
-class _AppUpdateSheetState extends State<AppUpdateSheet> {
+class _AppUpdateSheetState extends State<AppUpdateSheet>
+    with WidgetsBindingObserver {
   late final AppUpdateCoordinator _coordinator;
   late final bool _ownsCoordinator;
 
@@ -58,6 +59,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
       _ownsCoordinator = true;
     }
     _coordinator.addListener(_onCoordinatorChanged);
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_coordinator.status == AppUpdateStatus.idle ||
           _coordinator.status == AppUpdateStatus.error) {
@@ -68,11 +70,27 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _coordinator.removeListener(_onCoordinatorChanged);
     if (_ownsCoordinator) {
       _coordinator.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_resumePendingInstall());
+    }
+  }
+
+  Future<void> _resumePendingInstall() async {
+    try {
+      await _coordinator.resumePendingInstall();
+    } catch (_) {
+      // 系统设置返回时的补偿检查不能打断更新弹层；用户仍可手动重试。
+    }
   }
 
   void _onCoordinatorChanged() {
@@ -183,9 +201,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
       case AppUpdateStatus.installerOpened:
       case AppUpdateStatus.permissionRequired:
         final ver = _coordinator.info?.latestVersionName;
-        return ver != null && ver.isNotEmpty
-            ? '发现新版本 v$ver'
-            : '发现新版本';
+        return ver != null && ver.isNotEmpty ? '发现新版本 v$ver' : '发现新版本';
       case AppUpdateStatus.error:
         return '检查更新失败';
       case AppUpdateStatus.idle:
@@ -210,10 +226,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                 SizedBox(height: 14),
                 Text(
                   '正在检查新版本…',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: AppTheme.textSecondary,
-                  ),
+                  style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
                 ),
               ],
             ),
@@ -232,7 +245,8 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
         return [
           _ErrorCard(
             message: _resolveDisplayErrorMessage(),
-            onRetry: () => _coordinator.checkUpdate(manual: true, force: widget.force),
+            onRetry: () =>
+                _coordinator.checkUpdate(manual: true, force: widget.force),
           ),
         ];
 
@@ -450,7 +464,11 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded, size: 16, color: AppTheme.pink),
+                const Icon(
+                  Icons.info_outline_rounded,
+                  size: 16,
+                  color: AppTheme.pink,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -472,7 +490,9 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
             backgroundColor: AppTheme.primary,
             foregroundColor: Colors.white,
             minimumSize: const Size.fromHeight(48),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
           ),
           onPressed: _coordinator.openPermissionSettings,
           icon: const Icon(Icons.security_rounded, size: 18),
@@ -487,7 +507,9 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
             foregroundColor: AppTheme.textPrimary,
             minimumSize: const Size.fromHeight(44),
             side: const BorderSide(color: AppTheme.border),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
           ),
           onPressed: _coordinator.installApk,
           child: const Text('已授权，继续安装'),
@@ -498,7 +520,9 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
             backgroundColor: AppTheme.primary,
             foregroundColor: Colors.white,
             minimumSize: const Size.fromHeight(48),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
           ),
           onPressed: _coordinator.installApk,
           icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -510,7 +534,10 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
       ] else ...[
         Row(
           children: [
-            if (!_isForce && !isDownloading && !isInstalling && !isVerifying) ...[
+            if (!_isForce &&
+                !isDownloading &&
+                !isInstalling &&
+                !isVerifying) ...[
               Expanded(
                 flex: 1,
                 child: OutlinedButton(
@@ -542,11 +569,15 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                     borderRadius: BorderRadius.circular(14),
                   ),
                 ),
-                onPressed: (isDownloading || isInstalling || isVerifying || !AppInstaller.isSupported)
+                onPressed:
+                    (isDownloading ||
+                        isInstalling ||
+                        isVerifying ||
+                        !AppInstaller.isSupported)
                     ? null
                     : (isReadyToInstall
-                        ? _coordinator.installApk
-                        : _coordinator.startDownload),
+                          ? _coordinator.installApk
+                          : _coordinator.startDownload),
                 child: Text(
                   _actionButtonText(
                     isDownloading: isDownloading,
@@ -555,7 +586,10 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                     isReadyToInstall: isReadyToInstall,
                     isRequired: _isForce,
                   ),
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
@@ -603,8 +637,8 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
         : 0;
     final eta = seconds > 0
         ? seconds < 60
-            ? ' · 约 $seconds 秒'
-            : ' · 约 ${(seconds / 60).ceil()} 分钟'
+              ? ' · 约 $seconds 秒'
+              : ' · 约 ${(seconds / 60).ceil()} 分钟'
         : '';
     return '${_formatBytes(received)} / ${_formatBytes(total)}$speed$eta';
   }

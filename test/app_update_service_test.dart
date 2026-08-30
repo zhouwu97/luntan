@@ -97,6 +97,112 @@ void main() {
     );
   });
 
+  test('production 更新服务拒绝 HTTP Base URL', () {
+    expect(
+      () => AppUpdateService(
+        baseUri: Uri.parse('http://updates.example.com'),
+        productionBuild: true,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('production 检查拒绝 HTTP absolute download_url', () async {
+    final payload = jsonDecode(updatePayload()) as Map<String, dynamic>
+      ..['download_url'] = 'http://cdn.example.com/app-release.apk';
+    final service = AppUpdateService(
+      baseUri: Uri.parse('https://updates.example.com'),
+      productionBuild: true,
+      client: MockClient(
+        (_) async => http.Response.bytes(utf8.encode(jsonEncode(payload)), 200),
+      ),
+    );
+
+    await expectLater(
+      service.checkUpdate(versionName: '1.0.0', versionCode: 1),
+      throwsA(
+        isA<AppUpdateException>().having(
+          (error) => error.kind,
+          'kind',
+          AppUpdateErrorKind.protocol,
+        ),
+      ),
+    );
+    service.close();
+  });
+
+  test('production 允许 HTTPS CDN absolute download_url', () async {
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    String? requestedUrl;
+    final client = MockClient.streaming((request, bodyStream) async {
+      requestedUrl = request.url.toString();
+      return http.StreamedResponse(
+        Stream<List<int>>.fromIterable([apkBytes]),
+        200,
+        contentLength: apkBytes.length,
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('https://updates.example.com'),
+      productionBuild: true,
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 3,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: apkBytes.length,
+      sha256: apkSha,
+      downloadUrl: 'https://cdn.example.com/releases/app.apk?sig=stable',
+    );
+
+    await service.downloadApk(info: info);
+
+    expect(requestedUrl, 'https://cdn.example.com/releases/app.apk?sig=stable');
+    service.close();
+  });
+
+  test('downloadApk 拒绝下载地址路径穿越和协议相对地址', () async {
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: MockClient((request) async {
+        fail('非法下载地址不应发起网络请求');
+      }),
+    );
+    AppUpdateInfo info(String url) => AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 3,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: apkBytes.length,
+      sha256: apkSha,
+      downloadUrl: url,
+    );
+
+    for (final value in ['/../outside.apk', '//evil.example.com/app.apk']) {
+      await expectLater(
+        service.downloadApk(info: info(value)),
+        throwsA(
+          isA<AppUpdateException>().having(
+            (error) => error.kind,
+            'kind',
+            AppUpdateErrorKind.protocol,
+          ),
+        ),
+      );
+    }
+    service.close();
+  });
+
   test('downloadApk 下载完成后校验并落盘', () async {
     final root = await Directory.systemTemp.createTemp('update_test');
     addTearDown(() => root.deleteSync(recursive: true));
@@ -128,6 +234,189 @@ void main() {
     expect(await file.length(), apkBytes.length);
     expect(file.path.endsWith('.apk'), isTrue);
     expect(file.parent.path.contains('app_updates'), isTrue);
+  });
+
+  test('大安装包使用四路 Range 下载并合并校验', () async {
+    final largeBytes = Uint8List.fromList(
+      List<int>.generate(16 * 1024 * 1024, (index) => index % 251),
+    );
+    final largeSha = crypto.sha256.convert(largeBytes).toString();
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final ranges = <String>[];
+    final client = MockClient.streaming((request, bodyStream) async {
+      final range = request.headers['Range'];
+      expect(range, isNotNull);
+      ranges.add(range!);
+      final match = RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(range);
+      expect(match, isNotNull);
+      final start = int.parse(match!.group(1)!);
+      final end = int.parse(match.group(2)!);
+      expect(start, lessThanOrEqualTo(end));
+      final bytes = largeBytes.sublist(start, end + 1);
+      return http.StreamedResponse(
+        Stream<List<int>>.value(bytes),
+        206,
+        contentLength: bytes.length,
+        headers: {
+          'content-range': 'bytes $start-$end/${largeBytes.length}',
+          'etag': '"$largeSha"',
+        },
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    addTearDown(service.close);
+    final progress = <int>[];
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 4,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: largeBytes.length,
+      sha256: largeSha,
+      downloadUrl: '/download',
+    );
+
+    final file = await service.downloadApk(
+      info: info,
+      onProgress: (received, total) {
+        expect(total, largeBytes.length);
+        progress.add(received);
+      },
+    );
+
+    expect(ranges, contains('bytes=0-0'));
+    expect(ranges.where((range) => range != 'bytes=0-0'), hasLength(4));
+    expect(await file.readAsBytes(), largeBytes);
+    expect(progress.last, largeBytes.length);
+    expect(
+      Directory(
+        '${file.parent.path}${Platform.pathSeparator}update-4-$largeSha.parts',
+      ).existsSync(),
+      isFalse,
+    );
+  });
+
+  test('大安装包按分片断点续传已存在的分片', () async {
+    final largeBytes = Uint8List.fromList(
+      List<int>.generate(16 * 1024 * 1024, (index) => index % 251),
+    );
+    final largeSha = crypto.sha256.convert(largeBytes).toString();
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final downloadDir = await tempDirResolver(root);
+    final appUpdatesDirectory = Directory(
+      '${downloadDir.path}${Platform.pathSeparator}app_updates',
+    )..createSync(recursive: true);
+    final partsDirectory = Directory(
+      '${appUpdatesDirectory.path}${Platform.pathSeparator}update-6-$largeSha.parts',
+    )..createSync(recursive: true);
+    await File(
+      '${partsDirectory.path}${Platform.pathSeparator}metadata.json',
+    ).writeAsString(
+      jsonEncode({
+        'total_bytes': largeBytes.length,
+        'part_count': 4,
+        'etag': '"$largeSha"',
+      }),
+    );
+    await File(
+      '${partsDirectory.path}${Platform.pathSeparator}part-0.part',
+    ).writeAsBytes(largeBytes.sublist(0, 10));
+
+    final ranges = <String>[];
+    final client = MockClient.streaming((request, bodyStream) async {
+      final range = request.headers['Range'];
+      expect(range, isNotNull);
+      ranges.add(range!);
+      final match = RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(range);
+      expect(match, isNotNull);
+      final start = int.parse(match!.group(1)!);
+      final end = int.parse(match.group(2)!);
+      final bytes = largeBytes.sublist(start, end + 1);
+      return http.StreamedResponse(
+        Stream<List<int>>.value(bytes),
+        206,
+        contentLength: bytes.length,
+        headers: {
+          'content-range': 'bytes $start-$end/${largeBytes.length}',
+          'etag': '"$largeSha"',
+        },
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    addTearDown(service.close);
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 6,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: largeBytes.length,
+      sha256: largeSha,
+      downloadUrl: '/download',
+    );
+
+    final file = await service.downloadApk(info: info);
+
+    expect(ranges, contains('bytes=0-0'));
+    expect(ranges, contains('bytes=10-4194303'));
+    expect(ranges, hasLength(5));
+    expect(await file.readAsBytes(), largeBytes);
+  });
+
+  test('服务器不支持 Range 时回退到单连接下载', () async {
+    final largeBytes = Uint8List.fromList(
+      List<int>.generate(16 * 1024 * 1024, (index) => index % 251),
+    );
+    final largeSha = crypto.sha256.convert(largeBytes).toString();
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final ranges = <String?>[];
+    final client = MockClient.streaming((request, bodyStream) async {
+      ranges.add(request.headers['Range']);
+      return http.StreamedResponse(
+        Stream<List<int>>.value(largeBytes),
+        200,
+        contentLength: largeBytes.length,
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    addTearDown(service.close);
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 5,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: largeBytes.length,
+      sha256: largeSha,
+      downloadUrl: '/download',
+    );
+
+    final file = await service.downloadApk(info: info);
+
+    expect(ranges, ['bytes=0-0', null]);
+    expect(await file.readAsBytes(), largeBytes);
   });
 
   test('downloadApk SHA-256 不匹配时报错并清理 .part 文件', () async {
@@ -177,7 +466,7 @@ void main() {
       '${downloadDir.path}${Platform.pathSeparator}app_updates',
     )..createSync(recursive: true);
     final partFile = File(
-      '${appUpdatesDir.path}${Platform.pathSeparator}update-$apkSha.apk.part',
+      '${appUpdatesDir.path}${Platform.pathSeparator}update-3-$apkSha.apk.part',
     );
     await partFile.writeAsBytes(apkBytes.sublist(0, 20));
 
@@ -214,6 +503,56 @@ void main() {
     expect(await partFile.exists(), isFalse);
   });
 
+  test('downloadApk 收到 416 后清理分片并从头下载', () async {
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final downloadDir = await tempDirResolver(root);
+    final appUpdatesDir = Directory(
+      '${downloadDir.path}${Platform.pathSeparator}app_updates',
+    )..createSync(recursive: true);
+    final partFile = File(
+      '${appUpdatesDir.path}${Platform.pathSeparator}update-3-$apkSha.apk.part',
+    );
+    await partFile.writeAsBytes(apkBytes.sublist(0, 20));
+
+    var requests = 0;
+    final client = MockClient.streaming((request, bodyStream) async {
+      requests++;
+      if (requests == 1) {
+        expect(request.headers['Range'], 'bytes=20-');
+        return http.StreamedResponse(Stream<List<int>>.empty(), 416);
+      }
+      expect(request.headers['Range'], isNull);
+      return http.StreamedResponse(
+        Stream<List<int>>.fromIterable([apkBytes]),
+        200,
+        contentLength: apkBytes.length,
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 3,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: apkBytes.length,
+      sha256: apkSha,
+      downloadUrl: '/download',
+    );
+
+    final file = await service.downloadApk(info: info);
+
+    expect(requests, 2);
+    expect(await file.readAsBytes(), apkBytes);
+  });
+
   test('无更新响应解析为 updateAvailable=false', () async {
     final client = MockClient((request) async {
       return http.Response.bytes(
@@ -241,7 +580,7 @@ void main() {
       '${downloadDir.path}${Platform.pathSeparator}app_updates',
     )..createSync(recursive: true);
     final partFile = File(
-      '${appUpdatesDir.path}${Platform.pathSeparator}update-$apkSha.apk.part',
+      '${appUpdatesDir.path}${Platform.pathSeparator}update-3-$apkSha.apk.part',
     );
     await partFile.writeAsBytes(apkBytes.sublist(0, 20));
 

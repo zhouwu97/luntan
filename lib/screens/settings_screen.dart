@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'app_update_sheet.dart';
+import '../controllers/app_update_coordinator.dart';
 import '../theme/app_theme.dart';
 
 /// 个人中心的完整设置页。
@@ -21,6 +22,7 @@ class SettingsCenterScreen extends StatelessWidget {
     this.onClearHistory,
     this.onLogout,
     this.onDeleteAccount,
+    this.updateCoordinator,
   });
 
   final VoidCallback onOpenMessages;
@@ -34,6 +36,7 @@ class SettingsCenterScreen extends StatelessWidget {
   final Future<void> Function()? onClearHistory;
   final Future<void> Function()? onLogout;
   final Future<void> Function()? onDeleteAccount;
+  final AppUpdateCoordinator? updateCoordinator;
 
   @override
   Widget build(BuildContext context) {
@@ -125,6 +128,7 @@ class SettingsCenterScreen extends StatelessWidget {
             children: [
               _UpdateTile(
                 onFeedback: (message) => onFeedback(message),
+                updateCoordinator: updateCoordinator,
               ),
               _SettingsTile(
                 icon: Icons.info_outline_rounded,
@@ -226,9 +230,10 @@ class SettingsCenterScreen extends StatelessWidget {
 
 /// 「检查更新」入口。副标题展示当前版本号，点击拉起检查更新弹层。
 class _UpdateTile extends StatefulWidget {
-  const _UpdateTile({required this.onFeedback});
+  const _UpdateTile({required this.onFeedback, this.updateCoordinator});
 
   final ValueChanged<String> onFeedback;
+  final AppUpdateCoordinator? updateCoordinator;
 
   @override
   State<_UpdateTile> createState() => _UpdateTileState();
@@ -261,7 +266,8 @@ class _UpdateTileState extends State<_UpdateTile> {
       title: '检查更新',
       subtitle: _versionLabel,
       color: AppTheme.primary,
-      onTap: () => showAppUpdateSheet(context),
+      onTap: () =>
+          showAppUpdateSheet(context, coordinator: widget.updateCoordinator),
     );
   }
 }

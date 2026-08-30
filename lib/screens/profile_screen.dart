@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 
+import '../controllers/app_update_coordinator.dart';
 import '../data/api/api_client.dart';
 import '../data/api/auth_repository.dart';
 import '../data/api/bookmark_repository.dart';
@@ -88,6 +89,7 @@ class ProfileScreen extends StatelessWidget {
     this.onOpenRelations,
     this.onProfileUpdated,
     this.refreshToken = 0,
+    this.updateCoordinator,
   });
 
   final ForumStore store;
@@ -118,6 +120,7 @@ class ProfileScreen extends StatelessWidget {
   final void Function(String userId, bool followers)? onOpenRelations;
   final VoidCallback? onProfileUpdated;
   final int refreshToken;
+  final AppUpdateCoordinator? updateCoordinator;
 
   void _openHomepage(BuildContext context) {
     // /me/profile 和 /me/posts 都要求 Bearer 会话；退出登录或会话失效后，
@@ -225,6 +228,7 @@ class ProfileScreen extends StatelessWidget {
         onRequireAuth: onRequireAuth,
         onProfileUpdated: onProfileUpdated,
         refreshToken: refreshToken,
+        updateCoordinator: updateCoordinator,
       );
     }
     final isGuest = currentUser == null || currentUser?.accountType == 'guest';
@@ -382,6 +386,7 @@ class ProfileScreen extends StatelessWidget {
           onClearHistory: () async => store.clearHistory(),
           onLogout: onLogout,
           onDeleteAccount: onDeleteAccount,
+          updateCoordinator: updateCoordinator,
         ),
       ),
     );
@@ -596,6 +601,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.canManageProfile = true,
     this.onProfileUpdated,
     required this.refreshToken,
+    this.updateCoordinator,
   });
 
   final ProfileRepository repository;
@@ -625,6 +631,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final PublishRepository? publishRepository;
   final bool canManageProfile;
   final VoidCallback? onProfileUpdated;
+  final AppUpdateCoordinator? updateCoordinator;
 
   @override
   State<_ApiProfileScreen> createState() => _ApiProfileScreenState();
@@ -953,6 +960,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
           onClearHistory: () => widget.repository.clearHistory(),
           onLogout: widget.onLogout,
           onDeleteAccount: widget.onDeleteAccount,
+          updateCoordinator: widget.updateCoordinator,
         ),
       ),
     );

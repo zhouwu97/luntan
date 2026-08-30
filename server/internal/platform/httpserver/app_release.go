@@ -264,7 +264,9 @@ func (r *AppRelease) serveDownload(w http.ResponseWriter, request *http.Request)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": r.FileName}))
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("ETag", `"`+r.SHA256+`"`)
-	w.Header().Set("Cache-Control", "public, max-age=3600, immutable")
+	// 下载路径包含不可变的 version_code，允许 CDN 长期缓存 APK，避免大陆
+	// 用户每次更新都回源到香港实例。
+	w.Header().Set("Cache-Control", "public, max-age=2592000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, request, r.FileName, info.ModTime(), file)
 }

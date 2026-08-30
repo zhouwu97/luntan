@@ -15,6 +15,7 @@ void main() {
   });
 
   test('正式开发启动使用服务器 API 默认地址', () {
+    expect(defaultDevelopmentApiBaseUrl, 'https://shengbeijiang.com');
     expect(
       apiBaseUrlFromEnvironment(defaultBaseUrl: defaultDevelopmentApiBaseUrl),
       defaultDevelopmentApiBaseUrl,

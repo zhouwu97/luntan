@@ -14,6 +14,9 @@ class SecureTokenStore implements TokenStore {
   SecureTokenStore([FlutterSecureStorage? storage])
     : _storage = storage ?? const FlutterSecureStorage();
 
+  @override
+  bool get usesHttpOnlyRefreshCookie => false;
+
   static const _accessTokenKey = 'luntan.auth.access_token';
   static const _refreshTokenKey = 'luntan.auth.refresh_token';
 
@@ -45,6 +48,9 @@ class SecureTokenStore implements TokenStore {
 /// localStorage 不再接触长效凭证，XSS 无法窃取续期凭证。
 class WebTokenStore implements TokenStore {
   WebTokenStore();
+
+  @override
+  bool get usesHttpOnlyRefreshCookie => true;
 
   static const _accessTokenKey = 'luntan.auth.access_token';
   static const _legacyRefreshTokenKey = 'luntan.auth.refresh_token';

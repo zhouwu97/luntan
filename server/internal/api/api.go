@@ -23,6 +23,7 @@ type Server struct {
 	experienceRewards ExperienceRewardRules
 	mailSender        mailSender
 	appEnv            string
+	webOrigin         string
 }
 
 // ReadinessCheck 将业务依赖检查接入统一 /ready 端点。保持构造函数返回
@@ -63,7 +64,7 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 	if len(authServices) > 0 && authServices[0] != nil {
 		authService = authServices[0]
 	}
-	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
+	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment(), webOrigin: configuredWebOrigin()}
 }
 
 // NewHandlerWithMail 供正式服务注入 SMTP sender；保留 NewHandler 以兼容测试和本地无 SMTP 场景。
@@ -85,7 +86,7 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 	if storage == nil {
 		storage = unavailableMediaStorage{}
 	}
-	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment()}
+	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment(), webOrigin: configuredWebOrigin()}
 }
 
 // NewHandlerWithPointRewards 供集成测试和灰度环境显式注入奖励配置。
@@ -600,7 +601,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, r, err)
 			return
 		}
-		writeAuthResponse(w, r, http.StatusCreated, response)
+		s.writeAuthResponse(w, r, http.StatusCreated, response)
 		return
 	}
 
@@ -614,7 +615,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	writeAuthResponse(w, r, http.StatusCreated, response)
+	s.writeAuthResponse(w, r, http.StatusCreated, response)
 }
 
 func appEnvironment() string {
@@ -650,7 +651,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, r, err)
 			return
 		}
-		writeAuthResponse(w, r, http.StatusOK, response)
+		s.writeAuthResponse(w, r, http.StatusOK, response)
 		return
 	}
 
@@ -662,7 +663,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	writeAuthResponse(w, r, http.StatusOK, response)
+	s.writeAuthResponse(w, r, http.StatusOK, response)
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
@@ -676,12 +677,20 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, auth.ErrInvalidToken)
 		return
 	}
-	// Web 端不在 JS 侧保存 refresh token：body 为空时回退到 HttpOnly Cookie。
-	token := strings.TrimSpace(input.RefreshToken)
+	webCookieAuth := s.isWebCookieAuthRequest(r)
+	// Web 端只接受 HttpOnly Cookie；原生端优先读取 body，兼容没有 Origin
+	// 的旧 Web 请求时再回退到 Cookie。
+	token := ""
 	cookieSourced := false
-	if token == "" {
+	if webCookieAuth {
 		token = refreshTokenFromRequest(r)
 		cookieSourced = token != ""
+	} else {
+		token = strings.TrimSpace(input.RefreshToken)
+		if token == "" {
+			token = refreshTokenFromRequest(r)
+			cookieSourced = token != ""
+		}
 	}
 	if token == "" {
 		writeAuthError(w, r, auth.ErrInvalidToken)
@@ -695,7 +704,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	if cookieSourced {
 		// Cookie 轮换出的新 refresh token 只通过 Set-Cookie 下发，不进入
 		// 响应体，避免 XSS 借一次刷新窃取新的长期会话。
-		setRefreshTokenCookie(w, r, response.RefreshToken)
+		s.setRefreshTokenCookie(w, r, response.RefreshToken)
 		response.RefreshToken = ""
 	}
 	applyBaseCapabilities(&response.User)
@@ -713,9 +722,15 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, auth.ErrInvalidInput)
 		return
 	}
-	token := strings.TrimSpace(input.RefreshToken)
-	if token == "" {
+	webCookieAuth := s.isWebCookieAuthRequest(r)
+	token := ""
+	if webCookieAuth {
 		token = refreshTokenFromRequest(r)
+	} else {
+		token = strings.TrimSpace(input.RefreshToken)
+		if token == "" {
+			token = refreshTokenFromRequest(r)
+		}
 	}
 	// 登出必须幂等：token 只存在于已过期的 Cookie 中或完全缺失时，
 	// 仍要清除 Cookie 并返回 204，保证 Web 端登出永远能完成本地清理。
@@ -725,7 +740,9 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	clearRefreshTokenCookie(w, r)
+	if webCookieAuth {
+		s.clearRefreshTokenCookie(w, r)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -932,6 +949,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "ALREADY_VOTED", Message: "你已经参与过该投票，不能修改选项"}
 	case errors.Is(err, ErrPermissionDenied):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "PERMISSION_DENIED", Message: "没有执行该操作的权限"}
+	case errors.Is(err, ErrTargetRoleProtected):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "TARGET_ROLE_PROTECTED", Message: "目标账号角色级别不低于操作者，不能执行该处罚"}
 	case errors.Is(err, ErrInvalidModerationAction):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MODERATION_ACTION", Message: "审核动作不合法"}
 	case errors.Is(err, ErrModerationCaseNotFound):

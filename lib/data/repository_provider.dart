@@ -19,10 +19,10 @@ import '../domain/repositories.dart';
 
 /// 开发构建的默认 API 地址。
 ///
-/// 真实客户端默认连接自己的 Go 服务，不再因为忘记传 Dart define 而静默
-/// 展示本地演示数据。部署到其他环境时仍可通过 API_BASE_URL 覆盖；生产环境
-/// 必须显式使用 HTTPS 地址。
-const defaultDevelopmentApiBaseUrl = 'http://101.42.27.44';
+/// 本地启动默认通过正式域名的 HTTPS 入口访问 Go 服务，避免明文传输
+/// 登录令牌、媒体请求和其他 API 数据。部署到其他环境时仍可通过
+/// API_BASE_URL 覆盖；生产环境必须显式使用 HTTPS 地址。
+const defaultDevelopmentApiBaseUrl = 'https://shengbeijiang.com';
 
 String apiBaseUrlFromEnvironment({String? defaultBaseUrl, bool? releaseBuild}) {
   const configured = String.fromEnvironment('API_BASE_URL');

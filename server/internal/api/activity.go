@@ -21,6 +21,8 @@ type activityResponse struct {
 	EndAt        *time.Time `json:"end_at,omitempty"`
 	Location     string     `json:"location,omitempty"`
 	Status       string     `json:"status"`
+	PublicationStatus string `json:"publication_status"`
+	Phase        string     `json:"phase,omitempty"`
 	CreatedBy    string     `json:"created_by"`
 	AuthorName   string     `json:"author_name,omitempty"`
 	PublishedAt  *time.Time `json:"published_at,omitempty"`
@@ -69,10 +71,14 @@ func validateActivityStatus(status string) (string, *httpserver.AppError) {
 	}
 }
 
-func deriveActivityStatus(status string, startAt, endAt *time.Time, now time.Time) string {
+func activityPublicationStatus(status string) string {
 	if status == "draft" || status == "offline" {
 		return status
 	}
+	return "published"
+}
+
+func deriveActivityPhase(startAt, endAt *time.Time, now time.Time) string {
 	if startAt != nil && now.Before(*startAt) {
 		return "upcoming"
 	}
@@ -80,6 +86,43 @@ func deriveActivityStatus(status string, startAt, endAt *time.Time, now time.Tim
 		return "ended"
 	}
 	return "active"
+}
+
+func activityPhaseForPublication(publicationStatus string, startAt, endAt *time.Time, now time.Time) string {
+	if publicationStatus != "published" {
+		return ""
+	}
+	return deriveActivityPhase(startAt, endAt, now)
+}
+
+func activityStatusForResponse(publicationStatus string, startAt, endAt *time.Time, now time.Time) string {
+	if publicationStatus == "draft" || publicationStatus == "offline" {
+		return publicationStatus
+	}
+	return deriveActivityPhase(startAt, endAt, now)
+}
+
+func nullableTime(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+// deriveActivityStatus 保留旧调用方的语义，但内部统一先区分发布状态和
+// 时间阶段，避免把一个 status 同时当作持久化状态和动态状态。
+func deriveActivityStatus(status string, startAt, endAt *time.Time, now time.Time) string {
+	return activityStatusForResponse(activityPublicationStatus(status), startAt, endAt, now)
+}
+
+func hydrateActivityStatus(item *activityResponse, now time.Time) {
+	if item.PublicationStatus == "" {
+		// 兼容迁移前的内存数据和旧测试夹具；正式数据库由新迁移保证该列
+		// 非空，后续读写均以 publication_status 为准。
+		item.PublicationStatus = activityPublicationStatus(item.Status)
+	}
+	item.Phase = activityPhaseForPublication(item.PublicationStatus, item.StartAt, item.EndAt, now)
+	item.Status = activityStatusForResponse(item.PublicationStatus, item.StartAt, item.EndAt, now)
 }
 
 // listAdminActivities 管理员查看活动列表（支持状态筛选）。
@@ -100,7 +143,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT a.id, a.title, a.description, COALESCE(a.cover_media_id, ''),
 		       COALESCE(ma.object_key, a.cover_url, ''),
-		       a.start_at, a.end_at, a.location, a.status, a.created_by,
+		       a.start_at, a.end_at, a.location, a.publication_status, a.created_by,
 		       COALESCE(up.nickname, u.username, ''), a.published_at, a.created_at, a.updated_at
 		FROM activities a
 		JOIN users u ON u.id = a.created_by
@@ -125,7 +168,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		var startAt, endAt, publishedAt sql.NullTime
 		if err := rows.Scan(
 			&item.ID, &item.Title, &item.Description, &coverMediaID,
-			&coverKey, &startAt, &endAt, &item.Location, &item.Status,
+			&coverKey, &startAt, &endAt, &item.Location, &item.PublicationStatus,
 			&item.CreatedBy, &item.AuthorName, &publishedAt, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
 			writeInternalError(w, r, err)
@@ -146,7 +189,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		if publishedAt.Valid {
 			item.PublishedAt = &publishedAt.Time
 		}
-		item.Status = deriveActivityStatus(item.Status, item.StartAt, item.EndAt, now)
+		hydrateActivityStatus(&item, now)
 		if statusFilter != "" && statusFilter != "all" && item.Status != statusFilter {
 			continue
 		}
@@ -194,15 +237,18 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, statusErr := validateActivityStatus(input.Status)
+	requestedStatus, statusErr := validateActivityStatus(input.Status)
 	if statusErr != nil {
 		httpserver.WriteAppError(w, r, *statusErr)
 		return
 	}
 
+	publicationStatus := activityPublicationStatus(requestedStatus)
+	now := time.Now().UTC()
+	responseStatus := activityStatusForResponse(publicationStatus, input.StartAt, input.EndAt, now)
+	phase := activityPhaseForPublication(publicationStatus, input.StartAt, input.EndAt, now)
 	var publishedAt *time.Time
-	if status == "active" || status == "upcoming" {
-		now := time.Now().UTC()
+	if publicationStatus == "published" {
 		publishedAt = &now
 	}
 
@@ -213,13 +259,13 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 	_, err := s.db.ExecContext(r.Context(), `
 		INSERT INTO activities (
 			id, title, description, cover_media_id, cover_url,
-			start_at, end_at, location, status, created_by, published_at, created_at, updated_at
+			start_at, end_at, location, status, publication_status, created_by, published_at, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, NULLIF($4, ''), $5,
-			$6, $7, $8, $9, $10, $11, now(), now()
+			$6, $7, $8, $9, $10, $11, $12, $12, $12
 		)`,
 		activityID, title, strings.TrimSpace(input.Description), coverMediaID, coverURL,
-		input.StartAt, input.EndAt, strings.TrimSpace(input.Location), status, user.ID, publishedAt,
+		input.StartAt, input.EndAt, strings.TrimSpace(input.Location), responseStatus, publicationStatus, user.ID, publishedAt, now,
 	)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -227,9 +273,11 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{
-		"id":      activityID,
-		"status":  status,
-		"message": "活动已创建",
+		"id":                 activityID,
+		"status":             responseStatus,
+		"publication_status": publicationStatus,
+		"phase":              phase,
+		"message":            "活动已创建",
 	})
 }
 
@@ -271,22 +319,29 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 
-	status, statusErr := validateActivityStatus(input.Status)
+	requestedStatus, statusErr := validateActivityStatus(input.Status)
 	if statusErr != nil {
 		httpserver.WriteAppError(w, r, *statusErr)
 		return
 	}
 
+	publicationStatus := activityPublicationStatus(requestedStatus)
+	now := time.Now().UTC()
+	responseStatus := activityStatusForResponse(publicationStatus, input.StartAt, input.EndAt, now)
+	phase := activityPhaseForPublication(publicationStatus, input.StartAt, input.EndAt, now)
 	coverMediaID := strings.TrimSpace(input.CoverMediaID)
 	coverURL := strings.TrimSpace(input.CoverURL)
 
 	res, err := s.db.ExecContext(r.Context(), `
 		UPDATE activities
 		SET title = $1, description = $2, cover_media_id = NULLIF($3, ''), cover_url = $4,
-		    start_at = $5, end_at = $6, location = $7, status = $8, updated_at = now()
-		WHERE id = $9 AND deleted_at IS NULL`,
+		    start_at = $5, end_at = $6, location = $7, status = $8,
+		    publication_status = $9,
+		    published_at = CASE WHEN $9 = 'published' THEN COALESCE(published_at, $10) ELSE published_at END,
+		    updated_at = $10
+		WHERE id = $11 AND deleted_at IS NULL`,
 		title, strings.TrimSpace(input.Description), coverMediaID, coverURL,
-		input.StartAt, input.EndAt, strings.TrimSpace(input.Location), status, activityID,
+		input.StartAt, input.EndAt, strings.TrimSpace(input.Location), responseStatus, publicationStatus, now, activityID,
 	)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -302,7 +357,7 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": status, "message": "活动已更新"})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": responseStatus, "publication_status": publicationStatus, "phase": phase, "message": "活动已更新"})
 }
 
 // publishAdminActivity 发布活动（status -> active / upcoming）。
@@ -342,21 +397,18 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
-	newStatus := "active"
-	if startAt.Valid && startAt.Time.After(now) {
-		newStatus = "upcoming"
-	}
+	newStatus := deriveActivityPhase(nullableTime(startAt), nullableTime(endAt), now)
 
 	_, err = s.db.ExecContext(r.Context(), `
 		UPDATE activities
-		SET status = $1, published_at = COALESCE(published_at, now()), updated_at = now()
+		SET status = $1, publication_status = 'published', published_at = COALESCE(published_at, now()), updated_at = now()
 		WHERE id = $2 AND deleted_at IS NULL`, newStatus, activityID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": newStatus, "message": "活动已发布"})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": newStatus, "publication_status": "published", "phase": newStatus, "message": "活动已发布"})
 }
 
 // offlineAdminActivity 下架活动（status -> offline）。
@@ -374,7 +426,7 @@ func (s *Server) offlineAdminActivity(w http.ResponseWriter, r *http.Request, ac
 
 	res, err := s.db.ExecContext(r.Context(), `
 		UPDATE activities
-		SET status = 'offline', updated_at = now()
+		SET status = 'offline', publication_status = 'offline', updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL`, activityID)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -390,7 +442,7 @@ func (s *Server) offlineAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": "offline", "message": "活动已下架"})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": "offline", "publication_status": "offline", "phase": "", "message": "活动已下架"})
 }
 
 // deleteAdminActivity 软删除活动。
@@ -436,13 +488,13 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT a.id, a.title, a.description, COALESCE(a.cover_media_id, ''),
 		       COALESCE(ma.object_key, a.cover_url, ''),
-		       a.start_at, a.end_at, a.location, a.status, a.created_by,
+		       a.start_at, a.end_at, a.location, a.publication_status, a.created_by,
 		       COALESCE(up.nickname, u.username, ''), a.published_at, a.created_at, a.updated_at
 		FROM activities a
 		JOIN users u ON u.id = a.created_by
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets ma ON ma.id = a.cover_media_id AND ma.deleted_at IS NULL
-		WHERE a.deleted_at IS NULL AND a.status NOT IN ('draft', 'offline')
+		WHERE a.deleted_at IS NULL AND a.publication_status = 'published'
 		ORDER BY COALESCE(a.start_at, a.published_at, a.created_at) DESC
 		LIMIT 50`)
 	if err != nil {
@@ -459,7 +511,7 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 		var startAt, endAt, publishedAt sql.NullTime
 		if err := rows.Scan(
 			&item.ID, &item.Title, &item.Description, &coverMediaID,
-			&coverKey, &startAt, &endAt, &item.Location, &item.Status,
+			&coverKey, &startAt, &endAt, &item.Location, &item.PublicationStatus,
 			&item.CreatedBy, &item.AuthorName, &publishedAt, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
 			writeInternalError(w, r, err)
@@ -480,7 +532,7 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 		if publishedAt.Valid {
 			item.PublishedAt = &publishedAt.Time
 		}
-		item.Status = deriveActivityStatus(item.Status, item.StartAt, item.EndAt, now)
+		hydrateActivityStatus(&item, now)
 		items = append(items, item)
 	}
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -17,7 +18,26 @@ var (
 	ErrPermissionDenied        = errors.New("permission denied")
 	ErrInvalidModerationAction = errors.New("invalid moderation action")
 	ErrModerationCaseNotFound  = errors.New("moderation case not found")
+	ErrTargetRoleProtected     = errors.New("moderation target role is protected")
 )
+
+const (
+	roleRankUser               = 0
+	roleRankCommunityModerator = 1
+	roleRankCommunityOwner     = 2
+	roleRankPlatformModerator  = 3
+	roleRankPlatformAdmin      = 4
+	roleRankSuperAdmin         = 5
+)
+
+var moderationRoleRanks = map[string]int{
+	"user":                roleRankUser,
+	"community_moderator": roleRankCommunityModerator,
+	"community_owner":     roleRankCommunityOwner,
+	"platform_moderator":  roleRankPlatformModerator,
+	"platform_admin":      roleRankPlatformAdmin,
+	"super_admin":         roleRankSuperAdmin,
+}
 
 type moderationActionInput struct {
 	Action       string `json:"action"`
@@ -444,6 +464,11 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 	before := map[string]any{"target_type": targetType, "target_id": targetID}
 	var query string
 	var affected int64
+	if targetType == "user" {
+		if err := authorizeManagedTargetTx(r.Context(), tx, operatorID, targetID); err != nil {
+			return err
+		}
+	}
 	switch targetType {
 	case "post":
 		switch input.Action {
@@ -548,6 +573,55 @@ func applyModerationAction(r *http.Request, tx *sql.Tx, operatorID, caseID, targ
 		return err
 	}
 	return appendAdminLogTx(r.Context(), tx, operatorID, "moderation."+input.Action, targetType, targetID, strings.TrimSpace(input.Reason), r.Header.Get("X-Request-ID"), httpserver.ClientIP(r), after, time.Now().UTC())
+}
+
+// authorizeManagedTargetTx 在实际处罚写入前锁定目标账号并比较双方最高角色。
+// 该检查必须位于事务内，避免仅依赖 Handler 层的权限判断而被其他治理入口绕过。
+func authorizeManagedTargetTx(ctx context.Context, tx *sql.Tx, operatorID, targetID string) error {
+	if strings.TrimSpace(operatorID) == "" || strings.TrimSpace(targetID) == "" || operatorID == targetID {
+		return ErrTargetRoleProtected
+	}
+	var lockedTargetID string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, targetID).Scan(&lockedTargetID); errors.Is(err, sql.ErrNoRows) {
+		return ErrModerationCaseNotFound
+	} else if err != nil {
+		return err
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT ur.user_id, rl.name
+		FROM user_roles ur
+		JOIN roles rl ON rl.id = ur.role_id
+		WHERE ur.user_id IN ($1, $2)
+		ORDER BY ur.user_id, rl.name
+		FOR UPDATE OF ur`, operatorID, targetID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	ranks := map[string]int{operatorID: roleRankUser, targetID: roleRankUser}
+	for rows.Next() {
+		var userID, roleName string
+		if err := rows.Scan(&userID, &roleName); err != nil {
+			return err
+		}
+		rank, known := moderationRoleRanks[roleName]
+		if !known {
+			// 未知角色不能被当成普通用户处理，避免新增高权限角色时绕过
+			// 目标保护；角色映射补齐后才允许继续治理。
+			return ErrTargetRoleProtected
+		}
+		if rank > ranks[userID] {
+			ranks[userID] = rank
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if ranks[operatorID] <= ranks[targetID] {
+		return ErrTargetRoleProtected
+	}
+	return nil
 }
 
 func validModerationAction(input moderationActionInput) bool {

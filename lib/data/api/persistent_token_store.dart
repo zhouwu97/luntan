@@ -6,6 +6,9 @@ import 'api_client.dart';
 class SharedPreferencesTokenStore implements TokenStore {
   SharedPreferencesTokenStore(this._preferences);
 
+  @override
+  bool get usesHttpOnlyRefreshCookie => false;
+
   static const _accessTokenKey = 'luntan.auth.access_token';
   static const _refreshTokenKey = 'luntan.auth.refresh_token';
 

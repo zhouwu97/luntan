@@ -98,6 +98,10 @@ class AuthTokens {
 }
 
 abstract interface class TokenStore {
+  /// Web 端的长期会话由服务端 HttpOnly Cookie 保管，响应体可以省略
+  /// refresh token；原生存储仍要求响应体提供可轮换的 refresh token。
+  bool get usesHttpOnlyRefreshCookie;
+
   Future<String?> readAccessToken();
 
   Future<String?> readRefreshToken();
@@ -115,6 +119,9 @@ class MemoryTokenStore implements TokenStore {
 
   String? _accessToken;
   String? _refreshToken;
+
+  @override
+  bool get usesHttpOnlyRefreshCookie => false;
 
   @override
   Future<String?> readAccessToken() async => _accessToken;

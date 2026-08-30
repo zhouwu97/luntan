@@ -275,15 +275,19 @@ class AuthRepository {
   Future<AuthSession> _saveSession(Map<String, dynamic> payload) async {
     final accessToken = payload['access_token'];
     final refreshToken = payload['refresh_token'];
+    final bodyRefreshToken = refreshToken is String ? refreshToken : '';
     if (accessToken is! String ||
         accessToken.isEmpty ||
-        refreshToken is! String ||
-        refreshToken.isEmpty) {
+        (!_tokenStore.usesHttpOnlyRefreshCookie && bodyRefreshToken.isEmpty)) {
       throw const ApiException(type: ApiErrorType.unknown, message: '登录响应格式错误');
     }
     final tokens = AuthTokens(
       accessToken: accessToken,
-      refreshToken: refreshToken,
+      // Cookie-backed Web 会话不把服务端响应中的 refresh token 继续带入
+      // 客户端状态，即使旧服务端意外返回了该字段也不落入本地存储。
+      refreshToken: _tokenStore.usesHttpOnlyRefreshCookie
+          ? ''
+          : bodyRefreshToken,
       tokenType: payload['token_type'] as String? ?? 'Bearer',
       expiresIn: (payload['expires_in'] as num?)?.toInt(),
     );

@@ -22,14 +22,14 @@ func findCookie(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie 
 	return nil
 }
 
-func TestLoginPasswordSetsRefreshTokenCookie(t *testing.T) {
+func TestNativeLoginReturnsRefreshTokenBodyWithoutCookie(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
-	handler := NewHandler(db)
+	handler := NewHandlerWithMail(db, nil, "production")
 
 	hash, _ := (auth.BcryptPasswordHasher{}).Hash("password123")
 	mock.ExpectQuery("SELECT u\\.id, u\\.username, u\\.status").
@@ -52,8 +52,6 @@ func TestLoginPasswordSetsRefreshTokenCookie(t *testing.T) {
 		"password": "password123",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login/password", bytes.NewReader(body))
-	// 生产部署由 nginx 终结 TLS，Cookie 必须依据转发协议开启 Secure。
-	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -65,22 +63,70 @@ func TestLoginPasswordSetsRefreshTokenCookie(t *testing.T) {
 	if resp["access_token"] == "" || resp["refresh_token"] == "" {
 		t.Fatalf("body 必须保留 token 供原生客户端使用: %s", rec.Body.String())
 	}
+	if cookie := findCookie(t, rec.Result().Cookies(), refreshTokenCookieName); cookie != nil {
+		t.Fatalf("原生 token 会话不应设置 Web refresh cookie: %#v", cookie)
+	}
+}
+
+func TestWebLoginStoresRefreshTokenOnlyInSecureCookie(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := NewHandlerWithMail(db, nil, "production")
+	hash, _ := (auth.BcryptPasswordHasher{}).Hash("password123")
+	mock.ExpectQuery("SELECT u\\.id, u\\.username, u\\.status").
+		WithArgs("user@example.com", "user@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "auth_id", "credential_hash", "has_password"}).
+			AddRow("usr_1", "usr_1", "active", "测试用户", 1, 0, "email", "user@example.com", true, nil, "uam_1", hash, true))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE user_auth_methods SET last_used_at").
+		WithArgs(sqlmock.AnyArg(), "uam_1").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO sessions").
+		WithArgs(sqlmock.AnyArg(), "usr_1", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "192.0.2.1", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO refresh_tokens").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "usr_1", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "user@example.com",
+		"password": "password123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login/password", bytes.NewReader(body))
+	req.Header.Set("Origin", defaultWebOrigin)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["access_token"] == "" {
+		t.Fatalf("missing access_token: %s", rec.Body.String())
+	}
+	if value, ok := resp["refresh_token"].(string); !ok || value != "" {
+		t.Fatalf("Web JSON 不得携带长期 refresh token: %v", resp["refresh_token"])
+	}
 
 	cookie := findCookie(t, rec.Result().Cookies(), refreshTokenCookieName)
 	if cookie == nil {
-		t.Fatal("登录响应必须设置 refresh token Cookie")
+		t.Fatal("Web 登录响应必须设置 refresh token Cookie")
 	}
-	if !cookie.HttpOnly || !cookie.Secure {
-		t.Fatalf("cookie 必须 HttpOnly + Secure，got: %#v", cookie)
+	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("cookie 必须 HttpOnly + Secure + SameSite=Lax，got: %#v", cookie)
 	}
-	if cookie.Path != "/api/v1/auth" {
-		t.Fatalf("cookie path = %q", cookie.Path)
+	if cookie.Path != "/api/v1/auth" || cookie.MaxAge != refreshTokenCookieMaxAge || cookie.Value == "" {
+		t.Fatalf("cookie 属性不正确: %#v", cookie)
 	}
-	if cookie.MaxAge != 30*24*60*60 {
-		t.Fatalf("cookie max-age = %d", cookie.MaxAge)
-	}
-	if cookie.Value == "" {
-		t.Fatal("cookie value 为空")
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -91,7 +137,7 @@ func TestRefreshViaCookieOmitsBodyRefreshToken(t *testing.T) {
 	}
 	defer db.Close()
 
-	handler := NewHandler(db)
+	handler := NewHandlerWithMail(db, nil, "production")
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT rt\\.id, rt\\.session_id").
@@ -112,6 +158,7 @@ func TestRefreshViaCookieOmitsBodyRefreshToken(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"refresh_token": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewReader(body))
+	req.Header.Set("Origin", defaultWebOrigin)
 	req.AddCookie(&http.Cookie{Name: refreshTokenCookieName, Value: "raw-cookie-token"})
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -132,8 +179,8 @@ func TestRefreshViaCookieOmitsBodyRefreshToken(t *testing.T) {
 	if cookie == nil || cookie.Value == "" {
 		t.Fatal("轮换后的 refresh token 必须通过 Set-Cookie 下发")
 	}
-	if !cookie.HttpOnly {
-		t.Fatal("轮换 Cookie 必须保持 HttpOnly")
+	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("轮换 Cookie 必须保持 HttpOnly + Secure + SameSite=Lax: %#v", cookie)
 	}
 }
 
@@ -169,6 +216,7 @@ func TestLogoutWithoutTokenStillClearsCookie(t *testing.T) {
 	handler := NewHandler(db)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", bytes.NewReader([]byte("{}")))
+	req.Header.Set("Origin", defaultWebOrigin)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

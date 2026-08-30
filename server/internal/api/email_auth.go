@@ -244,7 +244,7 @@ func (s *Server) loginWithEmailCode(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	writeAuthResponse(w, r, http.StatusOK, response)
+	s.writeAuthResponse(w, r, http.StatusOK, response)
 }
 
 func (s *Server) guest(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +256,7 @@ func (s *Server) guest(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	writeAuthResponse(w, r, http.StatusCreated, response)
+	s.writeAuthResponse(w, r, http.StatusCreated, response)
 }
 
 func newEmailCode() (string, error) {

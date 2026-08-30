@@ -29,6 +29,9 @@ AuthController _controller({
 
 class _ThrowingTokenStore implements TokenStore {
   @override
+  bool get usesHttpOnlyRefreshCookie => false;
+
+  @override
   Future<String?> readAccessToken() => throw StateError('storage unavailable');
 
   @override

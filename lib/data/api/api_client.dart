@@ -371,25 +371,20 @@ class ApiClient {
     if (store == null) return;
     try {
       final refreshToken = await store.readRefreshToken();
-      if (refreshToken == null || refreshToken.isEmpty) {
-        throw const ApiException(
-          type: ApiErrorType.unauthorized,
-          message: '登录状态已失效',
-          statusCode: 401,
-        );
-      }
+      // Web 端本地没有 refresh token（由 HttpOnly cookie 携带），body 里
+      // 省略该字段，服务端回退读取 cookie。
+      final bodyToken =
+          (refreshToken == null || refreshToken.isEmpty) ? null : refreshToken;
       final payload = await _request(
         method: 'POST',
         path: '/api/v1/auth/refresh',
-        body: {'refresh_token': refreshToken},
+        body: {'refresh_token': ?bodyToken},
         allowRefresh: false,
       );
       final accessToken = payload['access_token'];
       final nextRefreshToken = payload['refresh_token'];
-      if (accessToken is! String ||
-          accessToken.isEmpty ||
-          nextRefreshToken is! String ||
-          nextRefreshToken.isEmpty) {
+      // cookie 刷新成功的响应不返回 refresh_token，只要求 access_token。
+      if (accessToken is! String || accessToken.isEmpty) {
         throw const ApiException(
           type: ApiErrorType.unknown,
           message: '刷新令牌响应格式错误',
@@ -398,7 +393,7 @@ class ApiClient {
       await store.save(
         AuthTokens(
           accessToken: accessToken,
-          refreshToken: nextRefreshToken,
+          refreshToken: nextRefreshToken is String ? nextRefreshToken : '',
           tokenType: payload['token_type'] as String? ?? 'Bearer',
           expiresIn: (payload['expires_in'] as num?)?.toInt(),
         ),

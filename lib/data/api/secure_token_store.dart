@@ -40,11 +40,14 @@ class SecureTokenStore implements TokenStore {
   }
 }
 
-class LocalTokenStore implements TokenStore {
-  LocalTokenStore();
+/// Web 端只持久化短时效 access token；refresh token 由服务端
+/// `luntan_refresh` HttpOnly cookie（Path=/api/v1/auth）保管，浏览器
+/// localStorage 不再接触长效凭证，XSS 无法窃取续期凭证。
+class WebTokenStore implements TokenStore {
+  WebTokenStore();
 
   static const _accessTokenKey = 'luntan.auth.access_token';
-  static const _refreshTokenKey = 'luntan.auth.refresh_token';
+  static const _legacyRefreshTokenKey = 'luntan.auth.refresh_token';
 
   static SharedPreferences? _prefs;
   static Future<SharedPreferences>? _loading;
@@ -63,24 +66,25 @@ class LocalTokenStore implements TokenStore {
       (await _store()).getString(_accessTokenKey);
 
   @override
-  Future<String?> readRefreshToken() async =>
-      (await _store()).getString(_refreshTokenKey);
+  Future<String?> readRefreshToken() async => null;
 
   @override
   Future<void> save(AuthTokens tokens) async {
     final store = await _store();
     await store.setString(_accessTokenKey, tokens.accessToken);
-    await store.setString(_refreshTokenKey, tokens.refreshToken);
+    // 迁移历史版本遗留的明文 refresh token。
+    await store.remove(_legacyRefreshTokenKey);
   }
 
   @override
   Future<void> clear() async {
     final store = await _store();
     await store.remove(_accessTokenKey);
-    await store.remove(_refreshTokenKey);
+    await store.remove(_legacyRefreshTokenKey);
   }
 }
 
-/// 按平台选择默认令牌存储：Web 用 localStorage，其余用平台安全存储。
+/// 按平台选择默认令牌存储：Web 只存 access token（refresh 走 HttpOnly
+/// cookie），原生端用平台安全存储。
 TokenStore createDefaultTokenStore() =>
-    kIsWeb ? LocalTokenStore() : SecureTokenStore();
+    kIsWeb ? WebTokenStore() : SecureTokenStore();

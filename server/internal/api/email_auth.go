@@ -244,8 +244,7 @@ func (s *Server) loginWithEmailCode(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	applyBaseCapabilities(&response.User)
-	httpserver.WriteJSON(w, http.StatusOK, response)
+	writeAuthResponse(w, r, http.StatusOK, response)
 }
 
 func (s *Server) guest(w http.ResponseWriter, r *http.Request) {
@@ -257,8 +256,7 @@ func (s *Server) guest(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	applyBaseCapabilities(&response.User)
-	httpserver.WriteJSON(w, http.StatusCreated, response)
+	writeAuthResponse(w, r, http.StatusCreated, response)
 }
 
 func newEmailCode() (string, error) {

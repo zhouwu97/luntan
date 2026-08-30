@@ -35,11 +35,21 @@ func ReadinessCheck(handler http.Handler) func(context.Context) error {
 	return server.Ready
 }
 
-func (s *Server) Ready(_ context.Context) error {
-	if strings.EqualFold(strings.TrimSpace(s.appEnv), "production") {
-		if _, unavailable := s.mediaStorage.(unavailableMediaStorage); unavailable {
+// storageHealthChecker 由媒体存储按需实现；/ready 借此探测存储后端真实可用，
+// 而不是只确认配置存在。
+type storageHealthChecker interface {
+	HealthCheck(ctx context.Context) error
+}
+
+func (s *Server) Ready(ctx context.Context) error {
+	if _, unavailable := s.mediaStorage.(unavailableMediaStorage); unavailable {
+		if strings.EqualFold(strings.TrimSpace(s.appEnv), "production") {
 			return ErrStorageUnavailable
 		}
+		return nil
+	}
+	if checker, ok := s.mediaStorage.(storageHealthChecker); ok {
+		return checker.HealthCheck(ctx)
 	}
 	return nil
 }
@@ -590,8 +600,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, r, err)
 			return
 		}
-		applyBaseCapabilities(&response.User)
-		httpserver.WriteJSON(w, http.StatusCreated, response)
+		writeAuthResponse(w, r, http.StatusCreated, response)
 		return
 	}
 
@@ -605,8 +614,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	applyBaseCapabilities(&response.User)
-	httpserver.WriteJSON(w, http.StatusCreated, response)
+	writeAuthResponse(w, r, http.StatusCreated, response)
 }
 
 func appEnvironment() string {
@@ -642,8 +650,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, r, err)
 			return
 		}
-		applyBaseCapabilities(&response.User)
-		httpserver.WriteJSON(w, http.StatusOK, response)
+		writeAuthResponse(w, r, http.StatusOK, response)
 		return
 	}
 
@@ -655,8 +662,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, err)
 		return
 	}
-	applyBaseCapabilities(&response.User)
-	httpserver.WriteJSON(w, http.StatusOK, response)
+	writeAuthResponse(w, r, http.StatusOK, response)
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
@@ -670,10 +676,27 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, auth.ErrInvalidToken)
 		return
 	}
-	response, err := s.authService.Refresh(r.Context(), input.RefreshToken, requestMetadata(r))
+	// Web 端不在 JS 侧保存 refresh token：body 为空时回退到 HttpOnly Cookie。
+	token := strings.TrimSpace(input.RefreshToken)
+	cookieSourced := false
+	if token == "" {
+		token = refreshTokenFromRequest(r)
+		cookieSourced = token != ""
+	}
+	if token == "" {
+		writeAuthError(w, r, auth.ErrInvalidToken)
+		return
+	}
+	response, err := s.authService.Refresh(r.Context(), token, requestMetadata(r))
 	if err != nil {
 		writeAuthError(w, r, err)
 		return
+	}
+	if cookieSourced {
+		// Cookie 轮换出的新 refresh token 只通过 Set-Cookie 下发，不进入
+		// 响应体，避免 XSS 借一次刷新窃取新的长期会话。
+		setRefreshTokenCookie(w, r, response.RefreshToken)
+		response.RefreshToken = ""
 	}
 	applyBaseCapabilities(&response.User)
 	httpserver.WriteJSON(w, http.StatusOK, response)
@@ -690,10 +713,19 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, auth.ErrInvalidInput)
 		return
 	}
-	if err := s.authService.Logout(r.Context(), input.RefreshToken); err != nil {
-		writeAuthError(w, r, err)
-		return
+	token := strings.TrimSpace(input.RefreshToken)
+	if token == "" {
+		token = refreshTokenFromRequest(r)
 	}
+	// 登出必须幂等：token 只存在于已过期的 Cookie 中或完全缺失时，
+	// 仍要清除 Cookie 并返回 204，保证 Web 端登出永远能完成本地清理。
+	if token != "" {
+		if err := s.authService.Logout(r.Context(), token); err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
+	}
+	clearRefreshTokenCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
 

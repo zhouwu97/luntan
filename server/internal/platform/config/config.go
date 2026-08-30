@@ -49,6 +49,12 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("production requires DATABASE_URL")
 	}
+	if !c.RateLimitEnabled {
+		return fmt.Errorf("production requires RATE_LIMIT_ENABLED=true")
+	}
+	if strings.TrimSpace(c.RedisURL) == "" {
+		return fmt.Errorf("production requires REDIS_URL to back the rate limiter")
+	}
 	storageURL := strings.TrimSpace(c.ObjectStorageUploadBaseURL)
 	if storageURL == "" || strings.TrimSpace(c.ObjectStorageSigningSecret) == "" {
 		return fmt.Errorf("production requires object storage URL and signing secret")
@@ -57,6 +63,11 @@ func (c Config) Validate() error {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("OBJECT_STORAGE_UPLOAD_BASE_URL must be a complete HTTP(S) URL")
+	}
+	// 上传与公开地址都会直接暴露给浏览器/客户端，生产环境一旦允许 HTTP，
+	// Web 端会因 mixed content 被拦截，媒体也会走明文链路。
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("OBJECT_STORAGE_UPLOAD_BASE_URL must use HTTPS in production")
 	}
 	publicURL := strings.TrimSpace(c.ObjectStoragePublicBaseURL)
 	if publicURL == "" {
@@ -67,6 +78,11 @@ func (c Config) Validate() error {
 		(parsedPublic.Scheme != "http" && parsedPublic.Scheme != "https") {
 		return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must be a complete HTTP(S) URL")
 	}
+	if parsedPublic.Scheme != "https" {
+		return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS in production")
+	}
+	// STORAGE_INTERNAL_BASE_URL 只在服务端与存储服务之间的内网链路使用，
+	// 不进入客户端，允许按内网拓扑继续使用 HTTP。
 	if internalURL := strings.TrimSpace(os.Getenv("STORAGE_INTERNAL_BASE_URL")); internalURL != "" {
 		parsedInternal, err := url.Parse(internalURL)
 		if err != nil || parsedInternal.Scheme == "" || parsedInternal.Host == "" ||
@@ -79,6 +95,9 @@ func (c Config) Validate() error {
 		if err != nil || parsedReleaseURL.Scheme == "" || parsedReleaseURL.Host == "" ||
 			(parsedReleaseURL.Scheme != "http" && parsedReleaseURL.Scheme != "https") {
 			return fmt.Errorf("APP_RELEASE_PUBLIC_BASE_URL must be a complete HTTP(S) URL")
+		}
+		if parsedReleaseURL.Scheme != "https" {
+			return fmt.Errorf("APP_RELEASE_PUBLIC_BASE_URL must use HTTPS in production")
 		}
 	}
 	return nil

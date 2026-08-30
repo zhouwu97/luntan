@@ -13,6 +13,7 @@ import 'package:luntan/screens/post_detail_screen.dart';
 import 'package:luntan/screens/governance_screens.dart';
 import 'package:luntan/screens/profile_screen.dart';
 import 'package:luntan/screens/settings_screen.dart';
+import 'package:luntan/widgets/app_network_image.dart';
 import 'package:luntan/widgets/comments/comment_item.dart';
 import 'package:luntan/widgets/forum_post_card.dart';
 import 'package:luntan/widgets/post_media_preview.dart';
@@ -76,6 +77,9 @@ class _FixedPointsRepository extends StoreRepository {
 }
 
 void main() {
+  // 点按落点未命中目标组件时直接失败，杜绝“点到卡片其他可点区域”的假阳性。
+  WidgetController.hitTestWarningShouldBeFatal = true;
+
   testWidgets('首页展示论坛骨架并可以切换我的页面', (tester) async {
     await tester.pumpWidget(const LuntanApp());
     expect(find.text('大型拆箱'), findsWidgets);
@@ -166,7 +170,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(PostMediaPreview).first);
+    // 单图瓦片只占预览区左侧 70%，必须点图片本身，否则会落空到卡片级
+    // InkWell，测不出“图片点击转发详情回调”。
+    await tester.tap(
+      find.descendant(
+        of: find.byType(PostMediaPreview),
+        matching: find.byType(AppNetworkImage),
+      ),
+    );
+    await tester.pumpAndSettle();
 
     expect(opened, isTrue);
   });

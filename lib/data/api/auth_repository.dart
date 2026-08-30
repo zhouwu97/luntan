@@ -253,12 +253,12 @@ class AuthRepository {
   Future<void> logout() async {
     try {
       final refreshToken = await _tokenStore.readRefreshToken();
-      if (refreshToken != null && refreshToken.isNotEmpty) {
-        await _client.postJson(
-          '/api/v1/auth/logout',
-          body: {'refresh_token': refreshToken},
-        );
-      }
+      // Web 端 refresh token 在 HttpOnly cookie 里，body 通常为空；
+      // 服务端收到后清除 cookie，未登录时也幂等返回 204。
+      await _client.postJson(
+        '/api/v1/auth/logout',
+        body: {'refresh_token': ?refreshToken},
+      );
     } finally {
       await _tokenStore.clear();
     }

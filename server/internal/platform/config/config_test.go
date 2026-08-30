@@ -21,6 +21,16 @@ func TestValidateProduction(t *testing.T) {
 	}
 
 	cfg.DatabaseURL = "postgres://localhost/db"
+	if err := cfg.Validate(); err == nil || err.Error() != "production requires RATE_LIMIT_ENABLED=true" {
+		t.Fatalf("expected rate limit error, got: %v", err)
+	}
+
+	cfg.RateLimitEnabled = true
+	if err := cfg.Validate(); err == nil || err.Error() != "production requires REDIS_URL to back the rate limiter" {
+		t.Fatalf("expected redis error, got: %v", err)
+	}
+
+	cfg.RedisURL = "redis://localhost:6379/0"
 	cfg.ObjectStorageUploadBaseURL = "https://upload.example.com"
 	cfg.ObjectStorageSigningSecret = "secret"
 	if err := cfg.Validate(); err == nil {
@@ -30,5 +40,78 @@ func TestValidateProduction(t *testing.T) {
 	cfg.ObjectStoragePublicBaseURL = "https://cdn.example.com"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected valid production config, got: %v", err)
+	}
+}
+
+func TestValidateProductionRejectsPlainTextClientFacingURLs(t *testing.T) {
+	base := Config{
+		AppEnv:                     "production",
+		DatabaseURL:                "postgres://localhost/db",
+		RateLimitEnabled:           true,
+		RedisURL:                   "redis://localhost:6379/0",
+		ObjectStorageUploadBaseURL: "https://upload.example.com",
+		ObjectStorageSigningSecret: "secret",
+		ObjectStoragePublicBaseURL: "https://cdn.example.com",
+	}
+
+	cases := []struct {
+		name    string
+		mutate  func(c *Config)
+		wantErr string
+	}{
+		{
+			name:    "upload base url over http",
+			mutate:  func(c *Config) { c.ObjectStorageUploadBaseURL = "http://upload.example.com" },
+			wantErr: "OBJECT_STORAGE_UPLOAD_BASE_URL must use HTTPS in production",
+		},
+		{
+			name:    "public base url over http",
+			mutate:  func(c *Config) { c.ObjectStoragePublicBaseURL = "http://cdn.example.com" },
+			wantErr: "OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS in production",
+		},
+		{
+			name:    "app release base url over http",
+			mutate:  func(c *Config) { c.AppReleasePublicBaseURL = "http://download.example.com" },
+			wantErr: "APP_RELEASE_PUBLIC_BASE_URL must use HTTPS in production",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("expected %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidateProductionAllowsInternalStorageHTTP(t *testing.T) {
+	t.Setenv("STORAGE_INTERNAL_BASE_URL", "http://storage.internal:9000")
+	cfg := Config{
+		AppEnv:                     "production",
+		DatabaseURL:                "postgres://localhost/db",
+		RateLimitEnabled:           true,
+		RedisURL:                   "redis://localhost:6379/0",
+		ObjectStorageUploadBaseURL: "https://upload.example.com",
+		ObjectStorageSigningSecret: "secret",
+		ObjectStoragePublicBaseURL: "https://cdn.example.com",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("internal server-to-server storage URL should keep HTTP, got: %v", err)
+	}
+}
+
+func TestValidateNonProductionKeepsFlexibleStorageScheme(t *testing.T) {
+	t.Setenv("STORAGE_INTERNAL_BASE_URL", "http://storage.internal:9000")
+	cfg := Config{
+		AppEnv:                     "qa",
+		ObjectStorageUploadBaseURL: "http://upload.example.com",
+		ObjectStoragePublicBaseURL: "http://cdn.example.com",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("QA/dev 允许 HTTP 存储，got: %v", err)
 	}
 }

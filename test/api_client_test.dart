@@ -141,6 +141,44 @@ void main() {
     );
   });
 
+  test('Web cookie 刷新：无本地 refresh token 也能续期并保存新 access token', () async {
+    final store = MemoryTokenStore(accessToken: 'expired-access');
+    final refreshBodies = <Object?>[];
+    var refreshCalls = 0;
+    var meCalls = 0;
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      tokenStore: store,
+      client: MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/refresh') {
+          refreshCalls++;
+          refreshBodies.add(jsonDecode(request.body));
+          // cookie 刷新成功的响应不返回 refresh_token
+          return http.Response(
+            '{"access_token":"new-access","token_type":"Bearer","expires_in":900}',
+            200,
+          );
+        }
+        if (request.url.path == '/api/v1/me') {
+          meCalls++;
+          if (meCalls == 1) {
+            return http.Response('{"code":"TOKEN_EXPIRED","message":"expired"}', 401);
+          }
+          return http.Response('{"id":"usr_1"}', 200);
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    final payload = await client.getJson('/api/v1/me');
+    expect(payload['id'], 'usr_1');
+    expect(meCalls, 2);
+    expect(refreshCalls, 1);
+    // body 中不携带 refresh_token，续期凭证由 HttpOnly cookie 承载
+    expect(refreshBodies.single, <String, dynamic>{});
+    expect(await store.readAccessToken(), 'new-access');
+  });
+
   test('ApiClient 上传使用独立的长超时，不受普通请求超时影响', () async {
     final client = ApiClient(
       baseUri: Uri.parse('https://example.com'),

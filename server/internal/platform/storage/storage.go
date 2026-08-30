@@ -135,6 +135,8 @@ func (m *MemoryStorage) DeleteMulti(ctx context.Context, objectKeys []string) er
 	return nil
 }
 
+func (m *MemoryStorage) HealthCheck(context.Context) error { return nil }
+
 func (m *MemoryStorage) HasObject(objectKey string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -212,6 +214,10 @@ func (UnavailableMediaStorage) Delete(context.Context, string) error {
 }
 
 func (UnavailableMediaStorage) DeleteMulti(context.Context, []string) error {
+	return ErrStorageUnavailable
+}
+
+func (UnavailableMediaStorage) HealthCheck(context.Context) error {
 	return ErrStorageUnavailable
 }
 
@@ -414,6 +420,43 @@ func (s *HTTPMediaStorage) DeleteMulti(ctx context.Context, objectKeys []string)
 		}
 	}
 	return firstErr
+}
+
+// HealthCheck 通过一次对探测键的低成本请求验证存储链路真实可达：
+// 2xx 或 404（探测键不存在）视为可用；401/403 说明签名配置失效，5xx 与
+// 网络错误说明存储服务当前不可用。就绪探测必须能暴露“配置存在但服务挂了”。
+func (s *HTTPMediaStorage) HealthCheck(ctx context.Context) error {
+	if s == nil || (s.uploadBaseURL == "" && s.internalBaseURL == "") {
+		return ErrStorageUnavailable
+	}
+	const probeKey = ".readiness-probe"
+	var probeURL string
+	if s.internalBaseURL != "" {
+		probeURL = s.internalBaseURL + "/" + probeKey
+	} else {
+		if len(s.secret) == 0 {
+			return ErrStorageUnavailable
+		}
+		signed, err := s.SignUpload(ctx, "readiness", probeKey, "application/octet-stream", time.Now().UTC().Add(time.Minute))
+		if err != nil {
+			return err
+		}
+		probeURL = signed
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return ErrStorageUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound ||
+		(resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices) {
+		return nil
+	}
+	return fmt.Errorf("storage health probe returned status %d", resp.StatusCode)
 }
 
 // SignedUploadHandler 是内置本地媒体存储接收客户端直传请求所需的最小接口。
@@ -621,6 +664,17 @@ func (s *LocalMediaStorage) DeleteMulti(ctx context.Context, objectKeys []string
 		}
 	}
 	return firstErr
+}
+
+func (s *LocalMediaStorage) HealthCheck(_ context.Context) error {
+	if s == nil || strings.TrimSpace(s.root) == "" {
+		return ErrStorageUnavailable
+	}
+	info, err := os.Stat(s.root)
+	if err != nil || !info.IsDir() {
+		return ErrStorageUnavailable
+	}
+	return nil
 }
 
 func (s *LocalMediaStorage) uploadSignature(assetID, objectKey, expires string) string {

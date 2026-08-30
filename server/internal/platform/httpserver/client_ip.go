@@ -26,6 +26,9 @@ func newClientIPResolver(values []string) (*clientIPResolver, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid trusted proxy CIDR %q: %w", value, err)
 		}
+		if prefix.Bits() == 0 {
+			return nil, fmt.Errorf("trusted proxy CIDR %q is too broad", value)
+		}
 		resolver.trusted = append(resolver.trusted, prefix.Masked())
 	}
 	return resolver, nil

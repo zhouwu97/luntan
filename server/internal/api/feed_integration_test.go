@@ -23,6 +23,9 @@ import (
 // `go test ./...` 不需要数据库。
 func feedIntegrationServer(t *testing.T) *Server {
 	t.Helper()
+	// 集成测试显式开启本地验证码回显；生产代码默认关闭该开关。
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("ALLOW_DEV_AUTH_CODE", "true")
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL 未配置，跳过真实 PostgreSQL Feed 集成测试")

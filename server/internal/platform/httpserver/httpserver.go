@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -26,9 +27,11 @@ type AppError struct {
 }
 
 type Options struct {
-	RateLimitEnabled  bool
-	RateLimitStore    RateLimitStore
-	TrustedProxyCIDRs []string
+	RateLimitEnabled    bool
+	RateLimitStore      RateLimitStore
+	TrustedProxyCIDRs   []string
+	MetricsAllowedCIDRs []string
+	SecureHeaders       bool
 	// AllowedOrigin 是 Web 端的精确来源。配置后仅对该来源开放带 Cookie 的跨域请求；
 	// 未配置时保留公开 API 的通配符 CORS 行为，但不允许跨域凭证。
 	AllowedOrigin string
@@ -53,8 +56,10 @@ func NewHandler(db *sql.DB, logger *slog.Logger) http.Handler {
 
 func NewHandlerWithAPI(db *sql.DB, logger *slog.Logger, apiHandler http.Handler) http.Handler {
 	handler, err := NewHandlerWithAPIOptions(db, logger, apiHandler, Options{
-		RateLimitEnabled:  rateLimitEnabled(),
-		TrustedProxyCIDRs: splitCommaSeparated(os.Getenv("TRUSTED_PROXY_CIDRS")),
+		RateLimitEnabled:    rateLimitEnabled(),
+		TrustedProxyCIDRs:   splitCommaSeparated(os.Getenv("TRUSTED_PROXY_CIDRS")),
+		MetricsAllowedCIDRs: splitCommaSeparated(os.Getenv("METRICS_ALLOWED_CIDRS")),
+		SecureHeaders:       strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production"),
 	})
 	if err != nil {
 		panic(err)
@@ -70,6 +75,10 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 	if err != nil {
 		return nil, err
 	}
+	metricsAllowed, err := newMetricsAllowlist(options.MetricsAllowedCIDRs)
+	if err != nil {
+		return nil, err
+	}
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/health":
@@ -77,6 +86,12 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 		case r.Method == http.MethodGet && r.URL.Path == "/version":
 			WriteJSON(w, http.StatusOK, buildInfoPayload("ok"))
 		case r.Method == http.MethodGet && r.URL.Path == "/metrics":
+			if !metricsAllowed(ClientIP(r)) {
+				// 对外隐藏运维端点的存在性，避免泄露版本、路由和运行状态。
+				WriteAppError(w, r, AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 			metrics.write(w)
 		case r.Method == http.MethodGet && r.URL.Path == "/ready":
@@ -119,7 +134,59 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 	}
 	root = clientIPMiddleware(root, resolver)
 	root = corsMiddleware(root, options.AllowedOrigin)
+	root = securityHeadersMiddleware(root, options.SecureHeaders)
 	return requestIDMiddleware(loggingMiddleware(recoveryMiddleware(root), logger)), nil
+}
+
+func newMetricsAllowlist(values []string) (func(string) bool, error) {
+	if len(values) == 0 {
+		values = []string{"127.0.0.1/32", "::1/128"}
+	}
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid metrics CIDR %q: %w", value, err)
+		}
+		if prefix.Bits() == 0 {
+			return nil, fmt.Errorf("metrics CIDR %q is too broad", value)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	if len(prefixes) == 0 {
+		return nil, fmt.Errorf("metrics allowlist must contain at least one CIDR")
+	}
+	return func(value string) bool {
+		address, err := netip.ParseAddr(strings.TrimSpace(value))
+		if err != nil {
+			return false
+		}
+		address = address.Unmap()
+		for _, prefix := range prefixes {
+			if prefix.Contains(address) {
+				return true
+			}
+		}
+		return false
+	}, nil
+}
+
+func securityHeadersMiddleware(next http.Handler, secure bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if secure {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // corsMiddleware 让公开 Feed、榜单和媒体元数据可以被 Flutter Web 跨域读取。

@@ -550,23 +550,12 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 	return AuthResponse{TokenPair: pair, User: user}, nil
 }
 
-// LoginByEmail 保持兼容旧调用的登录/转正方法。
-func (s *Service) LoginByEmail(ctx context.Context, email, nickname, guestUserID string, metadata SessionMetadata) (AuthResponse, error) {
-	// 尝试以验证码方式登录已有账号
-	res, err := s.EmailCodeLogin(ctx, email, metadata)
-	if err == nil {
-		return res, nil
-	}
-	if !errors.Is(err, ErrEmailNotRegistered) {
-		return AuthResponse{}, err
-	}
-	// 若未注册，通过默认密码占位创建新账号或升级游客
-	return s.RegisterWithEmail(ctx, EmailRegisterInput{
-		Email:       email,
-		Password:    "DefaultPassword123!",
-		Nickname:    nickname,
-		GuestUserID: guestUserID,
-	}, metadata)
+// LoginByEmail 保持兼容旧调用的邮箱登录入口。
+//
+// 旧实现会在邮箱不存在时使用固定密码自动创建账号。该行为会把公开的
+// 邮箱验证码入口变成已知密码账户创建器，因此这里仅允许登录已有账号。
+func (s *Service) LoginByEmail(ctx context.Context, email, _ string, _ string, metadata SessionMetadata) (AuthResponse, error) {
+	return s.EmailCodeLogin(ctx, email, metadata)
 }
 
 // CreateGuest 为游客模式创建可追踪的后台身份。游客仍然使用统一 users/sessions

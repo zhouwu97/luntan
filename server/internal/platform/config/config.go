@@ -16,16 +16,31 @@ type Config struct {
 	ObjectStorageUploadBaseURL string
 	ObjectStoragePublicBaseURL string
 	ObjectStorageSigningSecret string
+	AuthCodeHashSecret         string
 	WebOrigin                  string
 	RateLimitEnabled           bool
+	AllowDevAuthCode           bool
 	TrustedProxyCIDRs          []string
+	MetricsAllowedCIDRs        []string
 	AppReleaseManifestPath     string
 	AppReleasePublicBaseURL    string
 }
 
+const (
+	envDevelopment = "development"
+	envTest        = "test"
+	envQA          = "qa"
+	envStaging     = "staging"
+	envProduction  = "production"
+)
+
 func Load() Config {
+	appEnv := strings.TrimSpace(os.Getenv("APP_ENV"))
+	if normalized, err := normalizeAppEnv(appEnv); err == nil {
+		appEnv = normalized
+	}
 	return Config{
-		AppEnv:                     valueOrDefault("APP_ENV", "dev"),
+		AppEnv:                     appEnv,
 		HTTPPort:                   valueOrDefault("HTTP_PORT", "8080"),
 		DatabaseURL:                os.Getenv("DATABASE_URL"),
 		LogLevel:                   valueOrDefault("LOG_LEVEL", "info"),
@@ -33,19 +48,29 @@ func Load() Config {
 		ObjectStorageUploadBaseURL: os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"),
 		ObjectStoragePublicBaseURL: os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL"),
 		ObjectStorageSigningSecret: os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
+		AuthCodeHashSecret:         strings.TrimSpace(os.Getenv("AUTH_CODE_HASH_SECRET")),
 		WebOrigin:                  strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
-		RateLimitEnabled:           valueOrDefault("RATE_LIMIT_ENABLED", "false") == "true",
+		RateLimitEnabled:           strings.EqualFold(strings.TrimSpace(os.Getenv("RATE_LIMIT_ENABLED")), "true"),
+		AllowDevAuthCode:           strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEV_AUTH_CODE")), "true"),
 		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
+		MetricsAllowedCIDRs:        splitCSV(os.Getenv("METRICS_ALLOWED_CIDRS")),
 		AppReleaseManifestPath:     strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),
 		AppReleasePublicBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_PUBLIC_BASE_URL")), "/"),
 	}
 }
 
-// Validate 检查会导致线上服务以“半可用”状态启动的配置。
-// 开发环境保留本地数据库/邮件/对象存储的可选性；生产环境则必须显式配置，
-// 由启动进程直接失败，避免运行到用户旅程中途才暴露基础设施缺失。
+// Validate 检查会导致线上服务以“半可用”状态启动的配置。APP_ENV 必须
+// 显式设置为白名单值；开发环境保留本地数据库/邮件/对象存储的可选性，
+// 生产环境则必须显式配置完整依赖，由启动进程直接失败。
 func (c Config) Validate() error {
-	if !strings.EqualFold(strings.TrimSpace(c.AppEnv), "production") {
+	appEnv, err := normalizeAppEnv(c.AppEnv)
+	if err != nil {
+		return err
+	}
+	if c.AllowDevAuthCode && appEnv != envDevelopment && appEnv != envTest {
+		return fmt.Errorf("ALLOW_DEV_AUTH_CODE is only allowed in development or test")
+	}
+	if appEnv != envProduction {
 		return nil
 	}
 	if strings.TrimSpace(c.DatabaseURL) == "" {
@@ -56,6 +81,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.RedisURL) == "" {
 		return fmt.Errorf("production requires REDIS_URL to back the rate limiter")
+	}
+	if len([]byte(strings.TrimSpace(c.AuthCodeHashSecret))) < 32 {
+		return fmt.Errorf("production requires AUTH_CODE_HASH_SECRET with at least 32 bytes")
 	}
 	storageURL := strings.TrimSpace(c.ObjectStorageUploadBaseURL)
 	if storageURL == "" || strings.TrimSpace(c.ObjectStorageSigningSecret) == "" {
@@ -103,6 +131,25 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// normalizeAppEnv 只接受仓库定义的环境名称；prod/prd 等近似值必须显式报错，
+// 避免部署拼写错误时误走开发分支。
+func normalizeAppEnv(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "dev", envDevelopment:
+		return envDevelopment, nil
+	case envTest:
+		return envTest, nil
+	case envQA:
+		return envQA, nil
+	case envStaging:
+		return envStaging, nil
+	case envProduction:
+		return envProduction, nil
+	default:
+		return "", fmt.Errorf("invalid APP_ENV %q", value)
+	}
 }
 
 func splitCSV(value string) []string {

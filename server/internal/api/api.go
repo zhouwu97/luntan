@@ -16,15 +16,19 @@ import (
 )
 
 type Server struct {
-	db                *sql.DB
-	authService       *auth.Service
-	mediaStorage      mediaStorage
-	pointRewards      PointRewardRules
-	experienceRewards ExperienceRewardRules
-	mailSender        mailSender
-	appEnv            string
-	webOrigin         string
+	db                 *sql.DB
+	authService        *auth.Service
+	mediaStorage       mediaStorage
+	pointRewards       PointRewardRules
+	experienceRewards  ExperienceRewardRules
+	mailSender         mailSender
+	appEnv             string
+	webOrigin          string
+	authCodeHashSecret string
+	allowDevAuthCode   bool
 }
+
+type authenticatedUserContextKey struct{}
 
 // ReadinessCheck 将业务依赖检查接入统一 /ready 端点。保持构造函数返回
 // http.Handler，避免破坏现有测试和调用方，同时允许主进程检查对象存储。
@@ -64,7 +68,19 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 	if len(authServices) > 0 && authServices[0] != nil {
 		authService = authServices[0]
 	}
-	return &Server{db: db, authService: authService, mediaStorage: newObjectStorageFromEnv(), pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment(), webOrigin: configuredWebOrigin()}
+	appEnv := appEnvironment()
+	return &Server{
+		db:                 db,
+		authService:        authService,
+		mediaStorage:       newObjectStorageFromEnv(),
+		pointRewards:       pointRewardRulesFromEnv(),
+		experienceRewards:  defaultExperienceRewardRules(),
+		mailSender:         disabledMailSender{},
+		appEnv:             appEnv,
+		webOrigin:          configuredWebOrigin(),
+		authCodeHashSecret: configuredAuthCodeHashSecret(),
+		allowDevAuthCode:   devAuthCodeEnabled(appEnv),
+	}
 }
 
 // NewHandlerWithMail 供正式服务注入 SMTP sender；保留 NewHandler 以兼容测试和本地无 SMTP 场景。
@@ -74,7 +90,8 @@ func NewHandlerWithMail(db *sql.DB, sender mailSender, appEnvs ...string) http.H
 		server.mailSender = sender
 	}
 	if len(appEnvs) > 0 && strings.TrimSpace(appEnvs[0]) != "" {
-		server.appEnv = strings.TrimSpace(appEnvs[0])
+		server.appEnv = normalizeAppEnvironment(appEnvs[0])
+		server.allowDevAuthCode = devAuthCodeEnabled(server.appEnv)
 	}
 	return server
 }
@@ -86,7 +103,19 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 	if storage == nil {
 		storage = unavailableMediaStorage{}
 	}
-	return &Server{db: db, authService: authService, mediaStorage: storage, pointRewards: pointRewardRulesFromEnv(), experienceRewards: defaultExperienceRewardRules(), mailSender: disabledMailSender{}, appEnv: appEnvironment(), webOrigin: configuredWebOrigin()}
+	appEnv := appEnvironment()
+	return &Server{
+		db:                 db,
+		authService:        authService,
+		mediaStorage:       storage,
+		pointRewards:       pointRewardRulesFromEnv(),
+		experienceRewards:  defaultExperienceRewardRules(),
+		mailSender:         disabledMailSender{},
+		appEnv:             appEnv,
+		webOrigin:          configuredWebOrigin(),
+		authCodeHashSecret: configuredAuthCodeHashSecret(),
+		allowDevAuthCode:   devAuthCodeEnabled(appEnv),
+	}
 }
 
 // NewHandlerWithPointRewards 供集成测试和灰度环境显式注入奖励配置。
@@ -107,6 +136,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if s.isIPRestricted(r) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusForbidden, Code: "IP_RESTRICTED", Message: "当前网络地址暂不可访问"})
+		return
+	}
+	// 管理路由统一先完成身份认证；各 handler 继续执行自己的全局/社区
+	// 权限校验。认证结果放入本次请求上下文，避免重复读取会话。
+	if !s.authenticateAdministrativeRoute(w, r, path) {
 		return
 	}
 	switch {
@@ -623,7 +657,55 @@ func appEnvironment() string {
 	if value == "" {
 		return "development"
 	}
-	return value
+	return normalizeAppEnvironment(value)
+}
+
+func normalizeAppEnvironment(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "dev", "development":
+		return "development"
+	case "test":
+		return "test"
+	case "qa":
+		return "qa"
+	case "staging":
+		return "staging"
+	case "production":
+		return "production"
+	default:
+		return "unknown"
+	}
+}
+
+func configuredAuthCodeHashSecret() string {
+	return strings.TrimSpace(os.Getenv("AUTH_CODE_HASH_SECRET"))
+}
+
+func devAuthCodeEnabled(appEnv string) bool {
+	if appEnv != "development" && appEnv != "test" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEV_AUTH_CODE")), "true")
+}
+
+func isAdministrativePath(path string) bool {
+	return path == "/api/v1/admin" || strings.HasPrefix(path, "/api/v1/admin/") ||
+		path == "/api/v1/admins" || strings.HasPrefix(path, "/api/v1/admins/")
+}
+
+func (s *Server) authenticateAdministrativeRoute(w http.ResponseWriter, r *http.Request, path string) bool {
+	if !isAdministrativePath(path) {
+		return true
+	}
+	if !s.requireDatabase(w, r) {
+		return false
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return false
+	}
+	*r = *r.WithContext(context.WithValue(r.Context(), authenticatedUserContextKey{}, user))
+	return true
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -800,6 +882,13 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authenticatedUser(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
+	if user, ok := r.Context().Value(authenticatedUserContextKey{}).(auth.User); ok {
+		return user, true
+	}
+	if s == nil || s.authService == nil {
+		writeAuthError(w, r, auth.ErrInvalidToken)
+		return auth.User{}, false
+	}
 	token, ok := bearerToken(r.Header.Get("Authorization"))
 	if !ok {
 		writeAuthError(w, r, auth.ErrInvalidToken)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -71,18 +72,19 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 场景语义检查：登录时必须已注册，注册时必须未注册
+	// 场景语义检查仍然保留，但对外统一返回“已受理”，避免通过响应码
+	// 和错误文案探测邮箱是否存在。只有符合场景的请求才真正写入验证码。
 	registered, err := s.authService.IsEmailRegistered(r.Context(), email)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	if purpose == "login" && !registered {
-		writeAuthError(w, r, auth.ErrEmailNotRegistered)
+		writeEmailCodeAccepted(w)
 		return
 	}
 	if purpose == "register" && registered {
-		writeAuthError(w, r, auth.ErrEmailAlreadyRegistered)
+		writeEmailCodeAccepted(w)
 		return
 	}
 
@@ -118,7 +120,7 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	codeID := newPostID()
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO email_codes (id, email, purpose, code_hash, expires_at, requested_ip, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7)`, codeID, email, purpose, emailCodeHash(code), now.Add(emailCodeLifetime), httpserver.ClientIP(r), now); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO email_codes (id, email, purpose, code_hash, expires_at, requested_ip, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, 'sending', $7)`, codeID, email, purpose, s.emailCodeHash(code), now.Add(emailCodeLifetime), httpserver.ClientIP(r), now); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -148,14 +150,15 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 	mailErr := s.mailSender.Send(r.Context(), email, subject, fmt.Sprintf(`<p>你的圣杯酱%s验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">%s</p><p>验证码 10 分钟内有效。如非本人操作，请忽略此邮件。</p>`, actionText, html.EscapeString(code)))
 	if mailErr != nil {
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'delivery_failed', failure_reason = $1 WHERE id = $2`, mailErr.Error(), codeID)
-		if strings.EqualFold(s.appEnv, "production") {
+		if !s.devAuthCodeAllowed() {
 			writeAuthError(w, r, ErrMailUnavailable)
 			return
 		}
-		// 本地开发无 SMTP 时返回开发验证码，生产环境永不返回，便于联调而不降低线上安全性。
+		// 只有显式开启 ALLOW_DEV_AUTH_CODE 的 development/test 环境才允许
+		// 通过响应返回验证码；未知环境和 QA/staging 均 fail-closed。
 		devCode = code
-		// dev_code 即为投递通道：若保持 delivery_failed，校验查询（只认 created/sending/sent）
-		// 会永远拒绝该验证码，导致全新 dev 环境无法注册。生产环境不走此分支。
+		// dev_code 即为投递通道：若保持 delivery_failed，校验查询（只认
+		// created/sending/sent）会永远拒绝该验证码。
 		if _, err := s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'sent', sent_at = now() WHERE id = $1 AND consumed_at IS NULL`, codeID); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -174,6 +177,19 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
 
+func writeEmailCodeAccepted(w http.ResponseWriter) {
+	httpserver.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"expires_in":  int(emailCodeLifetime.Seconds()),
+		"retry_after": 60,
+		"delivery":    "email",
+	})
+}
+
+func (s *Server) devAuthCodeAllowed() bool {
+	return s != nil && s.allowDevAuthCode &&
+		(s.appEnv == "development" || s.appEnv == "test")
+}
+
 // verifyAndConsumeEmailCodeTx 校验并在事务内消耗特定 purpose 的验证码。
 func (s *Server) verifyAndConsumeEmailCodeTx(ctx context.Context, tx *sql.Tx, email, code, purpose string) error {
 	var id, codeHash string
@@ -190,7 +206,7 @@ func (s *Server) verifyAndConsumeEmailCodeTx(ctx context.Context, tx *sql.Tx, em
 		_, _ = tx.ExecContext(ctx, `UPDATE email_codes SET consumed_at = now(), status = 'expired' WHERE id = $1`, id)
 		return ErrEmailCodeExpired
 	}
-	expected := emailCodeHash(code)
+	expected := s.emailCodeHash(code)
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(codeHash)) != 1 {
 		attempts++
 		_, _ = tx.ExecContext(ctx, `UPDATE email_codes SET attempts = $1, status = CASE WHEN $1 >= 5 THEN 'expired' ELSE status END, consumed_at = CASE WHEN $1 >= 5 THEN now() ELSE consumed_at END WHERE id = $2`, attempts, id)
@@ -268,9 +284,24 @@ func newEmailCode() (string, error) {
 	return fmt.Sprintf("%06d", number), nil
 }
 
+func (s *Server) emailCodeHash(code string) string {
+	secret := ""
+	if s != nil {
+		secret = s.authCodeHashSecret
+	}
+	return emailCodeHashWithSecret(secret, code)
+}
+
+// emailCodeHash 保留给单元测试和旧测试夹具使用；生产请求始终通过
+// Server.emailCodeHash 使用运行时注入的 AUTH_CODE_HASH_SECRET。
 func emailCodeHash(code string) string {
-	hash := sha256.Sum256([]byte(code))
-	return hex.EncodeToString(hash[:])
+	return emailCodeHashWithSecret("", code)
+}
+
+func emailCodeHashWithSecret(secret, code string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(code))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func normalizeEmailAddress(value string) string { return strings.ToLower(strings.TrimSpace(value)) }

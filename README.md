@@ -81,11 +81,12 @@ Bash：
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/luntan?sslmode=disable"
+export APP_ENV=dev
 export HTTP_PORT=8080
 go run ./server/cmd/api
 ```
 
-服务启动时会自动执行 `server/migrations/` 下的数据库迁移（包含邮箱验证状态、游客会话、处罚限制、自动审核、风控、管理员角色范围、IP 限制和管理员哈希链日志）。生产环境必须同时配置 `APP_ENV=production`、`SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/SMTP_FROM` 以及 `OBJECT_STORAGE_UPLOAD_BASE_URL/OBJECT_STORAGE_SIGNING_SECRET`；可选配置 `PUSH_WEBHOOK_URL/PUSH_WEBHOOK_SECRET` 将通知投递到站外推送，未配置时仍会持久化站内通知。开发环境未配置 SMTP 时，验证码接口会返回 `dev_code` 便于联调，生产环境不会返回验证码。健康检查为 `/ready`，默认地址为 `http://localhost:8080`。
+服务启动时会自动执行 `server/migrations/` 下的数据库迁移（包含邮箱验证状态、游客会话、处罚限制、自动审核、风控、管理员角色范围、IP 限制和管理员哈希链日志）。生产环境必须同时配置 `APP_ENV=production`、`AUTH_CODE_HASH_SECRET`（至少 32 字节）、`SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/SMTP_FROM` 以及 `OBJECT_STORAGE_UPLOAD_BASE_URL/OBJECT_STORAGE_SIGNING_SECRET`；可选配置 `PUSH_WEBHOOK_URL/PUSH_WEBHOOK_SECRET` 将通知投递到站外推送，未配置时仍会持久化站内通知。验证码默认不会通过 HTTP 返回；仅本地 development/test 且显式设置 `ALLOW_DEV_AUTH_CODE=true` 时才允许回显 `dev_code`。健康检查为 `/ready`，默认地址为 `http://localhost:8080`。
 
 ## 连接 Flutter 客户端与 API
 
@@ -202,13 +203,17 @@ flutter build web --release --base-href=/forum/ \
 | --- | --- | --- |
 | `DATABASE_URL` | PostgreSQL 连接串，服务启动时自动执行迁移 | 服务端 |
 | `HTTP_PORT` | API 监听端口，默认 `8080` | 服务端 |
-| `APP_ENV` | `dev` / `qa` / `staging` / `production`；`production` 要求 HTTPS、SMTP 与对象存储配置齐备 | 双端 |
+| `APP_ENV` | `dev` / `development` / `test` / `qa` / `staging` / `production`；未知值直接拒绝启动，`production` 要求 HTTPS、SMTP、对象存储与验证码哈希密钥齐备 | 双端 |
+| `AUTH_CODE_HASH_SECRET` | 验证码 HMAC-SHA256 密钥；生产环境至少 32 字节 | 服务端 |
+| `ALLOW_DEV_AUTH_CODE` | 仅 development/test 的本地联调开关，默认关闭；生产/QA/staging 禁止开启 | 服务端 |
 | `API_BASE_URL` | 客户端 API 地址（编译期 dart-define），默认 `https://shengbeijiang.com` | 客户端 |
 | `WEB_BASE_URL` | 分享链接域名，默认 `https://luntan.app` | 客户端 |
 | `MEDIA_STORAGE_DIR` | 本地媒体目录兜底（dev/QA），生产使用外部对象存储 | 服务端 |
 | `OBJECT_STORAGE_PUBLIC_BASE_URL` | 媒体公开访问前缀 | 服务端 |
 | `OBJECT_STORAGE_UPLOAD_BASE_URL` / `OBJECT_STORAGE_SIGNING_SECRET` | 媒体上传地址与 HMAC 签名 | 服务端 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮箱验证码发送；生产缺失时 API 拒绝启动 | 服务端 |
+| `TRUSTED_PROXY_CIDRS` | 明确声明可信反向代理网段，服务端据此解析 `X-Forwarded-For` | 服务端 |
+| `METRICS_ALLOWED_CIDRS` | `/metrics` 允许访问的网段；未配置时仅 localhost | 服务端 |
 | `PUSH_WEBHOOK_URL` / `PUSH_WEBHOOK_SECRET` | 通知投递到站外推送，未配置时仅持久化站内通知 | 服务端 |
 | `APP_RELEASE_MANIFEST_PATH` | Android 软件内更新发布清单的绝对路径；清单与 APK 同目录 | 服务端 |
 | `APP_RELEASE_PUBLIC_BASE_URL` | 安装包公开 API 根地址；留空时复用当前 API 域名 | 服务端 |

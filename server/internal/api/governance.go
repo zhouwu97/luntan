@@ -402,6 +402,35 @@ func (s *Server) updateAdminRoles(w http.ResponseWriter, r *http.Request, target
 		return
 	}
 	defer tx.Rollback()
+	// 所有超级管理员角色变更先持有同一事务级锁，再检查“最后一个
+	// super_admin”约束，避免两个并发降权事务分别看到对方仍存在。
+	var advisoryLock any
+	if err := tx.QueryRowContext(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('luntan:admin-role-management'))`).Scan(&advisoryLock); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	// 操作者在进入 handler 后可能已经被另一笔事务降权；在锁内重新
+	// 校验，避免使用过期的权限判断继续修改管理角色。
+	var operatorCanManage bool
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1
+			FROM user_roles ur
+			JOIN roles rl ON rl.id = ur.role_id
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = $1
+			  AND rl.name = 'super_admin'
+			  AND ur.community_id IS NULL
+			  AND p.name = 'admin.role.manage'
+		)`, operator.ID).Scan(&operatorCanManage); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if !operatorCanManage {
+		writeAuthError(w, r, ErrAdminRoleManageDenied)
+		return
+	}
 	var targetUsername, targetStatus string
 	if err := tx.QueryRowContext(r.Context(), `SELECT username, status FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, targetID).Scan(&targetUsername, &targetStatus); errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrInvalidAdminRole)

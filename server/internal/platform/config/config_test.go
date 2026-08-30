@@ -8,10 +8,28 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("LOG_LEVEL", "")
 	cfg := Load()
-	if cfg.AppEnv != "dev" || cfg.HTTPPort != "8080" || cfg.LogLevel != "info" {
+	if cfg.AppEnv != "" || cfg.HTTPPort != "8080" || cfg.LogLevel != "info" {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
+
+func TestValidateRejectsUnknownEnvironment(t *testing.T) {
+	for _, appEnv := range []string{"", "prod", "prd", "production-like"} {
+		if err := (Config{AppEnv: appEnv}).Validate(); err == nil {
+			t.Fatalf("APP_ENV=%q should be rejected", appEnv)
+		}
+	}
+}
+
+func TestValidateRejectsDevelopmentAuthCodeOutsideDevelopment(t *testing.T) {
+	if err := (Config{AppEnv: "production", AllowDevAuthCode: true}).Validate(); err == nil {
+		t.Fatal("production must reject ALLOW_DEV_AUTH_CODE=true")
+	}
+	if err := (Config{AppEnv: "staging", AllowDevAuthCode: true}).Validate(); err == nil {
+		t.Fatal("staging must reject ALLOW_DEV_AUTH_CODE=true")
+	}
+}
+
 func TestValidateProduction(t *testing.T) {
 	cfg := Config{
 		AppEnv: "production",
@@ -31,6 +49,7 @@ func TestValidateProduction(t *testing.T) {
 	}
 
 	cfg.RedisURL = "redis://localhost:6379/0"
+	cfg.AuthCodeHashSecret = "01234567890123456789012345678901"
 	cfg.ObjectStorageUploadBaseURL = "https://upload.example.com"
 	cfg.ObjectStorageSigningSecret = "secret"
 	if err := cfg.Validate(); err == nil {
@@ -49,6 +68,7 @@ func TestValidateProductionRejectsPlainTextClientFacingURLs(t *testing.T) {
 		DatabaseURL:                "postgres://localhost/db",
 		RateLimitEnabled:           true,
 		RedisURL:                   "redis://localhost:6379/0",
+		AuthCodeHashSecret:         "01234567890123456789012345678901",
 		ObjectStorageUploadBaseURL: "https://upload.example.com",
 		ObjectStorageSigningSecret: "secret",
 		ObjectStoragePublicBaseURL: "https://cdn.example.com",
@@ -95,6 +115,7 @@ func TestValidateProductionAllowsInternalStorageHTTP(t *testing.T) {
 		DatabaseURL:                "postgres://localhost/db",
 		RateLimitEnabled:           true,
 		RedisURL:                   "redis://localhost:6379/0",
+		AuthCodeHashSecret:         "01234567890123456789012345678901",
 		ObjectStorageUploadBaseURL: "https://upload.example.com",
 		ObjectStorageSigningSecret: "secret",
 		ObjectStoragePublicBaseURL: "https://cdn.example.com",

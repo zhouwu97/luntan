@@ -24,7 +24,7 @@ func TestRequestEmailCodeChecksScene(t *testing.T) {
 
 	handler := NewHandler(db)
 
-	// 1. 登录场景：邮箱未注册 -> 报错 EMAIL_NOT_REGISTERED
+	// 1. 登录场景：邮箱未注册 -> 与正常请求统一返回 202，避免账号枚举
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = $1 AND account_type != 'guest' AND deleted_at IS NULL)`)).
 		WithArgs("unregistered@example.com").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 
@@ -36,16 +36,16 @@ func TestRequestEmailCodeChecksScene(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400 for unregistered email login code request, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202 for unregistered email login code request, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var errResp map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
-	if errResp["code"] != "EMAIL_NOT_REGISTERED" {
-		t.Fatalf("expected code EMAIL_NOT_REGISTERED, got %v", errResp["code"])
+	var acceptedResp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &acceptedResp)
+	if acceptedResp["delivery"] != "email" || acceptedResp["dev_code"] != nil {
+		t.Fatalf("unexpected account-suppressed response: %#v", acceptedResp)
 	}
 
-	// 2. 注册场景：邮箱已注册 -> 报错 EMAIL_ALREADY_REGISTERED (409)
+	// 2. 注册场景：邮箱已注册 -> 使用完全相同的 202 响应
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = $1 AND account_type != 'guest' AND deleted_at IS NULL)`)).
 		WithArgs("registered@example.com").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
@@ -57,13 +57,13 @@ func TestRequestEmailCodeChecksScene(t *testing.T) {
 	regRec := httptest.NewRecorder()
 	handler.ServeHTTP(regRec, regReq)
 
-	if regRec.Code != http.StatusConflict {
-		t.Fatalf("expected status 409 for already registered email register code request, got %d: %s", regRec.Code, regRec.Body.String())
+	if regRec.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202 for already registered email register code request, got %d: %s", regRec.Code, regRec.Body.String())
 	}
-	var regErrResp map[string]any
-	_ = json.Unmarshal(regRec.Body.Bytes(), &regErrResp)
-	if regErrResp["code"] != "EMAIL_ALREADY_REGISTERED" {
-		t.Fatalf("expected code EMAIL_ALREADY_REGISTERED, got %v", regErrResp["code"])
+	var regAcceptedResp map[string]any
+	_ = json.Unmarshal(regRec.Body.Bytes(), &regAcceptedResp)
+	if regAcceptedResp["delivery"] != "email" || regAcceptedResp["dev_code"] != nil {
+		t.Fatalf("unexpected account-suppressed response: %#v", regAcceptedResp)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -238,6 +238,7 @@ func TestEmailRegisterRouteValidatesCodeAndCreatesUser(t *testing.T) {
 // TestRequestEmailCodeDevFallbackMarksCodeSent 保证 dev 环境无 SMTP 时返回的 dev_code
 // 对应的验证码记录处于可校验状态（sent），否则注册/登录永远无法通过校验。
 func TestRequestEmailCodeDevFallbackMarksCodeSent(t *testing.T) {
+	t.Setenv("ALLOW_DEV_AUTH_CODE", "true")
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)

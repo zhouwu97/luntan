@@ -88,10 +88,61 @@ func TestVersion(t *testing.T) {
 
 func TestMetricsEndpointExposesPrometheusShape(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:4321"
 	res := httptest.NewRecorder()
 	NewHandler(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "luntan_http_requests_total") || !strings.Contains(res.Body.String(), "quantile=\"0.95\"") || !strings.Contains(res.Body.String(), "luntan_login_success_rate") {
 		t.Fatalf("metrics response: status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestMetricsEndpointRejectsRemoteClientsByDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "198.51.100.20:4321"
+	res := httptest.NewRecorder()
+	NewHandler(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("remote metrics status = %d, want 404", res.Code)
+	}
+}
+
+func TestMetricsEndpointHonorsConfiguredCIDR(t *testing.T) {
+	handler, err := NewHandlerWithAPIOptions(nil, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Options{
+		MetricsAllowedCIDRs: []string{"10.0.0.0/8"},
+	})
+	if err != nil {
+		t.Fatalf("create handler: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "10.20.30.40:4321"
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("configured metrics status = %d, want 200", res.Code)
+	}
+
+	if _, err := NewHandlerWithAPIOptions(nil, nil, nil, Options{MetricsAllowedCIDRs: []string{"0.0.0.0/0"}}); err == nil {
+		t.Fatal("catch-all metrics CIDR should fail startup")
+	}
+}
+
+func TestSecurityHeadersAreSet(t *testing.T) {
+	handler, err := NewHandlerWithAPIOptions(nil, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, Options{SecureHeaders: true})
+	if err != nil {
+		t.Fatalf("create handler: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	for header, want := range map[string]string{
+		"X-Content-Type-Options":    "nosniff",
+		"X-Frame-Options":           "DENY",
+		"Content-Security-Policy":   "default-src 'none'; frame-ancestors 'none'",
+		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+	} {
+		if got := res.Header().Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
 	}
 }
 

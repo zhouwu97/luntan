@@ -8,6 +8,10 @@
 
 所有环境通过环境变量注入连接串和密钥；不把 `.env`、数据库密码、对象存储签名密钥提交到仓库。
 
+`APP_ENV` 只接受 `dev`、`development`、`test`、`qa`、`staging` 和 `production`；`prod`、`prd` 等近似拼写会直接阻止服务启动。验证码哈希使用独立的 `AUTH_CODE_HASH_SECRET`，生产环境至少 32 字节。`ALLOW_DEV_AUTH_CODE` 默认关闭，只有 development/test 可显式开启，且不会被 production 配置接受。
+
+`/metrics` 默认只允许 localhost；部署到反向代理或独立监控网段时，必须通过 `METRICS_ALLOWED_CIDRS` 明确配置允许的 CIDR，并通过 `TRUSTED_PROXY_CIDRS` 明确配置可信代理网段。
+
 邮件发送通过 SMTP 环境变量注入。QQ 邮箱使用 `smtp.qq.com:465`、隐式 TLS 和邮箱授权码；
 `SMTP_PASSWORD` 只放在服务器密钥管理或运行时环境中，不得提交 Git。`production` 缺少 SMTP 配置时 API 拒绝启动，
-开发/测试环境则返回明确的 disabled 错误。
+开发/测试环境只有显式开启 `ALLOW_DEV_AUTH_CODE=true` 才允许本地验证码回显，否则返回明确的 disabled 错误。

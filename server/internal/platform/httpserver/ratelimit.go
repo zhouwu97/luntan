@@ -1,7 +1,12 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -100,14 +105,17 @@ func newRateLimiter(stores ...RateLimitStore) *rateLimiter {
 			"register":     {Limit: 5, Window: time.Minute},
 			"login":        {Limit: 10, Window: time.Minute},
 			"email_code":   {Limit: 5, Window: time.Minute},
-			"guest":        {Limit: 20, Window: time.Hour},
-			"refresh":      {Limit: 20, Window: time.Minute},
-			"publish":      {Limit: 20, Window: time.Minute},
-			"comment":      {Limit: 30, Window: time.Minute},
-			"like":         {Limit: 60, Window: time.Minute},
-			"follow":       {Limit: 30, Window: time.Minute},
-			"report":       {Limit: 10, Window: time.Minute},
-			"upload_token": {Limit: 30, Window: time.Minute},
+			"email_verify": {Limit: 10, Window: time.Minute},
+			// 验证码校验同时按 IP 和邮箱限流；邮箱维度使用单独更严格的规则。
+			"email_verify_email": {Limit: 5, Window: time.Minute},
+			"guest":              {Limit: 20, Window: time.Hour},
+			"refresh":            {Limit: 20, Window: time.Minute},
+			"publish":            {Limit: 20, Window: time.Minute},
+			"comment":            {Limit: 30, Window: time.Minute},
+			"like":               {Limit: 60, Window: time.Minute},
+			"follow":             {Limit: 30, Window: time.Minute},
+			"report":             {Limit: 10, Window: time.Minute},
+			"upload_token":       {Limit: 30, Window: time.Minute},
 		},
 	}
 }
@@ -119,9 +127,14 @@ func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		rule := l.rules[route]
-		key := "luntan:rate_limit:" + route + ":" + ClientIP(r)
-		allowed, err := l.store.Allow(r.Context(), key, rule.Limit, rule.Window, time.Now())
+		rule, exists := l.rules[route]
+		if !exists {
+			next.ServeHTTP(w, r)
+			return
+		}
+		now := time.Now()
+		key := "luntan:rate_limit:" + route + ":ip:" + ClientIP(r)
+		allowed, err := l.store.Allow(r.Context(), key, rule.Limit, rule.Window, now)
 		if err != nil {
 			WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "RATE_LIMIT_UNAVAILABLE", Message: "服务暂时不可用"})
 			return
@@ -130,6 +143,21 @@ func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 			WriteAppError(w, r, AppError{Status: http.StatusTooManyRequests, Code: "RATE_LIMITED", Message: "请求过于频繁，请稍后再试"})
 			return
 		}
+		if route == "email_verify" {
+			if email := emailFromRequest(r); email != "" {
+				emailRule := l.rules["email_verify_email"]
+				emailKey := "luntan:rate_limit:email_verify:email:" + hashRateLimitDimension(email)
+				allowed, err = l.store.Allow(r.Context(), emailKey, emailRule.Limit, emailRule.Window, now)
+				if err != nil {
+					WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "RATE_LIMIT_UNAVAILABLE", Message: "服务暂时不可用"})
+					return
+				}
+				if !allowed {
+					WriteAppError(w, r, AppError{Status: http.StatusTooManyRequests, Code: "RATE_LIMITED", Message: "请求过于频繁，请稍后再试"})
+					return
+				}
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -137,15 +165,17 @@ func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 func classifyRateLimitRoute(r *http.Request) string {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
-	case path == "/api/v1/auth/register":
+	case r.Method == http.MethodPost && path == "/api/v1/auth/register":
 		return "register"
-	case path == "/api/v1/auth/login":
+	case r.Method == http.MethodPost && (path == "/api/v1/auth/login" || path == "/api/v1/auth/login/password"):
 		return "login"
-	case path == "/api/v1/auth/email/request":
+	case r.Method == http.MethodPost && (path == "/api/v1/auth/email/request" || path == "/api/v1/auth/code/request"):
 		return "email_code"
-	case path == "/api/v1/auth/guest":
+	case r.Method == http.MethodPost && (path == "/api/v1/auth/email/verify" || path == "/api/v1/auth/login/code"):
+		return "email_verify"
+	case r.Method == http.MethodPost && path == "/api/v1/auth/guest":
 		return "guest"
-	case path == "/api/v1/auth/refresh":
+	case r.Method == http.MethodPost && path == "/api/v1/auth/refresh":
 		return "refresh"
 	case path == "/api/v1/posts" && r.Method == http.MethodPost:
 		return "publish"
@@ -155,7 +185,7 @@ func classifyRateLimitRoute(r *http.Request) string {
 		return "comment"
 	case (strings.HasSuffix(path, "/like") || strings.HasSuffix(path, "/bookmark")) && (r.Method == http.MethodPut || r.Method == http.MethodDelete):
 		return "like"
-	case strings.HasSuffix(path, "/follow") || strings.HasSuffix(path, "/membership"):
+	case (strings.HasSuffix(path, "/follow") || strings.HasSuffix(path, "/membership")) && (r.Method == http.MethodPut || r.Method == http.MethodDelete):
 		return "follow"
 	case path == "/api/v1/reports" && r.Method == http.MethodPost:
 		return "report"
@@ -164,4 +194,35 @@ func classifyRateLimitRoute(r *http.Request) string {
 	default:
 		return ""
 	}
+}
+
+// emailFromRequest 在读取后恢复请求体，确保限流中间件不会改变下游 handler
+// 的 JSON 输入。解析失败时仍保留 IP 维度限流，避免攻击者用畸形 body 绕过。
+func emailFromRequest(r *http.Request) string {
+	if r == nil || r.Body == nil {
+		return ""
+	}
+	originalBody := r.Body
+	payload, err := io.ReadAll(io.LimitReader(originalBody, (1<<20)+1))
+	_ = originalBody.Close()
+	r.Body = io.NopCloser(bytes.NewReader(payload))
+	if err != nil || len(payload) > 1<<20 {
+		return ""
+	}
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(payload, &input); err != nil {
+		return ""
+	}
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	if len(email) < 5 || len(email) > 320 {
+		return ""
+	}
+	return email
+}
+
+func hashRateLimitDimension(value string) string {
+	hash := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(hash[:])
 }

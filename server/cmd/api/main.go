@@ -77,12 +77,14 @@ func main() {
 		os.Exit(1)
 	}
 	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, apiHandler, httpserver.Options{
-		RateLimitEnabled:  cfg.RateLimitEnabled,
-		RateLimitStore:    rateLimitStore,
-		TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
-		AllowedOrigin:     cfg.WebOrigin,
-		ReadinessCheck:    api.ReadinessCheck(apiHandler),
-		AppRelease:        appRelease,
+		RateLimitEnabled:    cfg.RateLimitEnabled,
+		RateLimitStore:      rateLimitStore,
+		TrustedProxyCIDRs:   cfg.TrustedProxyCIDRs,
+		MetricsAllowedCIDRs: cfg.MetricsAllowedCIDRs,
+		AllowedOrigin:       cfg.WebOrigin,
+		SecureHeaders:       cfg.AppEnv == "production",
+		ReadinessCheck:      api.ReadinessCheck(apiHandler),
+		AppRelease:          appRelease,
 	})
 	if err != nil {
 		logger.Error("http_server_configuration_failed", "error", err.Error())

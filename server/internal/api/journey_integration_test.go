@@ -137,8 +137,9 @@ func TestPublishToNotificationJourneyAgainstPostgres(t *testing.T) {
 		t.Fatal("login returned empty access_token")
 	}
 
-	// 5. B 从 Feed 看到带图新帖。
-	feedReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?community_id="+communityID, nil)
+	// 5. B 从 Feed 看到带图新帖。媒体数组走 enrichPostResponse，
+	// 只有带 include_details=1 才会水合（与 Flutter 客户端行为一致）。
+	feedReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?community_id="+communityID+"&include_details=1", nil)
 	feedRes := httptest.NewRecorder()
 	handler.ServeHTTP(feedRes, feedReq)
 	if feedRes.Code != http.StatusOK {

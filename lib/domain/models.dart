@@ -316,9 +316,18 @@ class MediaAsset {
   final MediaVariant? detail;
   final MediaVariant? original;
 
-  String? get previewUrl => thumb?.url ?? detail?.url ?? original?.url ?? url;
-  String? get detailUrl => detail?.url ?? original?.url ?? thumb?.url ?? url;
-  String? get originalUrl => original?.url ?? detail?.url ?? thumb?.url ?? url;
+  /// Feed/正文预览图地址：优先 detail (<=1440px)，退回 original 或裸 url，最后才是 thumb。
+  /// 避免 Feed 中大图或单图直接拉伸低清 thumb 导致模糊。
+  String? get previewUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;
+
+  /// 详情大图地址：优先 detail，退回 original 或裸 url，最后才是 thumb。
+  String? get detailUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;
+
+  /// 原始大图地址：优先 original，退回 detail 或裸 url，最后才是 thumb。
+  String? get originalUrl => original?.url ?? detail?.url ?? url ?? thumb?.url;
+
+  /// 纯缩略图地址（微缩图标等极小尺寸场景）：优先 thumb，退回 detail/original。
+  String? get thumbUrl => thumb?.url ?? detail?.url ?? original?.url ?? url;
 
   // Mock/占位图片的视觉字段，接入真实媒体服务后由 url 和元数据替代。
   final String emoji;

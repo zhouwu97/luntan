@@ -1,17 +1,15 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../controllers/publish_controller.dart';
 import '../data/composer_draft_storage.dart';
+import '../data/draft_media_store/draft_media_store.dart';
 import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_motion.dart';
@@ -23,6 +21,7 @@ class PostEditorScreen extends StatefulWidget {
     super.key,
     required this.initialCommunityId,
     required this.onPublish,
+    this.userId,
     this.publishController,
     this.enableSampleMedia = true,
     this.availableCommunities = const [],
@@ -34,6 +33,7 @@ class PostEditorScreen extends StatefulWidget {
 
   final String initialCommunityId;
   final Future<void> Function(PostDraft draft) onPublish;
+  final String? userId;
   final PublishController? publishController;
   final bool enableSampleMedia;
   final List<Community> availableCommunities;
@@ -85,7 +85,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   bool _submitted = false;
   bool _keepDraftMedia = false;
   bool _closing = false;
-  bool _canPop = false;
+  bool _allowPop = false;
   Timer? _draftSaveTimer;
 
   static const int maxImages = 9;
@@ -125,7 +125,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         widget.initialDraft == null && widget.draftStorageFuture != null;
     communityId = _resolveInitialCommunityId();
     final draft = widget.initialDraft;
-    if (draft != null) _applyDraft(draft);
+    if (draft != null) unawaited(_applyDraft(draft));
     unawaited(_loadCommunities());
     unawaited(_loadDraftStorage());
   }
@@ -143,39 +143,32 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     return communities.isEmpty ? null : communities.first.id;
   }
 
-  Future<Directory?> _getDraftDirectory() async {
-    try {
-      final appDir = await getApplicationDocumentsDirectory()
-          .timeout(const Duration(milliseconds: 200));
-      final dir = Directory(p.join(appDir.path, 'composer_drafts'));
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
-      }
-      return dir;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  void _applyDraft(ComposerDraftSnapshot draft) {
+  Future<void> _applyDraft(ComposerDraftSnapshot draft) async {
     titleController.text = draft.title;
     bodyController.text = draft.body;
     communityId =
         draft.communityId ?? _defaultCommunityId(_availableCommunities);
     topic = draft.topic;
     _restoredMediaIds.addAll(draft.uploadedMediaIds);
-    for (var index = 0; index < draft.localImagePaths.length; index++) {
-      final path = draft.localImagePaths[index].trim();
+    final restoredImages = <_DraftImage>[];
+    for (final draftImg in draft.images) {
+      final path = draftImg.localPath.trim();
       if (path.isEmpty) continue;
-      final file = File(path);
-      if (!file.existsSync()) continue;
+      final exists = await DraftMediaStore.instance.fileExists(path);
+      if (!exists) continue;
       final image = _DraftImage(file: XFile(path));
-      if (index < draft.uploadedMediaIds.length) {
-        image.mediaId = draft.uploadedMediaIds[index];
+      if (draftImg.mediaId != null && draftImg.mediaId!.isNotEmpty) {
+        image.mediaId = draftImg.mediaId;
         image.status = _DraftImageStatus.done;
       }
-      images.add(image);
+      restoredImages.add(image);
     }
+    if (!mounted) return;
+    setState(() {
+      images
+        ..clear()
+        ..addAll(restoredImages);
+    });
     if (_usesRealUpload) {
       for (final image in images) {
         if (image.status != _DraftImageStatus.done) _enqueueUpload(image);
@@ -249,9 +242,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       );
       if (!mounted) return;
       if (shouldRestore == true) {
-        setState(() => _applyDraft(draft));
+        await _applyDraft(draft);
       } else if (shouldRestore == false) {
         await storage.clear();
+        await DraftMediaStore.instance.clearUserDraftMedia(widget.userId ?? 'global');
       }
     } catch (_) {
       // 草稿存储不可用时不阻塞编辑器，发布失败仍会保留当前页面内容。
@@ -324,11 +318,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     pollOptions: const [],
     allowMultiple: false,
     pollEndsAt: null,
-    localImagePaths: images.map((item) => item.file.path).toList(),
-    uploadedMediaIds: <String>{
-      ..._restoredMediaIds,
-      ...images.map((item) => item.mediaId).whereType<String>(),
-    }.toList(),
+    images: images
+        .map((item) => DraftImageData(
+              localPath: item.file.path,
+              mediaId: item.mediaId,
+            ))
+        .toList(),
     updatedAt: DateTime.now().toUtc(),
   );
 
@@ -353,18 +348,14 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   Future<void> _clearDraft() async {
     _draftSaveTimer?.cancel();
     await _draftStorage?.clear();
-    try {
-      final draftDir = await _getDraftDirectory();
-      if (draftDir != null && await draftDir.exists()) {
-        await draftDir.delete(recursive: true);
-      }
-    } catch (_) {}
+    await DraftMediaStore.instance.clearUserDraftMedia(widget.userId ?? 'global');
   }
 
   Future<void> _closeEditor() async {
     if (_closing || submitting) return;
     if (!_hasDraftContent) {
       _closing = true;
+      _allowPop = true;
       if (mounted) Navigator.of(context).pop();
       return;
     }
@@ -404,6 +395,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     } else {
       await _clearDraft();
     }
+    _allowPop = true;
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -441,6 +433,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       }
       if (!mounted) return;
       _submitted = true;
+      _allowPop = true;
       Navigator.of(context).pop();
     } catch (error) {
       if (!mounted) return;
@@ -455,28 +448,29 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     if (submitting || images.length >= maxImages) return;
     final files = await ImagePicker().pickMultiImage(imageQuality: 92);
     if (!mounted || files.isEmpty) return;
-    final draftDir = await _getDraftDirectory();
     final additions = <_DraftImage>[];
-    setState(() {
-      for (final file in files.take(maxImages - images.length)) {
-        if (draftDir != null) {
-          final ext = p.extension(file.path);
-          final uniqueName =
-              'draft_${DateTime.now().millisecondsSinceEpoch}_${images.length + additions.length}$ext';
-          final savedPath = p.join(draftDir.path, uniqueName);
-          try {
-            File(file.path).copySync(savedPath);
-            final img = _DraftImage(file: XFile(savedPath));
-            images.add(img);
-            additions.add(img);
-            continue;
-          } catch (_) {}
-        }
+    final userId = widget.userId ?? 'global';
+    for (var i = 0; i < files.length && images.length + additions.length < maxImages; i++) {
+      final file = files[i];
+      try {
+        final bytes = await file.readAsBytes();
+        final savedPath = await DraftMediaStore.instance.saveDraftImage(
+          originalPath: file.path,
+          bytes: bytes,
+          userId: userId,
+          index: images.length + additions.length,
+        );
+        final targetFile = savedPath != null ? XFile(savedPath) : file;
+        final image = _DraftImage(file: targetFile)..bytes = bytes;
+        images.add(image);
+        additions.add(image);
+      } catch (_) {
         final image = _DraftImage(file: file);
         images.add(image);
         additions.add(image);
       }
-    });
+    }
+    if (mounted) setState(() {});
     _scheduleDraftSave();
     for (final image in additions) {
       _enqueueUpload(image);
@@ -575,15 +569,15 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   }
 
   void _deleteImage(_DraftImage image) {
-    if (!_usesRealUpload) return;
     _uploadQueue.remove(image);
     image.pendingDelete = true;
     if (image.mediaId != null) _restoredMediaIds.remove(image.mediaId);
+    unawaited(DraftMediaStore.instance.deleteDraftImage(image.file.path));
     setState(() {
       images.remove(image);
       errorText = null;
     });
-    if (image.mediaId != null) {
+    if (image.mediaId != null && _usesRealUpload) {
       widget.publishController!.deleteMedia(image.mediaId!).catchError((_) {});
     }
     _scheduleDraftSave();
@@ -618,15 +612,9 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope<void>(
-      canPop: _canPop,
+      canPop: _allowPop || _submitted,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (_canPop || _submitted) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) Navigator.of(context).pop();
-          });
-          return;
-        }
         unawaited(_closeEditor());
       },
       child: Scaffold(

@@ -297,7 +297,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   }
 
   void _openPostEditor({required String initialCommunityId}) {
-    final draftStorageFuture = ComposerDraftStorage.create();
+    final currentUserId =
+        authController?.user?.id ?? (apiMode ? 'anonymous' : 'mock-user');
+    final draftStorageFuture = ComposerDraftStorage.create(userId: currentUserId);
     final availableCommunitiesFuture = apiMode
         ? _loadPublishCommunities()
         : null;
@@ -306,6 +308,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         builder: (_) => PostEditorScreen(
           initialCommunityId: initialCommunityId,
           onPublish: _publishDraft,
+          userId: currentUserId,
           publishController: apiMode ? publishController : null,
           enableSampleMedia: !apiMode,
           availableCommunities: apiMode

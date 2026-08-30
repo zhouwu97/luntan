@@ -256,4 +256,44 @@ void main() {
       expect(resize.height, isNull);
     });
   });
+
+  group('MediaAsset URL 变体降级链路', () {
+    test('previewUrl 优先使用 detail，避免 Feed 拉大 thumb 糊图', () {
+      const asset = MediaAsset(
+        id: 'full_variants',
+        type: MediaType.image,
+        url: 'https://example.com/source.jpg',
+        thumb: MediaVariant(url: 'https://example.com/thumb.jpg', width: 640, height: 480),
+        detail: MediaVariant(url: 'https://example.com/detail.jpg', width: 1440, height: 1080),
+        original: MediaVariant(url: 'https://example.com/original.jpg', width: 2400, height: 1800),
+      );
+
+      // Feed 正文预览必须优先 detail 变体
+      expect(asset.previewUrl, 'https://example.com/detail.jpg');
+      expect(asset.detailUrl, 'https://example.com/detail.jpg');
+      expect(asset.originalUrl, 'https://example.com/original.jpg');
+      expect(asset.thumbUrl, 'https://example.com/thumb.jpg');
+    });
+
+    test('缺少 detail 变体时安全回退到 original 或裸 url', () {
+      const noDetail = MediaAsset(
+        id: 'no_detail',
+        type: MediaType.image,
+        url: 'https://example.com/source.jpg',
+        thumb: MediaVariant(url: 'https://example.com/thumb.jpg', width: 640, height: 480),
+        original: MediaVariant(url: 'https://example.com/original.jpg', width: 2400, height: 1800),
+      );
+      expect(noDetail.previewUrl, 'https://example.com/original.jpg');
+
+      const onlyUrl = MediaAsset(
+        id: 'only_url',
+        type: MediaType.image,
+        url: 'https://example.com/fallback.jpg',
+      );
+      expect(onlyUrl.previewUrl, 'https://example.com/fallback.jpg');
+      expect(onlyUrl.detailUrl, 'https://example.com/fallback.jpg');
+      expect(onlyUrl.originalUrl, 'https://example.com/fallback.jpg');
+      expect(onlyUrl.thumbUrl, 'https://example.com/fallback.jpg');
+    });
+  });
 }

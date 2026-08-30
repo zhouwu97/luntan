@@ -66,7 +66,7 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	}
 
 	// 1. 生成 original 变体（保持原分辨率，通过解码->重新编码彻底剥离 EXIF / GPS）
-	origVariant, err := encodeVariant(srcImg, origW, origH, "original", 90)
+	origVariant, err := encodeVariant(srcImg, origW, origH, "original", 92)
 	if err != nil {
 		return nil, fmt.Errorf("encode original variant: %w", err)
 	}
@@ -77,7 +77,7 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	if detailW != origW || detailH != origH {
 		detailImg = resizeCatmullRom(srcImg, detailW, detailH)
 	}
-	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "detail", 85)
+	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "detail", 90)
 	if err != nil {
 		return nil, fmt.Errorf("encode detail variant: %w", err)
 	}

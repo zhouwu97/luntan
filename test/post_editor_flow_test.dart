@@ -99,22 +99,71 @@ void main() {
     expect(post.type, PostType.normal);
   });
 
-  test('草稿快照往返保留社区分类', () {
+  test('草稿快照往返保留社区分类与图片mediaId一一映射', () {
     final snapshot = ComposerDraftSnapshot(
       title: '标题',
       body: '正文',
       communityId: 'community-unboxing',
       topic: 'outfit',
-      localImagePaths: const ['/a.jpg'],
-      uploadedMediaIds: const ['m1'],
+      images: const [
+        DraftImageData(localPath: '/a.jpg', mediaId: 'media-a'),
+        DraftImageData(localPath: '/b.jpg', mediaId: null),
+        DraftImageData(localPath: '/c.jpg', mediaId: 'media-c'),
+      ],
       updatedAt: DateTime(2026, 8, 27),
     );
 
-    final restored = ComposerDraftSnapshot.fromJson(snapshot.toJson());
+    final json = snapshot.toJson();
+    final restored = ComposerDraftSnapshot.fromJson(json);
 
     expect(restored, isNotNull);
     expect(restored!.communityId, 'community-unboxing');
     expect(restored.title, '标题');
     expect(restored.topic, 'outfit');
+    expect(restored.images.length, 3);
+    expect(restored.images[0].localPath, '/a.jpg');
+    expect(restored.images[0].mediaId, 'media-a');
+    expect(restored.images[1].localPath, '/b.jpg');
+    expect(restored.images[1].mediaId, isNull);
+    expect(restored.images[2].localPath, '/c.jpg');
+    expect(restored.images[2].mediaId, 'media-c');
+  });
+
+  test('草稿快照向前兼容解析旧版 local_image_paths 与 uploaded_media_ids', () {
+    final legacyJson = {
+      'title': '旧版标题',
+      'body': '旧版正文',
+      'local_image_paths': ['/p1.jpg', '/p2.jpg'],
+      'uploaded_media_ids': ['m1'],
+      'updated_at': DateTime(2026, 8, 27).toIso8601String(),
+    };
+
+    final restored = ComposerDraftSnapshot.fromJson(legacyJson);
+    expect(restored, isNotNull);
+    expect(restored!.images.length, 2);
+    expect(restored.images[0].localPath, '/p1.jpg');
+    expect(restored.images[0].mediaId, 'm1');
+    expect(restored.images[1].localPath, '/p2.jpg');
+    expect(restored.images[1].mediaId, isNull);
+  });
+
+  test('草稿存储键支持按 userId 隔离', () {
+    expect(
+      ComposerDraftStorage.storageKeyForUser('user-100'),
+      'luntan.composer.draft.v2.user-100',
+    );
+    expect(
+      ComposerDraftStorage.storageKeyForUser('user-200'),
+      'luntan.composer.draft.v2.user-200',
+    );
+    expect(
+      ComposerDraftStorage.storageKeyForUser('user@123!'),
+      'luntan.composer.draft.v2.user_123_',
+    );
+    expect(
+      ComposerDraftStorage.storageKeyForUser(null),
+      'luntan.composer.draft.v2.global',
+    );
   });
 }
+

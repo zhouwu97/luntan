@@ -114,6 +114,15 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 
+	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now().UTC()) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusBadRequest,
+			Code:    "INVALID_RECOMMENDATION_EXPIRY",
+			Message: "推荐过期时间必须晚于当前时间",
+		})
+		return
+	}
+
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -121,9 +130,10 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 	}
 	defer tx.Rollback()
 
-	// Verify post exists and is not deleted
-	var status, moderation string
-	err = tx.QueryRowContext(r.Context(), `SELECT publication_status, moderation_status FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&status, &moderation)
+	// Verify post exists, is not deleted, and matches feed public visibility rules
+	var status, moderation, postType string
+	var publishedAt sql.NullTime
+	err = tx.QueryRowContext(r.Context(), `SELECT publication_status, moderation_status, type, published_at FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&status, &moderation, &postType, &publishedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "POST_NOT_FOUND", Message: "帖子不存在或已删除"})
 		return
@@ -132,7 +142,7 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		writeInternalError(w, r, err)
 		return
 	}
-	if status != "published" || (moderation != "normal" && moderation != "approved") {
+	if status != "published" || moderation != "normal" || postType == "market" || !publishedAt.Valid {
 		httpserver.WriteAppError(w, r, httpserver.AppError{
 			Status:  http.StatusBadRequest,
 			Code:    "POST_NOT_RECOMMENDABLE",

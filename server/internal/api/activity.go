@@ -106,16 +106,11 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON u.id = a.created_by
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets ma ON ma.id = a.cover_media_id AND ma.deleted_at IS NULL
-		WHERE a.deleted_at IS NULL`
+		WHERE a.deleted_at IS NULL
+		ORDER BY a.created_at DESC
+		LIMIT 200`
 
-	args := make([]any, 0, 2)
-	if statusFilter != "" && statusFilter != "all" {
-		args = append(args, statusFilter)
-		query += " AND a.status = $1"
-	}
-	query += " ORDER BY a.created_at DESC LIMIT 100"
-
-	rows, err := s.db.QueryContext(r.Context(), query, args...)
+	rows, err := s.db.QueryContext(r.Context(), query)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -152,6 +147,9 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 			item.PublishedAt = &publishedAt.Time
 		}
 		item.Status = deriveActivityStatus(item.Status, item.StartAt, item.EndAt, now)
+		if statusFilter != "" && statusFilter != "all" && item.Status != statusFilter {
+			continue
+		}
 		items = append(items, item)
 	}
 
@@ -320,8 +318,8 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
-	var startAt sql.NullTime
-	err := s.db.QueryRowContext(r.Context(), `SELECT start_at FROM activities WHERE id = $1 AND deleted_at IS NULL`, activityID).Scan(&startAt)
+	var startAt, endAt sql.NullTime
+	err := s.db.QueryRowContext(r.Context(), `SELECT start_at, end_at FROM activities WHERE id = $1 AND deleted_at IS NULL`, activityID).Scan(&startAt, &endAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{
 			Status:  http.StatusNotFound,
@@ -334,8 +332,18 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
+	now := time.Now().UTC()
+	if endAt.Valid && !now.Before(endAt.Time) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusConflict,
+			Code:    "ACTIVITY_ALREADY_ENDED",
+			Message: "已结束的活动不能发布",
+		})
+		return
+	}
+
 	newStatus := "active"
-	if startAt.Valid && startAt.Time.After(time.Now().UTC()) {
+	if startAt.Valid && startAt.Time.After(now) {
 		newStatus = "upcoming"
 	}
 
@@ -434,7 +442,7 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON u.id = a.created_by
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets ma ON ma.id = a.cover_media_id AND ma.deleted_at IS NULL
-		WHERE a.deleted_at IS NULL AND a.status IN ('upcoming', 'active', 'ended')
+		WHERE a.deleted_at IS NULL AND a.status NOT IN ('draft', 'offline')
 		ORDER BY COALESCE(a.start_at, a.published_at, a.created_at) DESC
 		LIMIT 50`)
 	if err != nil {

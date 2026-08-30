@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'controllers/app_update_coordinator.dart';
 import 'controllers/auth_controller.dart';
 import 'controllers/comments_controller.dart';
 import 'controllers/feed_controller.dart';
@@ -162,31 +163,50 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         if (mounted) setState(() => rulesGateVisible = rulesGate.shouldShow);
       }),
     );
+    updateCoordinator = AppUpdateCoordinator();
     unawaited(_checkStartupRequiredUpdate());
   }
+
+  late final AppUpdateCoordinator updateCoordinator;
 
   /// 启动强制更新门禁：Android 上检查到服务端标记 required 的新版本时，
   /// 弹出不可关闭的更新层。检查静默失败、不阻塞启动；Web 与桌面端没有
   /// APK 安装能力，不参与门禁。
   Future<void> _checkStartupRequiredUpdate() async {
     if (kIsWeb || !Platform.isAndroid) return;
-    final baseUrl = apiBaseUrlFromEnvironment().trim();
-    if (baseUrl.isEmpty) return;
-    final service = AppUpdateService(baseUri: Uri.parse(baseUrl));
     try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      final info = await service.checkUpdate(
-        versionName: packageInfo.version,
-        versionCode: int.tryParse(packageInfo.buildNumber) ?? 0,
-      );
+      await Future<void>.delayed(const Duration(seconds: 3));
       if (!mounted) return;
-      if (info.updateAvailable && info.isRequired) {
-        await showAppUpdateSheet(appContext, force: true);
+      final info = await updateCoordinator.checkUpdate(manual: false);
+      if (!mounted) return;
+      if (info != null && info.updateAvailable && info.isRequired) {
+        await showAppUpdateSheet(
+          appContext,
+          force: true,
+          coordinator: updateCoordinator,
+        );
       }
     } catch (_) {
       // 启动检查失败不打扰用户；设置页仍可手动检查更新。
-    } finally {
-      service.close();
+    }
+  }
+
+  Future<void> _checkForegroundUpdate() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      await updateCoordinator.onAppForeground();
+      if (!mounted) return;
+      if (updateCoordinator.info != null &&
+          updateCoordinator.info!.updateAvailable &&
+          updateCoordinator.info!.isRequired) {
+        await showAppUpdateSheet(
+          appContext,
+          force: true,
+          coordinator: updateCoordinator,
+        );
+      }
+    } catch (_) {
+      // 忽略前台检查异常
     }
   }
 
@@ -216,6 +236,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     personalFeedController.dispose();
     store.dispose();
     repositories.close();
+    updateCoordinator.dispose();
     super.dispose();
   }
 
@@ -223,6 +244,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_refreshUnreadCount());
+      unawaited(_checkForegroundUpdate());
     }
   }
 

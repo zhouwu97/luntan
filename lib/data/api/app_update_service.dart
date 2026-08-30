@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart' as path_provider;
 
+import 'update_config.dart';
+
 /// 应用更新检查结果。字段与服务端 `/api/v1/app/update` 响应对齐。
 class AppUpdateInfo {
   const AppUpdateInfo({
@@ -137,10 +139,10 @@ enum AppUpdateErrorKind { network, server, protocol }
 /// Range 返回 200 时截断重写；SHA-256 校验通过后原子改名成 `.apk`。
 class AppUpdateService {
   AppUpdateService({
-    required Uri baseUri,
+    Uri? baseUri,
     http.Client? client,
     Future<Directory> Function()? downloadDirResolver,
-  }) : _baseUri = baseUri,
+  }) : _baseUri = baseUri ?? Uri.parse(resolveUpdateBaseUrl()),
        _client = client ?? http.Client(),
        _downloadDirResolver = downloadDirResolver;
 
@@ -196,8 +198,21 @@ class AppUpdateService {
         AppUpdateErrorKind.network,
         '连接超时，请检查网络后重试',
       );
+    } on SocketException {
+      throw const AppUpdateException(
+        AppUpdateErrorKind.network,
+        '无法连接更新服务器，请检查网络',
+      );
+    } on HttpException {
+      throw const AppUpdateException(
+        AppUpdateErrorKind.network,
+        '无法连接更新服务器，请检查网络',
+      );
     } on http.ClientException {
-      throw const AppUpdateException(AppUpdateErrorKind.network, '网络连接失败');
+      throw const AppUpdateException(
+        AppUpdateErrorKind.network,
+        '无法连接更新服务器，请检查网络',
+      );
     }
     if (response.statusCode >= 500) {
       throw AppUpdateException(
@@ -408,6 +423,16 @@ class AppUpdateService {
       throw const AppUpdateException(
         AppUpdateErrorKind.network,
         '下载超时，请检查网络后重试',
+      );
+    } on SocketException {
+      throw const AppUpdateException(
+        AppUpdateErrorKind.network,
+        '网络连接中断，可重试续传',
+      );
+    } on HttpException {
+      throw const AppUpdateException(
+        AppUpdateErrorKind.network,
+        '网络连接中断，可重试续传',
       );
     } on http.ClientException {
       throw const AppUpdateException(

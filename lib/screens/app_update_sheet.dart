@@ -1,26 +1,24 @@
 import 'dart:async';
-import 'dart:io' show File;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show PlatformException;
-import 'package:package_info_plus/package_info_plus.dart';
 
+import '../controllers/app_update_coordinator.dart';
 import '../data/api/app_update_service.dart';
-import '../data/repository_provider.dart';
 import '../platform/app_installer.dart';
 import '../theme/app_theme.dart';
 
 /// 检查更新流程的底部弹层。
 ///
-/// 状态机：checking → upToDate / available / error；available 内部再分
-/// idle / downloading / readyToInstall / installPermissionRequired。
+/// 状态机：checking → upToDate / available / error；available 内部包含
+/// idle / downloading / verifying / readyToInstall / permissionRequired / installing / installerOpened。
 ///
 /// [force] 用于启动强制更新门禁：禁用点遮罩、下拉和返回键关闭，并隐藏
 /// 关闭按钮，用户只能更新或重试。
 Future<void> showAppUpdateSheet(
   BuildContext context, {
   bool force = false,
+  AppUpdateCoordinator? coordinator,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -31,222 +29,66 @@ Future<void> showAppUpdateSheet(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: (_) => AppUpdateSheet(force: force),
+    builder: (_) => AppUpdateSheet(force: force, coordinator: coordinator),
   );
 }
 
 class AppUpdateSheet extends StatefulWidget {
-  const AppUpdateSheet({super.key, this.force = false});
+  const AppUpdateSheet({super.key, this.force = false, this.coordinator});
 
   final bool force;
+  final AppUpdateCoordinator? coordinator;
 
   @override
   State<AppUpdateSheet> createState() => _AppUpdateSheetState();
 }
 
-enum _UpdatePhase { checking, upToDate, available, error }
-
-enum _DownloadPhase {
-  idle,
-  downloading,
-  readyToInstall,
-  installing,
-  installerOpened,
-}
-
 class _AppUpdateSheetState extends State<AppUpdateSheet> {
-  _UpdatePhase _phase = _UpdatePhase.checking;
-  _DownloadPhase _downloadPhase = _DownloadPhase.idle;
-  String? _errorMessage;
-  AppUpdateInfo? _info;
-  int _received = 0;
-  int _total = 0;
-  DateTime _lastTick = DateTime.now();
-  int _lastBytes = 0;
-  double _speedBytesPerSecond = 0;
-
-  AppUpdateService? _service;
-  ValueCancelToken? _cancelToken;
-  File? _downloadedFile;
+  late final AppUpdateCoordinator _coordinator;
+  late final bool _ownsCoordinator;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _check());
+    if (widget.coordinator != null) {
+      _coordinator = widget.coordinator!;
+      _ownsCoordinator = false;
+    } else {
+      _coordinator = AppUpdateCoordinator();
+      _ownsCoordinator = true;
+    }
+    _coordinator.addListener(_onCoordinatorChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_coordinator.status == AppUpdateStatus.idle ||
+          _coordinator.status == AppUpdateStatus.error) {
+        _coordinator.checkUpdate(manual: true, force: widget.force);
+      }
+    });
   }
 
   @override
   void dispose() {
-    _cancelToken?.cancel();
-    _service?.close();
+    _coordinator.removeListener(_onCoordinatorChanged);
+    if (_ownsCoordinator) {
+      _coordinator.dispose();
+    }
     super.dispose();
   }
 
-  AppUpdateService? _resolveService() {
-    try {
-      final baseUrl = apiBaseUrlFromEnvironment();
-      if (baseUrl.trim().isEmpty) return null;
-      return AppUpdateService(baseUri: Uri.parse(baseUrl));
-    } catch (_) {
-      return null;
-    }
+  void _onCoordinatorChanged() {
+    if (mounted) setState(() {});
   }
 
-  Future<void> _check() async {
-    final service = _resolveService();
-    if (service == null) {
-      setState(() {
-        _phase = _UpdatePhase.error;
-        _errorMessage = '当前为离线演示模式，无法检查更新';
-      });
-      return;
-    }
-    _service?.close();
-    _service = service;
-    setState(() {
-      _phase = _UpdatePhase.checking;
-      _errorMessage = null;
-    });
-    try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      final info = await service.checkUpdate(
-        versionName: packageInfo.version,
-        versionCode: int.tryParse(packageInfo.buildNumber) ?? 0,
-      );
-      if (!mounted) return;
-      setState(() {
-        if (info.updateAvailable) {
-          _info = info;
-          _phase = _UpdatePhase.available;
-        } else {
-          _phase = _UpdatePhase.upToDate;
-        }
-      });
-    } on AppUpdateException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _UpdatePhase.error;
-        _errorMessage = error.message;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _UpdatePhase.error;
-        _errorMessage = '检查更新失败，请稍后重试';
-      });
-    }
-  }
-
-  Future<void> _startDownload() async {
-    final info = _info;
-    final service = _service;
-    if (info == null || service == null) return;
-    final cancelToken = ValueCancelToken();
-    _cancelToken = cancelToken;
-    setState(() {
-      _downloadPhase = _DownloadPhase.downloading;
-      _received = 0;
-      _total = info.fileSize;
-      _speedBytesPerSecond = 0;
-      _lastTick = DateTime.now();
-      _lastBytes = 0;
-    });
-    try {
-      final file =
-          _downloadedFile ??
-          await service.downloadApk(
-            info: info,
-            cancelToken: cancelToken,
-            onProgress: (received, total) {
-              if (!mounted) return;
-              final now = DateTime.now();
-              final elapsed = now.difference(_lastTick).inMilliseconds;
-              if (elapsed >= 400) {
-                final speed =
-                    (received - _lastBytes) *
-                    1000 /
-                    (elapsed == 0 ? 1 : elapsed);
-                _lastTick = now;
-                _lastBytes = received;
-                _speedBytesPerSecond = speed;
-              }
-              setState(() {
-                _received = received;
-                _total = total;
-              });
-            },
-          );
-      if (!mounted) return;
-      _downloadedFile = file;
-      if (!AppInstaller.isSupported) {
-        setState(() => _downloadPhase = _DownloadPhase.readyToInstall);
-        return;
-      }
-      if (!await AppInstaller.canInstallPackages()) {
-        setState(() {
-          _downloadPhase = _DownloadPhase.readyToInstall;
-          _errorMessage = '需要先允许“安装未知应用”';
-        });
-        return;
-      }
-      setState(() => _downloadPhase = _DownloadPhase.installing);
-      try {
-        await AppInstaller.installApk(file);
-        if (!mounted) return;
-        setState(() {
-          _downloadPhase = _DownloadPhase.installerOpened;
-          _errorMessage = null;
-        });
-      } on PlatformException catch (error) {
-        if (!mounted) return;
-        setState(() {
-          _downloadPhase = _DownloadPhase.readyToInstall;
-          if (error.code == 'UNKNOWN_SOURCE_NOT_ALLOWED') {
-            _errorMessage = '需要先允许“安装未知应用”';
-          } else {
-            _errorMessage = error.message ?? '唤起安装器失败';
-          }
-        });
-      }
-    } on AppUpdateCancelled {
-      if (!mounted) return;
-      setState(() {
-        _downloadPhase = _DownloadPhase.idle;
-        _errorMessage = null;
-      });
-    } on AppUpdateException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _downloadPhase = _DownloadPhase.idle;
-        _errorMessage = error.message;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _downloadPhase = _DownloadPhase.idle;
-        _errorMessage = '下载失败，请稍后重试';
-      });
-    } finally {
-      if (identical(_cancelToken, cancelToken)) _cancelToken = null;
-    }
-  }
-
-  Future<void> _openPermissionSettings() async {
-    await AppInstaller.openInstallPermissionSettings();
-    if (!mounted) return;
-    setState(() {
-      _errorMessage = '授权后点击“安装”重新唤起安装器';
-    });
-  }
+  bool get _isForce => widget.force || _coordinator.isRequired;
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !widget.force,
+      canPop: !_isForce,
       child: SafeArea(
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(context).height * 0.86,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.88,
           ),
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
@@ -303,7 +145,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                         ],
                       ),
                     ),
-                    if (!widget.force)
+                    if (!_isForce)
                       IconButton(
                         tooltip: '关闭',
                         onPressed: () => Navigator.of(context).pop(),
@@ -315,22 +157,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                ...switch (_phase) {
-                  _UpdatePhase.checking => [
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 28),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  ],
-                  _UpdatePhase.upToDate => [_UpToDateCard(onRetry: _check)],
-                  _UpdatePhase.error => [
-                    _ErrorCard(
-                      message: _errorMessage ?? '检查更新失败',
-                      onRetry: _check,
-                    ),
-                  ],
-                  _UpdatePhase.available => _buildAvailableBody(),
-                },
+                ..._buildContent(),
               ],
             ),
           ),
@@ -340,18 +167,119 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
   }
 
   String _statusSubtitle() {
-    return switch (_phase) {
-      _UpdatePhase.checking => '正在连接服务器…',
-      _UpdatePhase.upToDate => '当前已是最新版本',
-      _UpdatePhase.available => '发现新版本 v${_info?.latestVersionName ?? ''}',
-      _UpdatePhase.error => '检查更新失败',
-    };
+    switch (_coordinator.status) {
+      case AppUpdateStatus.checking:
+        return '正在连接更新服务器…';
+      case AppUpdateStatus.upToDate:
+        return _coordinator.currentVersionName.isNotEmpty
+            ? '当前版本 v${_coordinator.currentVersionName} 已是最新'
+            : '当前已是最新版本';
+      case AppUpdateStatus.optionalUpdateAvailable:
+      case AppUpdateStatus.requiredUpdateAvailable:
+      case AppUpdateStatus.downloading:
+      case AppUpdateStatus.verifying:
+      case AppUpdateStatus.readyToInstall:
+      case AppUpdateStatus.installing:
+      case AppUpdateStatus.installerOpened:
+      case AppUpdateStatus.permissionRequired:
+        final ver = _coordinator.info?.latestVersionName;
+        return ver != null && ver.isNotEmpty
+            ? '发现新版本 v$ver'
+            : '发现新版本';
+      case AppUpdateStatus.error:
+        return '检查更新失败';
+      case AppUpdateStatus.idle:
+        return '准备检查更新…';
+    }
   }
 
-  List<Widget> _buildAvailableBody() {
-    final info = _info;
+  List<Widget> _buildContent() {
+    switch (_coordinator.status) {
+      case AppUpdateStatus.idle:
+      case AppUpdateStatus.checking:
+        return [
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 36),
+            child: Column(
+              children: [
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+                SizedBox(height: 14),
+                Text(
+                  '正在检查新版本…',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ];
+
+      case AppUpdateStatus.upToDate:
+        return [
+          _UpToDateCard(
+            versionName: _coordinator.currentVersionName,
+            onRetry: () => _coordinator.checkUpdate(manual: true),
+          ),
+        ];
+
+      case AppUpdateStatus.error:
+        return [
+          _ErrorCard(
+            message: _resolveDisplayErrorMessage(),
+            onRetry: () => _coordinator.checkUpdate(manual: true, force: widget.force),
+          ),
+        ];
+
+      case AppUpdateStatus.optionalUpdateAvailable:
+      case AppUpdateStatus.requiredUpdateAvailable:
+      case AppUpdateStatus.downloading:
+      case AppUpdateStatus.verifying:
+      case AppUpdateStatus.readyToInstall:
+      case AppUpdateStatus.installing:
+      case AppUpdateStatus.installerOpened:
+      case AppUpdateStatus.permissionRequired:
+        return _buildUpdateAvailableBody();
+    }
+  }
+
+  String _resolveDisplayErrorMessage() {
+    final msg = _coordinator.errorMessage;
+    if (msg != null && msg.isNotEmpty) return msg;
+
+    switch (_coordinator.errorKind) {
+      case AppUpdateErrorKind.network:
+        return '无法连接更新服务器，请检查网络后重试';
+      case AppUpdateErrorKind.server:
+        return '更新服务暂不可用，请稍后重试';
+      case AppUpdateErrorKind.protocol:
+        return '更新信息异常，请稍后重试';
+      case null:
+        return '检查更新失败，请稍后重试';
+    }
+  }
+
+  List<Widget> _buildUpdateAvailableBody() {
+    final info = _coordinator.info;
     if (info == null) return const [];
+
+    final isDownloading = _coordinator.status == AppUpdateStatus.downloading;
+    final isVerifying = _coordinator.status == AppUpdateStatus.verifying;
+    final isPermissionRequired =
+        _coordinator.status == AppUpdateStatus.permissionRequired;
+    final isReadyToInstall =
+        _coordinator.status == AppUpdateStatus.readyToInstall;
+    final isInstalling = _coordinator.status == AppUpdateStatus.installing;
+    final isInstallerOpened =
+        _coordinator.status == AppUpdateStatus.installerOpened;
+
     return [
+      // 版本详情卡片
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -373,7 +301,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (info.isRequired)
+                if (_isForce)
                   const _UpdateBadge(label: '必须更新', color: AppTheme.pink)
                 else
                   const _UpdateBadge(label: '推荐更新', color: AppTheme.mint),
@@ -410,7 +338,9 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
           ],
         ),
       ),
-      if (_downloadPhase == _DownloadPhase.downloading) ...[
+
+      // 下载中进度卡片
+      if (isDownloading) ...[
         const SizedBox(height: 14),
         Semantics(
           label: '安装包下载进度',
@@ -448,9 +378,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: LinearProgressIndicator(
-                    value: _total > 0
-                        ? (_received / _total).clamp(0.0, 1.0)
-                        : 0,
+                    value: _coordinator.downloadProgress,
                     minHeight: 8,
                     backgroundColor: Colors.white,
                     valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
@@ -469,7 +397,7 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
                       ),
                     ),
                     TextButton(
-                      onPressed: () => _cancelToken?.cancel(),
+                      onPressed: _coordinator.cancelDownload,
                       child: const Text('取消'),
                     ),
                   ],
@@ -479,29 +407,168 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
           ),
         ),
       ],
-      if (_errorMessage != null && _downloadPhase != _DownloadPhase.downloading)
+
+      // 正在校验状态
+      if (isVerifying) ...[
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceBlue,
+            borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          ),
+          child: const Row(
+            children: [
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              ),
+              SizedBox(width: 10),
+              Text(
+                '正在校验安装包完整性 (SHA-256)…',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+
+      // 权限提示或错误提示
+      if (_coordinator.errorMessage != null && !isDownloading && !isVerifying)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.pink.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, size: 16, color: AppTheme.pink),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _coordinator.errorMessage!,
+                    style: const TextStyle(fontSize: 12, color: AppTheme.pink),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+      const SizedBox(height: 16),
+
+      // 操作按钮组
+      if (isPermissionRequired) ...[
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: _coordinator.openPermissionSettings,
+          icon: const Icon(Icons.security_rounded, size: 18),
+          label: const Text(
+            '前往开启“安装未知应用”权限',
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.textPrimary,
+            minimumSize: const Size.fromHeight(44),
+            side: const BorderSide(color: AppTheme.border),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: _coordinator.installApk,
+          child: const Text('已授权，继续安装'),
+        ),
+      ] else if (isInstallerOpened) ...[
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: _coordinator.installApk,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text(
+            '重新唤起系统安装器',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ] else ...[
+        Row(
+          children: [
+            if (!_isForce && !isDownloading && !isInstalling && !isVerifying) ...[
+              Expanded(
+                flex: 1,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.textSecondary,
+                    minimumSize: const Size.fromHeight(48),
+                    side: const BorderSide(color: AppTheme.border),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(
+                    '稍后更新',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              flex: 2,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: (isDownloading || isInstalling || isVerifying || !AppInstaller.isSupported)
+                    ? null
+                    : (isReadyToInstall
+                        ? _coordinator.installApk
+                        : _coordinator.startDownload),
+                child: Text(
+                  _actionButtonText(
+                    isDownloading: isDownloading,
+                    isVerifying: isVerifying,
+                    isInstalling: isInstalling,
+                    isReadyToInstall: isReadyToInstall,
+                    isRequired: _isForce,
+                  ),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+
+      if (!AppInstaller.isSupported)
         Padding(
           padding: const EdgeInsets.only(top: 10),
           child: Text(
-            _errorMessage!,
-            style: const TextStyle(fontSize: 12, color: AppTheme.pink),
-          ),
-        ),
-      const SizedBox(height: 14),
-      _primaryButton(info),
-      if (AppInstaller.isSupported &&
-          _downloadPhase == _DownloadPhase.readyToInstall &&
-          _errorMessage?.contains('未知') == true)
-        TextButton(
-          onPressed: _openPermissionSettings,
-          child: const Text('前往开启安装权限'),
-        ),
-      if (!AppInstaller.isSupported)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
             kIsWeb
-                ? '浏览器环境不支持应用内安装，请使用 Android 手机下载'
+                ? '浏览器环境不支持应用内安装，请使用 Android 手机客户端'
                 : '当前平台不支持应用内安装（仅支持 Android）',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
@@ -510,59 +577,50 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
     ];
   }
 
-  Widget _primaryButton(AppUpdateInfo info) {
-    final downloading = _downloadPhase == _DownloadPhase.downloading;
-    final installing = _downloadPhase == _DownloadPhase.installing;
-    final installerOpened = _downloadPhase == _DownloadPhase.installerOpened;
-    return FilledButton(
-      style: FilledButton.styleFrom(
-        backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      onPressed:
-          downloading ||
-              installing ||
-              installerOpened ||
-              !AppInstaller.isSupported
-          ? null
-          : _startDownload,
-      child: Text(switch (_downloadPhase) {
-        _DownloadPhase.downloading => '正在下载 ${_percentText()}',
-        _DownloadPhase.installing => '正在打开系统安装器…',
-        _DownloadPhase.installerOpened => '已打开系统安装器',
-        _DownloadPhase.readyToInstall => '安装',
-        _DownloadPhase.idle => info.isRequired ? '立即更新' : '下载并安装',
-      }, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-    );
+  String _actionButtonText({
+    required bool isDownloading,
+    required bool isVerifying,
+    required bool isInstalling,
+    required bool isReadyToInstall,
+    required bool isRequired,
+  }) {
+    if (isDownloading) return '正在下载 ${_percentText()}';
+    if (isVerifying) return '正在校验…';
+    if (isInstalling) return '正在打开系统安装器…';
+    if (isReadyToInstall) return '立即安装';
+    return isRequired ? '立即更新' : '立即更新';
   }
 
   String _progressText() {
-    final speed = _speedBytesPerSecond > 0
-        ? ' · ${_formatBytes(_speedBytesPerSecond.round())}/s'
+    final speed = _coordinator.speedBytesPerSecond > 0
+        ? ' · ${_formatBytes(_coordinator.speedBytesPerSecond.round())}/s'
         : '';
-    final remainingBytes = (_total - _received).clamp(0, _total);
-    final seconds = _speedBytesPerSecond > 0
-        ? (remainingBytes / _speedBytesPerSecond).ceil()
+    final total = _coordinator.totalBytes;
+    final received = _coordinator.receivedBytes;
+    final remainingBytes = (total - received).clamp(0, total);
+    final seconds = _coordinator.speedBytesPerSecond > 0
+        ? (remainingBytes / _coordinator.speedBytesPerSecond).ceil()
         : 0;
     final eta = seconds > 0
         ? seconds < 60
-              ? ' · 约 $seconds 秒'
-              : ' · 约 ${(seconds / 60).ceil()} 分钟'
+            ? ' · 约 $seconds 秒'
+            : ' · 约 ${(seconds / 60).ceil()} 分钟'
         : '';
-    return '${_formatBytes(_received)} / ${_formatBytes(_total)}$speed$eta';
+    return '${_formatBytes(received)} / ${_formatBytes(total)}$speed$eta';
   }
 
   String _percentText() {
-    if (_total <= 0) return '0%';
-    return '${((_received / _total) * 100).clamp(0, 100).toStringAsFixed(0)}%';
+    final total = _coordinator.totalBytes;
+    if (total <= 0) return '0%';
+    final received = _coordinator.receivedBytes;
+    return '${((received / total) * 100).clamp(0, 100).toStringAsFixed(0)}%';
   }
 }
 
 class _UpToDateCard extends StatelessWidget {
-  const _UpToDateCard({required this.onRetry});
+  const _UpToDateCard({required this.versionName, required this.onRetry});
 
+  final String versionName;
   final VoidCallback onRetry;
 
   @override
@@ -571,21 +629,42 @@ class _UpToDateCard extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 18),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Column(
               children: [
-                Icon(Icons.check_circle_rounded, color: AppTheme.mint),
-                SizedBox(width: 8),
-                Text(
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: AppTheme.mint.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check_circle_rounded,
+                    color: AppTheme.mint,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
                   '已是最新版本',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.textPrimary,
                   ),
                 ),
+                if (versionName.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '当前版本：v$versionName',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -622,14 +701,33 @@ class _ErrorCard extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppTheme.textSecondary,
-              ),
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: AppTheme.pink.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.cloud_off_rounded,
+                    color: AppTheme.pink,
+                    size: 26,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    color: AppTheme.textSecondary,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
           ),
           SizedBox(

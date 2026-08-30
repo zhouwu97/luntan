@@ -37,12 +37,22 @@ import 'screens/ranking_submission_review_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
+import 'widgets/forum_rules_gate.dart';
 
 class LuntanApp extends StatefulWidget {
-  const LuntanApp({super.key, this.tokenStore, this.repositories});
+  const LuntanApp({
+    super.key,
+    this.tokenStore,
+    this.repositories,
+    this.rulesGate,
+  });
 
   final TokenStore? tokenStore;
   final ForumRepositories? repositories;
+
+  /// 版规公告栏弹窗控制器；生产入口注入 withPreferences 实例，直接构造
+  /// LuntanApp 的测试默认不展示弹窗，避免遮挡页面交互。
+  final ForumRulesGateController? rulesGate;
 
   @override
   State<LuntanApp> createState() => _LuntanAppState();
@@ -63,6 +73,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   bool browseWithoutAuth = true;
   int unreadCount = 0;
   int profileRefreshToken = 0;
+  late final ForumRulesGateController rulesGate;
+  bool rulesGateVisible = false;
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
@@ -136,6 +148,12 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     }
     // Mock 与 API 都从同一个通知仓储读取角标；Mock 空通知列表自然返回 0。
     unawaited(_refreshUnreadCount());
+    rulesGate = widget.rulesGate ?? ForumRulesGateController.disabled();
+    unawaited(
+      rulesGate.restore().then((_) {
+        if (mounted) setState(() => rulesGateVisible = rulesGate.shouldShow);
+      }),
+    );
   }
 
   void _handleSessionInvalidated() {
@@ -947,7 +965,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   }
 
   Widget _mainShell() {
-    return Scaffold(
+    final shell = Scaffold(
       body: IndexedStack(
         index: currentTab == 1 ? 0 : currentTab,
         children: [
@@ -1032,6 +1050,20 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         onCreate: showComposer,
       ),
     );
+    if (!rulesGateVisible) return shell;
+    // 版规弹窗覆盖主界面，遮罩吃掉点击，用户做出选择前无法进入论坛。
+    // ForumRulesGate 自带 Positioned.fill，直接放进 Stack 即可置顶。
+    return Stack(
+      children: [
+        Positioned.fill(child: shell),
+        ForumRulesGate(onAgree: _agreeRules),
+      ],
+    );
+  }
+
+  Future<void> _agreeRules() async {
+    await rulesGate.agree();
+    if (mounted) setState(() => rulesGateVisible = false);
   }
 
   @override

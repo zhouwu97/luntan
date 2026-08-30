@@ -12,6 +12,7 @@ import '../domain/models.dart' show CommunityStatus;
 import '../domain/repositories.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/search/search_community_row.dart';
 import '../widgets/search/search_post_row.dart';
 import '../widgets/search/search_section.dart';
@@ -1104,23 +1105,22 @@ class _SearchToyCard extends StatelessWidget {
                     width: 64,
                     height: 64,
                     child: toy.coverUrl != null && toy.coverUrl!.isNotEmpty
-                        ? Image.network(
-                            toy.coverUrl!,
+                        ? AppNetworkImage(
+                            url: toy.coverUrl,
                             fit: BoxFit.contain,
-                            errorBuilder: (context, error, stackTrace) =>
-                                Image.asset(
-                                  assetPath,
-                                  fit: BoxFit.contain,
-                                  errorBuilder:
-                                      (context, error, stackTrace) =>
-                                          Container(
-                                            color: const Color(0xFFF3F4F6),
-                                            child: const Icon(
-                                              Icons.toys_outlined,
-                                              color: Color(0xFF9CA3AF),
-                                            ),
-                                          ),
-                                ),
+                            errorBuilder: (_) => Image.asset(
+                              assetPath,
+                              fit: BoxFit.contain,
+                              errorBuilder:
+                                  (context, error, stackTrace) =>
+                                      Container(
+                                        color: const Color(0xFFF3F4F6),
+                                        child: const Icon(
+                                          Icons.toys_outlined,
+                                          color: Color(0xFF9CA3AF),
+                                        ),
+                                      ),
+                            ),
                           )
                         : Image.asset(
                             assetPath,

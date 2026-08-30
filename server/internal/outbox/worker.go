@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,6 +60,9 @@ type Worker struct {
 	Handler     Handler
 	BatchSize   int
 	MaxAttempts int
+	// Concurrency 是单个 worker 进程内并行处理事件的数量；<=0 时默认 4，
+	// 避免图片解码等耗时处理阻塞后续通知类事件的消费。
+	Concurrency int
 	Now         func() time.Time
 }
 
@@ -116,28 +121,61 @@ func (w Worker) RunOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	processed := 0
-	for _, event := range events {
-		handler := w.Handler
-		if handler == nil {
-			handler = NoopHandler{}
-		}
-		handleErr := handler.Handle(ctx, event)
-		if handleErr == nil {
-			_, updateErr := w.DB.ExecContext(ctx, `UPDATE outbox_events SET status = 'succeeded', processed_at = $1, locked_at = NULL, last_error = '' WHERE id = $2`, now().UTC(), event.ID)
-			if updateErr != nil {
-				return processed, updateErr
-			}
-			processed++
-			continue
-		}
-		backoff := time.Duration(1<<min(event.Attempts+1, 8)) * time.Second
-		_, updateErr := w.DB.ExecContext(ctx, `UPDATE outbox_events SET status = CASE WHEN attempts >= $1 THEN 'failed' ELSE 'pending' END, available_at = $2, locked_at = NULL, last_error = $3 WHERE id = $4`, maxAttempts, now().UTC().Add(backoff), strings.TrimSpace(handleErr.Error()), event.ID)
-		if updateErr != nil {
-			return processed, updateErr
-		}
+	concurrency := w.Concurrency
+	if concurrency <= 0 {
+		concurrency = 4
 	}
-	return processed, nil
+	if concurrency > len(events) {
+		concurrency = len(events)
+	}
+	processed := int64(0)
+	var firstErr error
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	// 任一事件的状态更新失败就取消剩余处理，避免同一批次反复写库失败。
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, concurrency)
+	for _, event := range events {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(event Event) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			handler := w.Handler
+			if handler == nil {
+				handler = NoopHandler{}
+			}
+			handleErr := handler.Handle(ctx, event)
+			if handleErr == nil {
+				_, updateErr := w.DB.ExecContext(ctx, `UPDATE outbox_events SET status = 'succeeded', processed_at = $1, locked_at = NULL, last_error = '' WHERE id = $2`, now().UTC(), event.ID)
+				if updateErr != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = updateErr
+						cancel()
+					}
+					mu.Unlock()
+					return
+				}
+				atomic.AddInt64(&processed, 1)
+				return
+			}
+			backoff := time.Duration(1<<min(event.Attempts+1, 8)) * time.Second
+			_, updateErr := w.DB.ExecContext(ctx, `UPDATE outbox_events SET status = CASE WHEN attempts >= $1 THEN 'failed' ELSE 'pending' END, available_at = $2, locked_at = NULL, last_error = $3 WHERE id = $4`, maxAttempts, now().UTC().Add(backoff), strings.TrimSpace(handleErr.Error()), event.ID)
+			if updateErr != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = updateErr
+					cancel()
+				}
+				mu.Unlock()
+				return
+			}
+		}(event)
+	}
+	wg.Wait()
+	return int(processed), firstErr
 }
 
 func min(left, right int) int {

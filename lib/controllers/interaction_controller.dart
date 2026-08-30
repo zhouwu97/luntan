@@ -3,6 +3,12 @@ import 'package:flutter/foundation.dart';
 import '../data/api/interaction_repository.dart';
 import '../domain/models.dart';
 
+/// 与单个帖子绑定的通知器：卡片只监听自己帖子的实例，
+/// 避免任一点赞/收藏变化重建列表里所有可见卡片。
+class _PostInteractions extends ChangeNotifier {
+  void emit() => notifyListeners();
+}
+
 /// 统一处理点赞/收藏的乐观更新、回滚和重复点击锁。
 class InteractionController extends ChangeNotifier {
   InteractionController({required InteractionRepository repository})
@@ -10,12 +16,34 @@ class InteractionController extends ChangeNotifier {
 
   final InteractionRepository _repository;
   final Set<String> _inFlight = <String>{};
+  final Map<String, _PostInteractions> _postTargets = <String, _PostInteractions>{};
 
   bool isInFlight(String target) => _inFlight.contains(target);
 
+  /// 帖子维度的 Listenable；与 [notifyListeners] 的全局通知（评论点赞等）
+  /// 相互独立，监听方按需选择粒度。
+  Listenable interactionsFor(String postId) => _targetFor(postId);
+
+  _PostInteractions _targetFor(String postId) =>
+      _postTargets.putIfAbsent(postId, _PostInteractions.new);
+
+  void _notifyPost(String postId) => _targetFor(postId).emit();
+
   void clearUserState() {
     _inFlight.clear();
+    for (final target in _postTargets.values) {
+      target.emit();
+    }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    for (final target in _postTargets.values) {
+      target.dispose();
+    }
+    _postTargets.clear();
+    super.dispose();
   }
 
   Future<void> togglePostLike(Post post) async {
@@ -24,13 +52,13 @@ class InteractionController extends ChangeNotifier {
     final next = !post.isLiked;
     post.isLiked = next;
     post.likeCount = (post.likeCount + (next ? 1 : -1)).clamp(0, 1 << 30);
-    notifyListeners();
+    _notifyPost(post.id);
     try {
       await _repository.setPostLike(postId: post.id, active: next);
     } catch (_) {
       post.isLiked = !next;
       post.likeCount = (post.likeCount + (next ? -1 : 1)).clamp(0, 1 << 30);
-      notifyListeners();
+      _notifyPost(post.id);
       rethrow;
     } finally {
       _inFlight.remove(key);
@@ -46,7 +74,7 @@ class InteractionController extends ChangeNotifier {
       0,
       1 << 30,
     );
-    notifyListeners();
+    _notifyPost(post.id);
     try {
       await _repository.setBookmark(postId: post.id, active: next);
     } catch (_) {
@@ -55,7 +83,7 @@ class InteractionController extends ChangeNotifier {
         0,
         1 << 30,
       );
-      notifyListeners();
+      _notifyPost(post.id);
       rethrow;
     } finally {
       _inFlight.remove(key);
@@ -71,7 +99,7 @@ class InteractionController extends ChangeNotifier {
       0,
       1 << 30,
     );
-    notifyListeners();
+    _notifyPost(post.id);
   }
 
   Future<void> toggleCommentLike(Comment comment) async {

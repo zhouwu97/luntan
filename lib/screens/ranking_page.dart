@@ -9,6 +9,7 @@ import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
 import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import 'ranking_reorder_screen.dart';
@@ -136,13 +137,12 @@ Widget _rankingImage(
 }) {
   final remoteUrl = item.remoteImageUrl;
   if (remoteUrl != null && remoteUrl.isNotEmpty) {
-    return Image.network(
-      remoteUrl,
+    return AppNetworkImage(
+      url: remoteUrl,
       width: width,
       height: height,
       fit: fit,
-      filterQuality: FilterQuality.medium,
-      errorBuilder: (_, _, _) => _rankingImageFallback(item, width, height, fit),
+      errorBuilder: (_) => _rankingImageFallback(item, width, height, fit),
     );
   }
   return _rankingImageFallback(item, width, height, fit);
@@ -770,22 +770,25 @@ class _RankingPageState extends State<RankingPage> {
     final items = _filteredItems;
 
     if (query.isNotEmpty) {
-      return ListView(
+      return ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12, left: 4),
-            child: Text(
-              '找到 ${items.length} 个榜单结果',
-              style: const TextStyle(
-                color: Color(0xFF6B7280),
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+        itemCount: 1 + (items.isEmpty ? 1 : items.length),
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12, left: 4),
+              child: Text(
+                '找到 ${items.length} 个榜单结果',
+                style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ),
-          if (items.isEmpty)
-            const Padding(
+            );
+          }
+          if (items.isEmpty) {
+            return const Padding(
               padding: EdgeInsets.symmetric(vertical: 48),
               child: Center(
                 child: Text(
@@ -793,18 +796,17 @@ class _RankingPageState extends State<RankingPage> {
                   style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
                 ),
               ),
-            )
-          else
-            ...items.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _RankingCard(
-                  item: item,
-                  onTap: () => _openRankingItem(item),
-                ),
-              ),
+            );
+          }
+          final item = items[index - 1];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _RankingCard(
+              item: item,
+              onTap: () => _openRankingItem(item),
             ),
-        ],
+          );
+        },
       );
     }
 
@@ -815,75 +817,77 @@ class _RankingPageState extends State<RankingPage> {
         ? items.where((i) => i.id != _topItem.id).toList()
         : items;
 
-    return ListView(
-      children: [
-        if (widget.repository != null &&
-            _remoteError != null &&
-            _remoteItems != null)
-          _RankingStaleBanner(
-            updatedAt: _remoteUpdatedAt,
-            onRetry: _loadRemoteRanking,
-          ),
-        _RankingTabs(
-          selectedIndex: _selectedTab,
-          onTap: (index) {
-            setState(() {
-              _selectedTab = index;
-              if (index > 0 && _selectedCategory < 0) {
-                _selectedCategory = 0;
-              }
-            });
-            if (widget.repository != null) _loadRemoteRanking();
-          },
+    final headers = <Widget>[
+      if (widget.repository != null &&
+          _remoteError != null &&
+          _remoteItems != null)
+        _RankingStaleBanner(
+          updatedAt: _remoteUpdatedAt,
+          onRetry: _loadRemoteRanking,
         ),
-        _CategoryGrid(
-          selectedIndex: _selectedCategory,
-          onTap: (index) {
-            setState(() {
-              if (_selectedTab == 0 && index == _selectedCategory) {
-                _selectedCategory = -1;
-              } else {
-                _selectedCategory = index;
-              }
-            });
-            if (widget.repository != null) _loadRemoteRanking();
-          },
-        ),
+      _RankingTabs(
+        selectedIndex: _selectedTab,
+        onTap: (index) {
+          setState(() {
+            _selectedTab = index;
+            if (index > 0 && _selectedCategory < 0) {
+              _selectedCategory = 0;
+            }
+          });
+          if (widget.repository != null) _loadRemoteRanking();
+        },
+      ),
+      _CategoryGrid(
+        selectedIndex: _selectedCategory,
+        onTap: (index) {
+          setState(() {
+            if (_selectedTab == 0 && index == _selectedCategory) {
+              _selectedCategory = -1;
+            } else {
+              _selectedCategory = index;
+            }
+          });
+          if (widget.repository != null) _loadRemoteRanking();
+        },
+      ),
+      if (showTopBanner)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             children: [
-              if (showTopBanner) ...[
-                _TopRankingCard(
-                  item: _topItem,
-                  onTap: () => _openRankingItem(_topItem),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (listItems.isEmpty && !showTopBanner)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Center(
-                    child: Text(
-                      '该分类暂无商品',
-                      style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
-                    ),
-                  ),
-                )
-              else
-                ...listItems.map(
-                  (item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _RankingCard(
-                      item: item,
-                      onTap: () => _openRankingItem(item),
-                    ),
-                  ),
-                ),
+              _TopRankingCard(
+                item: _topItem,
+                onTap: () => _openRankingItem(_topItem),
+              ),
+              const SizedBox(height: 10),
             ],
           ),
         ),
-      ],
+      if (listItems.isEmpty && !showTopBanner)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 40),
+          child: Center(
+            child: Text(
+              '该分类暂无商品',
+              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
+            ),
+          ),
+        ),
+    ];
+
+    return ListView.builder(
+      itemCount: headers.length + listItems.length,
+      itemBuilder: (context, index) {
+        if (index < headers.length) return headers[index];
+        final item = listItems[index - headers.length];
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          child: _RankingCard(
+            item: item,
+            onTap: () => _openRankingItem(item),
+          ),
+        );
+      },
     );
   }
 }
@@ -2734,12 +2738,12 @@ class _ReviewCard extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: avatarUrl != null && avatarUrl!.isNotEmpty
-              ? Image.network(
-                  avatarUrl!,
+              ? AppNetworkImage(
+                  url: avatarUrl,
                   width: 40,
                   height: 40,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const Icon(
+                  errorBuilder: (_) => const Icon(
                     Icons.person_outline_rounded,
                     size: 22,
                     color: Color(0xFF7D8BA3),
@@ -2874,13 +2878,12 @@ class _ReviewCard extends StatelessWidget {
                           onTap: onReply,
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              item.url,
+                            child: AppNetworkImage(
+                              url: item.url,
                               width: 96,
                               height: 96,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  const SizedBox.shrink(),
+                              errorBuilder: (_) => const SizedBox.shrink(),
                             ),
                           ),
                         ),

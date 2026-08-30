@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
+import '../app_network_image.dart';
 import 'search_post_row.dart';
 
 class SearchUserRow extends StatelessWidget {
@@ -42,6 +43,7 @@ class SearchUserRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final avatarImage = appNetworkImageProvider(avatar, maxWidth: 72);
     const nameBase = TextStyle(
       fontSize: 14,
       fontWeight: FontWeight.w700,
@@ -62,8 +64,8 @@ class SearchUserRow extends StatelessWidget {
             CircleAvatar(
               radius: 18,
               backgroundColor: AppTheme.surfaceBlue,
-              backgroundImage: avatar != null ? NetworkImage(avatar!) : null,
-              child: avatar == null
+              backgroundImage: avatarImage,
+              child: avatarImage == null
                   ? Text(
                       nickname.isNotEmpty ? nickname.characters.first : '友',
                       style: const TextStyle(

@@ -8,6 +8,7 @@ import '../data/api/comment_repository.dart';
 import '../domain/models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/comments/comment_composer_controller.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
@@ -15,7 +16,8 @@ import '../widgets/comments/emoji/sticker_catalog.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
-/// 楼中楼整页视图：根评论摘要 + 回复列表（cursor 分页）+ 底部回复栏。
+/// 楼中楼底部弹层：根评论摘要 + 回复列表（cursor 分页）+ 底部回复栏，
+/// 从帖子详情页底部弹出，样式对齐榜单的回复弹窗。
 class CommentThreadScreen extends StatefulWidget {
   const CommentThreadScreen({
     super.key,
@@ -43,7 +45,8 @@ class CommentThreadScreen extends StatefulWidget {
   final bool canComment;
   final String blockedMessage;
   final Future<Comment> Function(Comment target, String content) onReply;
-  final Future<Comment> Function(Comment target, CommentDraft draft)? onReplyDraft;
+  final Future<Comment> Function(Comment target, CommentDraft draft)?
+  onReplyDraft;
   final Future<void> Function(Comment comment)? onToggleLike;
   final Future<void> Function(Comment comment)? onToggleDislike;
   final ValueChanged<String>? onAuthorTap;
@@ -186,7 +189,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
     setState(() => highlightedReplyId = widget.focusReplyId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final context = GlobalObjectKey('reply:${widget.focusReplyId}').currentContext;
+      final context = GlobalObjectKey(
+        'reply:${widget.focusReplyId}',
+      ).currentContext;
       if (context != null) {
         Scrollable.ensureVisible(
           context,
@@ -245,7 +250,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
   }
 
   void _handleAuthorTap(String? authorId) {
-    if (authorId != null && authorId.isNotEmpty && !authorId.startsWith('guest')) {
+    if (authorId != null &&
+        authorId.isNotEmpty &&
+        !authorId.startsWith('guest')) {
       widget.onAuthorTap?.call(authorId);
     }
   }
@@ -267,10 +274,10 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
           ),
           body: Center(
             child: InteractiveViewer(
-              child: Image.network(
-                imageUrl,
+              child: AppNetworkImage(
+                url: imageUrl,
                 fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => const Icon(
+                errorBuilder: (_) => const Icon(
                   Icons.broken_image_outlined,
                   color: Colors.white54,
                   size: 64,
@@ -286,212 +293,252 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
   @override
   Widget build(BuildContext context) {
     final root = widget.rootComment;
-    final rootAuthor = root.author?.nickname ??
+    final rootAuthor =
+        root.author?.nickname ??
         (root.authorId.startsWith('guest') ? '游客' : '匿名用户');
-    final rootLevel = root.author?.level ??
+    final rootLevel =
+        root.author?.level ??
         (root.authorId.startsWith('guest') || root.authorId.isEmpty ? 0 : 1);
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: Text(
-          _replyTitle(root),
-          style: const TextStyle(
-            fontSize: 15.5,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Container(
-              color: Colors.white,
-              child: CustomScrollView(
-                controller: scrollController,
-                slivers: [
-                  // 根评论精简摘要
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF7FAFD),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            InkWell(
-                              onTap: () => _handleAuthorTap(root.authorId),
-                              borderRadius: BorderRadius.circular(13),
-                              child: _buildSmallAvatar(
-                                root.author?.avatar?.trim(),
-                                rootAuthor,
-                                size: 26,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  InkWell(
-                                    onTap: () => _handleAuthorTap(root.authorId),
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: Row(
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            rootAuthor,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontSize: 11.5,
-                                              fontWeight: FontWeight.w700,
-                                              color: AppTheme.textPrimary,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 0.5,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.levelBg,
-                                            borderRadius:
-                                                BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            'Lv.$rootLevel',
-                                            style: const TextStyle(
-                                              fontSize: 8.5,
-                                              fontWeight: FontWeight.w800,
-                                              color: AppTheme.levelText,
-                                            ),
-                                          ),
-                                        ),
-                                        if (_isPostAuthor(root)) ...[
-                                          const SizedBox(width: 4),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 4,
-                                              vertical: 0.5,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFFE8F1FD),
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: const Text(
-                                              '楼主',
-                                              style: TextStyle(
-                                                fontSize: 8.5,
-                                                fontWeight: FontWeight.w800,
-                                                color: Color(0xFF2F7FE0),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                        const Spacer(),
-                                        if (root.floor != null)
-                                          Text(
-                                            '${root.floor} 楼',
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              color: Color(0xFFA0AFBD),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (root.content.isNotEmpty) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      root.content,
-                                      style: const TextStyle(
-                                        fontSize: 12.5,
-                                        color: Color(0xFF243647),
-                                        height: 1.5,
-                                      ),
-                                    ),
-                                  ],
-                                  if (root.media.isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 6),
-                                      child: Wrap(
-                                        spacing: 6,
-                                        runSpacing: 6,
-                                        children: root.media.map((m) {
-                                          final url = m.previewUrl ?? '';
-                                          if (url.isEmpty) {
-                                            return const SizedBox.shrink();
-                                          }
-                                          return GestureDetector(
-                                            onTap: () => _openImagePreview(
-                                                context, m.originalUrl ?? url),
-                                            child: ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              child: Image.network(
-                                                url,
-                                                width: 72,
-                                                height: 72,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            ),
-                                          );
-                                        }).toList(),
-                                      ),
-                                    ),
-                                  if (root.stickerId != null &&
-                                      root.stickerId!.isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 6),
-                                      child: _buildStickerThumbnail(
-                                        root.stickerId!,
-                                        size: 56,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+    return Material(
+      color: Colors.white,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.82,
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD6E0E9),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 12, 10),
+                child: Row(
+                  children: [
+                    Text(
+                      _replyTitle(root),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
-                  ),
-                  const SliverToBoxAdapter(
-                    child: Divider(height: 1, color: AppTheme.border),
-                  ),
-                  ..._buildReplySlivers(),
-                ],
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ),
+              Expanded(
+                child: Container(
+                  color: Colors.white,
+                  child: CustomScrollView(
+                    controller: scrollController,
+                    slivers: [
+                      // 根评论精简摘要
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF7FAFD),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                InkWell(
+                                  onTap: () => _handleAuthorTap(root.authorId),
+                                  borderRadius: BorderRadius.circular(13),
+                                  child: _buildSmallAvatar(
+                                    root.author?.avatar?.trim(),
+                                    rootAuthor,
+                                    size: 26,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      InkWell(
+                                        onTap: () =>
+                                            _handleAuthorTap(root.authorId),
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                rootAuthor,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontSize: 11.5,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: AppTheme.textPrimary,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 4,
+                                                    vertical: 0.5,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.levelBg,
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                'Lv.$rootLevel',
+                                                style: const TextStyle(
+                                                  fontSize: 8.5,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppTheme.levelText,
+                                                ),
+                                              ),
+                                            ),
+                                            if (_isPostAuthor(root)) ...[
+                                              const SizedBox(width: 4),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 4,
+                                                      vertical: 0.5,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(
+                                                    0xFFE8F1FD,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: const Text(
+                                                  '楼主',
+                                                  style: TextStyle(
+                                                    fontSize: 8.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: Color(0xFF2F7FE0),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            const Spacer(),
+                                            if (root.floor != null)
+                                              Text(
+                                                '${root.floor} 楼',
+                                                style: const TextStyle(
+                                                  fontSize: 10,
+                                                  color: Color(0xFFA0AFBD),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (root.content.isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          root.content,
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                            color: Color(0xFF243647),
+                                            height: 1.5,
+                                          ),
+                                        ),
+                                      ],
+                                      if (root.media.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 6,
+                                          ),
+                                          child: Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: root.media.map((m) {
+                                              final url = m.previewUrl ?? '';
+                                              if (url.isEmpty) {
+                                                return const SizedBox.shrink();
+                                              }
+                                              return GestureDetector(
+                                                onTap: () => _openImagePreview(
+                                                  context,
+                                                  m.originalUrl ?? url,
+                                                ),
+                                                child: ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                  child: AppNetworkImage(
+                                                    url: url,
+                                                    width: 72,
+                                                    height: 72,
+                                                    fit: BoxFit.cover,
+                                                  ),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ),
+                                      if (root.stickerId != null &&
+                                          root.stickerId!.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 6,
+                                          ),
+                                          child: _buildStickerThumbnail(
+                                            root.stickerId!,
+                                            size: 56,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SliverToBoxAdapter(
+                        child: Divider(height: 1, color: AppTheme.border),
+                      ),
+                      ..._buildReplySlivers(),
+                    ],
+                  ),
+                ),
+              ),
 
-          // 底部回复栏（保留表情/贴纸/图片能力）
-          CommentReplyBar(
-            composerController: _composer,
-            target: currentReplyTarget,
-            sending: sending,
-            isAuthenticated: widget.isAuthenticated,
-            canComment: widget.canComment,
-            onRequireAuth: widget.onRequireAuth,
-            blockedMessage: widget.blockedMessage,
-            isSheetMode: true,
-            onFeedback: (msg) => ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(msg))),
-            onCancelTarget: () => setState(() => currentReplyTarget = null),
-            onSubmit: _sendReply,
+              // 底部回复栏（保留表情/贴纸/图片能力）
+              CommentReplyBar(
+                composerController: _composer,
+                target: currentReplyTarget,
+                sending: sending,
+                isAuthenticated: widget.isAuthenticated,
+                canComment: widget.canComment,
+                onRequireAuth: widget.onRequireAuth,
+                blockedMessage: widget.blockedMessage,
+                isSheetMode: true,
+                onFeedback: (msg) => ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(msg))),
+                onCancelTarget: () => setState(() => currentReplyTarget = null),
+                onSubmit: _sendReply,
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -522,7 +569,10 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  TextButton(onPressed: _loadFirstPage, child: const Text('点击重试')),
+                  TextButton(
+                    onPressed: _loadFirstPage,
+                    child: const Text('点击重试'),
+                  ),
                 ],
               ),
             ),
@@ -551,11 +601,8 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         sliver: SliverList.separated(
           itemCount: replies.length + 1,
-          separatorBuilder: (context, index) => const Divider(
-            height: 16,
-            thickness: 1,
-            color: Color(0xFFEFF3F6),
-          ),
+          separatorBuilder: (context, index) =>
+              const Divider(height: 16, thickness: 1, color: Color(0xFFEFF3F6)),
           itemBuilder: (context, index) {
             if (index == replies.length) {
               if (loadingMore) {
@@ -589,7 +636,8 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
 
             final reply = replies[index];
             final isHighlighted = highlightedReplyId == reply.id;
-            final author = reply.author?.nickname ??
+            final author =
+                reply.author?.nickname ??
                 (reply.authorId.startsWith('guest') ? '游客' : '匿名用户');
             final replyTo = reply.replyToUserId == null
                 ? null
@@ -600,8 +648,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
             return Container(
               key: GlobalObjectKey('reply:${reply.id}'),
               decoration: BoxDecoration(
-                color:
-                    isHighlighted ? const Color(0xFFEDF6FF) : Colors.transparent,
+                color: isHighlighted
+                    ? const Color(0xFFEDF6FF)
+                    : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
               ),
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -707,11 +756,13 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                 if (url.isEmpty) return const SizedBox.shrink();
                                 return GestureDetector(
                                   onTap: () => _openImagePreview(
-                                      context, m.originalUrl ?? url),
+                                    context,
+                                    m.originalUrl ?? url,
+                                  ),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(6),
-                                    child: Image.network(
-                                      url,
+                                    child: AppNetworkImage(
+                                      url: url,
                                       width: 80,
                                       height: 80,
                                       fit: BoxFit.cover,
@@ -892,19 +943,13 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
       child: SizedBox(
         width: size,
         height: size,
-        child: Image.network(
-          avatarUrl,
+        child: AppNetworkImage(
+          url: avatarUrl,
           fit: BoxFit.cover,
           width: size,
           height: size,
-          cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded || frame != null) {
-              return child;
-            }
-            return placeholder;
-          },
-          errorBuilder: (context, error, stackTrace) => placeholder,
+          placeholder: (_) => placeholder,
+          errorBuilder: (_) => placeholder,
         ),
       ),
     );

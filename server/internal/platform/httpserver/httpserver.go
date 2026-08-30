@@ -94,7 +94,7 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 			WriteAppError(w, r, AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
 		}
 	})
-	var root http.Handler = router
+	var root http.Handler = gzipMiddleware(router)
 	if options.RateLimitEnabled {
 		root = newRateLimiter(options.RateLimitStore).middleware(root)
 	}

@@ -1,7 +1,7 @@
 // ranking-import 把杯友酱公开榜单快照导入本项目数据库。
 //
 // 数据来源：scripts/sync_beiyoujiang_rankings.ps1 生成的
-// assets/ranking/beiyoujiang_snapshot.json（榜单、评价、配图均已在
+// server/seeds/beiyoujiang_snapshot.json（榜单、评价、配图均已在
 // 本地缓存）。导入器只负责幂等落库：
 //   - ranking_toys + 按视图名次（ranking_toy_rankings）
 //   - 封面/主图与评价配图 → media_assets + 对象存储
@@ -9,7 +9,7 @@
 //   - 想冲数、评分汇总、评分分布保留“源站基线 + 本站用户增量”
 //
 // 用法：MEDIA_STORAGE_DIR=... DATABASE_URL=... go run ./cmd/ranking-import \
-//   -snapshot assets/ranking/beiyoujiang_snapshot.json -assets-root .
+//   -snapshot server/seeds/beiyoujiang_snapshot.json -assets-root .
 package main
 
 import (
@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/media"
 	"github.com/zhouwu97/luntan/server/internal/platform/database"
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
@@ -162,7 +163,7 @@ type importer struct {
 }
 
 func main() {
-	snapshotPath := flag.String("snapshot", "assets/ranking/beiyoujiang_snapshot.json", "快照 JSON 路径")
+	snapshotPath := flag.String("snapshot", "server/seeds/beiyoujiang_snapshot.json", "快照 JSON 路径")
 	assetsRoot := flag.String("assets-root", ".", "快照内 asset_path 的根目录")
 	flag.Parse()
 
@@ -318,14 +319,14 @@ func (imp *importer) importToys(ctx context.Context, snap *snapshot, toys map[st
 	heroMedia := map[string]string{}
 	for id, entry := range toys {
 		if entry.toy.AssetPath != "" {
-			mediaID, err := imp.importMedia(ctx, entry.toy.AssetPath)
+			mediaID, err := imp.importMedia(ctx, entry.toy.AssetPath, "detail")
 			if err != nil {
 				return fmt.Errorf("封面图导入失败（toy %s）：%w", id, err)
 			}
 			coverMedia[id] = mediaID
 		}
 		if entry.toy.HeroAssetPath != "" {
-			mediaID, err := imp.importMedia(ctx, entry.toy.HeroAssetPath)
+			mediaID, err := imp.importMedia(ctx, entry.toy.HeroAssetPath, "detail")
 			if err != nil {
 				return fmt.Errorf("主图导入失败（toy %s）：%w", id, err)
 			}
@@ -526,7 +527,7 @@ func (imp *importer) importReviews(ctx context.Context, snap *snapshot, toys map
 		for _, review := range reviews {
 			ids := make([]string, 0, len(review.AssetPaths))
 			for _, path := range review.AssetPaths {
-				mediaID, err := imp.importMedia(ctx, path)
+				mediaID, err := imp.importMedia(ctx, path, "detail")
 				if err != nil {
 					return counts, fmt.Errorf("评价配图导入失败（review %d）：%w", review.ID, err)
 				}
@@ -547,7 +548,7 @@ func (imp *importer) importReviews(ctx context.Context, snap *snapshot, toys map
 			continue
 		}
 		if user.AvatarAssetPath != "" {
-			mediaID, err := imp.importMedia(ctx, user.AvatarAssetPath)
+			mediaID, err := imp.importMedia(ctx, user.AvatarAssetPath, "thumb")
 			if err != nil {
 				return counts, fmt.Errorf("头像导入失败（user %d）：%w", user.ID, err)
 			}
@@ -755,7 +756,13 @@ func (imp *importer) baselineRatingDistribution(ctx context.Context, toyID strin
 	return nil
 }
 
-func (imp *importer) importMedia(ctx context.Context, relPath string) (string, error) {
+// importMedia 把快照引用的本地缓存图片导入对象存储并登记媒体资产。
+// 可解码图片统一生成 original/detail/thumb 三个 JPEG 变体（与 worker 的
+// media_variants 写入约定一致），并把 media_assets.object_key 指向展示用
+// 变体对象（displayVariant 为 "thumb" 或 "detail"），客户端不必下载多兆
+// 原图；源对象仍保留并登记为 source 变体。无法解码的文件按旧行为只登记
+// 源对象。
+func (imp *importer) importMedia(ctx context.Context, relPath, displayVariant string) (string, error) {
 	relPath = strings.TrimSpace(relPath)
 	if relPath == "" {
 		return "", nil
@@ -768,35 +775,131 @@ func (imp *importer) importMedia(ctx context.Context, relPath string) (string, e
 	if err != nil {
 		return "", err
 	}
-	objectKey := defaultObjectPrefix + filepath.Base(relPath)
-	var mediaID string
-	err = imp.db.QueryRowContext(ctx, `SELECT id FROM media_assets WHERE object_key = $1`, objectKey).Scan(&mediaID)
-	if errors.Is(err, sql.ErrNoRows) {
-		mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(objectKey)))
-		if mimeType == "" {
-			mimeType = "application/octet-stream"
+	baseName := filepath.Base(relPath)
+	rawKey := defaultObjectPrefix + baseName
+	rawMime := mime.TypeByExtension(strings.ToLower(filepath.Ext(rawKey)))
+	if rawMime == "" {
+		rawMime = "application/octet-stream"
+	}
+	sum := sha256.Sum256(data)
+	rawSHA := hex.EncodeToString(sum[:])
+	rawW, rawH := 0, 0
+	if config, _, configErr := image.DecodeConfig(bytes.NewReader(data)); configErr == nil {
+		rawW, rawH = config.Width, config.Height
+	}
+
+	var proc *media.ProcessResult
+	if strings.HasPrefix(rawMime, "image/") {
+		if processed, procErr := media.ProcessImage(bytes.NewReader(data)); procErr != nil {
+			log.Printf("图片处理失败 %s：%v", relPath, procErr)
+		} else {
+			proc = processed
 		}
-		width, height := 0, 0
-		if config, _, configErr := image.DecodeConfig(bytes.NewReader(data)); configErr == nil {
-			width, height = config.Width, config.Height
+	}
+	displayKey, displayMime := rawKey, rawMime
+	displayW, displayH, displaySize := rawW, rawH, int64(len(data))
+	displaySHA := rawSHA
+	if proc != nil {
+		variant := proc.Detail
+		if displayVariant == "thumb" {
+			variant = proc.Thumb
 		}
-		sum := sha256.Sum256(data)
+		displayKey = variantObjectKey(rawKey, variant.Variant)
+		displayMime = variant.MimeType
+		displayW, displayH = variant.Width, variant.Height
+		displaySize = variant.SizeBytes
+		displaySHA = variant.SHA256
+	}
+
+	var mediaID, currentKey string
+	err = imp.db.QueryRowContext(ctx, `
+		SELECT id, object_key FROM media_assets
+		WHERE owner_id = $1 AND original_name = $2 AND deleted_at IS NULL`,
+		importerUserID, baseName).Scan(&mediaID, &currentKey)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		mediaID = "mda-" + randomHex(12)
-		if err := imp.store.Put(ctx, objectKey, mimeType, bytes.NewReader(data), int64(len(data))); err != nil {
-			return "", fmt.Errorf("对象存储写入失败 %s：%w", objectKey, err)
+		currentKey = ""
+		if err := imp.store.Put(ctx, rawKey, rawMime, bytes.NewReader(data), int64(len(data))); err != nil {
+			return "", fmt.Errorf("对象存储写入失败 %s：%w", rawKey, err)
 		}
 		if _, err := imp.db.ExecContext(ctx, `
 			INSERT INTO media_assets (id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, completed_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'ready', now())`,
-			mediaID, importerUserID, objectKey, filepath.Base(objectKey), mimeType,
-			width, height, int64(len(data)), hex.EncodeToString(sum[:])); err != nil {
+			mediaID, importerUserID, displayKey, baseName, displayMime,
+			displayW, displayH, displaySize, displaySHA); err != nil {
 			return "", err
 		}
-	} else if err != nil {
+	case err != nil:
+		return "", err
+	case currentKey != displayKey:
+		// 旧版导入只登记原图；重跑导入时把展示键与描述信息升级为变体。
+		if _, err := imp.db.ExecContext(ctx, `
+			UPDATE media_assets SET object_key = $2, mime_type = $3, width = $4, height = $5,
+			       size = $6, sha256 = $7, updated_at = now()
+			WHERE id = $1`,
+			mediaID, displayKey, displayMime, displayW, displayH, displaySize, displaySHA); err != nil {
+			return "", err
+		}
+	}
+
+	if err := imp.ensureMediaVariants(ctx, mediaID, rawKey, rawMime, rawW, rawH, int64(len(data)), rawSHA, proc); err != nil {
 		return "", err
 	}
 	imp.mediaIDs[relPath] = mediaID
 	return mediaID, nil
+}
+
+func variantObjectKey(rawKey, variant string) string {
+	return strings.TrimSuffix(rawKey, filepath.Ext(rawKey)) + "_" + variant + ".jpg"
+}
+
+// ensureMediaVariants 幂等补齐 media_variants：四个核心变体已就绪则跳过
+// （避免重跑导入反复上传对象），否则上传变体对象并逐行 UPSERT。
+func (imp *importer) ensureMediaVariants(ctx context.Context, mediaID, rawKey, rawMime string, rawW, rawH int, rawSize int64, rawSHA string, proc *media.ProcessResult) error {
+	var readyCount int
+	if err := imp.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM media_variants
+		WHERE media_id = $1 AND status = 'ready'
+		  AND variant IN ('source', 'original', 'detail', 'thumb')`, mediaID).Scan(&readyCount); err != nil {
+		return err
+	}
+	variants := []media.ProcessedVariant{{
+		Variant: "source", MimeType: rawMime, Width: rawW, Height: rawH,
+		SizeBytes: rawSize, SHA256: rawSHA,
+	}}
+	if proc != nil {
+		variants = append(variants, proc.Original, proc.Detail, proc.Thumb)
+	}
+	if readyCount >= len(variants) {
+		return nil
+	}
+	for _, variant := range variants {
+		key := rawKey
+		if variant.Variant != "source" {
+			key = variantObjectKey(rawKey, variant.Variant)
+			if err := imp.store.Put(ctx, key, variant.MimeType, bytes.NewReader(variant.Data), variant.SizeBytes); err != nil {
+				return fmt.Errorf("对象存储写入失败 %s：%w", key, err)
+			}
+		}
+		if _, err := imp.db.ExecContext(ctx, `
+			INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ready', $9, $9)
+			ON CONFLICT (media_id, variant) DO UPDATE SET
+				object_key = EXCLUDED.object_key,
+				mime_type = EXCLUDED.mime_type,
+				width = EXCLUDED.width,
+				height = EXCLUDED.height,
+				size_bytes = EXCLUDED.size_bytes,
+				sha256 = EXCLUDED.sha256,
+				status = 'ready',
+				updated_at = EXCLUDED.updated_at`,
+			mediaID, variant.Variant, key, variant.MimeType, variant.Width, variant.Height,
+			variant.SizeBytes, variant.SHA256, time.Now().UTC()); err != nil {
+			return fmt.Errorf("登记媒体变体 %s/%s 失败：%w", mediaID, variant.Variant, err)
+		}
+	}
+	return nil
 }
 
 var (

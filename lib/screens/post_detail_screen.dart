@@ -308,73 +308,79 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   void _openReplyThread(Comment comment, {String? focusReplyId}) {
     final post = widget.controller.state.detail?.post;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CommentThreadScreen(
-          rootComment: comment,
-          repository: widget.commentsController.repository,
-          postAuthorId: post?.authorId,
-          focusReplyId: focusReplyId,
-          isAuthenticated: widget.isAuthenticated,
-          onRequireAuth: widget.onRequireAuth,
-          canComment: widget.canComment ?? widget.isAuthenticated,
-          blockedMessage: _commentBlockedMessage,
-          onAuthorTap: widget.onOpenUserId,
-          onReplyDraft: (target, draft) async {
-            List<String> mediaIds = const [];
-            if (draft.localImage != null) {
-              final file = draft.localImage!;
-              final bytes = await file.readAsBytes();
-              final lower = file.name.toLowerCase();
-              final mimeType = lower.endsWith('.png')
-                  ? 'image/png'
-                  : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-              final digest = sha256.convert(bytes).toString();
-              if (widget.publishRepository != null) {
-                final ticket = await widget.publishRepository!.requestMediaUpload(
-                  fileName: file.name,
-                  mimeType: mimeType,
-                  size: bytes.length,
-                  sha256: digest,
-                );
-                await widget.publishRepository!.uploadMedia(
-                  ticket: ticket,
-                  bytes: bytes,
-                  size: bytes.length,
-                  sha256: digest,
-                );
-                mediaIds = [ticket.mediaId];
-              } else {
-                mediaIds = [file.path];
-              }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CommentThreadScreen(
+        rootComment: comment,
+        repository: widget.commentsController.repository,
+        postAuthorId: post?.authorId,
+        focusReplyId: focusReplyId,
+        isAuthenticated: widget.isAuthenticated,
+        onRequireAuth: widget.onRequireAuth,
+        canComment: widget.canComment ?? widget.isAuthenticated,
+        blockedMessage: _commentBlockedMessage,
+        onAuthorTap: widget.onOpenUserId,
+        onReplyDraft: (target, draft) async {
+          List<String> mediaIds = const [];
+          if (draft.localImage != null) {
+            final file = draft.localImage!;
+            final bytes = await file.readAsBytes();
+            final lower = file.name.toLowerCase();
+            final mimeType = lower.endsWith('.png')
+                ? 'image/png'
+                : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+            final digest = sha256.convert(bytes).toString();
+            if (widget.publishRepository != null) {
+              final ticket = await widget.publishRepository!.requestMediaUpload(
+                fileName: file.name,
+                mimeType: mimeType,
+                size: bytes.length,
+                sha256: digest,
+              );
+              await widget.publishRepository!.uploadMedia(
+                ticket: ticket,
+                bytes: bytes,
+                size: bytes.length,
+                sha256: digest,
+              );
+              mediaIds = [ticket.mediaId];
+            } else {
+              mediaIds = [file.path];
             }
-            final stickerId = draft.sticker?.id;
-            return widget.commentsController.replyTo(
-              target,
-              draft.text,
-              replyToUserId: target.authorId,
-              mediaIds: mediaIds,
-              stickerId: stickerId,
-            );
-          },
-          onReply: (target, content) => widget.commentsController.replyTo(
+          }
+          final stickerId = draft.sticker?.id;
+          return widget.commentsController.replyTo(
             target,
-            content,
+            draft.text,
             replyToUserId: target.authorId,
-          ),
-          onToggleLike: (reply) => _likeComment(reply),
-          onToggleDislike: (reply) => _dislikeComment(reply),
+            mediaIds: mediaIds,
+            stickerId: stickerId,
+          );
+        },
+        onReply: (target, content) => widget.commentsController.replyTo(
+          target,
+          content,
+          replyToUserId: target.authorId,
         ),
+        onToggleLike: (reply) => _likeComment(reply),
+        onToggleDislike: (reply) => _dislikeComment(reply),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = widget.controller.state;
+    final detailPostId = state.detail?.post.id;
+    // 评论点赞仍走全局通知；本帖点赞/收藏走帖子维度的细粒度通知。
     final listenables = <Listenable>[
       widget.controller,
       widget.commentsController,
       widget.interactionController,
+      if (detailPostId != null)
+        widget.interactionController.interactionsFor(detailPostId),
     ];
 
     return AnimatedBuilder(
@@ -670,64 +676,76 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     if (allComments.isNotEmpty)
                       SliverPadding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
-                        sliver: SliverToBoxAdapter(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(
-                                AppTheme.radiusMedium,
-                              ),
-                              border: Border.all(color: AppTheme.border),
-                            ),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: allComments.length,
-                              separatorBuilder: (context, index) =>
-                                  const Divider(
-                                    height: 1,
-                                    thickness: 1,
-                                    color: Color(0xFFEDF2F6),
-                                  ),
-                              itemBuilder: (context, index) {
-                                final comment = allComments[index];
-                                final isHighlighted =
-                                    highlightedCommentId == comment.id;
-
-                                return CommentItem(
-                                  key: GlobalObjectKey('comment:${comment.id}'),
-                                  comment: comment,
-                                  floor: index + 2,
-                                  replies: comment.replyPreview,
-                                  isHighlighted: isHighlighted,
-                                  isPostAuthor:
-                                      post.authorId == comment.authorId,
-                                  onAuthorTap: widget.onOpenUserId,
-                                  onReply: () {
-                                    setState(() => replyTarget = comment);
-                                    _composerController.openReply(
-                                      parentCommentId: comment.id,
-                                      replyToUserId: comment.authorId,
-                                      replyToName: comment.author?.nickname,
-                                    );
-                                  },
-                                  onReplyTo: (target) {
-                                    setState(() => replyTarget = target);
-                                    _composerController.openReply(
-                                      parentCommentId: target.id,
-                                      replyToUserId: target.authorId,
-                                      replyToName: target.author?.nickname,
-                                    );
-                                  },
-                                  onLike: () => _likeComment(comment),
-                                  onDislike: () => _dislikeComment(comment),
-                                  onMore: () => _showCommentMenu(comment),
-                                  onViewAllReplies: () =>
-                                      _openReplyThread(comment),
-                                );
-                              },
-                            ),
+                        sliver: SliverList.separated(
+                          itemCount: allComments.length,
+                          separatorBuilder: (context, index) => const Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: Color(0xFFEDF2F6),
                           ),
+                          itemBuilder: (context, index) {
+                            final comment = allComments[index];
+                            final isHighlighted =
+                                highlightedCommentId == comment.id;
+                            final isFirst = index == 0;
+                            final isLast = index == allComments.length - 1;
+                            final side = BorderSide(color: AppTheme.border);
+
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                border: Border(
+                                  top: isFirst ? side : BorderSide.none,
+                                  left: side,
+                                  right: side,
+                                  bottom: isLast ? side : BorderSide.none,
+                                ),
+                                borderRadius: BorderRadius.vertical(
+                                  top: isFirst
+                                      ? const Radius.circular(
+                                          AppTheme.radiusMedium,
+                                        )
+                                      : Radius.zero,
+                                  bottom: isLast
+                                      ? const Radius.circular(
+                                          AppTheme.radiusMedium,
+                                        )
+                                      : Radius.zero,
+                                ),
+                              ),
+                              child: CommentItem(
+                                key: GlobalObjectKey('comment:${comment.id}'),
+                                comment: comment,
+                                floor: index + 2,
+                                replies: comment.replyPreview,
+                                isHighlighted: isHighlighted,
+                                isPostAuthor:
+                                    post.authorId == comment.authorId,
+                                onAuthorTap: widget.onOpenUserId,
+                                onReply: () {
+                                  setState(() => replyTarget = comment);
+                                  _composerController.openReply(
+                                    parentCommentId: comment.id,
+                                    replyToUserId: comment.authorId,
+                                    replyToName: comment.author?.nickname,
+                                  );
+                                },
+                                onReplyTo: (target) {
+                                  setState(() => replyTarget = target);
+                                  _composerController.openReply(
+                                    parentCommentId: target.id,
+                                    replyToUserId: target.authorId,
+                                    replyToName: target.author?.nickname,
+                                  );
+                                },
+                                onLike: () => _likeComment(comment),
+                                onDislike: () => _dislikeComment(comment),
+                                onMore: () => _showCommentMenu(comment),
+                                onViewAllReplies: () =>
+                                    _openReplyThread(comment),
+                              ),
+                            );
+                          },
                         ),
                       ),
 

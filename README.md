@@ -156,7 +156,7 @@ pwsh scripts/sync_beiyoujiang_rankings.ps1
 # 2) 导入榜单商品、评价、配图与各筛选视图名次：写 ranking_* 与 media_assets。
 cd server
 go run ./cmd/ranking-import \
-  -snapshot ../assets/ranking/beiyoujiang_snapshot.json \
+  -snapshot seeds/beiyoujiang_snapshot.json \
   -assets-root ..
 cd ..
 

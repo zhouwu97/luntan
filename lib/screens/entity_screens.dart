@@ -267,7 +267,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         userId: profile.id,
         active: !profile.isFollowing,
       );
-      if (mounted) setState(() => _future = _load());
+      if (mounted) setState(() { _future = _load(); });
     } catch (error) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '关注操作失败'));
@@ -290,7 +290,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       await widget.repository.setBlock(userId: profile.id, active: active);
       if (mounted) {
         widget.onFeedback(active ? '已拉黑该用户' : '已取消拉黑');
-        setState(() => _future = _load());
+        setState(() { _future = _load(); });
       }
     } catch (error) {
       if (mounted) {
@@ -439,9 +439,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       );
       if (mounted) {
         widget.onFeedback(isAvatar ? '头像已更新' : '主页背景已更新');
-        setState(() => _future = _load());
+        setState(() { _future = _load(); });
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('changeProfileImage failed: $error');
+      debugPrint('$stackTrace');
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '图片上传失败，请重试'));
       }
@@ -474,7 +476,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   ),
                   const SizedBox(height: 8),
                   TextButton(
-                    onPressed: () => setState(() => _future = _load()),
+                    onPressed: () => setState(() { _future = _load(); }),
                     child: const Text('重试'),
                   ),
                 ],
@@ -1909,7 +1911,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       } else {
         await mutation.setFollow(communityId: community.id, active: active);
       }
-      if (mounted) setState(() => _future = _load());
+      if (mounted) setState(() { _future = _load(); });
     } catch (error) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '操作失败'));

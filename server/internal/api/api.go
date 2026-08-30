@@ -177,6 +177,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/admin/recommendations/"):
 		postID := strings.TrimPrefix(path, "/api/v1/admin/recommendations/")
 		s.removeHomeRecommendation(w, r, postID)
+		return
 	case r.Method == http.MethodGet && path == "/api/v1/admin/activities":
 		s.listAdminActivities(w, r)
 		return
@@ -705,7 +706,9 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user.AccountType != "guest" {
-		_ = s.claimDailyLoginExperience(r.Context(), user.ID)
+		if err := s.claimDailyLoginExperience(r.Context(), user.ID); err != nil {
+			log.Printf("daily login experience claim failed: user_id=%s err=%v", user.ID, err)
+		}
 	}
 	if err := s.populateUserCapabilities(r.Context(), &user); err != nil {
 		writeInternalError(w, r, err)

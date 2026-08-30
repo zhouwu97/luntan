@@ -76,10 +76,12 @@ func feedSortColumns(sort string) (scoreExpr, orderBy string) {
 }
 
 func feedSortColumnsAt(sort, asOfPlaceholder string) (scoreExpr, orderBy string) {
-	ageHours := "EXTRACT(EPOCH FROM (" + asOfPlaceholder + " - p.published_at)) / 3600.0"
+	ageHours := "GREATEST(EXTRACT(EPOCH FROM (" + asOfPlaceholder + " - p.published_at)) / 3600.0, 0.0)"
 	switch sort {
 	case "hot":
-		scoreExpr = "((p.like_count + p.comment_count + 2 * p.bookmark_count + p.share_count) / POWER(" + ageHours + " + 2, 1.5))::double precision"
+		// 参考 SYLUlive / MCP 热门帖子加权衰减算法：
+		// 评论权重 3.0、点赞 2.0、收藏 2.0、分享 3.0、浏览 0.05，底分 1.0，时间引力衰减指数 1.5
+		scoreExpr = "((p.comment_count * 3.0 + p.like_count * 2.0 + p.bookmark_count * 2.0 + p.share_count * 3.0 + p.view_count * 0.05 + 1.0) / POWER(" + ageHours + " + 2.0, 1.5))::double precision"
 		return scoreExpr, "ORDER BY (" + scoreExpr + ") DESC, p.published_at DESC, p.id DESC"
 	case "featured":
 		scoreExpr = "(p.bookmark_count * 5 + p.like_count * 3 + p.comment_count * 2 + p.share_count * 2)::double precision"

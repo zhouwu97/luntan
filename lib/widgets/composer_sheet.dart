@@ -1,11 +1,14 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../controllers/publish_controller.dart';
 import '../data/composer_draft_storage.dart';
@@ -82,6 +85,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   bool _submitted = false;
   bool _keepDraftMedia = false;
   bool _closing = false;
+  bool _canPop = false;
   Timer? _draftSaveTimer;
 
   static const int maxImages = 9;
@@ -139,6 +143,20 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     return communities.isEmpty ? null : communities.first.id;
   }
 
+  Future<Directory?> _getDraftDirectory() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory()
+          .timeout(const Duration(milliseconds: 200));
+      final dir = Directory(p.join(appDir.path, 'composer_drafts'));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return dir;
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _applyDraft(ComposerDraftSnapshot draft) {
     titleController.text = draft.title;
     bodyController.text = draft.body;
@@ -149,6 +167,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     for (var index = 0; index < draft.localImagePaths.length; index++) {
       final path = draft.localImagePaths[index].trim();
       if (path.isEmpty) continue;
+      final file = File(path);
+      if (!file.existsSync()) continue;
       final image = _DraftImage(file: XFile(path));
       if (index < draft.uploadedMediaIds.length) {
         image.mediaId = draft.uploadedMediaIds[index];
@@ -333,6 +353,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   Future<void> _clearDraft() async {
     _draftSaveTimer?.cancel();
     await _draftStorage?.clear();
+    try {
+      final draftDir = await _getDraftDirectory();
+      if (draftDir != null && await draftDir.exists()) {
+        await draftDir.delete(recursive: true);
+      }
+    } catch (_) {}
   }
 
   Future<void> _closeEditor() async {
@@ -429,9 +455,23 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     if (submitting || images.length >= maxImages) return;
     final files = await ImagePicker().pickMultiImage(imageQuality: 92);
     if (!mounted || files.isEmpty) return;
+    final draftDir = await _getDraftDirectory();
     final additions = <_DraftImage>[];
     setState(() {
       for (final file in files.take(maxImages - images.length)) {
+        if (draftDir != null) {
+          final ext = p.extension(file.path);
+          final uniqueName =
+              'draft_${DateTime.now().millisecondsSinceEpoch}_${images.length + additions.length}$ext';
+          final savedPath = p.join(draftDir.path, uniqueName);
+          try {
+            File(file.path).copySync(savedPath);
+            final img = _DraftImage(file: XFile(savedPath));
+            images.add(img);
+            additions.add(img);
+            continue;
+          } catch (_) {}
+        }
         final image = _DraftImage(file: file);
         images.add(image);
         additions.add(image);
@@ -578,9 +618,16 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope<void>(
-      canPop: false,
+      canPop: _canPop,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) unawaited(_closeEditor());
+        if (didPop) return;
+        if (_canPop || _submitted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) Navigator.of(context).pop();
+          });
+          return;
+        }
+        unawaited(_closeEditor());
       },
       child: Scaffold(
         backgroundColor: AppTheme.background,
@@ -776,6 +823,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                 ? null
                 : (widget.enableSampleMedia ? _addSampleImage : _pickImages),
             count: selectedMedia.length,
+            label: widget.enableSampleMedia ? '添加示例图' : '添加图片',
           );
         }
       },
@@ -1016,10 +1064,15 @@ class _DraftImageGridThumb extends StatelessWidget {
 }
 
 class _AddImageGridTile extends StatelessWidget {
-  const _AddImageGridTile({required this.onTap, this.count = 0});
+  const _AddImageGridTile({
+    required this.onTap,
+    this.count = 0,
+    this.label = '添加图片',
+  });
 
   final VoidCallback? onTap;
   final int count;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -1034,16 +1087,16 @@ class _AddImageGridTile extends StatelessWidget {
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(
+          children: [
+            const Icon(
               Icons.add_photo_alternate_outlined,
               size: 28,
               color: AppTheme.textSecondary,
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
-              '添加图片',
-              style: TextStyle(
+              label,
+              style: const TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,

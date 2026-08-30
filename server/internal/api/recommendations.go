@@ -132,6 +132,14 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		writeInternalError(w, r, err)
 		return
 	}
+	if status != "published" || (moderation != "normal" && moderation != "approved") {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusBadRequest,
+			Code:    "POST_NOT_RECOMMENDABLE",
+			Message: "帖子未公开发布或处于审核/隐藏状态，不可加入首页推荐",
+		})
+		return
+	}
 
 	position := 0
 	if input.Position != nil {

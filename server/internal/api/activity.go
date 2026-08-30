@@ -39,6 +39,49 @@ type createActivityInput struct {
 	Status       string     `json:"status"`
 }
 
+func validateActivityTimes(startAt, endAt *time.Time) *httpserver.AppError {
+	if startAt != nil && endAt != nil {
+		if !endAt.After(*startAt) {
+			return &httpserver.AppError{
+				Status:  http.StatusBadRequest,
+				Code:    "INVALID_ACTIVITY_TIME",
+				Message: "活动结束时间必须晚于开始时间",
+			}
+		}
+	}
+	return nil
+}
+
+func validateActivityStatus(status string) (string, *httpserver.AppError) {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "draft", nil
+	}
+	switch status {
+	case "draft", "upcoming", "active", "ended", "offline":
+		return status, nil
+	default:
+		return "", &httpserver.AppError{
+			Status:  http.StatusBadRequest,
+			Code:    "INVALID_ACTIVITY_STATUS",
+			Message: "活动状态无效",
+		}
+	}
+}
+
+func deriveActivityStatus(status string, startAt, endAt *time.Time, now time.Time) string {
+	if status == "draft" || status == "offline" {
+		return status
+	}
+	if startAt != nil && now.Before(*startAt) {
+		return "upcoming"
+	}
+	if endAt != nil && !now.Before(*endAt) {
+		return "ended"
+	}
+	return "active"
+}
+
 // listAdminActivities 管理员查看活动列表（支持状态筛选）。
 func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
@@ -79,6 +122,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	now := time.Now().UTC()
 	items := make([]activityResponse, 0)
 	for rows.Next() {
 		var item activityResponse
@@ -107,6 +151,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		if publishedAt.Valid {
 			item.PublishedAt = &publishedAt.Time
 		}
+		item.Status = deriveActivityStatus(item.Status, item.StartAt, item.EndAt, now)
 		items = append(items, item)
 	}
 
@@ -146,14 +191,15 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = "draft"
+	if timeErr := validateActivityTimes(input.StartAt, input.EndAt); timeErr != nil {
+		httpserver.WriteAppError(w, r, *timeErr)
+		return
 	}
-	switch status {
-	case "draft", "upcoming", "active", "ended", "offline":
-	default:
-		status = "draft"
+
+	status, statusErr := validateActivityStatus(input.Status)
+	if statusErr != nil {
+		httpserver.WriteAppError(w, r, *statusErr)
+		return
 	}
 
 	var publishedAt *time.Time
@@ -222,9 +268,15 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 
-	status := strings.TrimSpace(input.Status)
-	if status == "" {
-		status = "draft"
+	if timeErr := validateActivityTimes(input.StartAt, input.EndAt); timeErr != nil {
+		httpserver.WriteAppError(w, r, *timeErr)
+		return
+	}
+
+	status, statusErr := validateActivityStatus(input.Status)
+	if statusErr != nil {
+		httpserver.WriteAppError(w, r, *statusErr)
+		return
 	}
 
 	coverMediaID := strings.TrimSpace(input.CoverMediaID)
@@ -391,6 +443,7 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	now := time.Now().UTC()
 	items := make([]activityResponse, 0)
 	for rows.Next() {
 		var item activityResponse
@@ -419,6 +472,7 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 		if publishedAt.Valid {
 			item.PublishedAt = &publishedAt.Time
 		}
+		item.Status = deriveActivityStatus(item.Status, item.StartAt, item.EndAt, now)
 		items = append(items, item)
 	}
 

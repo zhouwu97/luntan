@@ -94,6 +94,11 @@ func TestValidateProductionRejectsPlainTextClientFacingURLs(t *testing.T) {
 			mutate:  func(c *Config) { c.AppReleasePublicBaseURL = "http://download.example.com" },
 			wantErr: "APP_RELEASE_PUBLIC_BASE_URL must use HTTPS in production",
 		},
+		{
+			name:    "app release download base url over http",
+			mutate:  func(c *Config) { c.AppReleaseDownloadBaseURL = "http://cdn.example.com" },
+			wantErr: "APP_RELEASE_DOWNLOAD_BASE_URL must use HTTPS in production",
+		},
 	}
 
 	for _, tc := range cases {

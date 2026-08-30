@@ -38,6 +38,9 @@ type AppRelease struct {
 	SHA256        string
 	PublishedAt   time.Time
 	PublicBaseURL string
+	// DownloadBaseURL 是可选的独立静态下载/CDN 根地址。配置后，更新接口
+	// 返回 /releases/<version>/<file>，而旧的 API 下载路由继续保留兼容性。
+	DownloadBaseURL string
 }
 
 type appReleaseManifest struct {
@@ -53,13 +56,16 @@ type appReleaseManifest struct {
 
 // LoadAppRelease 读取并校验发布清单。manifestPath 为空表示未启用应用分发；
 // 一旦显式配置，任何格式、路径或摘要错误都会阻止服务以半可用状态启动。
-func LoadAppRelease(manifestPath, publicBaseURL string) (*AppRelease, error) {
+func LoadAppRelease(manifestPath, publicBaseURL, downloadBaseURL string) (*AppRelease, error) {
 	manifestPath = strings.TrimSpace(manifestPath)
 	if manifestPath == "" {
 		return nil, nil
 	}
 	if err := validateReleasePublicBaseURL(publicBaseURL); err != nil {
 		return nil, err
+	}
+	if err := validateReleasePublicBaseURL(downloadBaseURL); err != nil {
+		return nil, fmt.Errorf("validate app release download base URL: %w", err)
 	}
 	absoluteManifestPath, err := filepath.Abs(manifestPath)
 	if err != nil {
@@ -130,6 +136,7 @@ func LoadAppRelease(manifestPath, publicBaseURL string) (*AppRelease, error) {
 		SHA256:                      actualSHA256,
 		PublishedAt:                 publishedAt.UTC(),
 		PublicBaseURL:               strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"),
+		DownloadBaseURL:             strings.TrimRight(strings.TrimSpace(downloadBaseURL), "/"),
 	}, nil
 }
 
@@ -173,11 +180,26 @@ func validateAppReleaseManifest(manifest appReleaseManifest) error {
 }
 
 func (r *AppRelease) downloadURL() string {
+	if r == nil {
+		return ""
+	}
+	if r.DownloadBaseURL != "" {
+		return r.DownloadBaseURL + r.staticDownloadPath()
+	}
 	path := r.downloadPath()
-	if r == nil || r.PublicBaseURL == "" {
+	if r.PublicBaseURL == "" {
 		return path
 	}
 	return r.PublicBaseURL + path
+}
+
+// staticDownloadPath 使用与发布清单相同的版本隔离目录，供 Nginx/CDN
+// 直接提供不可变 APK；文件名来自已通过清单路径校验的 basename。
+func (r *AppRelease) staticDownloadPath() string {
+	if r == nil {
+		return ""
+	}
+	return "/releases/" + strconv.FormatInt(r.VersionCode, 10) + "/" + url.PathEscape(r.FileName)
 }
 
 // downloadPath 带版本号，允许 CDN 长期缓存但不会把旧 APK 返回给新版本。

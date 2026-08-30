@@ -71,7 +71,11 @@ func main() {
 		os.Exit(1)
 	}
 	apiHandler := api.NewHandlerWithMail(db, sender, cfg.AppEnv)
-	appRelease, err := httpserver.LoadAppRelease(cfg.AppReleaseManifestPath, cfg.AppReleasePublicBaseURL)
+	appRelease, err := httpserver.LoadAppRelease(
+		cfg.AppReleaseManifestPath,
+		cfg.AppReleasePublicBaseURL,
+		cfg.AppReleaseDownloadBaseURL,
+	)
 	if err != nil {
 		logger.Error("app_release_configuration_failed", "error", err.Error())
 		os.Exit(1)

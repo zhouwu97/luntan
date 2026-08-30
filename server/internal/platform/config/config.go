@@ -24,6 +24,7 @@ type Config struct {
 	MetricsAllowedCIDRs        []string
 	AppReleaseManifestPath     string
 	AppReleasePublicBaseURL    string
+	AppReleaseDownloadBaseURL  string
 }
 
 const (
@@ -56,6 +57,7 @@ func Load() Config {
 		MetricsAllowedCIDRs:        splitCSV(os.Getenv("METRICS_ALLOWED_CIDRS")),
 		AppReleaseManifestPath:     strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),
 		AppReleasePublicBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_PUBLIC_BASE_URL")), "/"),
+		AppReleaseDownloadBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_DOWNLOAD_BASE_URL")), "/"),
 	}
 }
 
@@ -128,6 +130,16 @@ func (c Config) Validate() error {
 		}
 		if parsedReleaseURL.Scheme != "https" {
 			return fmt.Errorf("APP_RELEASE_PUBLIC_BASE_URL must use HTTPS in production")
+		}
+	}
+	if downloadBaseURL := strings.TrimSpace(c.AppReleaseDownloadBaseURL); downloadBaseURL != "" {
+		parsedDownloadURL, err := url.Parse(downloadBaseURL)
+		if err != nil || parsedDownloadURL.Scheme == "" || parsedDownloadURL.Host == "" ||
+			(parsedDownloadURL.Scheme != "http" && parsedDownloadURL.Scheme != "https") {
+			return fmt.Errorf("APP_RELEASE_DOWNLOAD_BASE_URL must be a complete HTTP(S) URL")
+		}
+		if parsedDownloadURL.Scheme != "https" {
+			return fmt.Errorf("APP_RELEASE_DOWNLOAD_BASE_URL must use HTTPS in production")
 		}
 	}
 	return nil

@@ -17,6 +17,10 @@ import (
 )
 
 func writeTestAppRelease(t *testing.T) *AppRelease {
+	return writeTestAppReleaseWithBases(t, "https://download.example.com", "")
+}
+
+func writeTestAppReleaseWithBases(t *testing.T, publicBaseURL, downloadBaseURL string) *AppRelease {
 	t.Helper()
 	directory := t.TempDir()
 	content := []byte("deterministic android package content")
@@ -47,11 +51,22 @@ func writeTestAppRelease(t *testing.T) *AppRelease {
 	if err := os.WriteFile(manifestPath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	release, err := LoadAppRelease(manifestPath, "https://download.example.com")
+	release, err := LoadAppRelease(manifestPath, publicBaseURL, downloadBaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return release
+}
+
+func TestAppReleaseUsesStaticDownloadBaseURL(t *testing.T) {
+	release := writeTestAppReleaseWithBases(t, "https://download.example.com", "https://dl.example.com")
+	if got, want := release.downloadURL(), "https://dl.example.com/releases/12/luntan-1.2.0.apk"; got != want {
+		t.Fatalf("static download URL=%q, want %q", got, want)
+	}
+	payload := release.releasePayload()
+	if payload["download_url"] != "https://dl.example.com/releases/12/luntan-1.2.0.apk" {
+		t.Fatalf("payload download_url=%v", payload["download_url"])
+	}
 }
 
 func newReleaseTestHandler(t *testing.T, release *AppRelease) http.Handler {
@@ -212,7 +227,7 @@ func TestLoadAppReleaseRejectsTraversalAndDigestMismatch(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadAppRelease(manifestPath, ""); err == nil || !strings.Contains(err.Error(), "inside") {
+	if _, err := LoadAppRelease(manifestPath, "", ""); err == nil || !strings.Contains(err.Error(), "inside") {
 		t.Fatalf("expected traversal error, got %v", err)
 	}
 }
@@ -231,7 +246,7 @@ func TestLoadAppReleaseRejectsDigestMismatchAtStartup(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadAppRelease(manifestPath, ""); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+	if _, err := LoadAppRelease(manifestPath, "", ""); err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
 		t.Fatalf("expected digest mismatch, got %v", err)
 	}
 }
@@ -274,7 +289,7 @@ func TestLoadAppReleaseEnforcesImmutableApkPath(t *testing.T) {
 			if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := LoadAppRelease(manifestPath, "")
+			_, err := LoadAppRelease(manifestPath, "", "")
 			if err == nil || !strings.Contains(err.Error(), "immutable path") {
 				t.Fatalf("expected immutable path error for %q, got %v", apkFile, err)
 			}

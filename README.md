@@ -217,6 +217,7 @@ flutter build web --release --base-href=/forum/ \
 | `PUSH_WEBHOOK_URL` / `PUSH_WEBHOOK_SECRET` | 通知投递到站外推送，未配置时仅持久化站内通知 | 服务端 |
 | `APP_RELEASE_MANIFEST_PATH` | Android 软件内更新发布清单的绝对路径；清单与 APK 同目录 | 服务端 |
 | `APP_RELEASE_PUBLIC_BASE_URL` | 安装包公开 API 根地址；留空时复用当前 API 域名 | 服务端 |
+| `APP_RELEASE_DOWNLOAD_BASE_URL` | 可选的 APK 静态下载/CDN 根地址；配置后返回 `/releases/<version>/<file>`，旧 API 下载路由仍保留 | 服务端 |
 
 环境隔离矩阵与密钥管理约束见 [`docs/deployment/environments.md`](docs/deployment/environments.md)。
 
@@ -245,10 +246,12 @@ flutter build apk --release --build-name 0.01 --build-number 1 `
 ```text
 APP_RELEASE_MANIFEST_PATH=/opt/luntan/releases/release.json
 APP_RELEASE_PUBLIC_BASE_URL=https://forum.example.com
+APP_RELEASE_DOWNLOAD_BASE_URL=https://dl.example.com
 ```
 
 重启 API 后依次验收 `/api/v1/app/releases/latest`、`/api/v1/app/update` 和
-响应中的 `/api/v1/app/releases/{version_code}/download`。服务启动会校验清单、APK 大小与 SHA-256；
+响应中的 `/releases/{version_code}/{file}` 静态地址，以及旧的
+`/api/v1/app/releases/{version_code}/download` 兼容地址。服务启动会校验清单、APK 大小与 SHA-256；
 配置错误时会拒绝启动，避免客户端拿到无法安装的半成品发布。
 
 ## 常用验证命令

@@ -3,14 +3,11 @@ package api
 import (
 	"context"
 	"database/sql"
-	"os"
-	"strconv"
-	"strings"
 )
 
 // PointRewardRules 集中管理积分奖励与每日获取上限。
-// 产品已确认：发帖 +5、点赞 +1、评论 +1，每日最多获得 20 积分；默认值即上线值，
-// 环境变量 POINT_REWARD_* 仍可覆盖（显式设 0 表示关闭该项）。
+// 产品已确认：发帖 +5、点赞 +1、评论 +1，每日最多获得 20 积分。
+// 这是用户可见的固定规则，不允许环境变量造成页面文案与实际发放不一致。
 type PointRewardRules struct {
 	PostCreate     int64
 	CommentCreate  int64
@@ -28,28 +25,7 @@ func defaultPointRewardRules() PointRewardRules {
 }
 
 func pointRewardRulesFromEnv() PointRewardRules {
-	rules := defaultPointRewardRules()
-	if value, ok := envInt64("POINT_REWARD_POST_CREATE"); ok {
-		rules.PostCreate = value
-	}
-	if value, ok := envInt64("POINT_REWARD_COMMENT_CREATE"); ok {
-		rules.CommentCreate = value
-	}
-	if value, ok := envInt64("POINT_REWARD_LIKE_CREATE"); ok {
-		rules.LikeCreate = value
-	}
-	if value, ok := envInt64("POINT_REWARD_DAILY_LIMIT"); ok {
-		rules.DailyEarnLimit = value
-	}
-	return rules
-}
-
-func envInt64(key string) (int64, bool) {
-	value, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(key)), 10, 64)
-	if err != nil || value < 0 {
-		return 0, false
-	}
-	return value, true
+	return defaultPointRewardRules()
 }
 
 // awardPointsTx 在调用方事务内完成余额更新与流水落库。

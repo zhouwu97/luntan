@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // FileProvider 位于 androidx.core，应用内更新安装需要它。
+    implementation("androidx.core:core-ktx:1.13.1")
+}

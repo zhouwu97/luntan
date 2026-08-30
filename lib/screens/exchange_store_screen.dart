@@ -33,62 +33,24 @@ class ExchangeStoreScreen extends StatelessWidget {
                 gradient: AppTheme.primaryGradient,
                 borderRadius: BorderRadius.circular(24),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(
-                    Icons.card_giftcard_rounded,
-                    color: Colors.white,
-                    size: 38,
-                  ),
-                  const SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '论坛周边兑换',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        const Text(
-                          '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
-                          style: TextStyle(
-                            color: Color(0xE6FFFFFF),
-                            fontSize: 12,
-                            height: 1.4,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        const Text(
-                          '积分只用于社区周边，不接现金、充值、提现和红包。',
-                          style: TextStyle(
-                            color: Color(0xE6FFFFFF),
-                            fontSize: 12,
-                            height: 1.4,
-                          ),
-                        ),
-                      ],
+                  Text(
+                    '论坛周边兑换    ${localStore.points} 积分',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: .18),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${localStore.points} 积分',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '发帖 +5 · 点赞 +1 · 评论 +1 · 每天最多获得 20 积分',
+                    style: TextStyle(
+                      color: Color(0xE6FFFFFF),
+                      fontSize: 12,
+                      height: 1.4,
                     ),
                   ),
                 ],
@@ -119,6 +81,34 @@ class ExchangeStoreScreen extends StatelessWidget {
                 onRedeem: () => _redeem(context, storeProducts[index]),
               ),
             ),
+            const SizedBox(height: 24),
+            const Text(
+              '我的兑换',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (localStore.redeemedProducts.isEmpty)
+              const Text(
+                '还没有兑换记录',
+                style: TextStyle(color: AppTheme.textSecondary),
+              )
+            else
+              ...localStore.redeemedProducts.map(
+                (product) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.card_giftcard_outlined,
+                    color: AppTheme.primary,
+                  ),
+                  title: Text(product.name),
+                  subtitle: Text('${product.points} 积分'),
+                  trailing: const Text('待领取'),
+                ),
+              ),
           ],
         ),
       ),

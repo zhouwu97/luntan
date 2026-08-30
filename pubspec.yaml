@@ -38,7 +38,13 @@ dependencies:
   crypto: ^3.0.7
   share_plus: ^10.1.4
   url_launcher: ^6.3.2
+<<<<<<< Updated upstream
   cached_network_image: ^3.4.1
+=======
+  package_info_plus: ^8.3.1
+  path_provider: ^2.1.5
+  path: ^1.9.1
+>>>>>>> Stashed changes
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

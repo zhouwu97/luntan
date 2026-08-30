@@ -9,6 +9,7 @@ import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/domain/models.dart';
 import 'package:luntan/screens/entity_screens.dart';
 import 'package:luntan/screens/profile_screen.dart';
+import 'package:luntan/screens/settings_screen.dart';
 
 class _MockProfileRepo extends ProfileRepository {
   _MockProfileRepo({
@@ -159,6 +160,7 @@ void main() {
     testWidgets('2. 个人主页入口为真实单入口且导航到 UserProfileScreen', (tester) async {
       const summary = ProfileSummary(
         id: 'user_100',
+        publicId: '10000',
         username: 'cup_master',
         nickname: '杯友老张',
         level: 3,
@@ -237,7 +239,112 @@ void main() {
       expect(find.byType(UserProfileScreen), findsOneWidget);
       expect(find.text('编辑资料'), findsOneWidget);
       expect(find.text('杯友老张'), findsOneWidget);
+      expect(find.text('签名：评测老手'), findsOneWidget);
+      expect(find.text('ID：10000'), findsOneWidget);
+      expect(find.textContaining('信任 trusted'), findsNothing);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('游客可进入公共设置，但个人资料设置仍要求绑定邮箱', (tester) async {
+      var authRequested = 0;
+      const guestSummary = ProfileSummary(
+        id: 'guest_user_1',
+        username: 'guest_9527',
+        nickname: '游客9527',
+        // 模拟旧服务端仍把游客返回成普通等级，页面必须以当前会话身份兜底锁级。
+        level: 7,
+        experience: 35,
+        growth: GrowthState(
+          level: 7,
+          experience: 35,
+          levelStartExperience: 0,
+          experienceInLevel: 35,
+          experienceRequiredInLevel: 7965,
+          levelLocked: false,
+        ),
+        trustLevel: 'new',
+        signature: '',
+        postCount: 0,
+        commentCount: 0,
+        likeReceivedCount: 0,
+        followerCount: 0,
+        followingCount: 0,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            store: ForumStore.uiOnly(),
+            isApiMode: true,
+            profileRepository: _MockProfileRepo(summary: guestSummary),
+            currentUser: const AuthUser(
+              id: 'guest_user_1',
+              username: 'guest_9527',
+              nickname: '游客9527',
+              level: 0,
+              experience: 35,
+              status: 'active',
+              accountType: 'guest',
+            ),
+            currentUserId: 'guest_user_1',
+            onOpenPost: (_) {},
+            onOpenHome: () {},
+            onOpenComposer: () {},
+            onOpenMessages: () {},
+            onFeedback: (_) {},
+            onRequireAuth: () => authRequested++,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsCenterScreen), findsOneWidget);
+      expect(find.text('检查更新'), findsOneWidget);
+      expect(find.text('登录 / 绑定邮箱'), findsOneWidget);
+      await tester.tap(find.text('登录 / 绑定邮箱'));
+      await tester.pumpAndSettle();
+      expect(authRequested, 1);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('个人主页'));
+      await tester.pumpAndSettle();
+      expect(find.text('Lv.0'), findsWidgets);
+      expect(find.text('ID：注册后生成'), findsOneWidget);
+      expect(find.textContaining('累计经验 35 EXP'), findsOneWidget);
+      await tester.tap(find.byTooltip('主页设置'));
+      await tester.pumpAndSettle();
+      expect(find.text('暂无设置权限'), findsOneWidget);
+      expect(find.textContaining('当前累计的经验和评论会继续保留'), findsOneWidget);
+      expect(find.byType(EditProfileScreen), findsNothing);
+    });
+
+    testWidgets('无本地用户对象的游客进入个人主页仍锁定为 Lv.0', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileScreen(
+            store: ForumStore.uiOnly(),
+            isApiMode: false,
+            currentUser: null,
+            currentUserId: null,
+            onOpenPost: (_) {},
+            onOpenHome: () {},
+            onOpenComposer: () {},
+            onOpenMessages: () {},
+            onFeedback: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('个人主页'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(UserProfileScreen), findsOneWidget);
+      expect(find.text('Lv.0'), findsWidgets);
+      expect(find.text('ID：注册后生成'), findsOneWidget);
     });
 
     testWidgets('个人主页帖子卡片只展示服务端真实计数', (tester) async {

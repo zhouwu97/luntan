@@ -11,23 +11,20 @@ func TestLevelForExperience(t *testing.T) {
 	}{
 		{-10, 1},
 		{0, 1},
-		{50, 1},
-		{99, 1},
-		{100, 2},
-		{299, 2},
-		{300, 3},
-		{599, 3},
-		{600, 4},
-		{860, 4},
+		{49, 1},
+		{50, 2},
+		{149, 2},
+		{150, 3},
+		{499, 3},
+		{500, 4},
 		{999, 4},
 		{1000, 5},
-		{1499, 5},
-		{1500, 6},
-		{2099, 6},
-		{2100, 7},
-		{2799, 7},
-		{2800, 8},
-		{5000, 8},
+		{2499, 5},
+		{2500, 6},
+		{4999, 6},
+		{5000, 7},
+		{7999, 7},
+		{8000, 8},
 		{99999, 8},
 	}
 
@@ -63,27 +60,27 @@ func TestGrowthState(t *testing.T) {
 	if userState.Level != 4 {
 		t.Errorf("user level = %d; want 4", userState.Level)
 	}
-	if userState.LevelStartExperience != 600 {
-		t.Errorf("user start exp = %d; want 600", userState.LevelStartExperience)
+	if userState.LevelStartExperience != 500 {
+		t.Errorf("user start exp = %d; want 500", userState.LevelStartExperience)
 	}
 	if userState.NextLevelExperience == nil || *userState.NextLevelExperience != 1000 {
 		t.Errorf("user next exp = %v; want 1000", userState.NextLevelExperience)
 	}
-	if userState.ExperienceInLevel != 260 {
-		t.Errorf("user in level = %d; want 260", userState.ExperienceInLevel)
+	if userState.ExperienceInLevel != 360 {
+		t.Errorf("user in level = %d; want 360", userState.ExperienceInLevel)
 	}
-	if userState.ExperienceRequiredInLevel == nil || *userState.ExperienceRequiredInLevel != 400 {
-		t.Errorf("user req in level = %v; want 400", userState.ExperienceRequiredInLevel)
+	if userState.ExperienceRequiredInLevel == nil || *userState.ExperienceRequiredInLevel != 500 {
+		t.Errorf("user req in level = %v; want 500", userState.ExperienceRequiredInLevel)
 	}
-	if userState.LevelProgress == nil || *userState.LevelProgress != 0.65 {
-		t.Errorf("user progress = %v; want 0.65", userState.LevelProgress)
+	if userState.LevelProgress == nil || *userState.LevelProgress != 0.72 {
+		t.Errorf("user progress = %v; want 0.72", userState.LevelProgress)
 	}
 	if userState.LevelLocked {
 		t.Errorf("user level_locked = %v; want false", userState.LevelLocked)
 	}
 
-	// 满级 Lv.8 (3000 EXP)
-	maxState := growthState("email", 3000)
+	// 满级 Lv.8 (8000 EXP)
+	maxState := growthState("email", 8000)
 	if maxState.Level != 8 {
 		t.Errorf("max user level = %d; want 8", maxState.Level)
 	}

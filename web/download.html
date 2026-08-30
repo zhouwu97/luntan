@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#fbf7f9">
+  <meta name="description" content="下载圣杯酱 Android 稳定版，查看版本、大小和完整性校验信息。">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <title>下载圣杯酱</title>
+  <style>
+    :root{--paper:#fff;--bg:#fbf7f9;--ink:#2c2730;--muted:#756e78;--line:#eadfe5;--pink:#d43f75;--pink-dark:#a92d5c;--soft:#f9edf2;--green:#178462;--shadow:0 28px 70px rgba(91,54,70,.13);--ease:cubic-bezier(.2,.8,.2,1)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100svh;color:var(--ink);background:radial-gradient(760px 460px at 83% 7%,rgba(212,63,117,.10),transparent 70%),linear-gradient(180deg,#fff 0,var(--bg) 55%,#f8f3f5 100%);font-family:"LuntanCJK","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}button{font:inherit}
+    .shell{width:min(1080px,calc(100% - 40px));margin:auto}.nav{height:78px;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:-.02em}.brand img{width:40px;height:40px;border-radius:12px}.back{padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.75);font-size:13px;font-weight:700;color:var(--muted);transition:.22s var(--ease)}.back:hover{color:var(--ink);background:#fff;transform:translateY(-1px)}
+    main{padding:74px 0 84px}.hero{max-width:720px}.hero h1{margin:0;font-size:clamp(44px,7vw,76px);line-height:1.06;letter-spacing:-.055em}.hero p{margin:22px 0 0;max-width:610px;color:var(--muted);font-size:16px;line-height:1.85}.layout{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(280px,.88fr);gap:22px;margin-top:58px}.release,.trust{border:1px solid var(--line);border-radius:28px;background:rgba(255,255,255,.92);box-shadow:var(--shadow)}.release{padding:34px}.release-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.platform{display:flex;align-items:center;gap:15px}.platform-icon{width:54px;height:54px;border-radius:17px;display:grid;place-items:center;background:var(--soft);color:var(--pink)}.platform-icon svg{width:27px;height:27px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.platform h2{margin:0;font-size:25px;letter-spacing:-.035em}.platform small{display:block;margin-top:4px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.08em}.status{display:inline-flex;align-items:center;gap:7px;padding:8px 10px;border-radius:10px;background:#eaf8f3;color:var(--green);font-size:11px;font-weight:800}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:30px;padding:23px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.metric span{display:block;color:#948c96;font-size:11px}.metric strong{display:block;margin-top:8px;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.change{min-height:92px;padding-top:22px}.change span{color:#948c96;font-size:11px}.change p{margin:9px 0 0;color:#5f5862;font-size:14px;line-height:1.75;white-space:pre-line}.actions{display:flex;align-items:center;gap:13px;margin-top:24px;flex-wrap:wrap}.download{min-height:50px;padding:0 20px;border:0;border-radius:14px;background:linear-gradient(135deg,var(--pink),var(--pink-dark));color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:9px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 15px 30px rgba(186,45,99,.23);transition:.22s var(--ease)}.download:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 19px 38px rgba(186,45,99,.28)}.download:disabled{cursor:not-allowed;background:#ded6da;color:#8e858a;box-shadow:none}.download svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.hint{font-size:12px;color:var(--muted)}.hint.error{color:#a83c54}.trust{padding:31px;box-shadow:0 20px 54px rgba(91,54,70,.08)}.trust h2{margin:0;font-size:24px;letter-spacing:-.035em}.trust-list{margin-top:24px;display:grid;gap:22px}.trust-item{padding-top:20px;border-top:1px solid var(--line)}.trust-item:first-child{padding-top:0;border-top:0}.trust-item strong{display:block;font-size:14px}.trust-item p{margin:7px 0 0;color:var(--muted);font-size:12px;line-height:1.72}.sha{word-break:break-all;font-family:Consolas,"SFMono-Regular",monospace;font-size:10px!important}.footer{margin-top:26px;color:#938b94;font-size:11px}
+    @media(max-width:760px){.shell{width:min(100% - 28px,1080px)}.nav{height:66px}.brand img{width:36px;height:36px}.back{font-size:12px}main{padding:48px 0 60px}.hero h1{font-size:48px}.hero p{font-size:14px}.layout{grid-template-columns:1fr;margin-top:38px}.release,.trust{border-radius:23px}.release{padding:24px}.release-head{align-items:center}.metrics{grid-template-columns:1fr 1fr}.metric:last-child{grid-column:1/-1}.download{width:100%}.hint{width:100%;text-align:center}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.back,.download{transition:none}}
+  </style>
+</head>
+<body>
+  <header class="shell nav">
+    <a class="brand" href="./" aria-label="返回圣杯酱社区"><img src="icons/Icon-192.png" alt=""><span>圣杯酱</span></a>
+    <a class="back" href="./">返回社区</a>
+  </header>
+  <main class="shell">
+    <section class="hero">
+      <h1>把真实体验，装进口袋。</h1>
+      <p>下载圣杯酱 Android 稳定版。版本信息与软件内“检查更新”来自同一发布源，点击后直接获取经过 SHA-256 登记的安装包。</p>
+    </section>
+    <section class="layout" aria-label="客户端下载">
+      <article class="release">
+        <div class="release-head">
+          <div class="platform"><span class="platform-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="4"></rect><path d="M9 7h6M9 17h6"></path></svg></span><div><h2>Android</h2><small>STABLE · APK</small></div></div>
+          <span class="status" id="status">正在读取</span>
+        </div>
+        <div class="metrics">
+          <div class="metric"><span>版本</span><strong id="version">—</strong></div>
+          <div class="metric"><span>安装包大小</span><strong id="size">—</strong></div>
+          <div class="metric"><span>发布时间</span><strong id="date">—</strong></div>
+        </div>
+        <div class="change"><span>更新说明</span><p id="changelog">正在从服务器读取当前稳定版信息…</p></div>
+        <div class="actions">
+          <button class="download" id="download" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 20h14"></path></svg><span id="downloadText">获取下载地址</span></button>
+          <span class="hint" id="hint" role="status" aria-live="polite">版本信息加载完成后即可下载</span>
+        </div>
+      </article>
+      <aside class="trust">
+        <h2>下载前可以确认</h2>
+        <div class="trust-list">
+          <div class="trust-item"><strong>与软件内更新一致</strong><p>网页和 App 共用服务端发布清单，不会出现页面显示新版、软件却找不到更新的情况。</p></div>
+          <div class="trust-item"><strong>完整性校验</strong><p class="sha" id="sha">SHA-256 将在版本信息加载后显示。</p></div>
+          <div class="trust-item"><strong>Android 安装提示</strong><p>首次通过浏览器或圣杯酱安装 APK 时，Android 可能要求允许来自此来源的应用安装。</p></div>
+        </div>
+      </aside>
+    </section>
+    <div class="footer">如下载中断，可再次点击下载；服务端支持断点范围请求。</div>
+  </main>
+  <script>
+    const elements={status:document.querySelector('#status'),version:document.querySelector('#version'),size:document.querySelector('#size'),date:document.querySelector('#date'),changelog:document.querySelector('#changelog'),download:document.querySelector('#download'),downloadText:document.querySelector('#downloadText'),hint:document.querySelector('#hint'),sha:document.querySelector('#sha')};
+    const query=new URLSearchParams(location.search);const apiBase=(query.get('api')||location.origin).replace(/\/$/,'');let target='';
+    function formatBytes(value){let n=Number(value);if(!Number.isFinite(n)||n<=0)return '—';const units=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<units.length-1){n/=1024;i++}return `${n>=100?n.toFixed(0):n>=10?n.toFixed(1):n.toFixed(2)} ${units[i]}`}
+    function formatDate(value){const date=new Date(value);return Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}).format(date)}
+    function absoluteURL(value){try{return new URL(value,apiBase).href}catch{return ''}}
+    async function loadRelease(){elements.download.disabled=true;elements.status.textContent='正在读取';elements.hint.classList.remove('error');try{const response=await fetch(`${apiBase}/api/v1/app/releases/latest`,{headers:{Accept:'application/json'},cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const data=await response.json();target=absoluteURL(data.download_url);if(!target)throw new Error('下载地址为空');elements.status.textContent='当前可用';elements.version.textContent=`v${data.latest_version_name}`;elements.size.textContent=formatBytes(data.file_size);elements.date.textContent=formatDate(data.published_at);elements.changelog.textContent=(data.changelog||'当前稳定版已发布。').trim();elements.sha.textContent=`SHA-256 · ${data.sha256}`;elements.download.disabled=false;elements.downloadText.textContent='下载 Android APK';elements.hint.textContent='安装包已就绪，点击即可开始下载'}catch(error){target='';elements.status.textContent='暂不可用';elements.version.textContent='获取失败';elements.changelog.textContent='当前无法读取稳定版信息，请检查网络后重试。';elements.download.disabled=false;elements.downloadText.textContent='重新获取';elements.hint.classList.add('error');elements.hint.textContent='版本服务暂不可用'}}
+    elements.download.addEventListener('click',()=>{if(!target){loadRelease();return}elements.hint.textContent='正在开始下载…';location.assign(target)});loadRelease();
+  </script>
+</body>
+</html>

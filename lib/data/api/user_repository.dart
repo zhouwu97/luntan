@@ -4,6 +4,7 @@ import 'api_client.dart';
 class UserProfile {
   const UserProfile({
     required this.id,
+    this.publicId = '',
     required this.username,
     required this.nickname,
     required this.bio,
@@ -25,6 +26,7 @@ class UserProfile {
   });
 
   final String id;
+  final String publicId;
   final String username;
   final String nickname;
   final String bio;
@@ -161,11 +163,13 @@ class ApiUserRepository implements UserRepository {
           : GrowthState.fromJson(
               null,
               fallbackLevel: rawLevel,
+              fallbackExperience: exp,
               accountType: accountType,
             );
       final level = growth.level;
       return UserProfile(
         id: _string(value['id']),
+        publicId: _string(value['public_id']),
         username: _string(value['username']),
         nickname: _string(value['nickname']),
         bio: _string(value['bio']),
@@ -334,9 +338,9 @@ class MockUserRepository implements UserRepository {
         level: 1,
         experience: 0,
         levelStartExperience: 0,
-        nextLevelExperience: 1000,
+        nextLevelExperience: 50,
         experienceInLevel: 0,
-        experienceRequiredInLevel: 1000,
+        experienceRequiredInLevel: 50,
         progress: 0.0,
         levelLocked: false,
       ),

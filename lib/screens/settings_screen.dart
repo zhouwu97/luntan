@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
+import 'app_update_sheet.dart';
 import '../theme/app_theme.dart';
 
 /// 个人中心的完整设置页。
@@ -121,11 +123,14 @@ class SettingsCenterScreen extends StatelessWidget {
           _SettingsSection(
             title: '关于',
             children: [
+              _UpdateTile(
+                onFeedback: (message) => onFeedback(message),
+              ),
               _SettingsTile(
                 icon: Icons.info_outline_rounded,
                 title: '关于圣杯酱',
-                subtitle: '版本 v1.0.0 · 社区规则与反馈',
-                onTap: () => onFeedback('当前版本 v1.0.0'),
+                subtitle: '社区规则与反馈',
+                onTap: () => onFeedback('圣杯酱 · 玩具交流轻社区'),
               ),
             ],
           ),
@@ -215,6 +220,48 @@ class SettingsCenterScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 「检查更新」入口。副标题展示当前版本号，点击拉起检查更新弹层。
+class _UpdateTile extends StatefulWidget {
+  const _UpdateTile({required this.onFeedback});
+
+  final ValueChanged<String> onFeedback;
+
+  @override
+  State<_UpdateTile> createState() => _UpdateTileState();
+}
+
+class _UpdateTileState extends State<_UpdateTile> {
+  String _versionLabel = '正在读取版本';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _versionLabel = '当前版本 v${info.version}');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _versionLabel = '点击检查是否有新版本');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsTile(
+      icon: Icons.system_update_alt_rounded,
+      title: '检查更新',
+      subtitle: _versionLabel,
+      color: AppTheme.primary,
+      onTap: () => showAppUpdateSheet(context),
     );
   }
 }

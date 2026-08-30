@@ -140,6 +140,7 @@ class ForumStore extends ChangeNotifier {
   FeedSort selectedSort = FeedSort.recommended;
   bool isRefreshing = false;
   int points = 3980;
+  final List<StoreProduct> redeemedProducts = <StoreProduct>[];
   int publishedCount = 119;
   int replyCount = 2584;
   int followedBoards = 20;
@@ -320,11 +321,15 @@ class ForumStore extends ChangeNotifier {
   }) {
     final now = DateTime.now();
     final comments = commentsByPost.putIfAbsent(post.id, () => <Comment>[]);
-    final mediaAssets = mediaIds.map((id) => MediaAsset(
-      id: id,
-      type: MediaType.image,
-      url: id.startsWith('http') ? id : null,
-    )).toList();
+    final mediaAssets = mediaIds
+        .map(
+          (id) => MediaAsset(
+            id: id,
+            type: MediaType.image,
+            url: id.startsWith('http') ? id : null,
+          ),
+        )
+        .toList();
     final comment = Comment(
       id: 'comment-${now.microsecondsSinceEpoch}',
       postId: post.id,
@@ -365,6 +370,7 @@ class ForumStore extends ChangeNotifier {
   bool redeem(StoreProduct product) {
     if (points < product.points) return false;
     points -= product.points;
+    redeemedProducts.insert(0, product);
     notifyListeners();
     return true;
   }

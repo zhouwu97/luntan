@@ -18,6 +18,8 @@ type Config struct {
 	ObjectStorageSigningSecret string
 	RateLimitEnabled           bool
 	TrustedProxyCIDRs          []string
+	AppReleaseManifestPath     string
+	AppReleasePublicBaseURL    string
 }
 
 func Load() Config {
@@ -32,6 +34,8 @@ func Load() Config {
 		ObjectStorageSigningSecret: os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
 		RateLimitEnabled:           valueOrDefault("RATE_LIMIT_ENABLED", "false") == "true",
 		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
+		AppReleaseManifestPath:     strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),
+		AppReleasePublicBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_PUBLIC_BASE_URL")), "/"),
 	}
 }
 
@@ -68,6 +72,13 @@ func (c Config) Validate() error {
 		if err != nil || parsedInternal.Scheme == "" || parsedInternal.Host == "" ||
 			(parsedInternal.Scheme != "http" && parsedInternal.Scheme != "https") {
 			return fmt.Errorf("STORAGE_INTERNAL_BASE_URL must be a complete HTTP(S) URL")
+		}
+	}
+	if publicBaseURL := strings.TrimSpace(c.AppReleasePublicBaseURL); publicBaseURL != "" {
+		parsedReleaseURL, err := url.Parse(publicBaseURL)
+		if err != nil || parsedReleaseURL.Scheme == "" || parsedReleaseURL.Host == "" ||
+			(parsedReleaseURL.Scheme != "http" && parsedReleaseURL.Scheme != "https") {
+			return fmt.Errorf("APP_RELEASE_PUBLIC_BASE_URL must be a complete HTTP(S) URL")
 		}
 	}
 	return nil

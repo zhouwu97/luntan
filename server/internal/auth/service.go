@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/zhouwu97/luntan/server/internal/growth"
 )
 
 var (
@@ -149,15 +151,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput, metadata Se
 
 // levelForExperience 计算累计经验对应的正式等级（1~8 级）。
 func levelForExperience(exp int64) int {
-	if exp <= 0 {
-		return 1
-	}
-	for lvl := 8; lvl >= 1; lvl-- {
-		if exp >= int64(50*lvl*(lvl-1)) {
-			return lvl
-		}
-	}
-	return 1
+	return growth.LevelForExperience(exp)
 }
 
 // IsEmailRegistered 检查邮箱是否已注册为正式账号。

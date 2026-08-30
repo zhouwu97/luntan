@@ -32,6 +32,8 @@ type Options struct {
 	// ReadinessCheck 用于检查 API 依赖的非数据库资源，例如对象存储。
 	// 留空表示只检查数据库，兼容没有业务 API 的基础 HTTP server。
 	ReadinessCheck func(context.Context) error
+	// AppRelease 同时为客户端更新检查和网站下载提供唯一发布数据源。
+	AppRelease *AppRelease
 }
 
 // BuildVersion 和 BuildCommit 由构建命令通过 -ldflags 注入，开发环境使用默认值。
@@ -88,6 +90,20 @@ func NewHandlerWithAPIOptions(db *sql.DB, logger *slog.Logger, apiHandler http.H
 				}
 			}
 			WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+		case (r.Method == http.MethodGet || r.Method == http.MethodHead) && options.AppRelease != nil && options.AppRelease.matchesDownloadPath(r.URL.Path):
+			options.AppRelease.serveDownload(w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/app/releases/latest":
+			if options.AppRelease == nil {
+				WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "APP_RELEASE_UNAVAILABLE", Message: "安装包暂未发布"})
+				return
+			}
+			options.AppRelease.serveLatest(w)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/app/update":
+			if options.AppRelease == nil {
+				WriteAppError(w, r, AppError{Status: http.StatusServiceUnavailable, Code: "APP_RELEASE_UNAVAILABLE", Message: "版本服务暂不可用"})
+				return
+			}
+			options.AppRelease.serveUpdate(w, r)
 		case apiHandler != nil && len(r.URL.Path) >= len("/api/") && r.URL.Path[:len("/api/")] == "/api/":
 			apiHandler.ServeHTTP(w, r)
 		default:
@@ -109,7 +125,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization, Idempotency-Key, X-Request-ID")
+		w.Header().Set(
+			"Access-Control-Allow-Headers",
+			"Accept, Content-Type, Authorization, Idempotency-Key, X-Request-ID, X-App-Platform, X-App-Channel, X-App-Version-Name, X-App-Version-Code",
+		)
 		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		w.Header().Set("Vary", "Origin")
 		if r.Method == http.MethodOptions {

@@ -3,6 +3,31 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/domain/models.dart';
 
 void main() {
+  test('成长状态使用参考阈值且游客始终锁定在 Lv.0', () {
+    final registered = GrowthState.fromJson(
+      null,
+      fallbackExperience: 860,
+      accountType: 'email',
+    );
+    expect(registered.level, 4);
+    expect(registered.levelStartExperience, 500);
+    expect(registered.nextLevelExperience, 1000);
+    expect(registered.experienceInLevel, 360);
+    expect(registered.experienceRequiredInLevel, 500);
+    expect(registered.progress, 0.72);
+
+    final guest = GrowthState.fromJson(
+      null,
+      fallbackLevel: 8,
+      fallbackExperience: 8600,
+      accountType: 'guest',
+    );
+    expect(guest.level, 0);
+    expect(guest.experience, 8600);
+    expect(guest.levelLocked, isTrue);
+    expect(guest.nextLevelExperience, isNull);
+  });
+
   test('Post 使用关系 ID 和原始数值字段，不保存展示时间/浏览字符串', () {
     final now = DateTime.utc(2026, 1, 1);
     final author = User(

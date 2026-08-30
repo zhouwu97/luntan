@@ -21,6 +21,9 @@ class AppLinks {
   static String ranking(String toyId) =>
       _resolve('ranking/${Uri.encodeComponent(toyId)}');
 
+  /// 官网下载页。Web 与原生端都通过这个入口获取同一份稳定版信息。
+  static String get downloadPage => _resolve('download.html');
+
   static String _resolve(String path) =>
       webBase.resolve(Uri(path: path).toString()).toString();
 }

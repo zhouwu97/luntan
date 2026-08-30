@@ -28,6 +28,34 @@ bool _hasUsableAvatarUrl(String? value) {
   return resolveMediaUrl(value) != null;
 }
 
+/// 游客没有资料设置权限；在入口处拦截，避免先进入设置页再遇到失败。
+Future<void> showGuestSettingsPermissionDialog(
+  BuildContext context, {
+  VoidCallback? onBindEmail,
+}) async {
+  final shouldBind =
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('暂无设置权限'),
+          content: const Text('游客账号不能修改设置。建议先绑定邮箱，当前累计的经验和评论会继续保留。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('暂不绑定'),
+            ),
+            if (onBindEmail != null)
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('绑定邮箱'),
+              ),
+          ],
+        ),
+      ) ??
+      false;
+  if (shouldBind && context.mounted) onBindEmail?.call();
+}
+
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
     super.key,
@@ -142,7 +170,8 @@ class ProfileScreen extends StatelessWidget {
             repository: MockUserRepository(postCount: postsCount),
             userId: mockSummary.id,
             profileSummary: mockSummary,
-            isAuthenticated: currentUser?.accountType != 'guest',
+            isAuthenticated:
+                currentUser != null && currentUser!.accountType != 'guest',
             canFollow: false,
             onRequireAuth: onRequireAuth ?? () {},
             onFeedback: onFeedback,
@@ -332,10 +361,11 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showSettings(BuildContext context) {
+    final isGuest = currentUser == null || currentUser?.accountType == 'guest';
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SettingsCenterScreen(
-          isGuest: currentUser == null || currentUser?.accountType == 'guest',
+          isGuest: isGuest,
           accountSubtitle:
               currentUser?.email ?? (isApiMode ? '未登录 · 游客体验' : null),
           onRequireAuth: onRequireAuth,
@@ -1879,7 +1909,7 @@ class _PointsBalanceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final expInLevel = growth?.experienceInLevel ?? 0;
-    final expReq = growth?.experienceRequiredInLevel ?? 1000;
+    final expReq = growth?.experienceRequiredInLevel ?? 50;
     final isLocked = level == 0 || growth?.levelLocked == true;
     final factor = expReq > 0 ? (expInLevel / expReq).clamp(0.05, 1.0) : 0.18;
 
@@ -1901,16 +1931,16 @@ class _PointsBalanceCard extends StatelessWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(15, 14, 15, 13),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       child: Column(
         children: [
           Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(9),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x143F709D),
@@ -1920,14 +1950,14 @@ class _PointsBalanceCard extends StatelessWidget {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(9),
                   child: Image.asset(
                     'assets/images/mascot.jpg',
                     fit: BoxFit.cover,
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1941,7 +1971,7 @@ class _PointsBalanceCard extends StatelessWidget {
                       balance == null ? '加载中…' : '$balance 积分',
                       style: const TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: 17,
+                        fontSize: 16,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -1977,7 +2007,7 @@ class _PointsBalanceCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           // 等级经验进度行
           if (isLocked)
             Row(

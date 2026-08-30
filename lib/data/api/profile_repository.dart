@@ -4,6 +4,7 @@ import 'api_client.dart';
 class ProfileSummary {
   const ProfileSummary({
     required this.id,
+    this.publicId = '',
     required this.username,
     required this.nickname,
     this.avatarMediaId,
@@ -23,6 +24,7 @@ class ProfileSummary {
   });
 
   final String id;
+  final String publicId;
   final String username;
   final String nickname;
   final String? avatarMediaId;
@@ -136,11 +138,13 @@ class ProfileRepository {
         : GrowthState.fromJson(
             null,
             fallbackLevel: rawLevel,
+            fallbackExperience: exp,
             accountType: accountType,
           );
     final level = growth.level;
     return ProfileSummary(
       id: _string(value['id']),
+      publicId: _string(value['public_id']),
       username: _string(value['username']),
       nickname: _string(value['nickname']),
       avatarMediaId: _nullableString(value['avatar_media_id']),

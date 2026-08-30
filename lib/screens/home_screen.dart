@@ -900,9 +900,12 @@ class _SectionTabs extends StatelessWidget {
                       (community) => Expanded(
                         child: _CommunityTab(
                           label: community.name,
-                          imageAsset:
+                          backgroundImages:
                               community.name.trim() == '酱紫社区'
-                              ? 'assets/images/mascot_community.png'
+                              ? (
+                                  'assets/images/tab_community_active.webp',
+                                  'assets/images/tab_community_inactive.webp',
+                                )
                               : null,
                           active: selectedCommunityId == community.id,
                           onTap: () => onChanged(community.id),
@@ -921,13 +924,15 @@ class _CommunityTab extends StatelessWidget {
     required this.label,
     required this.active,
     required this.onTap,
-    this.imageAsset,
+    this.backgroundImages,
   });
 
   final String label;
   final bool active;
   final VoidCallback onTap;
-  final String? imageAsset;
+
+  /// (选中态背景, 未选中态背景)。提供时整个标签以图片为底，不再叠加纯色胶囊。
+  final (String, String)? backgroundImages;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -942,14 +947,16 @@ class _CommunityTab extends StatelessWidget {
           duration: AppMotion.duration(context, AppMotion.normal),
           curve: AppMotion.emphasized,
           alignment: Alignment.center,
-          padding: imageAsset == null
+          padding: backgroundImages == null
               ? const EdgeInsets.symmetric(horizontal: 8)
-              : const EdgeInsets.all(2),
+              : EdgeInsets.zero,
           decoration: BoxDecoration(
-            color: active ? AppTheme.textPrimary : Colors.transparent,
+            color: backgroundImages == null && active
+                ? AppTheme.textPrimary
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: imageAsset == null
+          child: backgroundImages == null
               ? Text(
                   label,
                   style: TextStyle(
@@ -959,12 +966,11 @@ class _CommunityTab extends StatelessWidget {
                   ),
                 )
               : ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   child: Image.asset(
-                    imageAsset!,
-                    fit: BoxFit.cover,
-                    // 吉祥物立牌在画面中略低于中线，取景向下偏移让“酱紫社区”字样落在标签内。
-                    alignment: const Alignment(0, 0.2),
+                    active ? backgroundImages!.$1 : backgroundImages!.$2,
+                    fit: BoxFit.fill,
+                    gaplessPlayback: true,
                     filterQuality: FilterQuality.medium,
                   ),
                 ),

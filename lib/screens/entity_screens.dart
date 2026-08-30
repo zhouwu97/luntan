@@ -307,6 +307,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         (_profile != null
             ? ProfileSummary(
                 id: _profile!.id,
+                publicId: _profile!.publicId,
                 username: _profile!.username,
                 nickname: _profile!.nickname,
                 avatarMediaId: _profile!.avatarMediaId,
@@ -340,6 +341,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       _future = _load();
       _postsFuture = _loadInitialPosts();
     }
+  }
+
+  void _openProfileSettings() {
+    if (widget.isSelf && !widget.isAuthenticated) {
+      showGuestSettingsPermissionDialog(
+        context,
+        onBindEmail: widget.onRequireAuth,
+      );
+      return;
+    }
+    _openEditProfile();
   }
 
   @override
@@ -381,17 +393,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         final nickname = _selfSummary?.nickname.isNotEmpty == true
             ? _selfSummary!.nickname
             : (profile?.nickname.isNotEmpty == true ? profile!.nickname : '游客');
-        final username = _selfSummary?.username.isNotEmpty == true
-            ? _selfSummary!.username
-            : (profile?.username.isNotEmpty == true
-                  ? profile!.username
-                  : 'guest');
-        final level = _selfSummary?.level ?? profile?.level ?? 1;
-        final trustLevel = _selfSummary?.trustLevel.isNotEmpty == true
-            ? _selfSummary!.trustLevel
-            : (profile?.trustLevel.isNotEmpty == true
-                  ? profile!.trustLevel
-                  : 'new');
+        final isGuestSelf = widget.isSelf && !widget.isAuthenticated;
+        final level = isGuestSelf
+            ? 0
+            : (_selfSummary?.level ?? profile?.level ?? 1);
         final signature = _selfSummary?.signature.isNotEmpty == true
             ? _selfSummary!.signature
             : (profile?.bio.isNotEmpty == true ? profile!.bio : '');
@@ -409,8 +414,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         final growth = _selfSummary?.growth ?? profile?.growth;
         final experience = _selfSummary?.experience ?? profile?.experience ?? 0;
         final expInLevel = growth?.experienceInLevel ?? 0;
-        final expReq = growth?.experienceRequiredInLevel ?? 1000;
-        final isLocked = growth?.levelLocked == true;
+        final expReq = growth?.experienceRequiredInLevel ?? 50;
+        final isLocked = isGuestSelf || growth?.levelLocked == true;
+        final publicUserId = [_selfSummary?.publicId, profile?.publicId]
+            .whereType<String>()
+            .map((value) => value.trim())
+            .firstWhere(
+              (value) => value.isNotEmpty,
+              orElse: () => isLocked ? '注册后生成' : '待同步',
+            );
 
         return Stack(
           children: [
@@ -487,7 +499,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     color: Colors.white,
                                     size: 20,
                                   ),
-                                  onPressed: _openEditProfile,
+                                  onPressed: _openProfileSettings,
                                   tooltip: '主页设置',
                                 ),
                               )
@@ -582,7 +594,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             const Spacer(),
                             if (widget.isSelf)
                               InkWell(
-                                onTap: _openEditProfile,
+                                onTap: _openProfileSettings,
                                 borderRadius: BorderRadius.circular(13),
                                 child: Container(
                                   height: 35,
@@ -663,26 +675,26 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           ],
                         ),
                         const SizedBox(height: 5),
-                        // ID 与信任标签
+                        // 签名与公开用户 ID
                         Text(
-                          '@$username · 信任 $trustLevel',
+                          signature.isNotEmpty ? '签名：$signature' : '签名：还没有个性签名',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.78),
+                            color: Colors.white.withValues(alpha: 0.86),
                             fontSize: 12,
                           ),
                         ),
-                        if (signature.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            signature,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.85),
-                              fontSize: 12,
-                            ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'ID：$publicUserId',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 11,
                           ),
-                        ],
+                        ),
                         const SizedBox(height: 12),
                         // 统计指标行 (获赞、关注、粉丝)
                         Row(

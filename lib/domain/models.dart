@@ -31,6 +31,25 @@ enum CommentPublicationStatus { published, deleted }
 
 enum LatestOrder { comment, post }
 
+const List<int> _userLevelExperienceThresholds = <int>[
+  0,
+  0,
+  50,
+  150,
+  500,
+  1000,
+  2500,
+  5000,
+  8000,
+];
+
+int _levelForExperience(int experience) {
+  for (var level = 8; level >= 1; level--) {
+    if (experience >= _userLevelExperienceThresholds[level]) return level;
+  }
+  return 1;
+}
+
 class GrowthState {
   const GrowthState({
     required this.level,
@@ -55,19 +74,42 @@ class GrowthState {
   factory GrowthState.fromJson(
     Map<String, dynamic>? json, {
     int fallbackLevel = 1,
+    int fallbackExperience = 0,
     String accountType = 'email',
   }) {
     if (json == null) {
       final isGuest = accountType == 'guest';
+      final experience = fallbackExperience.clamp(0, 1 << 62).toInt();
+      if (isGuest) {
+        return GrowthState(
+          level: 0,
+          experience: experience,
+          levelStartExperience: 0,
+          nextLevelExperience: null,
+          experienceInLevel: experience,
+          experienceRequiredInLevel: null,
+          progress: null,
+          levelLocked: true,
+        );
+      }
+      final level = experience > 0
+          ? _levelForExperience(experience)
+          : fallbackLevel.clamp(1, 8).toInt();
+      final start = _userLevelExperienceThresholds[level];
+      final next = level >= 8
+          ? null
+          : _userLevelExperienceThresholds[level + 1];
+      final required = next == null ? null : next - start;
+      final inLevel = (experience - start).clamp(0, 1 << 62).toInt();
       return GrowthState(
-        level: isGuest ? 0 : fallbackLevel,
-        experience: 0,
-        levelStartExperience: 0,
-        nextLevelExperience: isGuest ? null : 100,
-        experienceInLevel: 0,
-        experienceRequiredInLevel: isGuest ? null : 100,
-        progress: isGuest ? null : 0.0,
-        levelLocked: isGuest,
+        level: level,
+        experience: experience,
+        levelStartExperience: start,
+        nextLevelExperience: next,
+        experienceInLevel: inLevel,
+        experienceRequiredInLevel: required,
+        progress: required == null ? 1.0 : (inLevel / required).clamp(0.0, 1.0),
+        levelLocked: false,
       );
     }
     final isGuest = accountType == 'guest';

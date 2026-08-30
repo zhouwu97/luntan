@@ -39,6 +39,9 @@ func TestCORSPreflight(t *testing.T) {
 	if res.Header().Get("Access-Control-Allow-Headers") == "" {
 		t.Fatal("preflight allow headers are empty")
 	}
+	if !strings.Contains(res.Header().Get("Access-Control-Allow-Headers"), "X-App-Version-Code") {
+		t.Fatal("preflight allow headers must include app update version headers")
+	}
 }
 
 func TestVersion(t *testing.T) {

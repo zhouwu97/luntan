@@ -71,11 +71,17 @@ func main() {
 		os.Exit(1)
 	}
 	apiHandler := api.NewHandlerWithMail(db, sender, cfg.AppEnv)
+	appRelease, err := httpserver.LoadAppRelease(cfg.AppReleaseManifestPath, cfg.AppReleasePublicBaseURL)
+	if err != nil {
+		logger.Error("app_release_configuration_failed", "error", err.Error())
+		os.Exit(1)
+	}
 	handler, err := httpserver.NewHandlerWithAPIOptions(db, logger, apiHandler, httpserver.Options{
 		RateLimitEnabled:  cfg.RateLimitEnabled,
 		RateLimitStore:    rateLimitStore,
 		TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 		ReadinessCheck:    api.ReadinessCheck(apiHandler),
+		AppRelease:        appRelease,
 	})
 	if err != nil {
 		logger.Error("http_server_configuration_failed", "error", err.Error())

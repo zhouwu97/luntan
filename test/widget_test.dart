@@ -443,6 +443,12 @@ void main() {
     expect(find.text('通知中心'), findsOneWidget);
     expect(find.text('隐私与安全'), findsOneWidget);
     expect(find.text('清空浏览历史'), findsOneWidget);
+    expect(find.text('检查更新'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('退出登录'),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('退出登录'), findsOneWidget);
     expect(find.text('注销账号'), findsOneWidget);
     expect(tester.takeException(), isNull);

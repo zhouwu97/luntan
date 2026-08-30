@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+
+	"github.com/zhouwu97/luntan/server/internal/growth"
 )
 
-const maxUserLevel = 8
+const maxUserLevel = growth.MaxUserLevel
 
 // ExperienceRewardRules 集中管理经验奖励与每日上限。
 type ExperienceRewardRules struct {
@@ -26,28 +28,15 @@ func defaultExperienceRewardRules() ExperienceRewardRules {
 	}
 }
 
-// levelStartExperience 根据公式 T(N) = 50 * N * (N - 1) 计算达到指定等级所需的累计经验。
+// levelStartExperience 返回达到指定等级所需的累计经验。
+// 兼容现有 API 包内调用，权威阈值统一维护在 internal/growth。
 func levelStartExperience(level int) int64 {
-	if level <= 1 {
-		return 0
-	}
-	if level > maxUserLevel {
-		level = maxUserLevel
-	}
-	return int64(50 * level * (level - 1))
+	return growth.LevelStartExperience(level)
 }
 
 // levelForExperience 根据累计经验计算正式用户的当前等级（最高 8 级）。
 func levelForExperience(exp int64) int {
-	if exp <= 0 {
-		return 1
-	}
-	for lvl := maxUserLevel; lvl >= 1; lvl-- {
-		if exp >= levelStartExperience(lvl) {
-			return lvl
-		}
-	}
-	return 1
+	return growth.LevelForExperience(exp)
 }
 
 // GrowthState 提供统一的经验与等级计算结果。

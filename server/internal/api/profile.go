@@ -134,12 +134,12 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var nickname, bio, trustLevel, avatarObjectKey, backgroundObjectKey, accountType string
+	var publicID, nickname, bio, trustLevel, avatarObjectKey, backgroundObjectKey, accountType string
 	var avatarMediaID, backgroundMediaID sql.NullString
 	var level int
 	var exp int64
 	if err := s.db.QueryRowContext(r.Context(), `
-        SELECT COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.avatar_media_id, ''),
+        SELECT COALESCE(u.public_id::text, ''), COALESCE(up.nickname, u.username), COALESCE(up.bio, ''), COALESCE(up.avatar_media_id, ''),
                COALESCE(ma.object_key, ''), COALESCE(up.background_media_id, ''), COALESCE(background.object_key, ''),
                CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.trust_level, 'new'), COALESCE(up.experience, 0), COALESCE(u.account_type, 'email')
@@ -148,7 +148,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
         LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id AND ma.status = 'ready' AND ma.deleted_at IS NULL
         LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
         WHERE u.id = $1`, user.ID).
-		Scan(&nickname, &bio, &avatarMediaID, &avatarObjectKey, &backgroundMediaID, &backgroundObjectKey, &level, &trustLevel, &exp, &accountType); err != nil {
+		Scan(&publicID, &nickname, &bio, &avatarMediaID, &avatarObjectKey, &backgroundMediaID, &backgroundObjectKey, &level, &trustLevel, &exp, &accountType); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -172,6 +172,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{
 		"id": user.ID, "username": user.Username, "nickname": nickname,
+		"public_id":           publicID,
 		"account_type":        accountType,
 		"avatar_media_id":     nullableProfileString(avatarMediaID),
 		"background_media_id": nullableProfileString(backgroundMediaID),

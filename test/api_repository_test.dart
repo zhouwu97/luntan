@@ -110,7 +110,7 @@ void main() {
       client: MockClient(
         (_) async => http.Response.bytes(
           utf8.encode(
-            '{"id":"guest-1","username":"guest_1","nickname":"游客","bio":"","account_type":"guest","level":1,"experience":860,"growth":{"level":1,"experience":860,"level_start_experience":600,"next_level_experience":1000,"experience_in_level":260,"experience_required_in_level":400,"level_progress":0.65,"level_locked":false},"trust_level":"new","status":"active","post_count":0,"follower_count":0,"following_count":0,"created_at":"2026-08-24T20:00:00Z","viewer_state":{}}',
+            '{"id":"guest-1","public_id":"","username":"guest_1","nickname":"游客","bio":"","account_type":"guest","level":1,"experience":860,"growth":{"level":1,"experience":860,"level_start_experience":600,"next_level_experience":1000,"experience_in_level":260,"experience_required_in_level":400,"level_progress":0.65,"level_locked":false},"trust_level":"new","status":"active","post_count":0,"follower_count":0,"following_count":0,"created_at":"2026-08-24T20:00:00Z","viewer_state":{}}',
           ),
           200,
           headers: const {'content-type': 'application/json; charset=utf-8'},
@@ -121,11 +121,33 @@ void main() {
     final profile = await ApiUserRepository(client).getProfile('guest-1');
 
     expect(profile?.experience, 860);
+    expect(profile?.publicId, isEmpty);
     expect(profile?.level, 0);
     expect(profile?.growth?.level, 0);
     expect(profile?.growth?.levelLocked, isTrue);
     expect(profile?.growth?.nextLevelExperience, isNull);
     expect(profile?.growth?.progress, isNull);
+    client.close();
+  });
+
+  test('ProfileRepository 映射注册后分配的数字 ID', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          utf8.encode(
+            '{"id":"uuid-1","public_id":"10000","username":"cup_master","nickname":"杯友老张","signature":"评测老手","account_type":"email","level":1,"experience":0,"trust_level":"new","post_count":0,"comment_count":0,"like_received_count":0,"follower_count":0,"following_count":0}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+
+    final profile = await ProfileRepository(client).getProfile();
+
+    expect(profile.id, 'uuid-1');
+    expect(profile.publicId, '10000');
     client.close();
   });
 

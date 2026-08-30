@@ -210,8 +210,40 @@ flutter build web --release --base-href=/forum/ \
 | `OBJECT_STORAGE_UPLOAD_BASE_URL` / `OBJECT_STORAGE_SIGNING_SECRET` | 媒体上传地址与 HMAC 签名 | 服务端 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮箱验证码发送；生产缺失时 API 拒绝启动 | 服务端 |
 | `PUSH_WEBHOOK_URL` / `PUSH_WEBHOOK_SECRET` | 通知投递到站外推送，未配置时仅持久化站内通知 | 服务端 |
+| `APP_RELEASE_MANIFEST_PATH` | Android 软件内更新发布清单的绝对路径；清单与 APK 同目录 | 服务端 |
+| `APP_RELEASE_PUBLIC_BASE_URL` | 安装包公开 API 根地址；留空时复用当前 API 域名 | 服务端 |
 
 环境隔离矩阵与密钥管理约束见 [`docs/deployment/environments.md`](docs/deployment/environments.md)。
+
+### 发布 Android 软件内更新
+
+“检查更新”和 APK 下载都由 Go API 提供，不依赖网页下载页。先构建 APK，再生成服务端可校验的发布清单：
+
+```powershell
+flutter build apk --release --build-name 1.1.0 --build-number 2 `
+  --dart-define=APP_ENV=production `
+  --dart-define=API_BASE_URL=https://forum.example.com
+
+.\scripts\prepare_app_release.ps1 `
+  -ApkPath .\build\app\outputs\flutter-apk\app-release.apk `
+  -OutputDirectory .\artifacts\app-release `
+  -VersionName 1.1.0 `
+  -VersionCode 2 `
+  -MinimumSupportedVersionCode 1 `
+  -Title '圣杯酱 1.1.0' `
+  -Changelog '优化检查更新与安装体验。'
+```
+
+把整个 `artifacts/app-release` 目录原样上传到服务器，并设置：
+
+```text
+APP_RELEASE_MANIFEST_PATH=/opt/luntan/releases/release.json
+APP_RELEASE_PUBLIC_BASE_URL=https://forum.example.com
+```
+
+重启 API 后依次验收 `/api/v1/app/releases/latest`、`/api/v1/app/update` 和
+响应中的 `/api/v1/app/releases/{version_code}/download`。服务启动会校验清单、APK 大小与 SHA-256；
+配置错误时会拒绝启动，避免客户端拿到无法安装的半成品发布。
 
 ## 常用验证命令
 

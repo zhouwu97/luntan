@@ -234,13 +234,13 @@ class AuthRepository {
     return _userFromJson(await _client.getJson('/api/v1/me'));
   }
 
-  Future<void> setPassword({required String password, String? currentPassword}) async {
+  Future<void> setPassword({
+    required String password,
+    String? currentPassword,
+  }) async {
     await _client.postJson(
       '/api/v1/me/password',
-      body: {
-        'password': password,
-        'current_password': ?currentPassword,
-      },
+      body: {'password': password, 'current_password': ?currentPassword},
     );
   }
 
@@ -308,6 +308,7 @@ class AuthRepository {
         : GrowthState.fromJson(
             null,
             fallbackLevel: level,
+            fallbackExperience: experience,
             accountType: accountType,
           );
 
@@ -315,7 +316,7 @@ class AuthRepository {
       id: _string(json['id']),
       username: _string(json['username']),
       nickname: _string(json['nickname']),
-      level: level,
+      level: growth.level,
       experience: experience,
       growth: growth,
       status: _string(json['status']),

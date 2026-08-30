@@ -8,6 +8,13 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+func TestPointRewardRulesMatchPublishedPolicy(t *testing.T) {
+	rules := pointRewardRulesFromEnv()
+	if rules.PostCreate != 5 || rules.LikeCreate != 1 || rules.CommentCreate != 1 || rules.DailyEarnLimit != 20 {
+		t.Fatalf("unexpected point policy: %+v", rules)
+	}
+}
+
 func TestAwardPointsTxIsIdempotentByEventKey(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

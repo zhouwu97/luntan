@@ -11,6 +11,7 @@ import (
 
 type userProfileResponse struct {
 	ID                string         `json:"id"`
+	PublicID          string         `json:"public_id"`
 	Username          string         `json:"username"`
 	Nickname          string         `json:"nickname"`
 	AvatarMediaID     string         `json:"avatar_media_id,omitempty"`
@@ -45,7 +46,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		viewerID = viewer.ID
 	}
 	err := s.db.QueryRowContext(r.Context(), `
-		SELECT u.id, u.username, COALESCE(up.nickname, u.username),
+		SELECT u.id, COALESCE(u.public_id::text, ''), u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.avatar_media_id, ''), COALESCE(up.background_media_id, ''), COALESCE(background.object_key, ''), COALESCE(up.bio, ''),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.trust_level, 'new'), u.status, u.created_at,
@@ -57,7 +58,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
 		WHERE u.id = $1 AND u.deleted_at IS NULL`, id).
-		Scan(&item.ID, &item.Username, &item.Nickname, &item.AvatarMediaID, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
+		Scan(&item.ID, &item.PublicID, &item.Username, &item.Nickname, &item.AvatarMediaID, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
 			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.FollowerCount, &item.FollowingCount)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "用户不存在"})

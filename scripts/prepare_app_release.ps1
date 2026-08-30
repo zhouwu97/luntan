@@ -1,0 +1,75 @@
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$ApkPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$OutputDirectory,
+
+    [Parameter(Mandatory = $true)]
+    [string]$VersionName,
+
+    [Parameter(Mandatory = $true)]
+    [long]$VersionCode,
+
+    [Parameter(Mandatory = $true)]
+    [long]$MinimumSupportedVersionCode,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Title,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Changelog
+)
+
+$ErrorActionPreference = 'Stop'
+
+$resolvedApk = (Resolve-Path -LiteralPath $ApkPath).Path
+if ([System.IO.Path]::GetExtension($resolvedApk) -ne '.apk') {
+    throw 'ApkPath 必须指向 .apk 文件'
+}
+if ($VersionCode -le 0) {
+    throw 'VersionCode 必须为正整数'
+}
+if ($MinimumSupportedVersionCode -le 0 -or $MinimumSupportedVersionCode -gt $VersionCode) {
+    throw 'MinimumSupportedVersionCode 必须为正整数且不能大于 VersionCode'
+}
+if ([string]::IsNullOrWhiteSpace($VersionName) -or
+    [string]::IsNullOrWhiteSpace($Title) -or
+    [string]::IsNullOrWhiteSpace($Changelog)) {
+    throw 'VersionName、Title 和 Changelog 不能为空'
+}
+
+$releaseDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
+[System.IO.Directory]::CreateDirectory($releaseDirectory) | Out-Null
+
+# 文件名只使用已校验的版本号字符，避免发布清单出现路径穿越或特殊字符。
+$safeVersionName = $VersionName.Trim()
+if ($safeVersionName -notmatch '^[0-9A-Za-z._-]+$') {
+    throw 'VersionName 只能包含字母、数字、点、下划线和连字符'
+}
+$apkFileName = "luntan-$safeVersionName-$VersionCode.apk"
+$publishedApk = Join-Path $releaseDirectory $apkFileName
+Copy-Item -LiteralPath $resolvedApk -Destination $publishedApk -Force
+
+$digest = (Get-FileHash -LiteralPath $publishedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifest = [ordered]@{
+    version_name                   = $safeVersionName
+    version_code                   = $VersionCode
+    minimum_supported_version_code = $MinimumSupportedVersionCode
+    title                          = $Title.Trim()
+    changelog                      = $Changelog.Trim()
+    apk_file                       = $apkFileName
+    sha256                         = $digest
+    published_at                   = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+}
+$manifestPath = Join-Path $releaseDirectory 'release.json'
+$json = $manifest | ConvertTo-Json -Depth 3
+[System.IO.File]::WriteAllText(
+    $manifestPath,
+    $json,
+    [System.Text.UTF8Encoding]::new($false)
+)
+
+Write-Output "APK: $publishedApk"
+Write-Output "Manifest: $manifestPath"
+Write-Output "SHA-256: $digest"

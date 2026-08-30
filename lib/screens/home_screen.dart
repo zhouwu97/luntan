@@ -760,32 +760,49 @@ class _Header extends StatelessWidget {
   Widget _buildAvatar(BuildContext context) {
     const radius = 21.0;
     const diameter = radius * 2;
-    final nickname = currentUser?.nickname.trim();
-    final initialChar = (nickname != null && nickname.isNotEmpty)
-        ? nickname.characters.first
-        : (currentUser?.accountType == 'guest' ? '游' : '理');
     final avatarUrl = currentUser?.avatar?.trim();
 
-    final placeholder = Container(
-      width: diameter,
-      height: diameter,
-      decoration: const BoxDecoration(
-        color: AppTheme.surfaceBlue,
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        initialChar,
-        style: const TextStyle(
-          color: AppTheme.primary,
-          fontSize: 15,
-          fontWeight: FontWeight.w800,
+    Widget placeholder() {
+      final nickname = currentUser?.nickname.trim();
+      final username = currentUser?.username.trim();
+      final String? initialChar;
+      if (nickname != null && nickname.isNotEmpty) {
+        initialChar = nickname.characters.first;
+      } else if (username != null && username.isNotEmpty) {
+        initialChar = username.characters.first.toUpperCase();
+      } else if (currentUser?.accountType == 'guest') {
+        initialChar = '游';
+      } else {
+        initialChar = null;
+      }
+
+      return Container(
+        width: diameter,
+        height: diameter,
+        decoration: const BoxDecoration(
+          color: AppTheme.surfaceBlue,
+          shape: BoxShape.circle,
         ),
-      ),
-    );
+        alignment: Alignment.center,
+        child: initialChar != null
+            ? Text(
+                initialChar,
+                style: const TextStyle(
+                  color: AppTheme.primary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              )
+            : const Icon(
+                Icons.person_rounded,
+                color: AppTheme.primary,
+                size: 22,
+              ),
+      );
+    }
 
     if (avatarUrl == null || avatarUrl.isEmpty) {
-      return placeholder;
+      return placeholder();
     }
 
     return ClipOval(
@@ -797,8 +814,8 @@ class _Header extends StatelessWidget {
           fit: BoxFit.cover,
           width: diameter,
           height: diameter,
-          placeholder: (_) => placeholder,
-          errorBuilder: (_) => placeholder,
+          placeholder: (_) => placeholder(),
+          errorBuilder: (_) => placeholder(),
         ),
       ),
     );
@@ -946,8 +963,7 @@ class _SectionTabs extends StatelessWidget {
                       (community) => Expanded(
                         child: _CommunityTab(
                           label: community.name,
-                          backgroundImages:
-                              community.name.trim() == '酱紫社区'
+                          backgroundImages: community.name.trim() == '酱紫社区'
                               ? (
                                   'assets/images/tab_community_active.webp',
                                   'assets/images/tab_community_inactive.webp',
@@ -1533,7 +1549,8 @@ class _FeedSkeleton extends StatelessWidget {
       children: List.generate(
         2,
         (index) => Container(
-          height: index == 0 ? 250 : 176,
+          // 首张骨架预留更接近放大后的单图区域，真实图片到位时不再明显跳高。
+          height: index == 0 ? 320 : 176,
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -1707,9 +1724,16 @@ class _ForumSearchDelegate extends SearchDelegate<void> {
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(14),
-              itemCount: (posts.isEmpty ? 0 : (kind == _SearchKind.all ? 1 : 0) + posts.length) +
-                  (users.isEmpty ? 0 : (kind == _SearchKind.all ? 1 : 0) + users.length) +
-                  (communities.isEmpty ? 0 : (kind == _SearchKind.all ? 1 : 0) + communities.length),
+              itemCount:
+                  (posts.isEmpty
+                      ? 0
+                      : (kind == _SearchKind.all ? 1 : 0) + posts.length) +
+                  (users.isEmpty
+                      ? 0
+                      : (kind == _SearchKind.all ? 1 : 0) + users.length) +
+                  (communities.isEmpty
+                      ? 0
+                      : (kind == _SearchKind.all ? 1 : 0) + communities.length),
               itemBuilder: (context, index) {
                 var i = index;
                 if (posts.isNotEmpty) {

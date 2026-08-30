@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -206,18 +207,43 @@ func (s *Server) optionalAuthenticatedUser(ctx context.Context, r *http.Request)
 }
 
 func publicMediaURL(objectKey string) string {
-	// 历史导入包曾把完整媒体 URL 写入 object_key；保留该 URL，避免再拼接公开前缀。
-	if strings.HasPrefix(objectKey, "http://") || strings.HasPrefix(objectKey, "https://") {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL")), "/")
+	// 历史导入包曾把完整媒体 URL 写入 object_key。自有媒体如果仍指向
+	// HTTP/IP 源站，Web 会触发 mixed content，Android 也会被明文策略拦截；
+	// 只替换自有媒体路径的 scheme/host，外部资源和其他绝对 URL 保持不变。
+	if parsed, err := url.Parse(objectKey); err == nil && parsed.IsAbs() {
+		if normalized := normalizeAbsoluteMediaURL(parsed, base); normalized != "" {
+			return normalized
+		}
 		return objectKey
 	}
 	key := strings.TrimLeft(objectKey, "/")
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL")), "/")
 	if base != "" {
 		return base + "/" + key
 	}
 	// 未配置对象存储公开域名时退回 API 自带的媒体下载兜底路由；根相对
 	// 地址由客户端按 API base 补全，浏览器同源访问时也能直接命中。
 	return "/api/v1/media-file/" + key
+}
+
+func normalizeAbsoluteMediaURL(mediaURL *url.URL, publicBase string) string {
+	baseURL, err := url.Parse(publicBase)
+	if err != nil || baseURL.Scheme != "https" || baseURL.Host == "" {
+		return ""
+	}
+	if (mediaURL.Scheme != "http" && mediaURL.Scheme != "https") ||
+		!isAppMediaPath(mediaURL.Path) {
+		return ""
+	}
+	mediaURL.Scheme = baseURL.Scheme
+	mediaURL.Host = baseURL.Host
+	mediaURL.User = nil
+	return mediaURL.String()
+}
+
+func isAppMediaPath(path string) bool {
+	return strings.HasPrefix(path, "/imported-media/") ||
+		strings.HasPrefix(path, "/api/v1/media-file/")
 }
 
 func includePostDetails(r *http.Request) bool {

@@ -18,6 +18,20 @@ func TestPublicMediaURLKeepsAbsoluteImportedURL(t *testing.T) {
 	}
 }
 
+func TestPublicMediaURLUpgradesLegacyAbsoluteMediaURL(t *testing.T) {
+	t.Setenv("OBJECT_STORAGE_PUBLIC_BASE_URL", "https://shengbeijiang.com/imported-media/user-media")
+
+	if got := publicMediaURL("http://43.161.249.91/imported-media/post.webp"); got != "https://shengbeijiang.com/imported-media/post.webp" {
+		t.Fatalf("旧媒体 URL 应升级到 HTTPS 正式域名，得到 %q", got)
+	}
+	if got := publicMediaURL("http://43.161.249.91/api/v1/media-file/media-1"); got != "https://shengbeijiang.com/api/v1/media-file/media-1" {
+		t.Fatalf("API 兜底媒体 URL 应升级到 HTTPS 正式域名，得到 %q", got)
+	}
+	if got := publicMediaURL("http://images.example.com/photos/post.webp"); got != "http://images.example.com/photos/post.webp" {
+		t.Fatalf("外部媒体 URL 不应被改写，得到 %q", got)
+	}
+}
+
 func TestEnrichPostResponsePopulatesAuthorAvatar(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

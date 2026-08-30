@@ -31,8 +31,8 @@ from typing import Any
 SOURCE_API = "https://beiyoujiang.com/api/post/getAllPost"
 SOURCE_COMMENTS_API = "https://beiyoujiang.com/api/comment/getPostComment"
 SOURCE_IMAGE_BASE = "https://beiyoujiang.com/PostImg/"
-# 当前部署通过服务器 IP 暴露媒体目录；可用 --public-media-base 覆盖。
-PUBLIC_MEDIA_BASE = "http://101.42.27.44/imported-media"
+# 当前部署通过正式 HTTPS 域名暴露媒体目录；可用 --public-media-base 覆盖。
+PUBLIC_MEDIA_BASE = "https://shengbeijiang.com/imported-media"
 
 # 用稳定哈希生成脱敏后的本地社区昵称。哈希只用于保持重复导入时
 # 的用户名稳定，不会把源站昵称、头像或用户 ID 写入展示数据。

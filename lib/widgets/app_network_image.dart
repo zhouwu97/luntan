@@ -11,6 +11,11 @@ void configureAppMediaBaseUrl(Uri? base) {
   _mediaBaseUri = base;
 }
 
+bool _isAppMediaPath(Uri uri) {
+  return uri.path.startsWith('/imported-media/') ||
+      uri.path.startsWith('/api/v1/media-file/');
+}
+
 /// 把服务端返回的媒体地址归一化为可请求的绝对 URL。
 ///
 /// 返回 null 表示无法构造可请求地址，调用方应展示占位图而不是抛错。
@@ -19,8 +24,27 @@ String? resolveMediaUrl(String? raw) {
   if (trimmed == null || trimmed.isEmpty) {
     return null;
   }
-  final scheme = Uri.tryParse(trimmed)?.scheme.toLowerCase();
-  if (scheme == 'http' || scheme == 'https' || scheme == 'blob' || scheme == 'data') {
+  final parsed = Uri.tryParse(trimmed);
+  final scheme = parsed?.scheme.toLowerCase();
+  if (scheme == 'http') {
+    final base = _mediaBaseUri;
+    if (parsed != null &&
+        base != null &&
+        base.scheme.toLowerCase() == 'https' &&
+        _isAppMediaPath(parsed)) {
+      // 兼容历史接口写入的源站 HTTP/IP 地址，避免 Android 明文策略和
+      // Web 混合内容策略拦截自有媒体；外部 HTTP 图片保持原地址不变。
+      return base
+          .replace(
+            path: parsed.path,
+            query: parsed.hasQuery ? parsed.query : null,
+            fragment: parsed.hasFragment ? parsed.fragment : null,
+          )
+          .toString();
+    }
+    return trimmed;
+  }
+  if (scheme == 'https' || scheme == 'blob' || scheme == 'data') {
     return trimmed;
   }
   final base = _mediaBaseUri;
@@ -103,10 +127,7 @@ class AppNetworkImage extends StatelessWidget {
     if (resolved == null) {
       final builder = errorBuilder ?? placeholder;
       return builder?.call(context) ??
-          const ColoredBox(
-            color: Color(0xFFF4F6F9),
-            child: SizedBox.expand(),
-          );
+          const ColoredBox(color: Color(0xFFF4F6F9), child: SizedBox.expand());
     }
 
     return LayoutBuilder(
@@ -188,8 +209,5 @@ ImageProvider? appNetworkImageProvider(String? url, {int? maxWidth}) {
   if (resolved == null) {
     return null;
   }
-  return CachedNetworkImageProvider(
-    resolved,
-    maxWidth: maxWidth,
-  );
+  return CachedNetworkImageProvider(resolved, maxWidth: maxWidth);
 }

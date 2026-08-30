@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-正式客户端默认连接自己的 Go API（开发默认地址为 `http://101.42.27.44`），首页默认请求最新帖子并按发帖时间排序；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建必须显式设置 `APP_ENV=production` 和 HTTPS API 地址；服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
+正式客户端默认连接自己的 Go API（默认地址为 `https://shengbeijiang.com`），首页默认请求最新帖子并按发帖时间排序；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建必须显式设置 `APP_ENV=production` 和 HTTPS API 地址；服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
 
 已覆盖的主要功能：
 
@@ -45,7 +45,7 @@ flutter pub get
 flutter run
 ```
 
-开发构建不传 `API_BASE_URL` 时默认使用 `http://101.42.27.44`，需要改后端地址时再传入 `--dart-define=API_BASE_URL=...`。客户端只请求自己的 API 和媒体地址，不直接依赖源站页面。
+开发构建不传 `API_BASE_URL` 时默认使用 `https://shengbeijiang.com`，需要改后端地址时再传入 `--dart-define=API_BASE_URL=...`。客户端只请求自己的 API 和媒体地址，不直接依赖源站页面。
 
 ### 离线 Mock / 测试模式
 
@@ -112,20 +112,20 @@ Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为�
 
 ### 远端 QA 环境与导入数据
 
-QA 服务器 `101.42.27.44` 运行完整后端与 Web 客户端，用于联调与验收：
+QA 服务器 `43.161.249.91` 运行完整后端与 Web 客户端，统一通过 `shengbeijiang.com` HTTPS 域名访问，用于联调与验收：
 
-- API：`http://101.42.27.44/api/v1`，健康检查 `/ready`
-- Web：`http://101.42.27.44/forum/`
-- 媒体：源站图片已全部下载到服务器本地媒体目录，由 nginx 通过 `/imported-media/` 提供，URL 保存在 `media_assets` 表
+- API：`https://shengbeijiang.com/api/v1`，健康检查 `/ready`
+- Web：`https://shengbeijiang.com/forum/`
+- 媒体：源站图片已全部下载到服务器本地媒体目录，由 nginx 通过 HTTPS `/imported-media/` 提供，URL 保存在 `media_assets` 表
 - 数据：帖子、评论、榜单商品与评价均来自导入快照，作者为稳定的脱敏本地账号，客户端运行时不直连源站
 
-QA 数据现状（2026-08-29）：90 个榜单商品、1245 条商品评价；310 篇帖子、2284 条评论，全部位于正式板块（酱紫社区 284 / 大型拆箱 14 / 杂鱼日常 12）。QA 为 HTTP 明文环境，仅限联调；生产构建必须声明 `APP_ENV=production` 并使用 HTTPS 地址（客户端会拒绝 HTTP API），由 HTTPS 反向代理统一承载 API、媒体和 Web，不要复用 QA 地址。
+QA 数据现状（2026-08-29）：90 个榜单商品、1245 条商品评价；310 篇帖子、2284 条评论，全部位于正式板块（酱紫社区 284 / 大型拆箱 14 / 杂鱼日常 12）。QA 也通过 HTTPS 反向代理统一承载 API、媒体和 Web；生产构建仍必须声明 `APP_ENV=production` 并使用正式生产域名。
 
 连接 QA 启动示例：
 
 ```bash
-flutter run --dart-define=API_BASE_URL=http://101.42.27.44
-flutter build apk --debug --dart-define=API_BASE_URL=http://101.42.27.44
+flutter run --dart-define=API_BASE_URL=https://shengbeijiang.com
+flutter build apk --debug --dart-define=API_BASE_URL=https://shengbeijiang.com
 ```
 
 生产构建示例：
@@ -162,11 +162,11 @@ cd ..
 
 # 3) 导入帖子、帖子评论与帖子配图：写 posts/comments/media_assets/post_media。
 # --media-dir 必须与 nginx 映射到 /imported-media/ 的目录一致；
-# --public-media-base 即写入库中的公开前缀（QA 帖子图为 http://101.42.27.44/imported-media）。
+# --public-media-base 即写入库中的公开前缀（QA 帖子图为 https://shengbeijiang.com/imported-media）。
 python3 scripts/import_placeholder_content.py \
   --output-dir /var/lib/luntan/import/posts \
   --media-dir /opt/luntan-qa/imported-media \
-  --public-media-base "http://101.42.27.44/imported-media" \
+  --public-media-base "https://shengbeijiang.com/imported-media" \
   --page-size 100
 ```
 
@@ -188,11 +188,11 @@ Web 发布：
 
 ```bash
 flutter build web --release --base-href=/forum/ \
-  --dart-define=API_BASE_URL=http://101.42.27.44 \
+  --dart-define=API_BASE_URL=https://shengbeijiang.com \
   --dart-define=APP_ENV=qa
 ```
 
-- QA 为 HTTP，必须显式传 `APP_ENV=qa`：release 构建缺省时客户端按 production 规则强制校验 HTTPS，启动即报「应用配置异常」。
+- QA 通过 HTTPS 域名访问，必须显式传 `APP_ENV=qa`：release 构建缺省时客户端按 production 规则强制校验 API 配置，启动即报「应用配置异常」。
 - `web/flutter_bootstrap.js` 为入库的自定义引导模板，canvaskit 从应用本地目录加载而不请求 gstatic（国内拉取 wasm 易超时导致白屏），部署时不要删除。
 - 产物解压到新发布目录并切换 `/opt/luntan-qa/web` 符号链接，回滚时把链接指回旧目录即可；nginx 对 `/forum/` 已配置协商缓存，发布后浏览器直接拉到新版。
 
@@ -203,7 +203,7 @@ flutter build web --release --base-href=/forum/ \
 | `DATABASE_URL` | PostgreSQL 连接串，服务启动时自动执行迁移 | 服务端 |
 | `HTTP_PORT` | API 监听端口，默认 `8080` | 服务端 |
 | `APP_ENV` | `dev` / `qa` / `staging` / `production`；`production` 要求 HTTPS、SMTP 与对象存储配置齐备 | 双端 |
-| `API_BASE_URL` | 客户端 API 地址（编译期 dart-define），开发默认 `http://101.42.27.44` | 客户端 |
+| `API_BASE_URL` | 客户端 API 地址（编译期 dart-define），默认 `https://shengbeijiang.com` | 客户端 |
 | `WEB_BASE_URL` | 分享链接域名，默认 `https://luntan.app` | 客户端 |
 | `MEDIA_STORAGE_DIR` | 本地媒体目录兜底（dev/QA），生产使用外部对象存储 | 服务端 |
 | `OBJECT_STORAGE_PUBLIC_BASE_URL` | 媒体公开访问前缀 | 服务端 |

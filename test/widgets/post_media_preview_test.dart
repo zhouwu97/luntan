@@ -28,16 +28,17 @@ void main() {
   }
 
   group('calculateFeedSingleImageSize 宽度优先模型', () {
-    test('390dp 内容宽度触发 250 上限，各比例尺寸正确', () {
+    test('390dp 内容宽度触发 320 上限，各比例尺寸正确', () {
+      const previewWidth = kFeedSingleImageMaxWidth;
       final cases = <String, (double?, double)>{
-        '16:9': (16 / 9, 250 / (16 / 9)),
-        '4:3': (4 / 3, 250 / (4 / 3)),
-        '1:1': (1.0, 250),
-        '4:5': (0.8, 250 / 0.8),
-        '3:4': (0.75, 250 / 0.75),
-        '9:16 长图': (0.5625, 250 / 0.75),
-        '超长截图': (0.2, 250 / 0.75),
-        '无元数据兜底 4:3': (null, 250 / (4 / 3)),
+        '16:9': (16 / 9, previewWidth / (16 / 9)),
+        '4:3': (4 / 3, previewWidth / (4 / 3)),
+        '1:1': (1.0, previewWidth),
+        '4:5': (0.8, previewWidth / 0.8),
+        '3:4': (0.75, previewWidth / 0.75),
+        '9:16 长图': (0.5625, previewWidth / 0.75),
+        '超长截图': (0.2, previewWidth / 0.75),
+        '无元数据兜底 4:3': (null, previewWidth / (4 / 3)),
       };
 
       cases.forEach((name, c) {
@@ -45,18 +46,18 @@ void main() {
           availableWidth: 390,
           aspectRatio: c.$1,
         );
-        expect(size.width, closeTo(250, 0.001), reason: name);
+        expect(size.width, closeTo(previewWidth, 0.001), reason: name);
         expect(size.height, closeTo(c.$2, 0.001), reason: name);
       });
     });
 
-    test('窄容器下宽度跟随 0.70 系数不触发上限', () {
+    test('窄容器下宽度跟随 0.86 系数不触发上限', () {
       final size = calculateFeedSingleImageSize(
         availableWidth: 200,
         aspectRatio: 1.0,
       );
-      expect(size.width, closeTo(140, 0.001));
-      expect(size.height, closeTo(140, 0.001));
+      expect(size.width, closeTo(172, 0.001));
+      expect(size.height, closeTo(172, 0.001));
     });
   });
 
@@ -65,8 +66,12 @@ void main() {
       await tester.pumpWidget(feedHost([asset('normal-3-4', 300, 400)]));
 
       final size = tester.getSize(find.byType(PostMediaPreview));
-      // 250 / 0.75 + 10 top padding
-      expect(size.height, closeTo(343.33, 0.5));
+      final previewWidth = calculateFeedSingleImageSize(
+        availableWidth: 360,
+        aspectRatio: 0.75,
+      ).width;
+      // 放大后的单图宽度 / 0.75 + 10 top padding
+      expect(size.height, closeTo(previewWidth / 0.75 + 10, 0.5));
 
       final image = tester.widget<Image>(find.byType(Image));
       expect(image.fit, BoxFit.contain);
@@ -74,14 +79,21 @@ void main() {
       expect(find.text('长图'), findsNothing);
     });
 
-    testWidgets('9:16 长图：cover + topCenter + 长图角标，宽度 250 未占满', (tester) async {
+    testWidgets('9:16 长图：cover + topCenter + 长图角标，宽度跟随容器放大', (tester) async {
       await tester.pumpWidget(feedHost([asset('long-9-16', 90, 160)]));
 
       final image = tester.widget<Image>(find.byType(Image));
       expect(image.fit, BoxFit.cover);
       expect(image.alignment, Alignment.topCenter);
       expect(find.text('长图'), findsOneWidget);
-      expect(tester.getSize(find.byType(Image)).width, closeTo(250, 0.5));
+      final previewWidth = calculateFeedSingleImageSize(
+        availableWidth: 360,
+        aspectRatio: 9 / 16,
+      ).width;
+      expect(
+        tester.getSize(find.byType(Image)).width,
+        closeTo(previewWidth, 0.5),
+      );
 
       // 解码按原图比例 0.5625 展开，而不是 3:4 预览框比例，避免位图被压扁。
       final provider = image.image;
@@ -94,7 +106,11 @@ void main() {
   group('Feed 多图', () {
     testWidgets('3 图一行三列同宽同高', (tester) async {
       await tester.pumpWidget(
-        feedHost([asset('g1', 40, 30), asset('g2', 40, 30), asset('g3', 40, 30)]),
+        feedHost([
+          asset('g1', 40, 30),
+          asset('g2', 40, 30),
+          asset('g3', 40, 30),
+        ]),
       );
 
       final size = tester.getSize(find.byType(PostMediaPreview));
@@ -102,12 +118,16 @@ void main() {
       expect(size.height, closeTo(126, 1.0));
 
       final tops = [
-        for (var i = 0; i < 3; i++) tester.getTopLeft(find.byType(Image).at(i)).dy,
+        for (var i = 0; i < 3; i++)
+          tester.getTopLeft(find.byType(Image).at(i)).dy,
       ];
       expect(tops[0], tops[1]);
       expect(tops[1], tops[2]);
       for (var i = 0; i < 3; i++) {
-        expect(tester.getSize(find.byType(Image).at(i)).width, closeTo(116, 0.5));
+        expect(
+          tester.getSize(find.byType(Image).at(i)).width,
+          closeTo(116, 0.5),
+        );
       }
     });
 
@@ -176,9 +196,7 @@ void main() {
 
     testWidgets('12 图只显示 9 张，第 9 张叠加 +3', (tester) async {
       await tester.pumpWidget(
-        feedHost([
-          for (var i = 1; i <= 12; i++) asset('e$i', 40, 30),
-        ]),
+        feedHost([for (var i = 1; i <= 12; i++) asset('e$i', 40, 30)]),
       );
 
       expect(find.byType(AppNetworkImage), findsNWidgets(9));
@@ -198,7 +216,10 @@ void main() {
                 width: 360,
                 child: PostMediaPreview(
                   mode: PostMediaPreviewMode.detail,
-                  images: [asset('detail-tall', 90, 160), asset('detail-sq', 30, 30)],
+                  images: [
+                    asset('detail-tall', 90, 160),
+                    asset('detail-sq', 30, 30),
+                  ],
                 ),
               ),
             ),
@@ -218,9 +239,7 @@ void main() {
     testWidgets('已知比例：解码目标按原图比例展开，长边封顶后比例不变', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: MediaGalleryScreen(
-            images: [asset('viewer-9-16', 90, 160)],
-          ),
+          home: MediaGalleryScreen(images: [asset('viewer-9-16', 90, 160)]),
         ),
       );
       await tester.pump();
@@ -263,9 +282,21 @@ void main() {
         id: 'full_variants',
         type: MediaType.image,
         url: 'https://example.com/source.jpg',
-        thumb: MediaVariant(url: 'https://example.com/thumb.jpg', width: 640, height: 480),
-        detail: MediaVariant(url: 'https://example.com/detail.jpg', width: 1440, height: 1080),
-        original: MediaVariant(url: 'https://example.com/original.jpg', width: 2400, height: 1800),
+        thumb: MediaVariant(
+          url: 'https://example.com/thumb.jpg',
+          width: 640,
+          height: 480,
+        ),
+        detail: MediaVariant(
+          url: 'https://example.com/detail.jpg',
+          width: 1440,
+          height: 1080,
+        ),
+        original: MediaVariant(
+          url: 'https://example.com/original.jpg',
+          width: 2400,
+          height: 1800,
+        ),
       );
 
       // Feed 正文预览必须优先 detail 变体
@@ -280,8 +311,16 @@ void main() {
         id: 'no_detail',
         type: MediaType.image,
         url: 'https://example.com/source.jpg',
-        thumb: MediaVariant(url: 'https://example.com/thumb.jpg', width: 640, height: 480),
-        original: MediaVariant(url: 'https://example.com/original.jpg', width: 2400, height: 1800),
+        thumb: MediaVariant(
+          url: 'https://example.com/thumb.jpg',
+          width: 640,
+          height: 480,
+        ),
+        original: MediaVariant(
+          url: 'https://example.com/original.jpg',
+          width: 2400,
+          height: 1800,
+        ),
       );
       expect(noDetail.previewUrl, 'https://example.com/original.jpg');
 

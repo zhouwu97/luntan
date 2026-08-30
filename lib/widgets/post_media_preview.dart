@@ -9,10 +9,10 @@ import 'app_network_image.dart';
 enum PostMediaPreviewMode { feed, detail }
 
 /// Feed 单图预览宽度 = 可用宽度 × [kFeedSingleImageWidthFactor]。
-const double kFeedSingleImageWidthFactor = 0.70;
+const double kFeedSingleImageWidthFactor = 0.86;
 
 /// Feed 单图预览最大宽度。
-const double kFeedSingleImageMaxWidth = 250.0;
+const double kFeedSingleImageMaxWidth = 320.0;
 
 /// 宽高比低于该值视为长截图，改用 3:4 预览框顶部裁切。
 const double kFeedLongImageRatio = 0.75;
@@ -50,10 +50,7 @@ Size calculateFeedSingleImageSize({
 double? mediaAssetRatio(PostMedia media) {
   final width = media.width?.toDouble();
   final height = media.height?.toDouble();
-  if (width == null ||
-      height == null ||
-      !width.isFinite ||
-      !height.isFinite) {
+  if (width == null || height == null || !width.isFinite || !height.isFinite) {
     return null;
   }
   if (width <= 0 || height <= 0) return null;
@@ -63,7 +60,7 @@ double? mediaAssetRatio(PostMedia media) {
 /// 帖子媒体预览。
 ///
 /// Feed 场景（贴吧式信息流）：
-/// - 单图宽度优先：预览宽 = min(内容宽 × 0.70, 250dp)，左对齐；比例 ≥ 0.75 按原比例完整展示，< 0.75 视为长图，用 3:4 预览框顶部裁切并提示“长图”；
+/// - 单图宽度优先：预览宽 = min(内容宽 × 0.86, 320dp)，左对齐；比例 ≥ 0.75 按原比例完整展示，< 0.75 视为长图，用 3:4 预览框顶部裁切并提示“长图”；
 /// - 多图统一方形瓦片：2 图一行两列，3 图一行三列，4 图 2×2，5 张及以上三列九宫格；最多展示 9 张，超出部分在第 9 张叠加 +N，全部 cover + 顶部对齐。
 ///
 /// Detail 场景：
@@ -149,10 +146,7 @@ class PostMediaPreview extends StatelessWidget {
         content = _buildFeedGrid(context, images, columns: 3);
     }
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: content,
-    );
+    return Padding(padding: const EdgeInsets.only(top: 10), child: content);
   }
 
   /// 单图：宽度优先 + 长图 3:4 顶部裁切。
@@ -217,10 +211,9 @@ class PostMediaPreview extends StatelessWidget {
                     index: i,
                     mode: PostMediaPreviewMode.feed,
                     alignment: Alignment.topCenter,
-                    extraOverlayCount:
-                        extraCount > 0 && i == visibleCount - 1
-                            ? extraCount
-                            : null,
+                    extraOverlayCount: extraCount > 0 && i == visibleCount - 1
+                        ? extraCount
+                        : null,
                   ),
                 ),
             ],

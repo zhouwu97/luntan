@@ -141,6 +141,10 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   late Future<List<StoreOrder>> ordersFuture;
 
   final Set<String> _redeeming = <String>{};
+  // 兑换幂等键按商品持久到请求成功为止，弱网重试时复用同一个键，
+  // 避免服务端把重试当成新订单重复扣积分。
+  final Map<String, String> _pendingRedeemKeys = <String, String>{};
+
   @override
   void initState() {
     super.initState();
@@ -278,14 +282,18 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
     if (_redeeming.contains(product.id)) return;
     setState(() => _redeeming.add(product.id));
     try {
-      final requestKey = sha256
-          .convert(
-            utf8.encode(
-              '${product.id}:${DateTime.now().microsecondsSinceEpoch}',
-            ),
-          )
-          .toString();
+      final requestKey = _pendingRedeemKeys.putIfAbsent(
+        product.id,
+        () => sha256
+            .convert(
+              utf8.encode(
+                '${product.id}:${DateTime.now().microsecondsSinceEpoch}',
+              ),
+            )
+            .toString(),
+      );
       await widget.repository.redeem(product.id, idempotencyKey: requestKey);
+      _pendingRedeemKeys.remove(product.id);
       if (!mounted) return;
       setState(() {
         productsFuture = widget.repository.products();

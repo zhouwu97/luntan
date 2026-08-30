@@ -15,11 +15,11 @@ import (
 )
 
 var rankingToySubmissionCategories = map[string]struct{}{
-	"cup":        {},
-	"small_hip":  {},
-	"large_hip":  {},
-	"half_body":  {},
-	"lubricant":  {},
+	"cup":       {},
+	"small_hip": {},
+	"large_hip": {},
+	"half_body": {},
+	"lubricant": {},
 }
 
 // 刺激度类型沿用榜单 tabs 的 segments 词汇表，审核通过后写入 ranking_toys.segments。

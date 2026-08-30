@@ -484,6 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
           canLike: widget.canLike,
           canVote: widget.canVote,
           onRequireAuth: widget.onRequireAuth,
+          onOpenUserId: widget.onOpenUserId,
         ),
       ),
     );
@@ -594,6 +595,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     onBookmark: () =>
                                         widget.onToggleBookmark(post),
                                     onMenu: () => _showPostMenu(post),
+                                    onAuthorTap: widget.onOpenUserId,
                                     contextMeta: showActivity
                                         ? '💬 最近回复 ${relativeTimeLabel(post.activityAt ?? post.lastCommentAt!)}'
                                         : null,

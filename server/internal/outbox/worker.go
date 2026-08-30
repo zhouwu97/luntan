@@ -60,6 +60,10 @@ type Worker struct {
 	Handler     Handler
 	BatchSize   int
 	MaxAttempts int
+	// Lease 是 processing 状态的租约时长：认领后超过该时长仍未写终态的任务
+	// 视为 worker 崩溃遗留，允许被重新认领。<=0 时默认 5 分钟，必须大于最慢
+	// 一类事件的真实处理耗时。
+	Lease       time.Duration
 	// Concurrency 是单个 worker 进程内并行处理事件的数量；<=0 时默认 4，
 	// 避免图片解码等耗时处理阻塞后续通知类事件的消费。
 	Concurrency int
@@ -78,6 +82,10 @@ func (w Worker) RunOnce(ctx context.Context) (int, error) {
 	if maxAttempts <= 0 {
 		maxAttempts = 8
 	}
+	lease := w.Lease
+	if lease <= 0 {
+		lease = 5 * time.Minute
+	}
 	now := time.Now
 	if w.Now != nil {
 		now = w.Now
@@ -87,12 +95,19 @@ func (w Worker) RunOnce(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
+	// 崩溃恢复：processing 已提交但进程死亡的行永远不会被 pending/failed 分支
+	// 选中，这里按租约超时把陈旧的 processing 一并纳入认领，由终态写入方
+	// （成功/重试路径）保证锁外竞态下的最终一致。
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, event_type, aggregate_type, aggregate_id, payload, attempts
 		FROM outbox_events
-		WHERE status IN ('pending', 'failed') AND available_at <= $1 AND attempts < $2
+		WHERE (
+			(status IN ('pending', 'failed') AND available_at <= $1 AND attempts < $2)
+			OR (status = 'processing' AND locked_at < $3 AND attempts < $2)
+		)
 		ORDER BY created_at ASC, id ASC
-		FOR UPDATE SKIP LOCKED LIMIT $3`, now().UTC(), maxAttempts, batchSize)
+		FOR UPDATE SKIP LOCKED LIMIT $4`,
+		now().UTC(), maxAttempts, now().UTC().Add(-lease), batchSize)
 	if err != nil {
 		return 0, err
 	}

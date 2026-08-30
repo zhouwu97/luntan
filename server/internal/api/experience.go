@@ -137,13 +137,15 @@ func awardExperienceTx(ctx context.Context, tx *sql.Tx, userID, source, reason, 
 		}
 	}
 
-	// 3. 每日上限检查（按 UTC 当日零点统计该 source 产生的奖励次数）
+	// 3. 每日上限检查（按北京时间自然日统计该 source 产生的奖励次数，与积分
+	// 每日上限共用同一日界，避免两套“一天”在北京时间早上 8 点前后错位；
+	// 双重 AT TIME ZONE 把上海零点正确还原成 timestamptz，不受会话时区影响）
 	if dailyLimit > 0 {
 		var countToday int
 		err := tx.QueryRowContext(ctx, `
 			SELECT count(*)
 			FROM experience_transactions
-			WHERE user_id = $1 AND source = $2 AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC')`, userID, source).Scan(&countToday)
+			WHERE user_id = $1 AND source = $2 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID, source).Scan(&countToday)
 		if err != nil {
 			return err
 		}

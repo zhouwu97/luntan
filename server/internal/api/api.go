@@ -206,6 +206,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/following")
 		s.listUserRelations(w, r, userID, "following")
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/") && strings.HasSuffix(path, "/comments"):
+		userID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/users/"), "/comments")
+		s.listUserComments(w, r, userID)
+		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/users/"):
 		s.getUserProfile(w, r, strings.TrimPrefix(path, "/api/v1/users/"))
 		return

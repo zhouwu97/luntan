@@ -42,4 +42,3 @@ func decodeFeedCursor(value string) (feedCursor, error) {
 	}
 	return cursor, nil
 }
-

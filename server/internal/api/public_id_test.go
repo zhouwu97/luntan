@@ -21,13 +21,14 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 		WithArgs("u1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "public_id", "username", "nickname", "avatar_media_id",
-			"background_media_id", "background_object_key", "bio", "level",
+			"avatar_object_key", "background_media_id", "background_object_key", "bio", "level",
 			"trust_level", "status", "created_at", "experience", "account_type",
-			"post_count", "follower_count", "following_count",
+			"post_count", "comment_count", "follower_count", "following_count",
 		}).AddRow(
-			"u1", "10000", "cup_master", "杯友老张", "", "", "", "评测老手",
+			"u1", "10000", "cup_master", "杯友老张", "",
+			"avatars/u1.webp", "", "", "评测老手",
 			1, "new", "active", time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC),
-			0, "email", 0, 0, 0,
+			0, "email", 0, 7, 0, 0,
 		))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1", nil)
@@ -37,8 +38,12 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
-	if body := res.Body.String(); body == "" || !strings.Contains(body, `"public_id":"10000"`) {
+	body := res.Body.String()
+	if body == "" || !strings.Contains(body, `"public_id":"10000"`) {
 		t.Fatalf("public_id missing from response: %s", body)
+	}
+	if !strings.Contains(body, `"avatar_url":`) || !strings.Contains(body, `"comment_count":7`) {
+		t.Fatalf("avatar_url or comment_count missing from response: %s", body)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

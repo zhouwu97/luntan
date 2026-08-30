@@ -57,7 +57,11 @@
   </main>
   <script>
     const elements={status:document.querySelector('#status'),version:document.querySelector('#version'),size:document.querySelector('#size'),date:document.querySelector('#date'),changelog:document.querySelector('#changelog'),download:document.querySelector('#download'),downloadText:document.querySelector('#downloadText'),hint:document.querySelector('#hint'),sha:document.querySelector('#sha')};
-    const query=new URLSearchParams(location.search);const apiBase=(query.get('api')||location.origin).replace(/\/$/,'');let target='';
+    const query=new URLSearchParams(location.search);
+    // ?api= 仅允许本机开发联调覆盖 API 源；其他域名一律固定为当前站点，
+    // 防止把下载页指向第三方 APK 源。
+    const allowApiOverride=['localhost','127.0.0.1'].includes(location.hostname);
+    const apiBase=((allowApiOverride?query.get('api'):null)||location.origin).replace(/\/$/,'');let target='';
     function formatBytes(value){let n=Number(value);if(!Number.isFinite(n)||n<=0)return '—';const units=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<units.length-1){n/=1024;i++}return `${n>=100?n.toFixed(0):n>=10?n.toFixed(1):n.toFixed(2)} ${units[i]}`}
     function formatDate(value){const date=new Date(value);return Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}).format(date)}
     function absoluteURL(value){try{return new URL(value,apiBase).href}catch{return ''}}

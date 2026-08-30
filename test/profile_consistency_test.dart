@@ -40,10 +40,15 @@ class _MockProfileRepo extends ProfileRepository {
 }
 
 class _MockUserRepository implements UserRepository {
-  _MockUserRepository({required this.profile, required this.posts});
+  _MockUserRepository({
+    required this.profile,
+    required this.posts,
+    this.comments = const [],
+  });
 
   final UserProfile profile;
   final UserPostPage posts;
+  final List<ProfilePostItem> comments;
 
   @override
   Future<UserProfile?> getProfile(String userId) async => profile;
@@ -54,6 +59,13 @@ class _MockUserRepository implements UserRepository {
     String? cursor,
     int limit = 20,
   }) async => posts;
+
+  @override
+  Future<ProfileListPage> listComments(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async => ProfileListPage(items: comments);
 
   @override
   Future<UserRelationPage> listFollowers(
@@ -358,6 +370,7 @@ void main() {
           trustLevel: 'trusted',
           status: 'active',
           postCount: 1,
+          commentCount: 2,
           followerCount: 11,
           followingCount: 13,
           createdAt: DateTime.utc(2026, 8, 24),
@@ -376,6 +389,21 @@ void main() {
             ),
           ],
         ),
+        comments: [
+          ProfilePostItem(
+            id: 'post_1001',
+            commentId: 'comment_2001',
+            authorId: 'user_100',
+            communityId: 'c1',
+            communityName: '评测专区',
+            title: '真实开箱体验分享',
+            contentPreview: '这条评论的正文预览',
+            commentCount: 0,
+            likeCount: 3,
+            bookmarkCount: 0,
+            publishedAt: DateTime.utc(2026, 8, 25),
+          ),
+        ],
       );
 
       await tester.pumpWidget(
@@ -398,6 +426,13 @@ void main() {
       expect(find.text('654'), findsOneWidget);
       expect(find.text('987'), findsOneWidget);
       expect(find.text('100%'), findsNothing);
+
+      // 评论 Tab 走 UserRepository.listComments（/users/{id}/comments），
+      // 不再依赖从未注入的 profileRepository。
+      await tester.tap(find.text('评论 2'));
+      await tester.pumpAndSettle();
+      expect(find.text('这条评论的正文预览'), findsOneWidget);
+      expect(find.text('回复帖子：真实开箱体验分享'), findsOneWidget);
     });
 
     testWidgets('3. 我的评论列表展示评论正文、原帖标题并带 focusCommentId 跳转', (tester) async {

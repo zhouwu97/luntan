@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
@@ -43,6 +44,52 @@ func TestNoopHandlerIsIdempotent(t *testing.T) {
 func TestMinCapsBackoffExponent(t *testing.T) {
 	if min(9, 8) != 8 || min(3, 8) != 3 {
 		t.Fatal(errors.New("min returned unexpected value"))
+	}
+}
+
+// 崩溃恢复：认领查询必须包含 processing 租约超时分支，使 claim 后进程死亡
+// 遗留的行能被重新认领。sqlmock 只能验证 SQL/参数形状，真实 WHERE 语义由
+// CI 集成测试兜底。
+func TestRunOnceReclaimsStaleProcessingLease(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := &testCaptureHandler{}
+	worker := Worker{
+		DB:      db,
+		Handler: handler,
+		Lease:   5 * time.Minute,
+		Now:     func() time.Time { return time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC) },
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`status = 'processing' AND locked_at < \$3 AND attempts < \$2`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "event_type", "aggregate_type", "aggregate_id", "payload", "attempts"}).
+			AddRow("event-stale", "notification.created", "notification", "n1", []byte(`{"id":"n1"}`), 1))
+	mock.ExpectExec(`UPDATE outbox_events SET status = 'processing', locked_at = \$1, attempts = attempts \+ 1 WHERE id = \$2`).
+		WithArgs(sqlmock.AnyArg(), "event-stale").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	mock.ExpectExec(`UPDATE outbox_events SET status = 'succeeded'`).
+		WithArgs(sqlmock.AnyArg(), "event-stale").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	processed, err := worker.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce failed: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed, got %d", processed)
+	}
+	if !handler.called {
+		t.Fatal("expected handler to be called for reclaimed stale processing event")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
 	}
 }
 

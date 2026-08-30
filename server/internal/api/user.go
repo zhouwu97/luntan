@@ -15,6 +15,7 @@ type userProfileResponse struct {
 	Username          string         `json:"username"`
 	Nickname          string         `json:"nickname"`
 	AvatarMediaID     string         `json:"avatar_media_id,omitempty"`
+	AvatarURL         string         `json:"avatar_url,omitempty"`
 	BackgroundMediaID string         `json:"background_media_id,omitempty"`
 	BackgroundURL     string         `json:"background_url,omitempty"`
 	Bio               string         `json:"bio"`
@@ -25,6 +26,7 @@ type userProfileResponse struct {
 	TrustLevel        string         `json:"trust_level"`
 	Status            string         `json:"status"`
 	PostCount         int64          `json:"post_count"`
+	CommentCount      int64          `json:"comment_count"`
 	FollowerCount     int64          `json:"follower_count"`
 	FollowingCount    int64          `json:"following_count"`
 	CreatedAt         string         `json:"created_at"`
@@ -38,6 +40,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	var item userProfileResponse
 	var createdAt sql.NullTime
 	var backgroundObjectKey string
+	var avatarObjectKey string
 	var viewerID, accountType string
 	var exp int64
 	var rawLevel int
@@ -47,19 +50,22 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	}
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT u.id, COALESCE(u.public_id::text, ''), u.username, COALESCE(up.nickname, u.username),
-		       COALESCE(up.avatar_media_id, ''), COALESCE(up.background_media_id, ''), COALESCE(background.object_key, ''), COALESCE(up.bio, ''),
+		       COALESCE(up.avatar_media_id, ''), COALESCE(avatar.object_key, ''),
+		       COALESCE(up.background_media_id, ''), COALESCE(background.object_key, ''), COALESCE(up.bio, ''),
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.trust_level, 'new'), u.status, u.created_at,
 		       COALESCE(up.experience, 0), COALESCE(u.account_type, 'email'),
 		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market'),
+		       (SELECT count(*) FROM comments c WHERE c.author_id = u.id AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'),
 		       (SELECT count(*) FROM user_follows f WHERE f.followee_id = u.id),
 		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets avatar ON avatar.id = up.avatar_media_id AND avatar.status = 'ready' AND avatar.deleted_at IS NULL
 		LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
 		WHERE u.id = $1 AND u.deleted_at IS NULL`, id).
-		Scan(&item.ID, &item.PublicID, &item.Username, &item.Nickname, &item.AvatarMediaID, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
-			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.FollowerCount, &item.FollowingCount)
+		Scan(&item.ID, &item.PublicID, &item.Username, &item.Nickname, &item.AvatarMediaID, &avatarObjectKey, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
+			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.CommentCount, &item.FollowerCount, &item.FollowingCount)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "用户不存在"})
 		return
@@ -75,6 +81,9 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 	item.Growth = growth
 	if createdAt.Valid {
 		item.CreatedAt = createdAt.Time.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
+	}
+	if avatarObjectKey != "" {
+		item.AvatarURL = publicMediaURL(avatarObjectKey)
 	}
 	if backgroundObjectKey != "" {
 		item.BackgroundURL = publicMediaURL(backgroundObjectKey)
@@ -252,4 +261,18 @@ func (s *Server) listUserRelations(w http.ResponseWriter, r *http.Request, userI
 		"items": items, "next_cursor": nextCursor, "has_more": hasMore,
 		"user_id": userID, "relation": relation,
 	})
+}
+
+// listUserComments 提供他人主页「评论」Tab 的数据，复用 /me/comments 的轻量查询
+// 与响应结构；评论没有仅本人可见的状态，本人查看自己也走该端点。
+func (s *Server) listUserComments(w http.ResponseWriter, r *http.Request, userID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
+		return
+	}
+	s.profileCommentList(w, r, userID, limit)
 }

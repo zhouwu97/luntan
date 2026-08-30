@@ -147,9 +147,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<ProfileListPage?> _loadInitialComments() async {
-    if (widget.profileRepository == null) return null;
     try {
-      final page = await widget.profileRepository!.list('comments');
+      final page = await widget.repository.listComments(widget.userId);
       if (!mounted) return page;
       setState(() {
         _comments
@@ -206,14 +205,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Future<void> _loadMoreComments() async {
     if (_loadingMoreComments ||
         !_hasMoreComments ||
-        _nextCommentsCursor == null ||
-        widget.profileRepository == null) {
+        _nextCommentsCursor == null) {
       return;
     }
     setState(() => _loadingMoreComments = true);
     try {
-      final page = await widget.profileRepository!.list(
-        'comments',
+      final page = await widget.repository.listComments(
+        widget.userId,
         cursor: _nextCommentsCursor,
       );
       if (!mounted) return;
@@ -402,13 +400,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             : (profile?.bio.isNotEmpty == true ? profile!.bio : '');
         final postCount =
             _selfSummary?.postCount ?? profile?.postCount ?? _posts.length;
-        final commentCount = _selfSummary?.commentCount ?? _comments.length;
+        final commentCount = _selfSummary?.commentCount ??
+            _profile?.commentCount ??
+            _comments.length;
         final followerCount =
             _selfSummary?.followerCount ?? profile?.followerCount ?? 0;
         final followingCount =
             _selfSummary?.followingCount ?? profile?.followingCount ?? 0;
         final likeReceivedCount = _selfSummary?.likeReceivedCount ?? 0;
-        final avatarUrl = _selfSummary?.avatarUrl;
+        final avatarUrl = _selfSummary?.avatarUrl ?? _profile?.avatarUrl;
         final backgroundUrl =
             _selfSummary?.backgroundUrl ?? profile?.backgroundUrl;
         final growth = _selfSummary?.growth ?? profile?.growth;
@@ -1676,6 +1676,7 @@ class CommunityDetailScreen extends StatefulWidget {
     required this.onToggleLike,
     required this.onToggleBookmark,
     required this.interactionController,
+    this.onOpenUserId,
   });
 
   final CommunityRepository repository;
@@ -1690,6 +1691,7 @@ class CommunityDetailScreen extends StatefulWidget {
   final ValueChanged<Post> onToggleLike;
   final ValueChanged<Post> onToggleBookmark;
   final InteractionController interactionController;
+  final ValueChanged<String>? onOpenUserId;
 
   @override
   State<CommunityDetailScreen> createState() => _CommunityDetailScreenState();
@@ -1900,6 +1902,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               onLike: () => widget.onToggleLike(post),
               onBookmark: () => widget.onToggleBookmark(post),
               onMenu: () => widget.onFeedback('更多操作请在帖子详情中进行'),
+              onAuthorTap: widget.onOpenUserId,
               interactionListenable:
                   widget.interactionController.interactionsFor(post.id),
             );

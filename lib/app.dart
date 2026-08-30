@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'controllers/auth_controller.dart';
 import 'controllers/comments_controller.dart';
@@ -12,6 +14,7 @@ import 'controllers/interaction_controller.dart';
 import 'controllers/post_detail_controller.dart';
 import 'controllers/publish_controller.dart';
 import 'data/api/api_client.dart';
+import 'data/api/app_update_service.dart';
 import 'data/api/auth_repository.dart';
 import 'data/api/publish_repository.dart';
 import 'data/api/platform_repository.dart';
@@ -20,6 +23,7 @@ import 'data/mock_forum_data.dart';
 import 'data/repository_provider.dart';
 import 'domain/models.dart';
 import 'domain/repositories.dart';
+import 'screens/app_update_sheet.dart';
 import 'screens/auth_screen.dart';
 import 'screens/appeal_detail_screen.dart';
 import 'screens/home_screen.dart';
@@ -154,6 +158,32 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         if (mounted) setState(() => rulesGateVisible = rulesGate.shouldShow);
       }),
     );
+    unawaited(_checkStartupRequiredUpdate());
+  }
+
+  /// 启动强制更新门禁：Android 上检查到服务端标记 required 的新版本时，
+  /// 弹出不可关闭的更新层。检查静默失败、不阻塞启动；Web 与桌面端没有
+  /// APK 安装能力，不参与门禁。
+  Future<void> _checkStartupRequiredUpdate() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    final baseUrl = apiBaseUrlFromEnvironment().trim();
+    if (baseUrl.isEmpty) return;
+    final service = AppUpdateService(baseUri: Uri.parse(baseUrl));
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      final info = await service.checkUpdate(
+        versionName: packageInfo.version,
+        versionCode: int.tryParse(packageInfo.buildNumber) ?? 0,
+      );
+      if (!mounted) return;
+      if (info.updateAvailable && info.isRequired) {
+        await showAppUpdateSheet(appContext, force: true);
+      }
+    } catch (_) {
+      // 启动检查失败不打扰用户；设置页仍可手动检查更新。
+    } finally {
+      service.close();
+    }
   }
 
   void _handleSessionInvalidated() {
@@ -569,6 +599,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           onToggleLike: togglePostLike,
           onToggleBookmark: toggleBookmark,
           interactionController: interactionController,
+          onOpenUserId: openUserProfile,
         ),
       ),
     );

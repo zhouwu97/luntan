@@ -21,7 +21,11 @@ func writeTestAppRelease(t *testing.T) *AppRelease {
 	content := []byte("deterministic android package content")
 	digest := sha256.Sum256(content)
 	digestHex := hex.EncodeToString(digest[:])
-	if err := os.WriteFile(filepath.Join(directory, "luntan-1.2.0.apk"), content, 0o644); err != nil {
+	versionDirectory := filepath.Join(directory, "releases", "12")
+	if err := os.MkdirAll(versionDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(versionDirectory, "luntan-1.2.0.apk"), content, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	manifest := map[string]any{
@@ -30,7 +34,7 @@ func writeTestAppRelease(t *testing.T) *AppRelease {
 		"minimum_supported_version_code": 10,
 		"title":                          "圣杯酱 1.2.0",
 		"changelog":                      "修复下载链路并优化更新体验。",
-		"apk_file":                       "luntan-1.2.0.apk",
+		"apk_file":                       "releases/12/luntan-1.2.0.apk",
 		"sha256":                         digestHex,
 		"published_at":                   "2026-08-30T00:00:00+08:00",
 	}
@@ -152,5 +156,41 @@ func TestAppReleaseUnavailableIsExplicit(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "APP_RELEASE_UNAVAILABLE") {
 		t.Fatalf("unexpected unavailable response: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAppReleaseDownloadRejectsInPlaceOverwrite(t *testing.T) {
+	release := writeTestAppRelease(t)
+	handler := newReleaseTestHandler(t, release)
+
+	// 同大小、不同内容的原地覆盖：SHA/ETag 仍是启动时算的旧值，此时继续下发
+	// 就会出现“接口 SHA=旧包、实际下载=新包”，必须拒绝服务。
+	overwritten := strings.Repeat("x", int(release.FileSize))
+	if err := os.WriteFile(release.FilePath, []byte(overwritten), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, release.downloadPath(), nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "APP_RELEASE_CHANGED") {
+		t.Fatalf("expected APP_RELEASE_CHANGED after overwrite, got status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestLoadAppReleaseEnforcesImmutableApkPath(t *testing.T) {
+	cases := []string{"app.apk", "luntan-1.0.0.apk", "packages/12/app.apk", "releases/13/app.apk", "releases/12/sub/app.apk"}
+	for _, apkFile := range cases {
+		t.Run(apkFile, func(t *testing.T) {
+			directory := t.TempDir()
+			manifest := `{"version_name":"1.0.0","version_code":12,"minimum_supported_version_code":10,"title":"t","changelog":"c","apk_file":"` + apkFile + `","sha256":"` + strings.Repeat("0", 64) + `","published_at":"2026-08-30T00:00:00+08:00"}`
+			manifestPath := filepath.Join(directory, "release.json")
+			if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadAppRelease(manifestPath, "")
+			if err == nil || !strings.Contains(err.Error(), "immutable path") {
+				t.Fatalf("expected immutable path error for %q, got %v", apkFile, err)
+			}
+		})
 	}
 }

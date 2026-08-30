@@ -15,7 +15,6 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
 
-
 func TestAPIWithoutDatabaseReturns503(t *testing.T) {
 	for _, path := range []string{"/api/v1/community-categories", "/api/v1/communities", "/api/v1/feed/latest", "/api/v1/posts/p1", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/me"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -306,6 +305,34 @@ func TestPublicUserPostsExposeRealPostCounts(t *testing.T) {
 		!strings.Contains(res.Body.String(), `"like_count":37`) ||
 		!strings.Contains(res.Body.String(), `"view_count":321`) {
 		t.Fatalf("public user posts response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublicUserCommentsListReturnsAuthoredComments(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	created := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*c\.author_id = \$1.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
+		WithArgs("u2", 2).
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
+			AddRow("c9", "post-1", "帖子标题", "他人主页可见的评论", "c1", "评测区", int64(4), int64(2), int64(0), created.Add(-time.Hour), created))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u2/comments?limit=1", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK ||
+		!strings.Contains(res.Body.String(), `"comment_id":"c9"`) ||
+		!strings.Contains(res.Body.String(), `"id":"post-1"`) ||
+		!strings.Contains(res.Body.String(), `"has_more":false`) {
+		t.Fatalf("public user comments response: status=%d body=%s", res.Code, res.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -647,7 +674,6 @@ func TestCreateCommentValidationRejectsEmpty(t *testing.T) {
 	}
 }
 
-
 func TestCreateCommentEnforcesAttachmentConstraints(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -788,6 +814,3 @@ func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-
-

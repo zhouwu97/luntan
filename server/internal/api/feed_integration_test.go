@@ -825,4 +825,3 @@ func TestReplyToHiddenCommentRejected(t *testing.T) {
 		t.Fatalf("expected no reply persisted, got err=%v count=%d", err, replyCount)
 	}
 }
-

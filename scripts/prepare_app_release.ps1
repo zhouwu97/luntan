@@ -40,7 +40,10 @@ if ([string]::IsNullOrWhiteSpace($VersionName) -or
 }
 
 $releaseDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-[System.IO.Directory]::CreateDirectory($releaseDirectory) | Out-Null
+# 每个版本独立目录（releases/<version_code>/），发布路径不可变，
+# 服务端强制校验 apk_file 必须落在该目录下。
+$versionDirectory = Join-Path $releaseDirectory (Join-Path 'releases' "$VersionCode")
+[System.IO.Directory]::CreateDirectory($versionDirectory) | Out-Null
 
 # 文件名只使用已校验的版本号字符，避免发布清单出现路径穿越或特殊字符。
 $safeVersionName = $VersionName.Trim()
@@ -48,17 +51,26 @@ if ($safeVersionName -notmatch '^[0-9A-Za-z._-]+$') {
     throw 'VersionName 只能包含字母、数字、点、下划线和连字符'
 }
 $apkFileName = "luntan-$safeVersionName-$VersionCode.apk"
-$publishedApk = Join-Path $releaseDirectory $apkFileName
-Copy-Item -LiteralPath $resolvedApk -Destination $publishedApk -Force
+$publishedApk = Join-Path $versionDirectory $apkFileName
 
-$digest = (Get-FileHash -LiteralPath $publishedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+$digest = (Get-FileHash -LiteralPath $resolvedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+if (Test-Path -LiteralPath $publishedApk) {
+    $existingDigest = (Get-FileHash -LiteralPath $publishedApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($existingDigest -ne $digest) {
+        throw "发布路径已存在内容不同的 APK：$publishedApk。发布包不可变，禁止原地覆盖；请递增 VersionCode 后重新发布。"
+    }
+}
+else {
+    Copy-Item -LiteralPath $resolvedApk -Destination $publishedApk
+}
+
 $manifest = [ordered]@{
     version_name                   = $safeVersionName
     version_code                   = $VersionCode
     minimum_supported_version_code = $MinimumSupportedVersionCode
     title                          = $Title.Trim()
     changelog                      = $Changelog.Trim()
-    apk_file                       = $apkFileName
+    apk_file                       = "releases/$VersionCode/$apkFileName"
     sha256                         = $digest
     published_at                   = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
 }

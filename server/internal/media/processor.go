@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"image"
@@ -52,6 +53,10 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode image (%s): %w", format, err)
 	}
+
+	// 手机横拍/竖拍的照片像素并不旋转，仅靠 EXIF Orientation 标记告知查看器摆正
+	// 方向。重编码会剥离全部元数据，若不先按标记旋转像素，这类照片将永久躺倒。
+	srcImg = applyEXIFOrientation(srcImg, readEXIFOrientation(data))
 
 	bounds := srcImg.Bounds()
 	origW := bounds.Dx()
@@ -158,6 +163,123 @@ func resizeCatmullRom(src image.Image, dstW, dstH int) *image.RGBA {
 		return dst
 	}
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
+	return dst
+}
+
+// readEXIFOrientation 从 JPEG APP1 (Exif) 段读取 Orientation(0x0112) 标记，
+// 返回 1-8；非 JPEG、缺失或结构异常时一律返回 1（不旋转），绝不因解析失败
+// 阻断上传处理。
+func readEXIFOrientation(data []byte) int {
+	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+		return 1
+	}
+	pos := 2
+	for pos+4 <= len(data) {
+		if data[pos] != 0xFF {
+			return 1
+		}
+		marker := data[pos+1]
+		switch {
+		case marker == 0xFF: // 填充字节，前进 1 字节后才是真实 marker
+			pos++
+			continue
+		case marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7): // 无长度的独立 marker
+			pos += 2
+			continue
+		case marker == 0xDA: // SOS 之后是压缩数据，不会再有 EXIF
+			return 1
+		}
+		segLen := int(data[pos+2])<<8 | int(data[pos+3])
+		if segLen < 2 || pos+2+segLen > len(data) {
+			return 1
+		}
+		payload := data[pos+4 : pos+2+segLen]
+		if marker == 0xE1 && len(payload) >= 8 && string(payload[:6]) == "Exif\x00\x00" {
+			return parseTIFFOrientation(payload[6:])
+		}
+		pos += 2 + segLen
+	}
+	return 1
+}
+
+func parseTIFFOrientation(tiff []byte) int {
+	if len(tiff) < 8 {
+		return 1
+	}
+	var order binary.ByteOrder = binary.LittleEndian
+	switch string(tiff[:2]) {
+	case "MM":
+		order = binary.BigEndian
+	case "II":
+	default:
+		return 1
+	}
+	if order.Uint16(tiff[2:4]) != 42 {
+		return 1
+	}
+	ifd := int(order.Uint32(tiff[4:8]))
+	if ifd < 8 || ifd+2 > len(tiff) {
+		return 1
+	}
+	entries := int(order.Uint16(tiff[ifd : ifd+2]))
+	for i := 0; i < entries; i++ {
+		off := ifd + 2 + i*12
+		if off+12 > len(tiff) {
+			return 1
+		}
+		if order.Uint16(tiff[off:off+2]) != 0x0112 { // Orientation tag
+			continue
+		}
+		// 规范上 Orientation 是 SHORT(3) 且 count=1；异常类型不做猜测。
+		if order.Uint16(tiff[off+2:off+4]) != 3 || order.Uint32(tiff[off+4:off+8]) != 1 {
+			return 1
+		}
+		// 值不超过 4 字节时按 TIFF 规范内联在条目 value 字段前部。
+		value := int(order.Uint16(tiff[off+8 : off+10]))
+		if value >= 1 && value <= 8 {
+			return value
+		}
+		return 1
+	}
+	return 1
+}
+
+// applyEXIFOrientation 按 EXIF Orientation(1-8) 旋转/翻转像素，使位图存储
+// 即为摆正后的样子；orientation 为 1 或不在 1-8 范围时原样返回。
+func applyEXIFOrientation(src image.Image, orientation int) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	newW, newH := w, h
+	var toDst func(x, y int) (int, int)
+	switch orientation {
+	case 2: // 水平镜像：第 0 行仍是视觉顶部，左右颠倒
+		toDst = func(x, y int) (int, int) { return w - 1 - x, y }
+	case 3: // 旋转 180
+		toDst = func(x, y int) (int, int) { return w - 1 - x, h - 1 - y }
+	case 4: // 垂直镜像：第 0 行是视觉底部
+		toDst = func(x, y int) (int, int) { return x, h - 1 - y }
+	case 5: // 转置（沿主对角线翻转）：第 0 行是视觉左侧、第 0 列是视觉顶部
+		toDst = func(x, y int) (int, int) { return y, x }
+		newW, newH = h, w
+	case 6: // 顺时针旋转 90：第 0 行是视觉右侧、第 0 列是视觉顶部
+		toDst = func(x, y int) (int, int) { return h - 1 - y, x }
+		newW, newH = h, w
+	case 7: // 反转置（沿反对角线翻转）：第 0 行是视觉右侧、第 0 列是视觉底部
+		toDst = func(x, y int) (int, int) { return h - 1 - y, w - 1 - x }
+		newW, newH = h, w
+	case 8: // 逆时针旋转 90：第 0 行是视觉左侧、第 0 列是视觉底部
+		toDst = func(x, y int) (int, int) { return y, w - 1 - x }
+		newW, newH = h, w
+	default: // 1 或非法值
+		return src
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dx, dy := toDst(x, y)
+			dst.Set(dx, dy, src.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
 	return dst
 }
 

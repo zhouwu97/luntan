@@ -1,5 +1,6 @@
 import '../../domain/models.dart';
 import 'api_client.dart';
+import 'profile_repository.dart';
 
 class UserProfile {
   const UserProfile({
@@ -18,8 +19,10 @@ class UserProfile {
     required this.followingCount,
     required this.createdAt,
     this.avatarMediaId,
+    this.avatarUrl,
     this.backgroundMediaId,
     this.backgroundUrl,
+    this.commentCount = 0,
     this.isFollowing = false,
     this.isBlocked = false,
     this.canFollow = false,
@@ -40,8 +43,10 @@ class UserProfile {
   final int followingCount;
   final DateTime createdAt;
   final String? avatarMediaId;
+  final String? avatarUrl;
   final String? backgroundMediaId;
   final String? backgroundUrl;
+  final int commentCount;
   final bool isFollowing;
   final bool isBlocked;
   final bool canFollow;
@@ -122,6 +127,12 @@ abstract interface class UserRepository {
     int limit = 20,
   });
 
+  Future<ProfileListPage> listComments(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  });
+
   Future<UserRelationPage> listFollowers(
     String userId, {
     String? cursor,
@@ -183,8 +194,10 @@ class ApiUserRepository implements UserRepository {
         followingCount: _int(value['following_count']),
         createdAt: _date(value['created_at']),
         avatarMediaId: _nullable(value['avatar_media_id']),
+        avatarUrl: _nullable(value['avatar_url']),
         backgroundMediaId: _nullable(value['background_media_id']),
         backgroundUrl: _nullable(value['background_url']),
+        commentCount: _int(value['comment_count']),
         isFollowing: viewer['is_following'] == true,
         isBlocked: viewer['is_blocked'] == true,
         canFollow: viewer['can_follow'] == true,
@@ -229,6 +242,22 @@ class ApiUserRepository implements UserRepository {
       nextCursor: value['next_cursor'] as String?,
       hasMore: value['has_more'] == true,
     );
+  }
+
+  @override
+  Future<ProfileListPage> listComments(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final value = await _client.getJson(
+      '/api/v1/users/$userId/comments',
+      queryParameters: {
+        'limit': '$limit',
+        ...?(cursor == null ? null : {'cursor': cursor}),
+      },
+    );
+    return profileListPageFromJson(value);
   }
 
   @override
@@ -360,6 +389,15 @@ class MockUserRepository implements UserRepository {
     int limit = 20,
   }) async {
     return const UserPostPage(items: [], hasMore: false);
+  }
+
+  @override
+  Future<ProfileListPage> listComments(
+    String userId, {
+    String? cursor,
+    int limit = 20,
+  }) async {
+    return const ProfileListPage(items: []);
   }
 
   @override

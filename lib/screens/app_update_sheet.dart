@@ -15,20 +15,30 @@ import '../theme/app_theme.dart';
 ///
 /// 状态机：checking → upToDate / available / error；available 内部再分
 /// idle / downloading / readyToInstall / installPermissionRequired。
-Future<void> showAppUpdateSheet(BuildContext context) async {
+///
+/// [force] 用于启动强制更新门禁：禁用点遮罩、下拉和返回键关闭，并隐藏
+/// 关闭按钮，用户只能更新或重试。
+Future<void> showAppUpdateSheet(
+  BuildContext context, {
+  bool force = false,
+}) async {
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.white,
+    isDismissible: !force,
+    enableDrag: !force,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: (_) => const AppUpdateSheet(),
+    builder: (_) => AppUpdateSheet(force: force),
   );
 }
 
 class AppUpdateSheet extends StatefulWidget {
-  const AppUpdateSheet({super.key});
+  const AppUpdateSheet({super.key, this.force = false});
+
+  final bool force;
 
   @override
   State<AppUpdateSheet> createState() => _AppUpdateSheetState();
@@ -231,94 +241,98 @@ class _AppUpdateSheetState extends State<AppUpdateSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.86,
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 38,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.border,
-                    borderRadius: BorderRadius.circular(99),
+    return PopScope(
+      canPop: !widget.force,
+      child: SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.86,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.border,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: AppTheme.surfaceBlue,
-                      borderRadius: BorderRadius.circular(13),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceBlue,
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(
+                        Icons.system_update_alt_rounded,
+                        color: AppTheme.primary,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.system_update_alt_rounded,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '检查更新',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '检查更新',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textPrimary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _statusSubtitle(),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary,
+                          const SizedBox(height: 2),
+                          Text(
+                            _statusSubtitle(),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
                           ),
+                        ],
+                      ),
+                    ),
+                    if (!widget.force)
+                      IconButton(
+                        tooltip: '关闭',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: AppTheme.textSecondary,
                         ),
-                      ],
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ...switch (_phase) {
+                  _UpdatePhase.checking => [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 28),
+                      child: Center(child: CircularProgressIndicator()),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(
-                      Icons.close_rounded,
-                      color: AppTheme.textSecondary,
+                  ],
+                  _UpdatePhase.upToDate => [_UpToDateCard(onRetry: _check)],
+                  _UpdatePhase.error => [
+                    _ErrorCard(
+                      message: _errorMessage ?? '检查更新失败',
+                      onRetry: _check,
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              ...switch (_phase) {
-                _UpdatePhase.checking => [
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 28),
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                ],
-                _UpdatePhase.upToDate => [_UpToDateCard(onRetry: _check)],
-                _UpdatePhase.error => [
-                  _ErrorCard(
-                    message: _errorMessage ?? '检查更新失败',
-                    onRetry: _check,
-                  ),
-                ],
-                _UpdatePhase.available => _buildAvailableBody(),
-              },
-            ],
+                  ],
+                  _UpdatePhase.available => _buildAvailableBody(),
+                },
+              ],
+            ),
           ),
         ),
       ),

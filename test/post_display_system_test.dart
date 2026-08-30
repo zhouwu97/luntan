@@ -410,6 +410,86 @@ void main() {
       await tester.tap(find.byIcon(Icons.chat_bubble_outline_rounded));
       expect(openedComments, isTrue);
     });
+
+    testWidgets('10. 点击卡片作者昵称触发 onAuthorTap 并传递作者 ID', (tester) async {
+      String? tappedUserId;
+      var opened = false;
+      final post = Post(
+        id: 'post-tap',
+        authorId: 'u9',
+        communityId: 'c1',
+        author: User(
+          id: 'u9',
+          username: 'u9',
+          nickname: '卡片作者',
+          avatar: null,
+          level: 2,
+          createdAt: now,
+          updatedAt: now,
+        ),
+        title: '作者跳转测试',
+        content: '正文内容',
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ForumPostCard(
+              post: post,
+              onOpen: () => opened = true,
+              onLike: () {},
+              onBookmark: () {},
+              onAuthorTap: (id) => tappedUserId = id,
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('卡片作者'));
+      expect(tappedUserId, 'u9');
+      expect(opened, isFalse);
+    });
+
+    testWidgets('11. 游客作者点击卡片作者区不触发 onAuthorTap', (tester) async {
+      String? tappedUserId;
+      final post = Post(
+        id: 'post-guest',
+        authorId: 'guest-abc',
+        communityId: 'c1',
+        author: User(
+          id: 'guest-abc',
+          username: 'guest-abc',
+          nickname: '游客用户',
+          avatar: null,
+          level: 0,
+          createdAt: now,
+          updatedAt: now,
+        ),
+        title: '游客帖子',
+        content: '正文内容',
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ForumPostCard(
+              post: post,
+              onOpen: () {},
+              onLike: () {},
+              onBookmark: () {},
+              onAuthorTap: (id) => tappedUserId = id,
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('游客用户'));
+      expect(tappedUserId, isNull);
+    });
   });
 
   group('四、详情页 CommentReplyBar 双态互动栏测试', () {

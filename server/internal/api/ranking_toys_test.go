@@ -67,4 +67,3 @@ func TestRankingToyCommentResponseIncludesAuthorRatingAndLevel(t *testing.T) {
 		t.Fatalf("author map = %#v, want level=4, author_rating=9", author)
 	}
 }
-

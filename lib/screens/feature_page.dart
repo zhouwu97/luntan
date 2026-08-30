@@ -47,6 +47,7 @@ class FeaturePage extends StatefulWidget {
     this.canVote = false,
     this.canManageRanking = false,
     this.onRequireAuth,
+    this.onOpenUserId,
   });
 
   final FeatureType type;
@@ -68,6 +69,7 @@ class FeaturePage extends StatefulWidget {
   final bool canVote;
   final bool canManageRanking;
   final VoidCallback? onRequireAuth;
+  final ValueChanged<String>? onOpenUserId;
 
   @override
   State<FeaturePage> createState() => _FeaturePageState();
@@ -270,6 +272,7 @@ class _FeaturePageState extends State<FeaturePage> {
     onBookmark: () => onBookmark?.call(post),
     // 专题页暂不提供帖子菜单，不渲染一个没有行为的省略号入口。
     onMenu: null,
+    onAuthorTap: widget.onOpenUserId,
     interactionListenable:
         widget.interactionController.interactionsFor(post.id),
   );

@@ -15,6 +15,7 @@ class ForumPostCard extends StatelessWidget {
     required this.onLike,
     required this.onBookmark,
     this.onMenu,
+    this.onAuthorTap,
     this.contextMeta,
     this.interactionListenable,
   });
@@ -25,6 +26,7 @@ class ForumPostCard extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onBookmark;
   final VoidCallback? onMenu;
+  final void Function(String userId)? onAuthorTap;
   final String? contextMeta;
   final Listenable? interactionListenable;
 
@@ -61,7 +63,11 @@ class ForumPostCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ForumAuthorRow(post: post, onMenu: onMenu),
+                ForumAuthorRow(
+                  post: post,
+                  onMenu: onMenu,
+                  onAuthorTap: onAuthorTap,
+                ),
                 const SizedBox(height: 9),
                 if (post.isPinned ||
                     post.isFeatured ||

@@ -203,4 +203,55 @@ void main() {
     expect(page.items.single.viewerState?.hasLiked, isTrue);
     client.close();
   });
+
+  test('ApiUserRepository 解析他人主页 avatar_url 与 comment_count', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          utf8.encode(
+            '{"id":"u1","username":"cup_master","nickname":"杯友老张","bio":"","account_type":"email","level":3,"experience":10,"trust_level":"new","status":"active","post_count":5,"comment_count":7,"follower_count":1,"following_count":2,"created_at":"2026-08-01T00:00:00Z","avatar_url":"/api/v1/media-file/avatars/u1.webp","background_url":"/api/v1/media-file/bg/u1.jpg"}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+
+    final profile = await ApiUserRepository(client).getProfile('u1');
+
+    expect(profile?.avatarUrl, '/api/v1/media-file/avatars/u1.webp');
+    expect(profile?.backgroundUrl, '/api/v1/media-file/bg/u1.jpg');
+    expect(profile?.commentCount, 7);
+    client.close();
+  });
+
+  test('ApiUserRepository.listComments 请求 /users/{id}/comments 并复用轻量结构', () async {
+    Uri? requestedUri;
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient((request) async {
+        requestedUri = request.url;
+        return http.Response.bytes(
+          utf8.encode(
+            '{"items":[{"id":"post-1","comment_id":"c9","title":"帖子标题","content_preview":"他人评论","community_id":"c1","community_name":"评测区","comment_count":4,"like_count":2,"bookmark_count":0,"published_at":"2026-08-24T20:00:00Z","activity_at":"2026-08-24T21:00:00Z"}],"next_cursor":"cur-2","has_more":true}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    final page = await ApiUserRepository(client).listComments('u2');
+
+    expect(requestedUri?.path, '/api/v1/users/u2/comments');
+    expect(page.items.single.commentId, 'c9');
+    expect(page.items.single.id, 'post-1');
+    expect(
+      page.items.single.activityAt,
+      DateTime.parse('2026-08-24T21:00:00Z'),
+    );
+    expect(page.nextCursor, 'cur-2');
+    client.close();
+  });
 }

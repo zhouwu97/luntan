@@ -224,9 +224,9 @@ func TestRankingSubmissionReviewBySuperAdmin(t *testing.T) {
 	}
 	var listPayload struct {
 		Items []struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			Category string `json:"category"`
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Category  string `json:"category"`
 			Submitter struct {
 				ID       string `json:"id"`
 				Username string `json:"username"`

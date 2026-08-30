@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,9 +32,12 @@ type AppRelease struct {
 	FileName                    string
 	FilePath                    string
 	FileSize                    int64
-	SHA256                      string
-	PublishedAt                 time.Time
-	PublicBaseURL               string
+	// FileModTime 是启动校验摘要时的文件 mtime 快照。SHA256 只在启动算一次，
+	// 下载时靠 size + mtime 双重比对确认磁盘文件未被原地替换。
+	FileModTime   time.Time
+	SHA256        string
+	PublishedAt   time.Time
+	PublicBaseURL string
 }
 
 type appReleaseManifest struct {
@@ -81,6 +85,9 @@ func LoadAppRelease(manifestPath, publicBaseURL string) (*AppRelease, error) {
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
 		return nil, errors.New("app release apk_file must stay inside the manifest directory")
 	}
+	if err := validateImmutableApkPath(manifest.APKFile, manifest.VersionCode); err != nil {
+		return nil, err
+	}
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("stat app release apk: %w", err)
@@ -94,9 +101,13 @@ func LoadAppRelease(manifestPath, publicBaseURL string) (*AppRelease, error) {
 	}
 	hasher := sha256.New()
 	_, copyErr := io.Copy(hasher, file)
+	hashedInfo, statErr := file.Stat()
 	closeErr := file.Close()
 	if copyErr != nil {
 		return nil, fmt.Errorf("hash app release apk: %w", copyErr)
+	}
+	if statErr != nil {
+		return nil, fmt.Errorf("stat app release apk after hashing: %w", statErr)
 	}
 	if closeErr != nil {
 		return nil, fmt.Errorf("close app release apk: %w", closeErr)
@@ -114,11 +125,24 @@ func LoadAppRelease(manifestPath, publicBaseURL string) (*AppRelease, error) {
 		Changelog:                   strings.TrimSpace(manifest.Changelog),
 		FileName:                    filepath.Base(filePath),
 		FilePath:                    filePath,
-		FileSize:                    info.Size(),
+		FileSize:                    hashedInfo.Size(),
+		FileModTime:                 hashedInfo.ModTime(),
 		SHA256:                      actualSHA256,
 		PublishedAt:                 publishedAt.UTC(),
 		PublicBaseURL:               strings.TrimRight(strings.TrimSpace(publicBaseURL), "/"),
 	}, nil
+}
+
+// validateImmutableApkPath 强制发布包走按版本隔离的不可变路径
+// （releases/<version_code>/xxx.apk）：发布新版本必须写新路径，从目录约定上
+// 杜绝原地覆盖同一个 APK 文件。
+func validateImmutableApkPath(apkFile string, versionCode int64) error {
+	slash := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(apkFile))))
+	expectedDir := "releases/" + strconv.FormatInt(versionCode, 10)
+	if dir := path.Dir(slash); dir != expectedDir {
+		return fmt.Errorf("app release apk_file must be %s/<file>.apk so each release keeps an immutable path", expectedDir)
+	}
+	return nil
 }
 
 func validateAppReleaseManifest(manifest appReleaseManifest) error {
@@ -229,7 +253,10 @@ func (r *AppRelease) serveDownload(w http.ResponseWriter, request *http.Request)
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || info.Size() != r.FileSize {
+	// SHA256/ETag 只在启动算一次。磁盘文件一旦被原地替换（哪怕大小不变），
+	// 继续下发就会出现“接口 SHA=旧包、实际下载=新包”；size 与 mtime 任一
+	// 对不上就拒绝服务，等重启重新校验清单后再恢复。
+	if err != nil || info.Size() != r.FileSize || !info.ModTime().Equal(r.FileModTime) {
 		WriteAppError(w, request, AppError{Status: http.StatusServiceUnavailable, Code: "APP_RELEASE_CHANGED", Message: "安装包正在更新，请稍后重试"})
 		return
 	}

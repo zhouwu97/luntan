@@ -18,7 +18,7 @@ class _RulesPalette {
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
-  static const panelBase = Color(0xFFFFD9E6);
+  static const panelBase = Color(0xFFFFDCE8);
   static const separator = Color(0xFFF6E2EA);
 }
 
@@ -134,27 +134,41 @@ class _ForumRulesGateState extends State<ForumRulesGate> {
                       ],
                     ),
                     clipBehavior: Clip.antiAlias,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Expanded(flex: 36, child: _CharacterArt()),
-                        Expanded(
-                          flex: 64,
-                          child: AnimatedSwitcher(
-                            duration: AppMotion.normal,
-                            child: _declined
-                                ? _DeclinePanel(
-                                    key: const ValueKey('declined'),
-                                    onBack: () =>
-                                        setState(() => _declined = false),
-                                    onExit: _exitApp,
-                                  )
-                                : _buildRulesPanel(
-                                    key: const ValueKey('rules'),
-                                  ),
-                          ),
-                        ),
-                      ],
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // 手机定宽立绘栏；大屏按比例但封顶，栏一旦过宽
+                        // cover 会转为纵向裁切、切掉头顶和靴底。
+                        final compact = constraints.maxWidth < 520;
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(
+                              width: compact
+                                  ? 120
+                                  : math.min(
+                                      constraints.maxWidth * 0.32,
+                                      250,
+                                    ),
+                              child: _CharacterArt(compact: compact),
+                            ),
+                            Expanded(
+                              child: AnimatedSwitcher(
+                                duration: AppMotion.normal,
+                                child: _declined
+                                    ? _DeclinePanel(
+                                        key: const ValueKey('declined'),
+                                        onBack: () =>
+                                            setState(() => _declined = false),
+                                        onExit: _exitApp,
+                                      )
+                                    : _buildRulesPanel(
+                                        key: const ValueKey('rules'),
+                                      ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -174,10 +188,10 @@ class _ForumRulesGateState extends State<ForumRulesGate> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
-            '吼吼！你捕获了一个（认真脸）的公告栏',
+            '❀ 公告栏',
             style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 16.5,
+              color: _RulesPalette.strong,
+              fontSize: 20,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -240,22 +254,78 @@ class _ForumRulesGateState extends State<ForumRulesGate> {
   }
 }
 
-/// 左侧粉色立绘；白底通过 multiply 混色融进粉色底。
+/// 左侧圣杯酱立绘栏。
 ///
-/// 用 contain 完整展示全身立绘：cover 会随窗口比例裁掉腿部或头发，
-/// 人物观感就歪了；空隙由同色底补齐，与混色后的白底无缝衔接。
+/// 手机窄栏用预裁的 rail 版（只裁背景与外围发丝），cover 横向溢出极小；
+/// 大屏栏变宽后若沿用窄图，cover 会转为纵向裁切、切掉头顶与靴底，
+/// 因此换成接近原图比例的 full 版。底色仅在图片解码前兜底防闪白，
+/// 右缘淡白渐变让粉色图区与白色正文自然过渡。
 class _CharacterArt extends StatelessWidget {
-  const _CharacterArt();
+  const _CharacterArt({required this.compact});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
       color: _RulesPalette.panelBase,
-      child: Image.asset(
-        'assets/images/shengbei_chan.jpg',
-        fit: BoxFit.contain,
-        color: _RulesPalette.panelBase,
-        colorBlendMode: BlendMode.multiply,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            compact
+                ? 'assets/images/shengbei_rules_rail.webp'
+                : 'assets/images/shengbei_rules_full.webp',
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
+          ),
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 18,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.transparent,
+                    Colors.white.withValues(alpha: 0.20),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // 窄栏塞字会挤，品牌署名只在大屏展示。
+          if (!compact)
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 18,
+              child: Column(
+                children: [
+                  Text(
+                    '圣杯酱',
+                    style: TextStyle(
+                      color: Color(0xFFD75D87),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'FORUM RULES',
+                    style: TextStyle(
+                      color: Color(0x99D75D87),
+                      fontSize: 8,
+                      letterSpacing: 1.7,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

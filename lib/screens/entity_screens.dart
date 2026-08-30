@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../controllers/feed_controller.dart';
 import '../controllers/interaction_controller.dart';
@@ -11,6 +12,7 @@ import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
+import '../utils/profile_image_crop.dart';
 import '../widgets/app_network_image.dart';
 import '../widgets/forum_post_card.dart';
 import 'profile_screen.dart';
@@ -90,6 +92,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   ProfileSummary? _selfSummary;
   int? _pointsBalance;
   bool _busy = false;
+  bool _mediaBusy = false;
   int _currentTab = 0; // 0: 帖子, 1: 评论
   final ScrollController _postsScrollController = ScrollController();
   final ScrollController _commentsScrollController = ScrollController();
@@ -352,6 +355,101 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     _openEditProfile();
   }
 
+  /// 主页头像/背景直接点击更换：选图 → 裁剪 → 上传 → 立即写回资料并刷新。
+  Future<void> _changeProfileImage(ProfileImageKind kind) async {
+    if (_mediaBusy || !widget.isSelf) return;
+    if (!widget.isAuthenticated) {
+      showGuestSettingsPermissionDialog(
+        context,
+        onBindEmail: widget.onRequireAuth,
+      );
+      return;
+    }
+    final profileRepository = widget.profileRepository;
+    final publisher = widget.publishRepository;
+    if (profileRepository == null || publisher == null) {
+      widget.onFeedback('当前无法修改图片');
+      return;
+    }
+
+    ImageSource? source;
+    if (kind == ProfileImageKind.avatar) {
+      source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('从相册选择'),
+                onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('拍照'),
+                onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (source == null || !mounted) return;
+    }
+
+    setState(() => _mediaBusy = true);
+    try {
+      final cropped = await pickAndCropProfileImage(
+        context: context,
+        kind: kind,
+        source: source ?? ImageSource.gallery,
+      );
+      if (cropped == null) return;
+      final bytes = await cropped.readAsBytes();
+      final isAvatar = kind == ProfileImageKind.avatar;
+      if (bytes.length > 10 * 1024 * 1024) {
+        widget.onFeedback(isAvatar ? '头像不能超过 10 MB' : '主页背景图不能超过 10 MB');
+        return;
+      }
+      final summary = _selfSummary;
+      final profile = _profile;
+      final nickname = summary?.nickname.isNotEmpty == true
+          ? summary!.nickname
+          : (profile?.nickname ?? '');
+      if (nickname.isEmpty) {
+        widget.onFeedback('请先设置昵称，再更换图片');
+        return;
+      }
+      final mediaId = await uploadProfileMedia(
+        publisher,
+        file: cropped,
+        bytes: bytes,
+        fileNamePrefix: isAvatar ? 'avatar_' : 'background_',
+      );
+      await profileRepository.updateProfile(
+        nickname: nickname,
+        signature: summary?.signature ?? profile?.bio ?? '',
+        avatarMediaId: isAvatar
+            ? mediaId
+            : (summary?.avatarMediaId ?? profile?.avatarMediaId),
+        backgroundMediaId: isAvatar
+            ? (summary?.backgroundMediaId ?? profile?.backgroundMediaId)
+            : mediaId,
+      );
+      if (mounted) {
+        widget.onFeedback(isAvatar ? '头像已更新' : '主页背景已更新');
+        setState(() => _future = _load());
+      }
+    } catch (error) {
+      if (mounted) {
+        widget.onFeedback(userFacingApiMessage(error, fallback: '图片上传失败，请重试'));
+      }
+    } finally {
+      if (mounted) setState(() => _mediaBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: Colors.white,
@@ -435,21 +533,29 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               child: Stack(
                 children: [
                   Positioned.fill(
-                    child: _ProfileHeroBackground(imageUrl: backgroundUrl),
-                  ),
-                  Positioned.fill(
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Color(0x050B1422),
-                            Color(0x140A1422),
-                            Color(0xCC070D18),
-                          ],
-                          stops: [0.0, 0.34, 1.0],
-                        ),
+                    child: GestureDetector(
+                      onTap: widget.isSelf
+                          ? () => _changeProfileImage(ProfileImageKind.background)
+                          : null,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _ProfileHeroBackground(imageUrl: backgroundUrl),
+                          Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Color(0x050B1422),
+                                  Color(0x140A1422),
+                                  Color(0xCC070D18),
+                                ],
+                                stops: [0.0, 0.34, 1.0],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -548,47 +654,87 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Container(
-                              width: 78,
-                              height: 78,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                  width: 3,
-                                ),
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFFF4F9FF),
-                                    Color(0xFFD8EDFF),
-                                  ],
-                                ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Color(0x2E000000),
-                                    blurRadius: 18,
-                                    offset: Offset(0, 6),
-                                  ),
-                                ],
-                              ),
-                              child: ClipOval(
-                                child: _hasUsableAvatar(avatarUrl)
-                                    ? AppNetworkImage(
-                                        url: avatarUrl,
-                                        fit: BoxFit.cover,
-                                      )
-                                    : Center(
-                                        child: Text(
-                                          nickname.isEmpty
-                                              ? '游'
-                                              : nickname.characters.first,
-                                          style: const TextStyle(
-                                            color: Color(0xFF417CC0),
-                                            fontSize: 29,
-                                            fontWeight: FontWeight.w900,
+                            GestureDetector(
+                              onTap: widget.isSelf
+                                  ? () => _changeProfileImage(
+                                      ProfileImageKind.avatar,
+                                    )
+                                  : null,
+                              child: SizedBox(
+                                width: 78,
+                                height: 78,
+                                child: Stack(
+                                  children: [
+                                    Container(
+                                      width: 78,
+                                      height: 78,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.9,
+                                          ),
+                                          width: 3,
+                                        ),
+                                        gradient: const LinearGradient(
+                                          colors: [
+                                            Color(0xFFF4F9FF),
+                                            Color(0xFFD8EDFF),
+                                          ],
+                                        ),
+                                        boxShadow: const [
+                                          BoxShadow(
+                                            color: Color(0x2E000000),
+                                            blurRadius: 18,
+                                            offset: Offset(0, 6),
+                                          ),
+                                        ],
+                                      ),
+                                      child: ClipOval(
+                                        child: _hasUsableAvatar(avatarUrl)
+                                            ? AppNetworkImage(
+                                                url: avatarUrl,
+                                                fit: BoxFit.cover,
+                                              )
+                                            : Center(
+                                                child: Text(
+                                                  nickname.isEmpty
+                                                      ? '游'
+                                                      : nickname.characters.first,
+                                                  style: const TextStyle(
+                                                    color: Color(0xFF417CC0),
+                                                    fontSize: 29,
+                                                    fontWeight: FontWeight.w900,
+                                                  ),
+                                                ),
+                                              ),
+                                      ),
+                                    ),
+                                    if (widget.isSelf)
+                                      Positioned(
+                                        right: 0,
+                                        bottom: 0,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(3.5),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFF4B97C6),
+                                            shape: BoxShape.circle,
+                                            border: Border.fromBorderSide(
+                                              BorderSide(
+                                                color: Colors.white,
+                                                width: 1.5,
+                                              ),
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.photo_camera_rounded,
+                                            size: 12,
+                                            color: Colors.white,
                                           ),
                                         ),
                                       ),
+                                  ],
+                                ),
                               ),
                             ),
                             const Spacer(),
@@ -906,6 +1052,22 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 ),
               ),
             ),
+            if (_mediaBusy)
+              const Positioned.fill(
+                child: ColoredBox(
+                  color: Color(0x5A0B1422),
+                  child: Center(
+                    child: SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         );
       },

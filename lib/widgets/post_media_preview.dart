@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
@@ -6,11 +8,49 @@ import 'app_network_image.dart';
 /// 帖子媒体预览的使用场景。
 enum PostMediaPreviewMode { feed, detail }
 
+/// Feed 单图预览宽度 = 可用宽度 × [kFeedSingleImageWidthFactor]。
+const double kFeedSingleImageWidthFactor = 0.70;
+
+/// Feed 单图预览最大宽度。
+const double kFeedSingleImageMaxWidth = 250.0;
+
+/// 宽高比低于该值视为长截图，改用 3:4 预览框顶部裁切。
+const double kFeedLongImageRatio = 0.75;
+
+/// Feed 单图缺少宽高元数据时的兜底比例。
+const double kFeedSingleImageFallbackRatio = 4.0 / 3.0;
+
+/// Feed 多图最多展示的张数，超出部分在最后一张叠加 +N。
+const int kFeedMaxImages = 9;
+
+/// Feed 多图瓦片间距。
+const double kFeedGridSpacing = 6.0;
+
+/// 计算 Feed 单图预览尺寸（宽度优先模型）。
+///
+/// 比例 >= [kFeedLongImageRatio] 时按原比例完整展示；
+/// 比例 < [kFeedLongImageRatio] 视为长图，返回固定 3:4 预览框。
+@visibleForTesting
+Size calculateFeedSingleImageSize({
+  required double availableWidth,
+  double? aspectRatio,
+}) {
+  final width = math.min(
+    availableWidth * kFeedSingleImageWidthFactor,
+    kFeedSingleImageMaxWidth,
+  );
+  final ratio = aspectRatio ?? kFeedSingleImageFallbackRatio;
+  final height = ratio < kFeedLongImageRatio
+      ? width / kFeedLongImageRatio
+      : width / ratio;
+  return Size(width, height);
+}
+
 /// 帖子媒体预览。
 ///
-/// Feed 场景：
-/// - 单图采用「比例钳制（0.72 ~ 1.78）」，3:4、4:5、1:1、4:3、16:9 完整展示，超长图（<0.72）高度限制在 width/0.72，极长图（<0.60）采用顶部对齐并在右下角轻量提示“长图 ↗”；
-/// - 多图采用拼图布局（2图左右并排、3图左大右小上下排、4图及以上2×2网格，第4张叠加+N）。
+/// Feed 场景（贴吧式信息流）：
+/// - 单图宽度优先：预览宽 = min(内容宽 × 0.70, 250dp)，左对齐；比例 ≥ 0.75 按原比例完整展示，< 0.75 视为长图，用 3:4 预览框顶部裁切并提示“长图”；
+/// - 多图统一方形瓦片：2 图一行两列，3 图一行三列，4 图 2×2，5 张及以上三列九宫格；最多展示 9 张，超出部分在第 9 张叠加 +N，全部 cover + 顶部对齐。
 ///
 /// Detail 场景：
 /// - 纵向真实比例完整展示全部图片，撑满正文宽度，支持长截图自然向下滚动，无固定600px上限与浅蓝letterbox。
@@ -76,20 +116,23 @@ class PostMediaPreview extends StatelessWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // Feed 场景：单图比例钳制 + 多图拼图
+  // Feed 场景：单图宽度优先 + 多图方形瓦片网格
   // ---------------------------------------------------------------------------
   Widget _buildFeedStream(BuildContext context) {
     final count = images.length;
     Widget content;
 
-    if (count == 1) {
-      content = _buildFeedSingleImage(context, images.first);
-    } else if (count == 2) {
-      content = _buildFeedTwoImages(context, images);
-    } else if (count == 3) {
-      content = _buildFeedThreeImages(context, images);
-    } else {
-      content = _buildFeedFourPlusImages(context, images);
+    switch (count) {
+      case 1:
+        content = _buildFeedSingleImage(context, images.first);
+      case 2:
+        content = _buildFeedGrid(context, images, columns: 2);
+      case 3:
+        content = _buildFeedGrid(context, images, columns: 3);
+      case 4:
+        content = _buildFeedGrid(context, images, columns: 2);
+      default:
+        content = _buildFeedGrid(context, images, columns: 3);
     }
 
     return Padding(
@@ -98,192 +141,74 @@ class PostMediaPreview extends StatelessWidget {
     );
   }
 
-  /// 单图自适应预览（比例钳制 0.72 ~ 1.78）
+  /// 单图：宽度优先 + 长图 3:4 顶部裁切。
   Widget _buildFeedSingleImage(BuildContext context, PostMedia media) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final rawRatio = _rawRatio(media);
-        final ratio = (rawRatio ?? (4.0 / 3.0)).clamp(0.72, 1.78).toDouble();
-        final width = constraints.maxWidth;
-        final height = width / ratio;
-        final isLongCrop = rawRatio != null && rawRatio < 0.72;
-        final isTopCrop = rawRatio != null && rawRatio < 0.60;
+        final size = calculateFeedSingleImageSize(
+          availableWidth: constraints.maxWidth,
+          aspectRatio: rawRatio,
+        );
+        final isLongImage = rawRatio != null && rawRatio < kFeedLongImageRatio;
 
-        return SizedBox(
-          width: width,
-          height: height,
-          child: _tile(
-            context,
-            media,
-            index: 0,
-            mode: PostMediaPreviewMode.feed,
-            alignment: isTopCrop ? Alignment.topCenter : Alignment.center,
-            showLongImageBadge: isLongCrop,
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: _tile(
+              context,
+              media,
+              index: 0,
+              mode: PostMediaPreviewMode.feed,
+              fit: isLongImage ? BoxFit.cover : BoxFit.contain,
+              alignment: isLongImage ? Alignment.topCenter : Alignment.center,
+              showLongImageBadge: isLongImage,
+            ),
           ),
         );
       },
     );
   }
 
-  /// 2张图：左右等分拼图
-  Widget _buildFeedTwoImages(BuildContext context, List<PostMedia> items) {
-    const spacing = 6.0;
+  /// 多图：columns 列方形瓦片网格，超出 9 张在最后一张叠加 +N。
+  Widget _buildFeedGrid(
+    BuildContext context,
+    List<PostMedia> items, {
+    required int columns,
+  }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final itemWidth = (width - spacing) / 2;
-        final height = itemWidth * 0.95;
+        final tileWidth = (width - kFeedGridSpacing * (columns - 1)) / columns;
+        final visibleCount = math.min(items.length, kFeedMaxImages);
+        final rowCount = (visibleCount + columns - 1) ~/ columns;
+        final extraCount = items.length - visibleCount;
 
         return SizedBox(
           width: width,
-          height: height,
-          child: Row(
+          height: tileWidth * rowCount + kFeedGridSpacing * (rowCount - 1),
+          child: Wrap(
+            spacing: kFeedGridSpacing,
+            runSpacing: kFeedGridSpacing,
             children: [
-              Expanded(
-                child: _tile(
-                  context,
-                  items[0],
-                  index: 0,
-                  mode: PostMediaPreviewMode.feed,
+              for (var i = 0; i < visibleCount; i++)
+                SizedBox(
+                  width: tileWidth,
+                  height: tileWidth,
+                  child: _tile(
+                    context,
+                    items[i],
+                    index: i,
+                    mode: PostMediaPreviewMode.feed,
+                    alignment: Alignment.topCenter,
+                    extraOverlayCount:
+                        extraCount > 0 && i == visibleCount - 1
+                            ? extraCount
+                            : null,
+                  ),
                 ),
-              ),
-              const SizedBox(width: spacing),
-              Expanded(
-                child: _tile(
-                  context,
-                  items[1],
-                  index: 1,
-                  mode: PostMediaPreviewMode.feed,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// 3张图：左大 + 右二上下排列拼图
-  Widget _buildFeedThreeImages(BuildContext context, List<PostMedia> items) {
-    const spacing = 6.0;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final height = width * 0.60;
-        final leftWidth = (width - spacing) * 0.58;
-        final rightWidth = (width - spacing) * 0.42;
-
-        return SizedBox(
-          width: width,
-          height: height,
-          child: Row(
-            children: [
-              SizedBox(
-                width: leftWidth,
-                height: height,
-                child: _tile(
-                  context,
-                  items[0],
-                  index: 0,
-                  mode: PostMediaPreviewMode.feed,
-                ),
-              ),
-              const SizedBox(width: spacing),
-              SizedBox(
-                width: rightWidth,
-                height: height,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: _tile(
-                        context,
-                        items[1],
-                        index: 1,
-                        mode: PostMediaPreviewMode.feed,
-                      ),
-                    ),
-                    const SizedBox(height: spacing),
-                    Expanded(
-                      child: _tile(
-                        context,
-                        items[2],
-                        index: 2,
-                        mode: PostMediaPreviewMode.feed,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// 4张及以上：2×2 宫格拼图，第4张支持覆盖 +N
-  Widget _buildFeedFourPlusImages(BuildContext context, List<PostMedia> items) {
-    const spacing = 6.0;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final itemHeight = (width - spacing) / 2 * 0.88;
-        final totalHeight = itemHeight * 2 + spacing;
-        final extraCount = items.length - 4;
-
-        return SizedBox(
-          width: width,
-          height: totalHeight,
-          child: Column(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _tile(
-                        context,
-                        items[0],
-                        index: 0,
-                        mode: PostMediaPreviewMode.feed,
-                      ),
-                    ),
-                    const SizedBox(width: spacing),
-                    Expanded(
-                      child: _tile(
-                        context,
-                        items[1],
-                        index: 1,
-                        mode: PostMediaPreviewMode.feed,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: spacing),
-              Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _tile(
-                        context,
-                        items[2],
-                        index: 2,
-                        mode: PostMediaPreviewMode.feed,
-                      ),
-                    ),
-                    const SizedBox(width: spacing),
-                    Expanded(
-                      child: _tile(
-                        context,
-                        items[3],
-                        index: 3,
-                        mode: PostMediaPreviewMode.feed,
-                        extraOverlayCount: extraCount > 0 ? extraCount : null,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         );
@@ -321,6 +246,7 @@ class PostMediaPreview extends StatelessWidget {
     PostMedia media, {
     required int index,
     required PostMediaPreviewMode mode,
+    BoxFit fit = BoxFit.cover,
     Alignment alignment = Alignment.center,
     bool showLongImageBadge = false,
     int? extraOverlayCount,
@@ -339,7 +265,7 @@ class PostMediaPreview extends StatelessWidget {
               if (imageUrl != null && imageUrl.isNotEmpty)
                 AppNetworkImage(
                   url: imageUrl,
-                  fit: BoxFit.cover,
+                  fit: fit,
                   alignment: alignment,
                   errorBuilder: (_) => _fallback(media),
                 )

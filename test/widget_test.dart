@@ -196,7 +196,7 @@ void main() {
     expect(openedComments, isTrue);
   });
 
-  testWidgets('帖子媒体缩略图居中裁切且不压扁', (tester) async {
+  testWidgets('帖子媒体长图缩略图顶部裁切且不压扁', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
@@ -220,6 +220,7 @@ void main() {
 
     final image = tester.widget<Image>(find.byType(Image));
     expect(image.fit, BoxFit.cover);
+    expect(image.alignment, Alignment.topCenter);
     // 解码尺寸按布局约束计算，宽高比与实际显示区域一致，cover 裁切下不会被压扁。
     final provider = image.image;
     expect(provider, isA<ResizeImage>());

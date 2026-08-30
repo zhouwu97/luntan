@@ -762,8 +762,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                         SizedBox(
                           width: 86,
                           height: 86,
+                          // 发帖器缩略图是固定方框的满铺预览，不走 feed 宽度优先规则。
                           child: PostMediaPreview(
                             images: [selectedMedia[index]],
+                            mode: PostMediaPreviewMode.detail,
                           ),
                         ),
                         Positioned(

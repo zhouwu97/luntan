@@ -1,8 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/auth_repository.dart';
@@ -14,6 +13,7 @@ import '../data/api/user_repository.dart';
 import '../data/mock_forum_data.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
+import '../utils/profile_image_crop.dart';
 import '../widgets/app_network_image.dart';
 import 'exchange_store_screen.dart';
 import 'bookmark_folders_screen.dart';
@@ -987,9 +987,9 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   late final TextEditingController nicknameController;
   late final TextEditingController signatureController;
-  XFile? avatarFile;
+  CroppedFile? avatarFile;
   Uint8List? avatarBytes;
-  XFile? backgroundFile;
+  CroppedFile? backgroundFile;
   Uint8List? backgroundBytes;
   bool saving = false;
   String? errorText;
@@ -1010,9 +1010,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _pickAvatar() async {
     if (saving) return;
-    final file = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 90,
+    final file = await pickAndCropProfileImage(
+      context: context,
+      kind: ProfileImageKind.avatar,
     );
     if (!mounted || file == null) return;
     final bytes = await file.readAsBytes();
@@ -1029,9 +1029,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Future<void> _pickBackground() async {
     if (saving) return;
-    final file = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 88,
+    final file = await pickAndCropProfileImage(
+      context: context,
+      kind: ProfileImageKind.background,
     );
     if (!mounted || file == null) return;
     final bytes = await file.readAsBytes();
@@ -1053,25 +1053,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (publisher == null || file == null || bytes == null) {
       return widget.profile.avatarMediaId;
     }
-    final lower = file.name.toLowerCase();
-    final mimeType = lower.endsWith('.png') ? 'image/png' : 'image/jpeg';
-    final digest = sha256.convert(bytes).toString();
-    final ticket = await publisher.requestMediaUpload(
-      fileName: file.name,
-      mimeType: mimeType,
-      size: bytes.length,
-      sha256: digest,
-    );
-    if (DateTime.now().isAfter(ticket.expiresAt)) {
-      throw const PublishException('头像上传凭证已过期，请重新选择');
-    }
-    await publisher.uploadMedia(
-      ticket: ticket,
+    return uploadProfileMedia(
+      publisher,
+      file: file,
       bytes: bytes,
-      size: bytes.length,
-      sha256: digest,
+      fileNamePrefix: 'avatar_',
     );
-    return ticket.mediaId;
   }
 
   Future<String?> _uploadBackground() async {
@@ -1081,25 +1068,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (publisher == null || file == null || bytes == null) {
       return widget.profile.backgroundMediaId;
     }
-    final lower = file.name.toLowerCase();
-    final mimeType = lower.endsWith('.png') ? 'image/png' : 'image/jpeg';
-    final digest = sha256.convert(bytes).toString();
-    final ticket = await publisher.requestMediaUpload(
-      fileName: file.name,
-      mimeType: mimeType,
-      size: bytes.length,
-      sha256: digest,
-    );
-    if (DateTime.now().isAfter(ticket.expiresAt)) {
-      throw const PublishException('背景图上传凭证已过期，请重新选择');
-    }
-    await publisher.uploadMedia(
-      ticket: ticket,
+    return uploadProfileMedia(
+      publisher,
+      file: file,
       bytes: bytes,
-      size: bytes.length,
-      sha256: digest,
+      fileNamePrefix: 'background_',
     );
-    return ticket.mediaId;
   }
 
   Future<void> _save() async {

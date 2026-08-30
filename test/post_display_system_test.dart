@@ -103,20 +103,25 @@ void main() {
   });
 
   group('二、图片系统与多图流测试', () {
-    testWidgets('4. 单张 3:4 图片 Feed 不再固定裁成 240px，按比例自适应展开 (480px) 且不出现长图标签', (tester) async {
+    testWidgets('4. 单张 3:4 图片 Feed 走宽度优先模型 (250×333) 且不出现长图标签', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
             body: SizedBox(
               width: 360,
-              child: PostMediaPreview(
-                images: [
-                  MediaAsset(
-                    id: 'img-3-4',
-                    type: MediaType.image,
-                    url: 'https://example.com/3_4.jpg',
-                    width: 300,
-                    height: 400, // 3:4 ratio -> 0.75 in [0.72, 1.78] -> height = 360 / 0.75 = 480
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PostMediaPreview(
+                    images: [
+                      MediaAsset(
+                        id: 'img-3-4',
+                        type: MediaType.image,
+                        url: 'https://example.com/3_4.jpg',
+                        width: 300,
+                        height: 400, // 3:4 ratio -> 0.75 >= 0.75 非长图 -> 250 x 333.33
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -126,25 +131,35 @@ void main() {
       );
 
       final size = tester.getSize(find.byType(PostMediaPreview));
-      // 480 + 10 top padding = 490
-      expect(size.height, closeTo(490, 1.0));
+      expect(size.width, closeTo(360, 0.1));
+      // 250 / 0.75 + 10 top padding = 343.33
+      expect(size.height, closeTo(343.33, 1.0));
       expect(find.text('长图'), findsNothing);
+
+      final image = tester.widget<Image>(find.byType(Image));
+      expect(image.fit, BoxFit.contain);
+      expect(image.alignment, Alignment.center);
     });
 
-    testWidgets('5. 9:16 长图与 1:2 极长图 Feed 钳制到 0.72 (500px) 且展示顶部对齐与轻量长图角标', (tester) async {
+    testWidgets('5. 9:16 长图 Feed 固定 3:4 预览框顶部裁切并展示长图角标', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
             body: SizedBox(
               width: 360,
-              child: PostMediaPreview(
-                images: [
-                  MediaAsset(
-                    id: 'img-long',
-                    type: MediaType.image,
-                    url: 'https://example.com/long.jpg',
-                    width: 90,
-                    height: 160, // 9:16 ratio = 0.5625 < 0.72 -> clamped to 0.72 -> height = 360 / 0.72 = 500
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PostMediaPreview(
+                    images: [
+                      MediaAsset(
+                        id: 'img-long',
+                        type: MediaType.image,
+                        url: 'https://example.com/long.jpg',
+                        width: 90,
+                        height: 160, // 9:16 ratio = 0.5625 < 0.75 -> 3:4 预览框 250 x 333.33
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -154,35 +169,41 @@ void main() {
       );
 
       final size = tester.getSize(find.byType(PostMediaPreview));
-      // 500 + 10 top padding = 510
-      expect(size.height, closeTo(510, 1.0));
+      // 333.33 + 10 top padding = 343.33
+      expect(size.height, closeTo(343.33, 1.0));
       expect(find.text('长图'), findsOneWidget);
 
       final image = tester.widget<Image>(find.byType(Image));
+      expect(image.fit, BoxFit.cover);
       expect(image.alignment, Alignment.topCenter);
     });
 
-    testWidgets('6. 两张图 Feed 采用左右双列拼图', (tester) async {
+    testWidgets('6. 两张图 Feed 一行两列方形瓦片', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
             body: SizedBox(
               width: 360,
-              child: PostMediaPreview(
-                images: [
-                  MediaAsset(
-                    id: 'img-1',
-                    type: MediaType.image,
-                    url: 'https://example.com/1.jpg',
-                    width: 400,
-                    height: 300,
-                  ),
-                  MediaAsset(
-                    id: 'img-2',
-                    type: MediaType.image,
-                    url: 'https://example.com/2.jpg',
-                    width: 400,
-                    height: 300,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PostMediaPreview(
+                    images: [
+                      MediaAsset(
+                        id: 'img-1',
+                        type: MediaType.image,
+                        url: 'https://example.com/1.jpg',
+                        width: 400,
+                        height: 300,
+                      ),
+                      MediaAsset(
+                        id: 'img-2',
+                        type: MediaType.image,
+                        url: 'https://example.com/2.jpg',
+                        width: 400,
+                        height: 300,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -193,24 +214,39 @@ void main() {
 
       expect(find.byType(Image), findsNWidgets(2));
       final size = tester.getSize(find.byType(PostMediaPreview));
-      // 宽度 360，(360-6)/2 * 0.95 ≈ 168.15 + 10 top padding = 178.15
-      expect(size.height, closeTo(178, 5.0));
+      // (360 - 6) / 2 = 177 + 10 top padding = 187
+      expect(size.height, closeTo(187, 1.0));
+
+      for (var i = 0; i < 2; i++) {
+        final tileSize = tester.getSize(find.byType(Image).at(i));
+        expect(tileSize.width, closeTo(177, 0.5));
+        expect(tileSize.height, closeTo(177, 0.5));
+        expect(
+          tester.widget<Image>(find.byType(Image).at(i)).alignment,
+          Alignment.topCenter,
+        );
+      }
     });
 
-    testWidgets('7. 3张图与4+图 Feed 采用拼图与 +N 角标', (tester) async {
+    testWidgets('7. 6张图 Feed 三列九宫格全部展示且无 +N', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
             body: SizedBox(
               width: 360,
-              child: PostMediaPreview(
-                images: [
-                  MediaAsset(id: '1', type: MediaType.image, url: '1.jpg', width: 400, height: 300),
-                  MediaAsset(id: '2', type: MediaType.image, url: '2.jpg', width: 400, height: 300),
-                  MediaAsset(id: '3', type: MediaType.image, url: '3.jpg', width: 400, height: 300),
-                  MediaAsset(id: '4', type: MediaType.image, url: '4.jpg', width: 400, height: 300),
-                  MediaAsset(id: '5', type: MediaType.image, url: '5.jpg', width: 400, height: 300),
-                  MediaAsset(id: '6', type: MediaType.image, url: '6.jpg', width: 400, height: 300),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PostMediaPreview(
+                    images: [
+                      MediaAsset(id: '1', type: MediaType.image, url: '1.jpg', width: 400, height: 300),
+                      MediaAsset(id: '2', type: MediaType.image, url: '2.jpg', width: 400, height: 300),
+                      MediaAsset(id: '3', type: MediaType.image, url: '3.jpg', width: 400, height: 300),
+                      MediaAsset(id: '4', type: MediaType.image, url: '4.jpg', width: 400, height: 300),
+                      MediaAsset(id: '5', type: MediaType.image, url: '5.jpg', width: 400, height: 300),
+                      MediaAsset(id: '6', type: MediaType.image, url: '6.jpg', width: 400, height: 300),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -218,8 +254,11 @@ void main() {
         ),
       );
 
-      expect(find.byType(AppNetworkImage), findsNWidgets(4));
-      expect(find.text('+2'), findsOneWidget);
+      expect(find.byType(AppNetworkImage), findsNWidgets(6));
+      expect(find.text('+2'), findsNothing);
+      final size = tester.getSize(find.byType(PostMediaPreview));
+      // 3 列 tile = (360-12)/3 = 116，两行 = 116*2 + 6 + 10 top padding = 248
+      expect(size.height, closeTo(248, 1.0));
     });
 
     testWidgets('8. 详情页图片流纵向完整展示全部图片且不限高', (tester) async {
@@ -295,17 +334,18 @@ void main() {
       expect(tappedIndex, equals(1));
     });
 
-    testWidgets('10. 针对 16:9, 4:3, 1:1, 4:5, 3:4, 2:3, 9:16, 1:2 验收 Feed 比例钳制与 Detail 真实展开', (tester) async {
-      // 验收比例列表: [width, height, expectedFeedHeight, expectLongBadge]
+    testWidgets('10. 针对 16:9, 4:3, 1:1, 4:5, 3:4, 2:3, 9:16, 1:2 验收 Feed 宽度优先模型与 Detail 真实展开', (tester) async {
+      // 验收比例列表: [width, height, expectedFeedHeight(单图 250 宽), expectLongBadge]
+      const previewWidth = 250.0;
       final cases = [
-        {'w': 1600, 'h': 900, 'feedH': 360.0 / 1.7777777777777777, 'badge': false}, // 16:9 -> ~202.5
-        {'w': 400, 'h': 300, 'feedH': 360.0 / (4.0 / 3.0), 'badge': false},           // 4:3 -> 270
-        {'w': 300, 'h': 300, 'feedH': 360.0, 'badge': false},                          // 1:1 -> 360
-        {'w': 400, 'h': 500, 'feedH': 360.0 / 0.8, 'badge': false},                   // 4:5 -> 450
-        {'w': 300, 'h': 400, 'feedH': 360.0 / 0.75, 'badge': false},                  // 3:4 -> 480
-        {'w': 200, 'h': 300, 'feedH': 360.0 / 0.72, 'badge': true},                   // 2:3 (0.667 < 0.72) -> 500
-        {'w': 90, 'h': 160, 'feedH': 360.0 / 0.72, 'badge': true},                    // 9:16 (0.5625) -> 500
-        {'w': 100, 'h': 200, 'feedH': 360.0 / 0.72, 'badge': true},                   // 1:2 (0.50) -> 500
+        {'w': 1600, 'h': 900, 'feedH': previewWidth / 1.7777777777777777, 'badge': false}, // 16:9 -> ~140.6
+        {'w': 400, 'h': 300, 'feedH': previewWidth / (4.0 / 3.0), 'badge': false},        // 4:3 -> 187.5
+        {'w': 300, 'h': 300, 'feedH': previewWidth, 'badge': false},                       // 1:1 -> 250
+        {'w': 400, 'h': 500, 'feedH': previewWidth / 0.8, 'badge': false},                // 4:5 -> 312.5
+        {'w': 300, 'h': 400, 'feedH': previewWidth / 0.75, 'badge': false},               // 3:4 -> 333.33
+        {'w': 200, 'h': 300, 'feedH': previewWidth / 0.75, 'badge': true},                // 2:3 (0.667 < 0.75) -> 3:4 框
+        {'w': 90, 'h': 160, 'feedH': previewWidth / 0.75, 'badge': true},                 // 9:16 (0.5625) -> 3:4 框
+        {'w': 100, 'h': 200, 'feedH': previewWidth / 0.75, 'badge': true},                // 1:2 (0.50) -> 3:4 框
       ];
 
       for (final c in cases) {
@@ -320,14 +360,19 @@ void main() {
             home: Scaffold(
               body: SizedBox(
                 width: 360,
-                child: PostMediaPreview(
-                  images: [
-                    MediaAsset(
-                      id: 'test-$w-$h',
-                      type: MediaType.image,
-                      url: 'https://example.com/$w-$h.jpg',
-                      width: w,
-                      height: h,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    PostMediaPreview(
+                      images: [
+                        MediaAsset(
+                          id: 'test-$w-$h',
+                          type: MediaType.image,
+                          url: 'https://example.com/$w-$h.jpg',
+                          width: w,
+                          height: h,
+                        ),
+                      ],
                     ),
                   ],
                 ),

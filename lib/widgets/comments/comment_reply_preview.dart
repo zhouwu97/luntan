@@ -36,10 +36,15 @@ class CommentReplyPreview extends StatelessWidget {
         children: [
           if (previewItems.isNotEmpty)
             Container(
-              padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+              padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
               decoration: const BoxDecoration(
+                color: Color(0xFFF8FBFE),
+                borderRadius: BorderRadius.only(
+                  topRight: Radius.circular(10),
+                  bottomRight: Radius.circular(10),
+                ),
                 border: Border(
-                  left: BorderSide(color: Color(0xFFD7E4F0), width: 2),
+                  left: BorderSide(color: Color(0xFFDBE9F8), width: 2.5),
                 ),
               ),
               child: Column(
@@ -59,13 +64,13 @@ class CommentReplyPreview extends StatelessWidget {
             ),
           if (totalReplyCount > 0)
             Padding(
-              padding: const EdgeInsets.only(top: 4, left: 10),
+              padding: const EdgeInsets.only(top: 5, left: 10),
               child: GestureDetector(
                 onTap: onOpenThread,
                 child: Text(
                   '展开 $totalReplyCount 条回复 ›',
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w700,
                     color: AppTheme.primary,
                   ),

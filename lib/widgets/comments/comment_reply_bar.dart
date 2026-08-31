@@ -98,7 +98,6 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
     });
   }
 
-
   @override
   void didChangeMetrics() {
     super.didChangeMetrics();
@@ -267,7 +266,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
                 14,
                 6,
                 14,
-                showEmoji ? 6 : (6 + (isExpanded ? 0 : 0)),
+                showEmoji ? 6 : 6,
               ),
               child: (!isExpanded && showDetailActions)
                   ? _buildDefaultBar(targetUser)
@@ -301,13 +300,12 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           child: GestureDetector(
             onTap: _activateEditing,
             child: Container(
-              height: 40,
+              height: 42,
               decoration: BoxDecoration(
-                color: const Color(0xFFF4F7FA),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFFDDE6F0)),
+                color: const Color(0xFFF2F3F5),
+                borderRadius: BorderRadius.circular(21),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.centerLeft,
               child: Row(
                 children: [
@@ -416,7 +414,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
     final canSubmit = !_composer.draft.isEmpty && !widget.sending;
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // 图片附件按钮
         IconButton(
@@ -429,7 +427,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           ),
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 40),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 42),
           tooltip: '添加图片',
           onPressed: widget.sending ? null : _handlePickImage,
         ),
@@ -447,7 +445,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           ),
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 40),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 42),
           tooltip: '表情与贴纸',
           onPressed: widget.sending ? null : () => _composer.toggleEmoji(),
         ),
@@ -455,23 +453,15 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
 
         // 输入框
         Expanded(
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 40, maxHeight: 100),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F8FB),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFDDE7F0)),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            alignment: Alignment.centerLeft,
+          child: SizedBox(
+            height: 42,
             child: TextField(
               focusNode: _composer.focusNode,
               controller: _composer.textController,
               enabled: !widget.sending,
-              // null 会让 RenderEditable 在父级 maxHeight 约束下直接撑满，
-              // 导致单行输入也显示成高输入框；显式限制行数后按内容渐进增高。
               minLines: 1,
-              maxLines: 4,
+              maxLines: 1,
+              textAlignVertical: TextAlignVertical.center,
               style: const TextStyle(
                 fontSize: 13.5,
                 color: AppTheme.textPrimary,
@@ -484,12 +474,25 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
                   fontSize: 13,
                   color: Color(0xFF899AAC),
                 ),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                filled: false,
+                filled: true,
+                fillColor: const Color(0xFFF2F3F5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(21),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(21),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(21),
+                  borderSide: BorderSide.none,
+                ),
                 isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 0,
+                ),
               ),
               textInputAction: TextInputAction.send,
               onSubmitted: (_) {
@@ -502,7 +505,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
 
         // 发送按钮
         SizedBox(
-          height: 40,
+          height: 42,
           child: FilledButton(
             onPressed: canSubmit
                 ? () {
@@ -524,7 +527,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
               disabledForegroundColor: const Color(0xFF9CB1C4),
               padding: const EdgeInsets.symmetric(horizontal: 16),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(13),
+                borderRadius: BorderRadius.circular(21),
               ),
               elevation: 0,
             ),
@@ -550,5 +553,3 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
     );
   }
 }
-
-

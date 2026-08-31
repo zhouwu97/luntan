@@ -22,6 +22,7 @@ import '../widgets/comments/comment_item.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import 'comment_thread_screen.dart';
+import 'image_moderation_screen.dart';
 import '../widgets/forum_author_row.dart';
 import '../widgets/link_text.dart';
 import '../widgets/post_media_preview.dart';
@@ -422,6 +423,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         return Scaffold(
           backgroundColor: AppTheme.background,
           appBar: AppBar(
+            backgroundColor: const Color(0xFFF7FAFD),
+            surfaceTintColor: Colors.transparent,
             titleSpacing: 0,
             title: Text(
               post.community?.name ?? post.tag,
@@ -449,15 +452,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   controller: commentsScrollController,
                   slivers: [
                     // 帖子主体
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      sliver: SliverToBoxAdapter(
+                    SliverToBoxAdapter(
+                      child: Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             ForumAuthorRow(
                               post: post,
                               onAuthorTap: widget.onOpenUserId,
+                              avatarRadius: 19.0,
                             ),
                             const SizedBox(height: 12),
                             if (post.isPinned ||
@@ -478,8 +483,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 fontSize: 20,
                                 height: 1.38,
                                 color: AppTheme.textPrimary,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.3,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.25,
                               ),
                             ),
                             const SizedBox(height: 10),
@@ -488,7 +493,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               selectable: true,
                               style: const TextStyle(
                                 color: Color(0xFF243647),
-                                fontSize: 15.5,
+                                fontSize: 15,
                                 height: 1.72,
                                 letterSpacing: 0.1,
                               ),
@@ -570,22 +575,35 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ),
                               ],
                             ),
-                            const Divider(height: 32, color: AppTheme.border),
                           ],
                         ),
                       ),
                     ),
 
+                    // 很淡的内容分区
+                    SliverToBoxAdapter(
+                      child: Container(
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: AppTheme.background,
+                          border: Border(
+                            top: BorderSide(color: Color(0xFFEDF2F6), width: 1),
+                            bottom: BorderSide(color: Color(0xFFEDF2F6), width: 1),
+                          ),
+                        ),
+                      ),
+                    ),
+
                     // 评论区标题
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      sliver: SliverToBoxAdapter(
+                    SliverToBoxAdapter(
+                      child: Container(
+                        color: const Color(0xFFF7FAFD),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
                               key: commentsKey,
-                              padding: const EdgeInsets.only(bottom: 12),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -991,6 +1009,30 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
                       );
                     }
+                  }
+                },
+              ),
+            if (widget.canModerate &&
+                widget.platformRepository != null &&
+                post.images.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.blur_on_rounded),
+                title: const Text('图片打码'),
+                subtitle: const Text('对帖子图片进行马赛克或模糊处理'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+
+                  final changed = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                      builder: (_) => ImageModerationScreen(
+                        post: post,
+                        platformRepository: widget.platformRepository,
+                      ),
+                    ),
+                  );
+
+                  if (changed == true && mounted) {
+                    await widget.controller.load();
                   }
                 },
               ),
@@ -1497,18 +1539,22 @@ class _CommentSortChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    child: AnimatedContainer(
+      duration: AppMotion.duration(context, AppMotion.normal),
+      curve: AppMotion.standard,
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: selected ? AppTheme.primary : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(999),
+        color: selected ? AppTheme.primary : const Color(0xFFF0F4F8),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          color: selected ? Colors.white : AppTheme.textSecondary,
+          fontSize: 11,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+          color: selected ? Colors.white : const Color(0xFF71869B),
         ),
       ),
     ),

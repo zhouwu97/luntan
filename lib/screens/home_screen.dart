@@ -569,7 +569,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       else
                         const SliverToBoxAdapter(child: SizedBox(height: 2)),
                       SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                        padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
                         sliver:
                             activeStatus == FeedStatus.error && posts.isEmpty
                             ? SliverToBoxAdapter(
@@ -879,7 +879,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
       child: Row(
         children: [
           InkResponse(
@@ -891,13 +891,13 @@ class _Header extends StatelessWidget {
           Expanded(
             child: InkWell(
               onTap: onSearch,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(16),
               child: Ink(
-                height: 42,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: AppTheme.border),
                 ),
                 child: const Row(
@@ -985,14 +985,14 @@ class _SectionTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = communities;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+      padding: const EdgeInsets.fromLTRB(14, 1, 14, 4),
       child: Container(
-        height: 46,
+        height: 43,
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: AppTheme.surfaceBlue,
-          borderRadius: BorderRadius.circular(15),
-          border: Border.all(color: AppTheme.border),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.border, width: 0.8),
         ),
         child: tabs.isEmpty
             ? loading
@@ -1069,21 +1069,21 @@ class _CommunityTab extends StatelessWidget {
               : EdgeInsets.zero,
           decoration: BoxDecoration(
             color: backgroundImages == null && active
-                ? AppTheme.textPrimary
+                ? const Color(0xFF18324B)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(11),
           ),
           child: backgroundImages == null
               ? Text(
                   label,
                   style: TextStyle(
-                    color: active ? Colors.white : AppTheme.textSecondary,
-                    fontSize: 13,
+                    color: active ? Colors.white : const Color(0xFF70859A),
+                    fontSize: 12.5,
                     fontWeight: active ? FontWeight.w800 : FontWeight.w600,
                   ),
                 )
               : ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(11),
                   child: Image.asset(
                     active ? backgroundImages!.$1 : backgroundImages!.$2,
                     fit: BoxFit.fill,
@@ -1106,35 +1106,35 @@ class _FeatureEntries extends StatelessWidget {
     (
       Icons.emoji_events_outlined,
       FeatureType.ranking,
-      Color(0xFFD9EBFF),
+      Color(0xFFE1EFFF),
       Color(0xFF3F8FE8),
     ),
     (
       Icons.local_fire_department_outlined,
       FeatureType.hot,
-      Color(0xFFFFE4D2),
-      Color(0xFFF28B43),
+      Color(0xFFFFE8D8),
+      Color(0xFFEF8A45),
     ),
     (
       Icons.checkroom_outlined,
       FeatureType.outfit,
-      Color(0xFFF6DCE8),
-      Color(0xFFDC7099),
+      Color(0xFFF7DFEB),
+      Color(0xFFD86F99),
     ),
     (
       Icons.calendar_month_outlined,
       FeatureType.activity,
-      Color(0xFFD3F1EB),
-      Color(0xFF2EAE98),
+      Color(0xFFDDF4EF),
+      Color(0xFF2FAE96),
     ),
   ];
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 92,
+      height: 78,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
         child: Row(
           children: entries.map((entry) {
             return Expanded(
@@ -1144,24 +1144,22 @@ class _FeatureEntries extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 42,
-                      height: 42,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
                         color: entry.$3,
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.iconContainerRadius,
-                        ),
+                        borderRadius: BorderRadius.circular(13),
                       ),
-                      child: Icon(entry.$1, color: entry.$4, size: 21),
+                      child: Icon(entry.$1, color: entry.$4, size: 20),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 5),
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
                         entry.$2.label,
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
-                          fontSize: 10.5,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1194,7 +1192,7 @@ class _FeedToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final showCapsule = selected == FeedSort.latest;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [

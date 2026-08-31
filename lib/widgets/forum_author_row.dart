@@ -10,7 +10,7 @@ class ForumAuthorRow extends StatelessWidget {
     required this.post,
     this.onMenu,
     this.onAuthorTap,
-    this.avatarRadius = 19.0,
+    this.avatarRadius = 18.0,
     this.showCommunity = true,
   });
 
@@ -85,7 +85,7 @@ class ForumAuthorRow extends StatelessWidget {
                           color: AppTheme.textPrimary,
                           fontSize: 13.5,
                           fontWeight: FontWeight.w800,
-                          height: 1.25,
+                          height: 1.22,
                         ),
                       ),
                     ),
@@ -100,7 +100,7 @@ class ForumAuthorRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
-                    fontSize: 11,
+                    fontSize: 10.5,
                     height: 1.2,
                   ),
                 ),
@@ -112,12 +112,12 @@ class ForumAuthorRow extends StatelessWidget {
           IconButton(
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             onPressed: onMenu,
             icon: const Icon(
               Icons.more_horiz_rounded,
               color: AppTheme.textSecondary,
-              size: 20,
+              size: 19,
             ),
           ),
       ],

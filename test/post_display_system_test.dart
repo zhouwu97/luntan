@@ -735,7 +735,7 @@ void main() {
       expect(cancelled, isTrue);
     });
 
-    testWidgets('13. 单行输入保持单行高度，多行时才按内容扩展', (tester) async {
+    testWidgets('13. 回复栏固定为 42dp 胶囊形状，输入保持单行', (tester) async {
       final composer = CommentComposerController();
       addTearDown(composer.dispose);
 
@@ -757,14 +757,13 @@ void main() {
 
       final input = find.byType(TextField);
       final singleLineHeight = tester.getSize(input).height;
-      expect(singleLineHeight, lessThan(60));
+      expect(singleLineHeight, equals(42));
 
-      await tester.enterText(input, '第一行\n第二行\n第三行\n第四行');
+      await tester.enterText(input, '输入单行或多行文本');
       await tester.pump();
 
-      final multiLineHeight = tester.getSize(input).height;
-      expect(multiLineHeight, greaterThan(singleLineHeight));
-      expect(multiLineHeight, lessThanOrEqualTo(100));
+      final textHeight = tester.getSize(input).height;
+      expect(textHeight, equals(42));
     });
   });
 }

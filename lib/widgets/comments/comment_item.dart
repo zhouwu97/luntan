@@ -147,7 +147,7 @@ class _CommentItemState extends State<CommentItem>
             color: _highlightAnimation.value ?? Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           child: child,
         );
       },
@@ -270,8 +270,8 @@ class _CommentItemState extends State<CommentItem>
             Padding(
               padding: const EdgeInsets.only(left: 44, top: 8),
               child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 6,
+                runSpacing: 6,
                 children: comment.media.map((media) {
                   final imageUrl = media.previewUrl ?? '';
                   if (imageUrl.isEmpty) return const SizedBox.shrink();
@@ -282,11 +282,11 @@ class _CommentItemState extends State<CommentItem>
                       media.originalUrl ?? imageUrl,
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                       child: Container(
                         constraints: const BoxConstraints(
-                          maxWidth: 200,
-                          maxHeight: 200,
+                          maxWidth: 195,
+                          maxHeight: 195,
                         ),
                         color: const Color(0xFFEAF0F6),
                         child: AppNetworkImage(

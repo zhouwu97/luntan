@@ -22,9 +22,9 @@ class AppTheme {
   static const softRose = Color(0xFFFDEEF1);
   static const softViolet = Color(0xFFF0EDFF);
   static const cardShadow = BoxShadow(
-    color: Color(0x0A2B456B),
-    blurRadius: 14,
-    offset: Offset(0, 4),
+    color: Color(0x08182A3D),
+    blurRadius: 10,
+    offset: Offset(0, 2),
   );
 
   static const surface = Colors.white;

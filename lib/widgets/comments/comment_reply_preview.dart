@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
+import '../link_text.dart';
 
 class CommentReplyPreview extends StatelessWidget {
   const CommentReplyPreview({
@@ -42,95 +44,17 @@ class CommentReplyPreview extends StatelessWidget {
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: previewItems.map((reply) {
-                  final author = reply.author?.nickname ?? '用户';
-                  final replyTo = reply.replyToUserId == null
-                      ? null
-                      : (reply.replyToUser?.nickname ??
-                            reply.replyToUser?.username ??
-                            '用户');
-
-                  final canTapAuthor = onAuthorTap != null &&
-                      reply.authorId.isNotEmpty &&
-                      !reply.authorId.startsWith('guest');
-
-                  final canTapReplyTo = onAuthorTap != null &&
-                      reply.replyToUserId != null &&
-                      reply.replyToUserId!.isNotEmpty &&
-                      !reply.replyToUserId!.startsWith('guest');
-
-                  return InkWell(
-                    onTap: () {
-                      if (onReplyTo != null) {
-                        onReplyTo!(reply);
-                      } else {
-                        onOpenThread();
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2.5),
-                      child: Text.rich(
-                        TextSpan(
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            color: Color(0xFF5F7488),
-                            height: 1.5,
-                          ),
-                          children: [
-                            WidgetSpan(
-                              alignment: PlaceholderAlignment.baseline,
-                              baseline: TextBaseline.alphabetic,
-                              child: GestureDetector(
-                                onTap: canTapAuthor
-                                    ? () => onAuthorTap!(reply.authorId)
-                                    : null,
-                                child: Text(
-                                  author,
-                                  style: const TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF385A79),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (replyTo != null) ...[
-                              const TextSpan(text: ' 回复 '),
-                              WidgetSpan(
-                                alignment: PlaceholderAlignment.baseline,
-                                baseline: TextBaseline.alphabetic,
-                                child: GestureDetector(
-                                  onTap: canTapReplyTo
-                                      ? () => onAuthorTap!(reply.replyToUserId!)
-                                      : null,
-                                  child: Text(
-                                    '@$replyTo',
-                                    style: const TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                            const TextSpan(
-                              text: '：',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF385A79),
-                              ),
-                            ),
-                            TextSpan(text: reply.content),
-                          ],
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                children: previewItems
+                    .map(
+                      (reply) => _ReplyPreviewLine(
+                        key: ValueKey('reply-preview:${reply.id}'),
+                        reply: reply,
+                        onOpenThread: onOpenThread,
+                        onReplyTo: onReplyTo,
+                        onAuthorTap: onAuthorTap,
                       ),
-                    ),
-                  );
-                }).toList(),
+                    )
+                    .toList(),
               ),
             ),
           if (totalReplyCount > 0)
@@ -149,6 +73,175 @@ class CommentReplyPreview extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// 单条回复预览：作者 + 回复对象 + 正文（正文中的网址可点击跳转）。
+class _ReplyPreviewLine extends StatefulWidget {
+  const _ReplyPreviewLine({
+    super.key,
+    required this.reply,
+    required this.onOpenThread,
+    this.onReplyTo,
+    this.onAuthorTap,
+  });
+
+  final Comment reply;
+  final VoidCallback onOpenThread;
+  final ValueChanged<Comment>? onReplyTo;
+  final ValueChanged<String>? onAuthorTap;
+
+  @override
+  State<_ReplyPreviewLine> createState() => _ReplyPreviewLineState();
+}
+
+class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
+  final _recognizers = <TapGestureRecognizer>[];
+
+  @override
+  void didUpdateWidget(covariant _ReplyPreviewLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.reply.content != widget.reply.content) {
+      _disposeRecognizers();
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
+
+  void _disposeRecognizers() {
+    for (final recognizer in _recognizers) {
+      recognizer.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  void _openLink(Uri uri) async {
+    final opened = await openExternalLink(context, uri);
+    if (!mounted || opened) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('无法打开该网址')),
+    );
+  }
+
+  List<TextSpan> _contentSpans() {
+    final text = widget.reply.content;
+    final links = extractContentLinks(text);
+    final linkStyle = const TextStyle(color: AppTheme.primary);
+    final spans = <TextSpan>[];
+    var cursor = 0;
+    for (final link in links) {
+      if (link.start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, link.start)));
+      }
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () => _openLink(link.uri);
+      _recognizers.add(recognizer);
+      spans.add(
+        TextSpan(text: link.text, style: linkStyle, recognizer: recognizer),
+      );
+      cursor = link.end;
+    }
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor)));
+    }
+    if (spans.isEmpty) spans.add(TextSpan(text: text));
+    return spans;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reply = widget.reply;
+    final author = reply.author?.nickname ?? '用户';
+    final replyTo = reply.replyToUserId == null
+        ? null
+        : (reply.replyToUser?.nickname ??
+              reply.replyToUser?.username ??
+              '用户');
+
+    final canTapAuthor = widget.onAuthorTap != null &&
+        reply.authorId.isNotEmpty &&
+        !reply.authorId.startsWith('guest');
+
+    final canTapReplyTo = widget.onAuthorTap != null &&
+        reply.replyToUserId != null &&
+        reply.replyToUserId!.isNotEmpty &&
+        !reply.replyToUserId!.startsWith('guest');
+
+    return InkWell(
+      onTap: () {
+        if (widget.onReplyTo != null) {
+          widget.onReplyTo!(reply);
+        } else {
+          widget.onOpenThread();
+        }
+      },
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2.5),
+        child: Text.rich(
+          TextSpan(
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: Color(0xFF5F7488),
+              height: 1.5,
+            ),
+            children: [
+              WidgetSpan(
+                alignment: PlaceholderAlignment.baseline,
+                baseline: TextBaseline.alphabetic,
+                child: GestureDetector(
+                  onTap: canTapAuthor
+                      ? () => widget.onAuthorTap!(reply.authorId)
+                      : null,
+                  child: Text(
+                    author,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF385A79),
+                    ),
+                  ),
+                ),
+              ),
+              if (replyTo != null) ...[
+                const TextSpan(text: ' 回复 '),
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.baseline,
+                  baseline: TextBaseline.alphabetic,
+                  child: GestureDetector(
+                    onTap: canTapReplyTo
+                        ? () => widget.onAuthorTap!(reply.replyToUserId!)
+                        : null,
+                    child: Text(
+                      '@$replyTo',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const TextSpan(
+                text: '：',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF385A79),
+                ),
+              ),
+              ..._contentSpans(),
+            ],
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }

@@ -13,6 +13,7 @@ import '../widgets/comments/comment_composer_controller.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import '../widgets/comments/emoji/sticker_catalog.dart';
+import '../widgets/link_text.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
@@ -451,8 +452,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                       ),
                                       if (root.content.isNotEmpty) ...[
                                         const SizedBox(height: 2),
-                                        Text(
+                                        LinkText(
                                           root.content,
+                                          selectable: true,
                                           style: const TextStyle(
                                             fontSize: 12.5,
                                             color: Color(0xFF243647),
@@ -736,8 +738,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                         ],
                         if (reply.content.isNotEmpty) ...[
                           const SizedBox(height: 4),
-                          Text(
+                          LinkText(
                             reply.content,
+                            selectable: true,
                             style: const TextStyle(
                               fontSize: 13,
                               color: AppTheme.textPrimary,

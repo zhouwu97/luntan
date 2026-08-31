@@ -289,3 +289,78 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 		"updated": len(input.Items),
 	})
 }
+
+type setHotSuppressionInput struct {
+	Suppressed bool   `json:"suppressed"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+func (s *Server) setPostHotSuppression(w http.ResponseWriter, r *http.Request, postID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+
+	var input setHotSuppressionInput
+	if err := decodeJSON(r, &input); err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "请求体格式错误"})
+		return
+	}
+
+	var exists bool
+	if err := s.db.QueryRowContext(r.Context(), `SELECT EXISTS (SELECT 1 FROM posts WHERE id = $1 AND deleted_at IS NULL)`, postID).Scan(&exists); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if !exists {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "POST_NOT_FOUND", Message: "帖子不存在或已删除"})
+		return
+	}
+
+	if input.Suppressed {
+		now := time.Now().UTC()
+		_, err := s.db.ExecContext(r.Context(), `
+			UPDATE posts
+			SET hot_suppressed = true,
+			    hot_suppressed_by = $1,
+			    hot_suppressed_at = $2,
+			    hot_suppressed_reason = $3,
+			    updated_at = now()
+			WHERE id = $4`, user.ID, now, input.Reason, postID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	} else {
+		_, err := s.db.ExecContext(r.Context(), `
+			UPDATE posts
+			SET hot_suppressed = false,
+			    hot_suppressed_by = NULL,
+			    hot_suppressed_at = NULL,
+			    hot_suppressed_reason = '',
+			    updated_at = now()
+			WHERE id = $1`, postID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+
+	_ = appendAdminLog(r.Context(), s.db, user.ID, "post.hot_suppression", "post", postID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+		"suppressed": input.Suppressed,
+		"reason":     input.Reason,
+	}, time.Now().UTC())
+
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"success":        true,
+		"post_id":        postID,
+		"hot_suppressed": input.Suppressed,
+	})
+}

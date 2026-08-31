@@ -318,6 +318,11 @@ func TestPublicUserCommentsListReturnsAuthoredComments(t *testing.T) {
 	}
 	defer db.Close()
 
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "has_password"}).
+			AddRow("u2", "user2", "active", "用户2", 1, 0, "email", "", false, nil, false))
+
 	created := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*c\.author_id = \$1.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
 		WithArgs("u2", 2).
@@ -325,6 +330,7 @@ func TestPublicUserCommentsListReturnsAuthoredComments(t *testing.T) {
 			AddRow("c9", "post-1", "帖子标题", "他人主页可见的评论", "c1", "评测区", int64(4), int64(2), int64(0), created.Add(-time.Hour), created))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u2/comments?limit=1", nil)
+	req.Header.Set("Authorization", "Bearer access-token-u2")
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
 

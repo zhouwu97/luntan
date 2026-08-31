@@ -31,3 +31,18 @@ func appendAdminLogTx(ctx context.Context, tx *sql.Tx, operatorID, action, targe
 	_, err = tx.ExecContext(ctx, `UPDATE admin_log_chain SET last_hash = $1 WHERE id = 1`, hash)
 	return err
 }
+
+func appendAdminLog(ctx context.Context, db *sql.DB, operatorID, action, targetType, targetID, reason, requestID, ipAddress string, payload map[string]any, now time.Time) error {
+	if db == nil {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := appendAdminLogTx(ctx, tx, operatorID, action, targetType, targetID, reason, requestID, ipAddress, payload, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

@@ -278,6 +278,58 @@ class ViewerPostState {
 
 enum MediaType { image, video }
 
+class MaskRegion {
+  const MaskRegion({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    this.type = 'mosaic',
+  });
+
+  final double x; // 0.0 ~ 1.0 归一化比例
+  final double y; // 0.0 ~ 1.0
+  final double width; // 0.0 ~ 1.0
+  final double height; // 0.0 ~ 1.0
+  final String type; // 'mosaic' 或 'blur'
+
+  factory MaskRegion.fromJson(Map<String, dynamic> json) {
+    return MaskRegion(
+      x: (json['x'] as num?)?.toDouble() ?? 0.0,
+      y: (json['y'] as num?)?.toDouble() ?? 0.0,
+      width: (json['width'] as num?)?.toDouble() ?? 0.0,
+      height: (json['height'] as num?)?.toDouble() ?? 0.0,
+      type: (json['type'] as String?) ?? 'mosaic',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'x': x,
+      'y': y,
+      'width': width,
+      'height': height,
+      'type': type,
+    };
+  }
+
+  MaskRegion copyWith({
+    double? x,
+    double? y,
+    double? width,
+    double? height,
+    String? type,
+  }) {
+    return MaskRegion(
+      x: x ?? this.x,
+      y: y ?? this.y,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      type: type ?? this.type,
+    );
+  }
+}
+
 class MediaVariant {
   const MediaVariant({
     required this.url,
@@ -302,6 +354,8 @@ class MediaAsset {
     this.width,
     this.height,
     this.altText,
+    this.moderationStatus = 'normal',
+    this.maskRegions = const [],
     this.thumb,
     this.detail,
     this.original,
@@ -316,9 +370,13 @@ class MediaAsset {
   final int? width;
   final int? height;
   final String? altText;
+  final String moderationStatus;
+  final List<MaskRegion> maskRegions;
   final MediaVariant? thumb;
   final MediaVariant? detail;
   final MediaVariant? original;
+
+  bool get isCensored => moderationStatus == 'censored';
 
   /// Feed/正文预览图地址：优先 detail (<=1440px)，退回 original 或裸 url，最后才是 thumb。
   /// 避免 Feed 中大图或单图直接拉伸低清 thumb 导致模糊。
@@ -363,6 +421,10 @@ class Post {
     this.lastCommentAt,
     this.isRecommended = false,
     this.recommendationPosition,
+    this.hotSuppressed = false,
+    this.hotSuppressedReason,
+    this.hotSuppressedAt,
+    this.hotSuppressedBy,
     ViewerPostState? viewerState,
     this.tags = const [],
     this.extraTag,
@@ -394,6 +456,10 @@ class Post {
   final DateTime? lastCommentAt;
   final bool isRecommended;
   final int? recommendationPosition;
+  final bool hotSuppressed;
+  final String? hotSuppressedReason;
+  final DateTime? hotSuppressedAt;
+  final String? hotSuppressedBy;
   final ViewerPostState viewerState;
   final List<String> tags;
   final String? extraTag;

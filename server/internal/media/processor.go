@@ -19,8 +19,16 @@ import (
 	xdraw "golang.org/x/image/draw"
 )
 
+type MaskRegion struct {
+	X      float64 `json:"x"`      // 0.0 ~ 1.0 比例坐标
+	Y      float64 `json:"y"`      // 0.0 ~ 1.0
+	Width  float64 `json:"width"`  // 0.0 ~ 1.0
+	Height float64 `json:"height"` // 0.0 ~ 1.0
+	Type   string  `json:"type"`   // "mosaic" (默认) 或 "blur"
+}
+
 type ProcessedVariant struct {
-	Variant   string // "thumb", "detail", "original"
+	Variant   string // "thumb", "detail", "original", "censored_thumb", "censored_detail", "censored_original"
 	MimeType  string
 	Width     int
 	Height    int
@@ -281,6 +289,227 @@ func applyEXIFOrientation(src image.Image, orientation int) image.Image {
 		}
 	}
 	return dst
+}
+
+// ApplyMaskRegions 在图像上对指定的归一化比例区域应用马赛克或模糊效果。
+func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
+	if len(regions) == 0 {
+		return src
+	}
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return src
+	}
+
+	// 复制到 RGBA 画布进行像素级处理
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(dst, dst.Bounds(), src, bounds.Min, draw.Src)
+
+	for _, region := range regions {
+		// 校验并限制归一化坐标范围 [0.0, 1.0]
+		rx := math.Max(0.0, math.Min(1.0, region.X))
+		ry := math.Max(0.0, math.Min(1.0, region.Y))
+		rw := math.Max(0.0, math.Min(1.0-rx, region.Width))
+		rh := math.Max(0.0, math.Min(1.0-ry, region.Height))
+		if rw <= 0 || rh <= 0 {
+			continue
+		}
+
+		minX := int(math.Round(rx * float64(w)))
+		minY := int(math.Round(ry * float64(h)))
+		maxX := int(math.Round((rx + rw) * float64(w)))
+		maxY := int(math.Round((ry + rh) * float64(h)))
+
+		if minX >= maxX || minY >= maxY {
+			continue
+		}
+		if minX < 0 {
+			minX = 0
+		}
+		if minY < 0 {
+			minY = 0
+		}
+		if maxX > w {
+			maxX = w
+		}
+		if maxY > h {
+			maxY = h
+		}
+
+		if region.Type == "blur" {
+			// 区域高斯/盒式模糊：根据图像分辨率动态计算模糊核半宽
+			radius := int(math.Max(4, float64(w+h)/160.0))
+			temp := image.NewRGBA(image.Rect(minX, minY, maxX, maxY))
+			// 水平模糊
+			for y := minY; y < maxY; y++ {
+				for x := minX; x < maxX; x++ {
+					var rSum, gSum, bSum, aSum, count uint32
+					for kx := x - radius; kx <= x + radius; kx++ {
+						sampleX := kx
+						if sampleX < 0 {
+							sampleX = 0
+						}
+						if sampleX >= w {
+							sampleX = w - 1
+						}
+						r, g, b, a := dst.RGBAAt(sampleX, y).RGBA()
+						rSum += r >> 8
+						gSum += g >> 8
+						bSum += b >> 8
+						aSum += a >> 8
+						count++
+					}
+					temp.SetRGBA(x, y, color.RGBA{
+						R: uint8(rSum / count),
+						G: uint8(gSum / count),
+						B: uint8(bSum / count),
+						A: uint8(aSum / count),
+					})
+				}
+			}
+			// 垂直模糊写回
+			for y := minY; y < maxY; y++ {
+				for x := minX; x < maxX; x++ {
+					var rSum, gSum, bSum, aSum, count uint32
+					for ky := y - radius; ky <= y + radius; ky++ {
+						sampleY := ky
+						if sampleY < 0 {
+							sampleY = 0
+						}
+						if sampleY >= h {
+							sampleY = h - 1
+						}
+						var r, g, b, a uint32
+						if sampleY >= minY && sampleY < maxY {
+							c := temp.RGBAAt(x, sampleY)
+							r, g, b, a = uint32(c.R), uint32(c.G), uint32(c.B), uint32(c.A)
+						} else {
+							c := dst.RGBAAt(x, sampleY)
+							r, g, b, a = uint32(c.R), uint32(c.G), uint32(c.B), uint32(c.A)
+						}
+						rSum += r
+						gSum += g
+						bSum += b
+						aSum += a
+						count++
+					}
+					dst.SetRGBA(x, y, color.RGBA{
+						R: uint8(rSum / count),
+						G: uint8(gSum / count),
+						B: uint8(bSum / count),
+						A: uint8(aSum / count),
+					})
+				}
+			}
+		} else {
+			// 默认马赛克效果：根据图像尺寸自适应马赛克方块大小
+			blockSize := int(math.Max(8, float64(w+h)/100.0))
+			for by := minY; by < maxY; by += blockSize {
+				for bx := minX; bx < maxX; bx += blockSize {
+					bMaxX := bx + blockSize
+					if bMaxX > maxX {
+						bMaxX = maxX
+					}
+					bMaxY := by + blockSize
+					if bMaxY > maxY {
+						bMaxY = maxY
+					}
+
+					var rSum, gSum, bSum, aSum, count uint32
+					for py := by; py < bMaxY; py++ {
+						for px := bx; px < bMaxX; px++ {
+							r, g, b, a := dst.RGBAAt(px, py).RGBA()
+							rSum += r >> 8
+							gSum += g >> 8
+							bSum += b >> 8
+							aSum += a >> 8
+							count++
+						}
+					}
+					if count == 0 {
+						continue
+					}
+					avgColor := color.RGBA{
+						R: uint8(rSum / count),
+						G: uint8(gSum / count),
+						B: uint8(bSum / count),
+						A: uint8(aSum / count),
+					}
+					for py := by; py < bMaxY; py++ {
+						for px := bx; px < bMaxX; px++ {
+							dst.SetRGBA(px, py, avgColor)
+						}
+					}
+				}
+			}
+		}
+	}
+	return dst
+}
+
+// ProcessCensoredImage 对原图源数据应用打码区域后，重新生成打码版 thumb、detail、original 衍生图
+func ProcessCensoredImage(r io.Reader, regions []MaskRegion) (*ProcessResult, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read source image data: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty image data")
+	}
+
+	srcImg, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode image (%s): %w", format, err)
+	}
+	srcImg = applyEXIFOrientation(srcImg, readEXIFOrientation(data))
+
+	// 对原尺寸图像应用打码区域
+	censoredImg := ApplyMaskRegions(srcImg, regions)
+
+	bounds := censoredImg.Bounds()
+	origW := bounds.Dx()
+	origH := bounds.Dy()
+	if origW <= 0 || origH <= 0 {
+		return nil, fmt.Errorf("invalid image dimensions: %dx%d", origW, origH)
+	}
+
+	// 1. 生成 censored_original
+	origVariant, err := encodeVariant(censoredImg, origW, origH, "censored_original", 92)
+	if err != nil {
+		return nil, fmt.Errorf("encode censored original variant: %w", err)
+	}
+
+	// 2. 生成 censored_detail (长边 <= 1440px)
+	detailW, detailH := calcScaledDimensions(origW, origH, 1440)
+	var detailImg image.Image = censoredImg
+	if detailW != origW || detailH != origH {
+		detailImg = resizeCatmullRom(censoredImg, detailW, detailH)
+	}
+	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "censored_detail", 90)
+	if err != nil {
+		return nil, fmt.Errorf("encode censored detail variant: %w", err)
+	}
+
+	// 3. 生成 censored_thumb (长边 <= 640px)
+	thumbW, thumbH := calcScaledDimensions(origW, origH, 640)
+	var thumbImg image.Image = censoredImg
+	if thumbW != origW || thumbH != origH {
+		thumbImg = resizeCatmullRom(censoredImg, thumbW, thumbH)
+	}
+	thumbVariant, err := encodeVariant(thumbImg, thumbW, thumbH, "censored_thumb", 80)
+	if err != nil {
+		return nil, fmt.Errorf("encode censored thumb variant: %w", err)
+	}
+
+	return &ProcessResult{
+		OriginalWidth:  origW,
+		OriginalHeight: origH,
+		SourceMimeType: "image/" + format,
+		Thumb:          thumbVariant,
+		Detail:         detailVariant,
+		Original:       origVariant,
+	}, nil
 }
 
 // 确保 png 编解码包注册

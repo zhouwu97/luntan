@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/mock_forum_data.dart';
 import '../theme/app_theme.dart';
 import 'forum_author_row.dart';
+import 'link_text.dart';
 import 'motion_tap_icon.dart';
 import 'post_media_preview.dart';
 
@@ -71,10 +72,23 @@ class ForumPostCard extends StatelessWidget {
                 const SizedBox(height: 9),
                 if (post.isPinned ||
                     post.isFeatured ||
+                    post.hotSuppressed ||
                     post.extraTag == '精华') ...[
-                  _Tag(
-                    text: post.isPinned ? '置顶' : '精华',
-                    color: post.isPinned ? AppTheme.pink : AppTheme.orange,
+                  Row(
+                    children: [
+                      if (post.isPinned || post.isFeatured || post.extraTag == '精华') ...[
+                        _Tag(
+                          text: post.isPinned ? '置顶' : '精华',
+                          color: post.isPinned ? AppTheme.pink : AppTheme.orange,
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      if (post.hotSuppressed)
+                        const _Tag(
+                          text: '已人工移出热门',
+                          color: Colors.blueGrey,
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 6),
                 ],
@@ -113,7 +127,7 @@ class ForumPostCard extends StatelessWidget {
                 ),
                 if (post.body.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  Text(
+                  LinkText(
                     post.body,
                     maxLines: post.images.isEmpty ? 5 : 3,
                     overflow: TextOverflow.ellipsis,

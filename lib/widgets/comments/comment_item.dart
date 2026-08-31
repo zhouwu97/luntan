@@ -4,6 +4,7 @@ import '../../domain/models.dart';
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import '../app_network_image.dart';
+import '../link_text.dart';
 import 'comment_reply_preview.dart';
 import 'emoji/sticker_catalog.dart';
 
@@ -253,8 +254,9 @@ class _CommentItemState extends State<CommentItem>
           if (!deleted && comment.content.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 44, top: 4, right: 4),
-              child: Text(
+              child: LinkText(
                 comment.content,
+                selectable: true,
                 style: const TextStyle(
                   fontSize: 14,
                   color: AppTheme.textPrimary,

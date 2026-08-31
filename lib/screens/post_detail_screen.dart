@@ -23,6 +23,7 @@ import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import 'comment_thread_screen.dart';
 import '../widgets/forum_author_row.dart';
+import '../widgets/link_text.dart';
 import '../widgets/post_media_preview.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -481,8 +482,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                             ),
                             const SizedBox(height: 10),
-                            Text(
+                            LinkText(
                               post.body,
+                              selectable: true,
                               style: const TextStyle(
                                 color: Color(0xFF243647),
                                 fontSize: 15.5,

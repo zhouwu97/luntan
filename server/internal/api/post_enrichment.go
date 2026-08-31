@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 
 	"github.com/zhouwu97/luntan/server/internal/auth"
+	"github.com/zhouwu97/luntan/server/internal/media"
 )
 
 type mediaVariantResponse struct {
@@ -20,16 +22,18 @@ type mediaVariantResponse struct {
 }
 
 type postMediaResponse struct {
-	ID       string                `json:"id"`
-	Type     string                `json:"type"`
-	URL      string                `json:"url,omitempty"`
-	Width    int                   `json:"width"`
-	Height   int                   `json:"height"`
-	AltText  string                `json:"alt_text,omitempty"`
-	MimeType string                `json:"mime_type,omitempty"`
-	Thumb    *mediaVariantResponse `json:"thumb,omitempty"`
-	Detail   *mediaVariantResponse `json:"detail,omitempty"`
-	Original *mediaVariantResponse `json:"original,omitempty"`
+	ID               string                `json:"id"`
+	Type             string                `json:"type"`
+	URL              string                `json:"url,omitempty"`
+	Width            int                   `json:"width"`
+	Height           int                   `json:"height"`
+	AltText          string                `json:"alt_text,omitempty"`
+	MimeType         string                `json:"mime_type,omitempty"`
+	ModerationStatus string                `json:"moderation_status,omitempty"`
+	MaskRegions      []media.MaskRegion    `json:"mask_regions,omitempty"`
+	Thumb            *mediaVariantResponse `json:"thumb,omitempty"`
+	Detail           *mediaVariantResponse `json:"detail,omitempty"`
+	Original         *mediaVariantResponse `json:"original,omitempty"`
 }
 
 type viewerPostState struct {
@@ -48,7 +52,8 @@ type viewerPostState struct {
 // 元数据和当前用户状态。
 func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, response *postResponse, includeViewer bool) error {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ma.id, ma.mime_type, ma.width, ma.height, ma.original_name, ma.object_key
+		SELECT ma.id, ma.mime_type, ma.width, ma.height, ma.original_name, ma.object_key,
+		       COALESCE(ma.moderation_status, 'normal'), COALESCE(ma.mask_regions::text, '[]')
 		FROM post_media pm
 		JOIN media_assets ma ON ma.id = pm.media_id
 		WHERE pm.post_id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
@@ -58,13 +63,15 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	}
 	defer rows.Close()
 	type mediaItemWithKey struct {
-		item      postMediaResponse
-		objectKey string
+		item             postMediaResponse
+		objectKey        string
+		moderationStatus string
+		rawMaskRegions   string
 	}
 	items := make([]mediaItemWithKey, 0)
 	for rows.Next() {
 		var it mediaItemWithKey
-		if err := rows.Scan(&it.item.ID, &it.item.MimeType, &it.item.Width, &it.item.Height, &it.item.AltText, &it.objectKey); err != nil {
+		if err := rows.Scan(&it.item.ID, &it.item.MimeType, &it.item.Width, &it.item.Height, &it.item.AltText, &it.objectKey, &it.moderationStatus, &it.rawMaskRegions); err != nil {
 			return err
 		}
 		if strings.HasPrefix(it.item.MimeType, "video/") {
@@ -73,6 +80,13 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 			it.item.Type = "image"
 		}
 		it.item.URL = publicMediaURL(it.objectKey)
+		it.item.ModerationStatus = it.moderationStatus
+		if it.rawMaskRegions != "" && it.rawMaskRegions != "[]" {
+			var regions []media.MaskRegion
+			if jsonErr := json.Unmarshal([]byte(it.rawMaskRegions), &regions); jsonErr == nil {
+				it.item.MaskRegions = regions
+			}
+		}
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
@@ -109,10 +123,25 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		}
 		for _, it := range items {
 			item := it.item
+			isCensored := it.moderationStatus == "censored"
 			if vmap, ok := variantsMap[item.ID]; ok {
-				item.Thumb = vmap["thumb"]
-				item.Detail = vmap["detail"]
-				item.Original = vmap["original"]
+				if isCensored && vmap["censored_thumb"] != nil {
+					item.Thumb = vmap["censored_thumb"]
+				} else {
+					item.Thumb = vmap["thumb"]
+				}
+
+				if isCensored && vmap["censored_detail"] != nil {
+					item.Detail = vmap["censored_detail"]
+				} else {
+					item.Detail = vmap["detail"]
+				}
+
+				if isCensored && vmap["censored_original"] != nil {
+					item.Original = vmap["censored_original"]
+				} else {
+					item.Original = vmap["original"]
+				}
 			}
 			if item.Thumb == nil && item.URL != "" {
 				item.Thumb = &mediaVariantResponse{
@@ -138,7 +167,29 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 					MimeType: item.MimeType,
 				}
 			}
+			// 若已打码，主 URL 默认指向打码缩略图/详情图，防止客户端直读原图
+			if isCensored && item.Detail != nil {
+				item.URL = item.Detail.URL
+			} else if isCensored && item.Thumb != nil {
+				item.URL = item.Thumb.URL
+			}
 			response.Media = append(response.Media, item)
+		}
+	}
+
+	var hotSuppressed bool
+	var hotSuppressedReason, hotSuppressedBy sql.NullString
+	var hotSuppressedAt sql.NullTime
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(hot_suppressed, false), COALESCE(hot_suppressed_reason, ''), hot_suppressed_at, COALESCE(hot_suppressed_by, '') FROM posts WHERE id = $1`, response.ID).Scan(&hotSuppressed, &hotSuppressedReason, &hotSuppressedAt, &hotSuppressedBy); err == nil {
+		response.HotSuppressed = hotSuppressed
+		if hotSuppressedReason.Valid {
+			response.HotSuppressedReason = hotSuppressedReason.String
+		}
+		if hotSuppressedAt.Valid {
+			response.HotSuppressedAt = &hotSuppressedAt.Time
+		}
+		if hotSuppressedBy.Valid {
+			response.HotSuppressedBy = hotSuppressedBy.String
 		}
 	}
 

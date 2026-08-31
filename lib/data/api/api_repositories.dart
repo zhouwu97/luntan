@@ -222,6 +222,13 @@ Post _postFromJson(Map<String, dynamic> json) {
   final media = json['media'] is List
       ? (json['media'] as List).whereType<Map>().map((raw) {
           final value = Map<String, dynamic>.from(raw);
+          final rawMasks = value['mask_regions'];
+          final masks = rawMasks is List
+              ? rawMasks
+                  .whereType<Map>()
+                  .map((m) => MaskRegion.fromJson(Map<String, dynamic>.from(m)))
+                  .toList()
+              : const <MaskRegion>[];
           return MediaAsset(
             id: _string(value['id']),
             type: value['type'] == 'video' ? MediaType.video : MediaType.image,
@@ -229,6 +236,8 @@ Post _postFromJson(Map<String, dynamic> json) {
             width: _nullableInt(value['width']),
             height: _nullableInt(value['height']),
             altText: _nullableString(value['alt_text']),
+            moderationStatus: _string(value['moderation_status']) == 'censored' ? 'censored' : 'normal',
+            maskRegions: masks,
             thumb: _parseVariant(value['thumb']),
             detail: _parseVariant(value['detail']),
             original: _parseVariant(value['original']),
@@ -283,6 +292,8 @@ Post _postFromJson(Map<String, dynamic> json) {
     lastCommentAt: lastCommentAt,
     isRecommended: json['is_recommended'] == true,
     recommendationPosition: _nullableInt(json['recommendation_position']),
+    hotSuppressed: json['hot_suppressed'] == true,
+    hotSuppressedReason: _nullableString(json['hot_suppressed_reason']),
     viewerState: ViewerPostState(
       hasLiked: viewerJson['has_liked'] == true,
       hasBookmarked: viewerJson['has_bookmarked'] == true,

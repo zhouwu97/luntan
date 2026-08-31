@@ -26,8 +26,8 @@ void main() {
     expect(find.text('投票选项'), findsNothing);
     expect(find.text('添加选项'), findsNothing);
     expect(find.text('允许多选'), findsNothing);
-    expect(find.text('标题'), findsOneWidget);
-    expect(find.text('正文'), findsOneWidget);
+    expect(find.text('给帖子起一个清楚的标题'), findsOneWidget);
+    expect(find.text('分享你的真实体验、问题或发现……'), findsOneWidget);
     expect(find.text('添加示例图'), findsOneWidget);
   });
 

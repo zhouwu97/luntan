@@ -47,6 +47,10 @@ type postResponse struct {
 	LastCommentAt          *time.Time          `json:"last_comment_at,omitempty"`
 	IsRecommended          bool                `json:"is_recommended,omitempty"`
 	RecommendationPosition *int                `json:"recommendation_position,omitempty"`
+	HotSuppressed          bool                `json:"hot_suppressed,omitempty"`
+	HotSuppressedReason    string              `json:"hot_suppressed_reason,omitempty"`
+	HotSuppressedAt        *time.Time          `json:"hot_suppressed_at,omitempty"`
+	HotSuppressedBy        string              `json:"hot_suppressed_by,omitempty"`
 	Publication            string              `json:"publication_status,omitempty"`
 	Moderation             string              `json:"moderation_status,omitempty"`
 	Media                  []postMediaResponse `json:"media,omitempty"`
@@ -213,6 +217,9 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
 		  AND c.status = 'active' AND c.deleted_at IS NULL`
+		if sortMode == "hot" {
+			query += " AND p.hot_suppressed = false"
+		}
 	}
 
 	args := make([]any, 0, 8)

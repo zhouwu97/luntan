@@ -168,10 +168,10 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 	}
 
 	// Query post_media
-	mock.ExpectQuery(`SELECT ma\.id, ma\.mime_type, ma\.width, ma\.height, ma\.original_name, ma\.object_key FROM post_media pm JOIN media_assets ma`).
+	mock.ExpectQuery(`(?s)SELECT ma\.id, ma\.mime_type, ma\.width, ma\.height, ma\.original_name, ma\.object_key.*FROM post_media pm JOIN media_assets ma`).
 		WithArgs("post-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "mime_type", "width", "height", "original_name", "object_key"}).
-			AddRow("media_e2e_123", "image/jpeg", 2400, 1600, "photo.jpg", objectKey))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "mime_type", "width", "height", "original_name", "object_key", "moderation_status", "mask_regions"}).
+			AddRow("media_e2e_123", "image/jpeg", 2400, 1600, "photo.jpg", objectKey, "normal", "[]"))
 
 	// Query media_variants
 	mock.ExpectQuery(`SELECT mv\.media_id, mv\.variant, mv\.object_key, mv\.mime_type, mv\.width, mv\.height, mv\.size_bytes FROM media_variants mv`).
@@ -180,6 +180,12 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 			AddRow("media_e2e_123", "thumb", objectKey+"_thumb.jpg", "image/jpeg", 640, 427, int64(len(thumbBytes))).
 			AddRow("media_e2e_123", "detail", objectKey+"_detail.jpg", "image/jpeg", 1440, 960, int64(len(detailBytes))).
 			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes))))
+
+	// Query post hot_suppressed
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(hot_suppressed, false\).*FROM posts WHERE id = \$1`).
+		WithArgs("post-1").
+		WillReturnRows(sqlmock.NewRows([]string{"hot_suppressed", "hot_suppressed_reason", "hot_suppressed_at", "hot_suppressed_by"}).
+			AddRow(false, "", nil, ""))
 
 	// Query user profile level and avatar
 	mock.ExpectQuery(`SELECT CASE WHEN u\.account_type = 'guest' THEN 0 ELSE COALESCE\(up\.level, 1\) END`).

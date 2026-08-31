@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/media"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
@@ -390,4 +393,139 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 		return
 	}
 	_, _ = io.Copy(w, rc)
+}
+
+type moderateMediaInput struct {
+	ModerationStatus string             `json:"moderation_status"` // "censored" or "normal"
+	MaskRegions      []media.MaskRegion `json:"mask_regions"`
+	Reason           string             `json:"reason,omitempty"`
+}
+
+func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+
+	var input moderateMediaInput
+	if err := decodeJSON(r, &input); err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "请求体格式错误"})
+		return
+	}
+	if input.ModerationStatus == "" {
+		input.ModerationStatus = "censored"
+	}
+	if input.ModerationStatus != "censored" && input.ModerationStatus != "normal" {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STATUS", Message: "审核状态只能为 censored 或 normal"})
+		return
+	}
+
+	var objectKey, mimeType string
+	var status string
+	err := s.db.QueryRowContext(r.Context(), `SELECT object_key, mime_type, status FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mediaID).Scan(&objectKey, &mimeType, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "MEDIA_NOT_FOUND", Message: "媒体不存在或已删除"})
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	now := time.Now().UTC()
+	regionsJSON, _ := json.Marshal(input.MaskRegions)
+
+	if input.ModerationStatus == "censored" && len(input.MaskRegions) > 0 {
+		// 生成 censored 衍生图变体
+		if s.mediaStorage != nil {
+			rc, _, _, err := s.mediaStorage.Get(r.Context(), objectKey)
+			if err == nil && rc != nil {
+				data, readErr := io.ReadAll(rc)
+				_ = rc.Close()
+				if readErr == nil && len(data) > 0 {
+					procRes, procErr := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
+					if procErr == nil && procRes != nil {
+						origKey := objectKey + "_censored_original.jpg"
+						detailKey := objectKey + "_censored_detail.jpg"
+						thumbKey := objectKey + "_censored_thumb.jpg"
+						_ = s.mediaStorage.Put(r.Context(), origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes)
+						_ = s.mediaStorage.Put(r.Context(), detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes)
+						_ = s.mediaStorage.Put(r.Context(), thumbKey, procRes.Thumb.MimeType, bytes.NewReader(procRes.Thumb.Data), procRes.Thumb.SizeBytes)
+
+						// 写入/更新 media_variants
+						for _, v := range []struct {
+							variant string
+							key     string
+							p       media.ProcessedVariant
+						}{
+							{"censored_original", origKey, procRes.Original},
+							{"censored_detail", detailKey, procRes.Detail},
+							{"censored_thumb", thumbKey, procRes.Thumb},
+						} {
+							_, _ = s.db.ExecContext(r.Context(), `
+								INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
+								VALUES ($1, $2, $3, 'image/jpeg', $4, $5, $6, $7, 'ready', $8, $8)
+								ON CONFLICT (media_id, variant) DO UPDATE SET
+									object_key = EXCLUDED.object_key,
+									width = EXCLUDED.width,
+									height = EXCLUDED.height,
+									size_bytes = EXCLUDED.size_bytes,
+									sha256 = EXCLUDED.sha256,
+									status = 'ready',
+									updated_at = EXCLUDED.updated_at`,
+								mediaID, v.variant, v.key, v.p.Width, v.p.Height, v.p.SizeBytes, v.p.SHA256, now)
+						}
+					}
+				}
+			}
+		}
+		_, err = s.db.ExecContext(r.Context(), `
+			UPDATE media_assets
+			SET moderation_status = 'censored',
+			    mask_regions = $1::jsonb,
+			    moderated_by = $2,
+			    moderated_at = $3,
+			    moderation_reason = $4,
+			    updated_at = $3
+			WHERE id = $5`, string(regionsJSON), user.ID, now, input.Reason, mediaID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	} else {
+		// 恢复正常
+		_, err = s.db.ExecContext(r.Context(), `
+			UPDATE media_assets
+			SET moderation_status = 'normal',
+			    mask_regions = '[]'::jsonb,
+			    moderated_by = $1,
+			    moderated_at = $2,
+			    moderation_reason = $3,
+			    updated_at = $2
+			WHERE id = $4`, user.ID, now, input.Reason, mediaID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+
+	_ = appendAdminLog(r.Context(), s.db, user.ID, "media.moderation", "media", mediaID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+		"status":  input.ModerationStatus,
+		"regions": input.MaskRegions,
+		"reason":  input.Reason,
+	}, now)
+
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"success":           true,
+		"media_id":          mediaID,
+		"moderation_status": input.ModerationStatus,
+		"mask_regions":      input.MaskRegions,
+	})
 }

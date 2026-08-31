@@ -1,3 +1,4 @@
+import '../../domain/models.dart';
 import 'api_client.dart';
 
 enum NotificationCategory {
@@ -853,6 +854,36 @@ class PlatformRepository {
           for (var index = 0; index < postIds.length; index++)
             {'post_id': postIds[index], 'position': index},
         ],
+      },
+    );
+  }
+
+  Future<void> setPostHotSuppression({
+    required String postId,
+    required bool suppressed,
+    String? reason,
+  }) async {
+    await _client.putJson(
+      '/api/v1/admin/posts/$postId/hot-suppression',
+      body: {
+        'suppressed': suppressed,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      },
+    );
+  }
+
+  Future<void> moderateMedia({
+    required String mediaId,
+    required String moderationStatus,
+    List<MaskRegion> maskRegions = const [],
+    String? reason,
+  }) async {
+    await _client.putJson(
+      '/api/v1/admin/media/$mediaId/moderation',
+      body: {
+        'moderation_status': moderationStatus,
+        'mask_regions': maskRegions.map((r) => r.toJson()).toList(),
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
       },
     );
   }

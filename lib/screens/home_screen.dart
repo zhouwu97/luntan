@@ -21,6 +21,7 @@ import '../widgets/app_network_image.dart';
 import '../widgets/forum_post_card.dart';
 import 'package:share_plus/share_plus.dart';
 import 'feature_page.dart';
+import 'image_moderation_screen.dart';
 import 'search_screen.dart';
 
 /// 首页导航是产品级固定结构，不依赖服务端返回顺序，也不把 QA/导入板块
@@ -665,7 +666,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.pop(sheetContext);
               },
             ),
-            if (widget.platform != null && widget.canModerate)
+            if (widget.platform != null && widget.canModerate) ...[
               ListTile(
                 leading: Icon(
                   post.isRecommended
@@ -698,6 +699,60 @@ class _HomeScreenState extends State<HomeScreen> {
                   }
                 },
               ),
+              ListTile(
+                leading: Icon(
+                  post.hotSuppressed
+                      ? Icons.whatshot_outlined
+                      : Icons.local_fire_department,
+                  color: post.hotSuppressed
+                      ? AppTheme.textSecondary
+                      : AppTheme.orange,
+                ),
+                title: Text(post.hotSuppressed ? '恢复热门榜单展示' : '取消热门 (移出热榜)'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  try {
+                    final newSuppressed = !post.hotSuppressed;
+                    await widget.platform!.setPostHotSuppression(
+                      postId: post.id,
+                      suppressed: newSuppressed,
+                      reason: newSuppressed ? '管理员手动移出热门' : '恢复热门展示',
+                    );
+                    if (!mounted) return;
+                    widget.onFeedback(
+                      newSuppressed ? '已将帖子移出热门榜' : '已恢复帖子在热门榜展示',
+                    );
+                    await widget.feedController.refresh();
+                  } catch (error) {
+                    if (mounted) {
+                      widget.onFeedback(
+                        userFacingApiMessage(error, fallback: '操作失败，请稍后重试'),
+                      );
+                    }
+                  }
+                },
+              ),
+              if (post.images.isNotEmpty)
+                ListTile(
+                  leading: const Icon(
+                    Icons.auto_fix_high_rounded,
+                    color: AppTheme.primary,
+                  ),
+                  title: const Text('图片处理 (打码/遮挡)'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ImageModerationScreen(
+                          post: post,
+                          platformRepository: widget.platform,
+                          onSaved: () => widget.feedController.refresh(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
             ListTile(
               leading: const Icon(Icons.share_outlined),
               title: const Text('分享帖子'),

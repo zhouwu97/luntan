@@ -7,6 +7,7 @@ import '../../domain/models.dart' show relativeTimeLabel;
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import 'comment_skeleton.dart';
+import '../link_text.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
@@ -361,7 +362,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                                   ],
                                 ),
                                 const SizedBox(height: 4),
-                                Text(
+                                LinkText(
                                   widget.rootComment.content,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
@@ -534,8 +535,9 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                   ),
                 ],
                 const SizedBox(height: 4),
-                Text(
+                LinkText(
                   reply.content,
+                  selectable: true,
                   style: const TextStyle(
                     fontSize: 13,
                     color: AppTheme.textPrimary,

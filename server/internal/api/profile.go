@@ -159,7 +159,7 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		query  string
 	}{
 		{&posts, `SELECT count(*) FROM posts WHERE author_id = $1 AND publication_status = 'published' AND type <> 'market' AND deleted_at IS NULL`},
-		{&comments, `SELECT count(*) FROM comments WHERE author_id = $1 AND publication_status = 'published' AND deleted_at IS NULL`},
+		{&comments, `SELECT count(*) FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.author_id = $1 AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.type <> 'market'`},
 		{&receivedLikes, `SELECT count(*) FROM post_reactions pr JOIN posts p ON p.id = pr.post_id WHERE p.author_id = $1 AND p.type <> 'market' AND p.deleted_at IS NULL`},
 		{&followers, `SELECT count(*) FROM user_follows WHERE followee_id = $1`},
 		{&following, `SELECT count(*) FROM user_follows WHERE follower_id = $1`},

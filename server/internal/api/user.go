@@ -56,7 +56,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		       COALESCE(up.trust_level, 'new'), u.status, u.created_at,
 		       COALESCE(up.experience, 0), COALESCE(u.account_type, 'email'),
 		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market' AND (p.moderation_status = 'normal' OR (p.author_id = $2 AND p.moderation_status = 'pending'))),
-		       (SELECT count(*) FROM comments c WHERE c.author_id = u.id AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'),
+		       (SELECT count(*) FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.author_id = u.id AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.type <> 'market'),
 		       (SELECT count(*) FROM user_follows f WHERE f.followee_id = u.id),
 		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
 		FROM users u

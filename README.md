@@ -256,6 +256,14 @@ APP_RELEASE_PUBLIC_BASE_URL=https://forum.example.com
 APP_RELEASE_DOWNLOAD_BASE_URL=https://dl.example.com
 ```
 
+客户端只允许从官方更新域或显式编入的 CDN 域名下载安装包。若
+`APP_RELEASE_DOWNLOAD_BASE_URL` 指向独立 CDN 域名，构建 APK 时必须用
+dart-define 同步编入 allowlist，否则更新检查会直接拒绝该下载地址：
+
+```powershell
+--dart-define=UPDATE_ALLOWED_HOSTS=dl.example.com
+```
+
 重启 API 后依次验收 `/api/v1/app/releases/latest`、`/api/v1/app/update` 和
 响应中的 `/releases/{version_code}/{file}` 静态地址，以及旧的
 `/api/v1/app/releases/{version_code}/download` 兼容地址。服务启动会校验清单、APK 大小与 SHA-256；

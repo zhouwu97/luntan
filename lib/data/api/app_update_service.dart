@@ -205,7 +205,9 @@ class AppUpdateService {
          production: productionBuild ?? isProductionUpdateBuild(),
        ),
        _client = client ?? http.Client(),
-       _downloadDirResolver = downloadDirResolver;
+       _downloadDirResolver = downloadDirResolver {
+    _allowedDownloadHosts = _buildAllowedHosts(_baseUri);
+  }
 
   final Uri _baseUri;
   final bool _productionBuild;
@@ -213,6 +215,25 @@ class AppUpdateService {
 
   /// 下载目录解析器。默认走 path_provider 的临时目录；测试注入临时目录。
   final Future<Directory> Function()? _downloadDirResolver;
+
+  /// 下载 URL 允许的主机集合：官方更新域 + 编译期 `UPDATE_ALLOWED_HOSTS`。
+  /// 更新元数据（hash、URL）与服务端同源时可能被一并篡改，独立 allowlist
+  /// 是防止安装包被引导到任意主机的最后防线。
+  late final Set<String> _allowedDownloadHosts;
+
+  static const _maxDownloadRedirects = 5;
+
+  static Set<String> _buildAllowedHosts(Uri baseUri) {
+    final hosts = <String>{baseUri.host.toLowerCase()};
+    const configuredHosts = String.fromEnvironment('UPDATE_ALLOWED_HOSTS');
+    for (final entry in configuredHosts.split(',')) {
+      final host = entry.trim().toLowerCase();
+      if (host.isNotEmpty) {
+        hosts.add(host);
+      }
+    }
+    return hosts;
+  }
 
   static Uri _validateBaseUri(
     Uri uri, {
@@ -499,9 +520,7 @@ class AppUpdateService {
         if (received > 0) {
           request.headers['Range'] = 'bytes=$received-';
         }
-        final response = await _client
-            .send(request)
-            .timeout(const Duration(seconds: 30));
+        final response = await _sendDownloadRequest(request);
         if (response.statusCode == 416) {
           // Range 不合适：本地数据与服务器期望不一致，重头再来。
           received = 0;
@@ -629,9 +648,7 @@ class AppUpdateService {
     // 这时回退到原来的单连接下载，保证更新链路仍然兼容。
     final probeRequest = http.Request('GET', uri)
       ..headers['Range'] = 'bytes=0-0';
-    final probeResponse = await _client
-        .send(probeRequest)
-        .timeout(const Duration(seconds: 30));
+    final probeResponse = await _sendDownloadRequest(probeRequest);
     if (probeResponse.statusCode == 200) {
       await _discardResponse(probeResponse);
       await _deletePartsDirectory(partsDirectory);
@@ -836,9 +853,7 @@ class AppUpdateService {
       if (etag != null) {
         request.headers['If-Range'] = etag;
       }
-      final response = await _client
-          .send(request)
-          .timeout(const Duration(seconds: 30));
+      final response = await _sendDownloadRequest(request);
       if (response.statusCode == 200) {
         await _discardResponse(response);
         throw const _RangeUnsupported();
@@ -1060,11 +1075,75 @@ class AppUpdateService {
     }
 
     final resolved = isAbsolute ? parsed : _baseUri.resolveUri(parsed);
-    return _validateBaseUri(
+    final validated = _validateBaseUri(
       resolved,
       production: _productionBuild,
       allowQuery: true,
     );
+    if (!_allowedDownloadHosts.contains(validated.host.toLowerCase())) {
+      throw StateError('下载地址主机不在允许列表中');
+    }
+    return validated;
+  }
+
+  /// 发送下载请求并手动处理重定向。每一跳的 Location 都必须重新通过
+  /// allowlist 校验，防止更新服务器被劫持后把安装包重定向到任意主机。
+  Future<http.StreamedResponse> _sendDownloadRequest(
+    http.Request request,
+  ) async {
+    var current = request;
+    var hops = 0;
+    while (true) {
+      current.followRedirects = false;
+      final response = await _client
+          .send(current)
+          .timeout(const Duration(seconds: 30));
+      final status = response.statusCode;
+      if (status < 300 || status >= 400 || status == 304) {
+        return response;
+      }
+      final location = response.headers['location'];
+      await _discardResponse(response);
+      if (hops >= _maxDownloadRedirects) {
+        throw const AppUpdateException(
+          AppUpdateErrorKind.protocol,
+          '下载重定向次数超限',
+        );
+      }
+      hops += 1;
+      if (location == null || location.trim().isEmpty) {
+        throw const AppUpdateException(
+          AppUpdateErrorKind.protocol,
+          '下载重定向缺少 Location',
+        );
+      }
+      final trimmedLocation = location.trim();
+      Uri nextUri;
+      try {
+        final parsedLocation = Uri.parse(trimmedLocation);
+        // 相对 Location 按当前跳的 URL 解析，而不是 base URI。
+        nextUri = parsedLocation.hasScheme
+            ? parsedLocation
+            : current.url.resolve(trimmedLocation);
+      } on FormatException {
+        throw const AppUpdateException(
+          AppUpdateErrorKind.protocol,
+          '下载重定向地址非法',
+        );
+      }
+      Uri safeUri;
+      try {
+        safeUri = _resolveDownloadUri(nextUri.toString());
+      } on StateError catch (error) {
+        throw AppUpdateException(
+          AppUpdateErrorKind.protocol,
+          error.message.toString(),
+        );
+      }
+      final redirected = http.Request(current.method, safeUri);
+      redirected.headers.addAll(current.headers);
+      current = redirected;
+    }
   }
 
   Future<String> _sha256Of(File file) async {

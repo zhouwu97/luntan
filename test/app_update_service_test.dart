@@ -131,7 +131,43 @@ void main() {
     service.close();
   });
 
-  test('production 允许 HTTPS CDN absolute download_url', () async {
+  test('production 拒绝未编入 allowlist 的 CDN absolute download_url', () async {
+    final service = AppUpdateService(
+      baseUri: Uri.parse('https://updates.example.com'),
+      productionBuild: true,
+      client: MockClient((request) async {
+        fail('非 allowlist 主机不应发起网络请求');
+      }),
+    );
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 3,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: apkBytes.length,
+      sha256: apkSha,
+      downloadUrl: 'https://cdn.example.com/releases/app.apk?sig=stable',
+    );
+
+    await expectLater(
+      service.downloadApk(info: info),
+      throwsA(
+        isA<AppUpdateException>()
+            .having((error) => error.kind, 'kind', AppUpdateErrorKind.protocol)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('不在允许列表中'),
+            ),
+      ),
+    );
+    service.close();
+  });
+
+  test('production 允许同 host 的 HTTPS absolute download_url', () async {
     final root = await Directory.systemTemp.createTemp('update_test');
     addTearDown(() => root.deleteSync(recursive: true));
     String? requestedUrl;
@@ -159,12 +195,105 @@ void main() {
       changelog: 'c',
       fileSize: apkBytes.length,
       sha256: apkSha,
-      downloadUrl: 'https://cdn.example.com/releases/app.apk?sig=stable',
+      downloadUrl: 'https://updates.example.com/releases/app.apk?sig=stable',
     );
 
     await service.downloadApk(info: info);
 
-    expect(requestedUrl, 'https://cdn.example.com/releases/app.apk?sig=stable');
+    expect(
+      requestedUrl,
+      'https://updates.example.com/releases/app.apk?sig=stable',
+    );
+    service.close();
+  });
+
+  test('下载重定向到非 allowlist 主机被拒绝', () async {
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final client = MockClient.streaming((request, bodyStream) async {
+      return http.StreamedResponse(
+        Stream<List<int>>.empty(),
+        302,
+        headers: {'location': 'https://evil.example.com/app.apk'},
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 3,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: apkBytes.length,
+      sha256: apkSha,
+      downloadUrl: '/api/v1/app/releases/3/download',
+    );
+
+    await expectLater(
+      service.downloadApk(info: info),
+      throwsA(
+        isA<AppUpdateException>()
+            .having((error) => error.kind, 'kind', AppUpdateErrorKind.protocol)
+            .having(
+              (error) => error.message,
+              'message',
+              contains('不在允许列表中'),
+            ),
+      ),
+    );
+    service.close();
+  });
+
+  test('下载重定向到 allowlist 主机的相对 Location 正常跟随', () async {
+    final root = await Directory.systemTemp.createTemp('update_test');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final requestedUrls = <String>[];
+    final client = MockClient.streaming((request, bodyStream) async {
+      requestedUrls.add(request.url.toString());
+      if (request.url.path == '/api/v1/app/releases/3/download') {
+        return http.StreamedResponse(
+          Stream<List<int>>.empty(),
+          302,
+          headers: {'location': '/files/app-release.apk'},
+        );
+      }
+      return http.StreamedResponse(
+        Stream<List<int>>.fromIterable([apkBytes]),
+        200,
+        contentLength: apkBytes.length,
+      );
+    });
+    final service = AppUpdateService(
+      baseUri: Uri.parse('http://server.test'),
+      client: client,
+      downloadDirResolver: () => tempDirResolver(root),
+    );
+    final info = AppUpdateInfo(
+      updateAvailable: true,
+      updateType: 'optional',
+      latestVersionName: '1.2.0',
+      latestVersionCode: 3,
+      minimumSupportedVersionCode: 1,
+      title: 't',
+      changelog: 'c',
+      fileSize: apkBytes.length,
+      sha256: apkSha,
+      downloadUrl: '/api/v1/app/releases/3/download',
+    );
+
+    final file = await service.downloadApk(info: info);
+
+    expect(requestedUrls, [
+      'http://server.test/api/v1/app/releases/3/download',
+      'http://server.test/files/app-release.apk',
+    ]);
+    expect(await file.length(), apkBytes.length);
     service.close();
   });
 

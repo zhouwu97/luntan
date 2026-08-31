@@ -144,6 +144,7 @@ func TestCreatePostResponseReflectsModerationTrigger(t *testing.T) {
 	})
 	urlReq := httptest.NewRequest(http.MethodPost, "/api/v1/posts", bytes.NewReader(urlPostBody))
 	urlReq.Header.Set("Authorization", "Bearer "+oldToken)
+	urlReq.Header.Set("Idempotency-Key", fmt.Sprintf("itest-mod-url-%d", oldUserSuffix))
 	urlRec := httptest.NewRecorder()
 	handler.ServeHTTP(urlRec, urlReq)
 	if urlRec.Code != http.StatusCreated {
@@ -164,6 +165,7 @@ func TestCreatePostResponseReflectsModerationTrigger(t *testing.T) {
 	})
 	spamReq := httptest.NewRequest(http.MethodPost, "/api/v1/posts", bytes.NewReader(spamPostBody))
 	spamReq.Header.Set("Authorization", "Bearer "+oldToken)
+	spamReq.Header.Set("Idempotency-Key", fmt.Sprintf("itest-mod-spam-%d", oldUserSuffix))
 	spamRec := httptest.NewRecorder()
 	handler.ServeHTTP(spamRec, spamReq)
 	if spamRec.Code != http.StatusCreated {

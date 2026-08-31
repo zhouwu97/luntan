@@ -129,6 +129,11 @@ String rankingWantCountText(int count) {
 bool _isUnauthorized(Object error) =>
     error is ApiException && error.statusCode == 401;
 
+/// 401/403 统一视为“当前身份不能写服务器”，想冲/买过回退本机标记。
+bool _isAuthOrCapabilityDenied(Object error) =>
+    error is ApiException &&
+    (error.statusCode == 401 || error.statusCode == 403);
+
 Widget _rankingImage(
   RankingItem item, {
   required double width,
@@ -1586,8 +1591,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
 
   Future<void> _setWanted() async {
     final nextWanted = !_wanted;
-    // 游客也可以管理本机“想冲”清单；优惠券链接由管理员统一维护。
-    if (!_hasServer || !widget.isAuthenticated || !widget.canVote) {
+    // 登录态可能在本页面创建后才建立（弹层登录不会重建已推入的路由），
+    // 因此不用构造时的登录快照预判：直接尝试服务器，401/403 再回退本机清单。
+    if (!_hasServer) {
       setState(() => _wanted = nextWanted);
       if (nextWanted && mounted) {
         await Navigator.of(context).push(
@@ -1598,25 +1604,44 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       }
       return;
     }
+    setState(() => _wanted = nextWanted);
     try {
       final toy = await widget.repository!.setWanted(
         toyId: item.id,
-        active: !_wanted,
+        active: nextWanted,
       );
       _replaceToy(toy);
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+      if (nextWanted && mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RankingCouponPage(item: displayItem),
+          ),
+        );
       }
+    } catch (error) {
+      if (!mounted) return;
+      if (_isAuthOrCapabilityDenied(error)) {
+        // 游客或当前身份无投票权限：保留本机“想冲”标记，行为与游客一致。
+        if (nextWanted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => RankingCouponPage(item: item),
+            ),
+          );
+        }
+        return;
+      }
+      setState(() => _wanted = !nextWanted);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
     }
   }
 
   Future<void> _setOwned() async {
     final nextOwned = !_owned;
-    // “买过”同样允许游客先在本机标记，避免未登录时强制跳转认证页。
-    if (!_hasServer || !widget.isAuthenticated || !widget.canVote) {
+    // 与 _setWanted 同策略：直接尝试服务器，401/403 回退本机“买过”标记。
+    if (!_hasServer) {
       setState(() => _owned = nextOwned);
       if (mounted) {
         await Navigator.of(context).push(
@@ -1627,18 +1652,30 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       }
       return;
     }
+    setState(() => _owned = nextOwned);
     try {
       final toy = await widget.repository!.setOwned(
         toyId: item.id,
-        active: !_owned,
+        active: nextOwned,
       );
       _replaceToy(toy);
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+      if (!mounted) return;
+      if (_isAuthOrCapabilityDenied(error)) {
+        if (mounted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  RankingPurchasePage(item: item, owned: nextOwned),
+            ),
+          );
+        }
+        return;
       }
+      setState(() => _owned = !nextOwned);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
     }
   }
 
@@ -2050,7 +2087,7 @@ class RankingCouponPage extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              '已加入本机想冲清单，可直接领取或查看优惠。',
+              '已加入想冲清单，可直接领取或查看优惠。',
               textAlign: TextAlign.center,
               style: TextStyle(color: Color(0xFF718096), fontSize: 13),
             ),

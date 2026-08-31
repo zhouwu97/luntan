@@ -50,7 +50,8 @@ jobs:
           --dart-define=API_BASE_URL=https://shengbeijiang.com
           --dart-define=WEB_BASE_URL=https://shengbeijiang.com
         env:
-          ANDROID_RELEASE_STORE_FILE: android/app/ci-release.keystore
+          # 相对 gradle rootProject（android/）解析，与 keytool 生成的 android/app/ci-release.keystore 是同一文件。
+          ANDROID_RELEASE_STORE_FILE: app/ci-release.keystore
           ANDROID_RELEASE_STORE_TYPE: PKCS12
           ANDROID_RELEASE_STORE_PASSWORD: ci-only-release-password
           ANDROID_RELEASE_KEY_ALIAS: ci-release

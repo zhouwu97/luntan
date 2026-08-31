@@ -98,14 +98,37 @@ func TestCreatePostResponseReflectsModerationTrigger(t *testing.T) {
 	oldUserSuffix := time.Now().UnixNano() + 1
 	oldEmail := fmt.Sprintf("itest-old-%d@example.com", oldUserSuffix)
 	oldUsername := fmt.Sprintf("itest_old_%d", oldUserSuffix%100000000)
-	oldRegBody, _ := json.Marshal(map[string]string{"email": oldEmail, "code": devCode, "password": "password123", "nickname": "老用户", "username": oldUsername})
+	oldCodeBody, _ := json.Marshal(map[string]string{"email": oldEmail, "purpose": "register"})
+	oldCodeReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/code/request", bytes.NewReader(oldCodeBody))
+	oldCodeRec := httptest.NewRecorder()
+	handler.ServeHTTP(oldCodeRec, oldCodeReq)
+	var oldCodeResp map[string]any
+	_ = json.Unmarshal(oldCodeRec.Body.Bytes(), &oldCodeResp)
+	oldDevCode, _ := oldCodeResp["dev_code"].(string)
+	if oldDevCode == "" {
+		t.Fatalf("old user dev_code missing: %s", oldCodeRec.Body.String())
+	}
+	oldRegBody, _ := json.Marshal(map[string]string{"email": oldEmail, "code": oldDevCode, "password": "password123", "nickname": "老用户", "username": oldUsername})
 	oldRegReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(oldRegBody))
 	oldRegRec := httptest.NewRecorder()
 	handler.ServeHTTP(oldRegRec, oldRegReq)
+	if oldRegRec.Code != http.StatusCreated {
+		t.Fatalf("old user register failed: %d %s", oldRegRec.Code, oldRegRec.Body.String())
+	}
 	var oldRegResp map[string]any
 	_ = json.Unmarshal(oldRegRec.Body.Bytes(), &oldRegResp)
 	oldToken, _ := oldRegResp["access_token"].(string)
-	oldUserID, _ := oldRegResp["user"].(map[string]any)["id"].(string)
+	if oldToken == "" {
+		t.Fatalf("old user missing access_token: %s", oldRegRec.Body.String())
+	}
+	oldUser, _ := oldRegResp["user"].(map[string]any)
+	if oldUser == nil {
+		t.Fatalf("old user register response missing user object: %s", oldRegRec.Body.String())
+	}
+	oldUserID, _ := oldUser["id"].(string)
+	if oldUserID == "" {
+		t.Fatalf("old user register response missing user id: %s", oldRegRec.Body.String())
+	}
 
 	// 修改老用户注册时间为 48 小时前，模拟老账号
 	if _, err := s.db.Exec(`UPDATE users SET created_at = now() - interval '48 hours' WHERE id = $1`, oldUserID); err != nil {

@@ -472,6 +472,11 @@ func ProcessCensoredImage(r io.Reader, regions []MaskRegion) (*ProcessResult, er
 	if err != nil {
 		return nil, fmt.Errorf("read source image data: %w", err)
 	}
+	return ProcessCensoredImageBytes(data, regions)
+}
+
+// ProcessCensoredImageBytes 对已读取的图片字节数据应用打码区域，避免重复复制
+func ProcessCensoredImageBytes(data []byte, regions []MaskRegion) (*ProcessResult, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty image data")
 	}

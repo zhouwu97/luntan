@@ -735,7 +735,7 @@ void main() {
       expect(cancelled, isTrue);
     });
 
-    testWidgets('13. 回复栏固定为 42dp 胶囊形状，输入保持单行', (tester) async {
+    testWidgets('13. 回复栏起步 42dp 胶囊形状，支持多行输入自适应展开', (tester) async {
       final composer = CommentComposerController();
       addTearDown(composer.dispose);
 
@@ -759,11 +759,18 @@ void main() {
       final singleLineHeight = tester.getSize(input).height;
       expect(singleLineHeight, equals(42));
 
-      await tester.enterText(input, '输入单行或多行文本');
+      // 单行输入保持 42
+      await tester.enterText(input, '输入单行文本');
+      await tester.pump();
+      expect(tester.getSize(input).height, equals(42));
+
+      // 多行换行输入自适应扩展（不超过 100）
+      await tester.enterText(input, '第一行\n第二行\n第三行\n第四行');
       await tester.pump();
 
-      final textHeight = tester.getSize(input).height;
-      expect(textHeight, equals(42));
+      final multilineHeight = tester.getSize(input).height;
+      expect(multilineHeight, greaterThan(42));
+      expect(multilineHeight, lessThanOrEqualTo(100));
     });
   });
 }

@@ -104,12 +104,20 @@ class _ReplyPreviewLine extends StatefulWidget {
 
 class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
   final _recognizers = <TapGestureRecognizer>[];
+  late List<TextSpan> _spans;
+
+  @override
+  void initState() {
+    super.initState();
+    _rebuildSpans();
+  }
 
   @override
   void didUpdateWidget(covariant _ReplyPreviewLine oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.reply.content != widget.reply.content) {
       _disposeRecognizers();
+      _rebuildSpans();
     }
   }
 
@@ -134,7 +142,7 @@ class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
     );
   }
 
-  List<TextSpan> _contentSpans() {
+  void _rebuildSpans() {
     final text = widget.reply.content;
     final links = extractContentLinks(text);
     final linkStyle = const TextStyle(color: AppTheme.primary);
@@ -156,7 +164,7 @@ class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
       spans.add(TextSpan(text: text.substring(cursor)));
     }
     if (spans.isEmpty) spans.add(TextSpan(text: text));
-    return spans;
+    _spans = spans;
   }
 
   @override
@@ -241,7 +249,7 @@ class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
                   color: Color(0xFF385A79),
                 ),
               ),
-              ..._contentSpans(),
+              ..._spans,
             ],
           ),
           maxLines: 2,

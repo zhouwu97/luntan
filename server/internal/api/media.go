@@ -848,17 +848,39 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		}
 		releaseModeration := s.releaseModerationSlot
 
-		rc, _, _, err := s.mediaStorage.Get(r.Context(), objectKey)
+		const maxModerationSourceBytes = 20 * 1024 * 1024
+
+		rc, size, _, err := s.mediaStorage.Get(r.Context(), objectKey)
 		if err != nil || rc == nil {
 			releaseModeration()
 			writeInternalError(w, r, fmt.Errorf("failed to retrieve source image: %w", err))
 			return
 		}
-		data, readErr := io.ReadAll(rc)
+		if size > maxModerationSourceBytes {
+			_ = rc.Close()
+			releaseModeration()
+			httpserver.WriteAppError(w, r, httpserver.AppError{
+				Status:  http.StatusBadRequest,
+				Code:    "MEDIA_TOO_LARGE",
+				Message: "图片文件过大，无法进行在线打码处理",
+			})
+			return
+		}
+
+		data, readErr := io.ReadAll(io.LimitReader(rc, maxModerationSourceBytes+1))
 		_ = rc.Close()
 		if readErr != nil || len(data) == 0 {
 			releaseModeration()
 			writeInternalError(w, r, fmt.Errorf("failed to read source image: %w", readErr))
+			return
+		}
+		if len(data) > maxModerationSourceBytes {
+			releaseModeration()
+			httpserver.WriteAppError(w, r, httpserver.AppError{
+				Status:  http.StatusBadRequest,
+				Code:    "MEDIA_TOO_LARGE",
+				Message: "图片文件过大，无法进行在线打码处理",
+			})
 			return
 		}
 
@@ -870,7 +892,7 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		done := make(chan censoredOutcome, 1)
 		go func() {
 			defer releaseModeration()
-			res, err := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
+			res, err := media.ProcessCensoredImageBytes(data, input.MaskRegions)
 			done <- censoredOutcome{res: res, err: err}
 		}()
 

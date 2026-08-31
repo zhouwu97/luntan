@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
@@ -112,7 +113,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
   }
 
   Future<void> _saveModeration({bool resetToNormal = false}) async {
-    if (_images.isEmpty) return;
+    if (_isSaving || _images.isEmpty) return;
     final media = _images[_selectedImageIndex];
 
     setState(() => _isSaving = true);
@@ -146,7 +147,10 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存出错: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(
+          content: Text(userFacingApiMessage(e, fallback: '图片处理失败，请稍后重试')),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -162,7 +166,9 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
           errorBuilder: (_, _, _) => _sourceError('原图无法显示'),
         );
       }
-      if (_sourceLoadError != null) return _sourceError(_sourceLoadError!);
+      if (_sourceLoadError != null) {
+        return _sourceError(_sourceLoadError!, onRetry: _loadCurrentMediaSource);
+      }
       return const Center(
         child: CircularProgressIndicator(color: AppTheme.primary),
       );
@@ -175,11 +181,27 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     );
   }
 
-  Widget _sourceError(String message) {
+  Widget _sourceError(String message, {VoidCallback? onRetry}) {
     return Container(
       color: Colors.black26,
       child: Center(
-        child: Text(message, style: const TextStyle(color: Colors.white70)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, style: const TextStyle(color: Colors.white70)),
+            if (onRetry != null) ...[
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: _isSaving ? null : onRetry,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
+                ),
+                child: const Text('重试'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -224,19 +246,21 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
             tooltip: '撤销上一步',
             icon: Icon(
               Icons.undo,
-              color: _undoHistory.isNotEmpty ? Colors.white : Colors.white38,
+              color: (!_isSaving && _undoHistory.isNotEmpty)
+                  ? Colors.white
+                  : Colors.white38,
             ),
-            onPressed: _undoHistory.isNotEmpty ? _undo : null,
+            onPressed: (!_isSaving && _undoHistory.isNotEmpty) ? _undo : null,
           ),
           IconButton(
             tooltip: '清空打码',
             icon: Icon(
               Icons.delete_outline,
-              color: _currentRegions.isNotEmpty
+              color: (!_isSaving && _currentRegions.isNotEmpty)
                   ? Colors.redAccent
                   : Colors.white38,
             ),
-            onPressed: _currentRegions.isNotEmpty ? _clearAll : null,
+            onPressed: (!_isSaving && _currentRegions.isNotEmpty) ? _clearAll : null,
           ),
           TextButton(
             onPressed: _isSaving ? null : () => _saveModeration(),
@@ -274,15 +298,17 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                   final m = _images[index];
                   final isSelected = index == _selectedImageIndex;
                   return GestureDetector(
-                    onTap: () {
-                      if (index != _selectedImageIndex) {
-                        setState(() {
-                          _selectedImageIndex = index;
-                          _loadCurrentMediaRegions();
-                        });
-                        _loadCurrentMediaSource();
-                      }
-                    },
+                    onTap: _isSaving
+                        ? null
+                        : () {
+                            if (index != _selectedImageIndex) {
+                              setState(() {
+                                _selectedImageIndex = index;
+                                _loadCurrentMediaRegions();
+                              });
+                              _loadCurrentMediaSource();
+                            }
+                          },
                     child: Container(
                       width: 56,
                       margin: const EdgeInsets.only(right: 8),
@@ -310,153 +336,161 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
               ),
             ),
           Expanded(
-            child: Center(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final imgW = currentMedia.width?.toDouble() ?? 800;
-                  final imgH = currentMedia.height?.toDouble() ?? 600;
-                  final aspect = (imgW > 0 && imgH > 0) ? imgW / imgH : 4 / 3;
+            child: IgnorePointer(
+              ignoring: _isSaving,
+              child: Center(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final imgW = currentMedia.width?.toDouble() ?? 800;
+                    final imgH = currentMedia.height?.toDouble() ?? 600;
+                    final aspect = (imgW > 0 && imgH > 0) ? imgW / imgH : 4 / 3;
 
-                  return AspectRatio(
-                    aspectRatio: aspect,
-                    child: LayoutBuilder(
-                      builder: (canvasCtx, canvasConstraints) {
-                        final canvasW = canvasConstraints.maxWidth;
-                        final canvasH = canvasConstraints.maxHeight;
+                    return AspectRatio(
+                      aspectRatio: aspect,
+                      child: LayoutBuilder(
+                        builder: (canvasCtx, canvasConstraints) {
+                          final canvasW = canvasConstraints.maxWidth;
+                          final canvasH = canvasConstraints.maxHeight;
 
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            _buildSourceImage(currentMedia, imageUrl),
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onPanStart: (details) {
-                                setState(() {
-                                  _dragStart = details.localPosition;
-                                  _dragCurrent = details.localPosition;
-                                });
-                              },
-                              onPanUpdate: (details) {
-                                setState(() {
-                                  _dragCurrent = details.localPosition;
-                                });
-                              },
-                              onPanEnd: (details) {
-                                if (_dragStart != null &&
-                                    _dragCurrent != null &&
-                                    canvasW > 0 &&
-                                    canvasH > 0) {
-                                  final left =
-                                      (_dragStart!.dx < _dragCurrent!.dx
-                                              ? _dragStart!.dx
-                                              : _dragCurrent!.dx)
-                                          .clamp(0.0, canvasW);
-                                  final top =
-                                      (_dragStart!.dy < _dragCurrent!.dy
-                                              ? _dragStart!.dy
-                                              : _dragCurrent!.dy)
-                                          .clamp(0.0, canvasH);
-                                  final right =
-                                      (_dragStart!.dx > _dragCurrent!.dx
-                                              ? _dragStart!.dx
-                                              : _dragCurrent!.dx)
-                                          .clamp(0.0, canvasW);
-                                  final bottom =
-                                      (_dragStart!.dy > _dragCurrent!.dy
-                                              ? _dragStart!.dy
-                                              : _dragCurrent!.dy)
-                                          .clamp(0.0, canvasH);
+                          return Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              _buildSourceImage(currentMedia, imageUrl),
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onPanStart: (details) {
+                                  setState(() {
+                                    _dragStart = details.localPosition;
+                                    _dragCurrent = details.localPosition;
+                                  });
+                                },
+                                onPanUpdate: (details) {
+                                  setState(() {
+                                    _dragCurrent = details.localPosition;
+                                  });
+                                },
+                                onPanEnd: (details) {
+                                  if (_dragStart != null &&
+                                      _dragCurrent != null &&
+                                      canvasW > 0 &&
+                                      canvasH > 0) {
+                                    final left =
+                                        (_dragStart!.dx < _dragCurrent!.dx
+                                                ? _dragStart!.dx
+                                                : _dragCurrent!.dx)
+                                            .clamp(0.0, canvasW);
+                                    final top =
+                                        (_dragStart!.dy < _dragCurrent!.dy
+                                                ? _dragStart!.dy
+                                                : _dragCurrent!.dy)
+                                            .clamp(0.0, canvasH);
+                                    final right =
+                                        (_dragStart!.dx > _dragCurrent!.dx
+                                                ? _dragStart!.dx
+                                                : _dragCurrent!.dx)
+                                            .clamp(0.0, canvasW);
+                                    final bottom =
+                                        (_dragStart!.dy > _dragCurrent!.dy
+                                                ? _dragStart!.dy
+                                                : _dragCurrent!.dy)
+                                            .clamp(0.0, canvasH);
 
-                                  final boxW = right - left;
-                                  final boxH = bottom - top;
+                                    final boxW = right - left;
+                                    final boxH = bottom - top;
 
-                                  if (boxW > 8 && boxH > 8) {
-                                    _pushHistory();
-                                    _currentRegions.add(
-                                      MaskRegion(
-                                        x: (left / canvasW).clamp(0.0, 1.0),
-                                        y: (top / canvasH).clamp(0.0, 1.0),
-                                        width: (boxW / canvasW).clamp(0.0, 1.0),
-                                        height: (boxH / canvasH).clamp(
-                                          0.0,
-                                          1.0,
+                                    if (boxW > 8 && boxH > 8) {
+                                      _pushHistory();
+                                      _currentRegions.add(
+                                        MaskRegion(
+                                          x: (left / canvasW).clamp(0.0, 1.0),
+                                          y: (top / canvasH).clamp(0.0, 1.0),
+                                          width: (boxW / canvasW).clamp(0.0, 1.0),
+                                          height: (boxH / canvasH).clamp(
+                                            0.0,
+                                            1.0,
+                                          ),
+                                          type: _currentType,
                                         ),
-                                        type: _currentType,
-                                      ),
-                                    );
+                                      );
+                                    }
                                   }
-                                }
-                                setState(() {
-                                  _dragStart = null;
-                                  _dragCurrent = null;
-                                });
-                              },
-                              child: CustomPaint(
-                                painter: _MaskCanvasPainter(
-                                  regions: _currentRegions,
-                                  dragStart: _dragStart,
-                                  dragCurrent: _dragCurrent,
-                                  currentType: _currentType,
+                                  setState(() {
+                                    _dragStart = null;
+                                    _dragCurrent = null;
+                                  });
+                                },
+                                child: CustomPaint(
+                                  painter: _MaskCanvasPainter(
+                                    regions: _currentRegions,
+                                    dragStart: _dragStart,
+                                    dragCurrent: _dragCurrent,
+                                    currentType: _currentType,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  );
-                },
+                            ],
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Color(0xFF23262F),
-              border: Border(
-                top: BorderSide(color: Color(0xFF353945), width: 1),
+          IgnorePointer(
+            ignoring: _isSaving,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: const BoxDecoration(
+                color: Color(0xFF23262F),
+                border: Border(
+                  top: BorderSide(color: Color(0xFF353945), width: 1),
+                ),
               ),
-            ),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  const Text(
-                    '遮挡样式：',
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('马赛克'),
-                    selected: _currentType == 'mosaic',
-                    selectedColor: AppTheme.primary,
-                    onSelected: (val) {
-                      if (val) setState(() => _currentType = 'mosaic');
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('毛玻璃模糊'),
-                    selected: _currentType == 'blur',
-                    selectedColor: AppTheme.primary,
-                    onSelected: (val) {
-                      if (val) setState(() => _currentType = 'blur');
-                    },
-                  ),
-                  const Spacer(),
-                  if (currentMedia.isCensored)
-                    TextButton.icon(
-                      icon: const Icon(
-                        Icons.refresh,
-                        color: Colors.orangeAccent,
-                        size: 18,
-                      ),
-                      label: const Text(
-                        '恢复原图',
-                        style: TextStyle(color: Colors.orangeAccent),
-                      ),
-                      onPressed: () => _saveModeration(resetToNormal: true),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    const Text(
+                      '遮挡样式：',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
-                ],
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('马赛克'),
+                      selected: _currentType == 'mosaic',
+                      selectedColor: AppTheme.primary,
+                      onSelected: (val) {
+                        if (val) setState(() => _currentType = 'mosaic');
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('毛玻璃模糊'),
+                      selected: _currentType == 'blur',
+                      selectedColor: AppTheme.primary,
+                      onSelected: (val) {
+                        if (val) setState(() => _currentType = 'blur');
+                      },
+                    ),
+                    const Spacer(),
+                    if (currentMedia.isCensored)
+                      TextButton.icon(
+                        icon: const Icon(
+                          Icons.refresh,
+                          color: Colors.orangeAccent,
+                          size: 18,
+                        ),
+                        label: const Text(
+                          '恢复原图',
+                          style: TextStyle(color: Colors.orangeAccent),
+                        ),
+                        onPressed: _isSaving
+                            ? null
+                            : () => _saveModeration(resetToNormal: true),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

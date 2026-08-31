@@ -414,7 +414,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
     final canSubmit = !_composer.draft.isEmpty && !widget.sending;
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         // 图片附件按钮
         IconButton(
@@ -427,7 +427,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           ),
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 42),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 42),
           tooltip: '添加图片',
           onPressed: widget.sending ? null : _handlePickImage,
         ),
@@ -445,7 +445,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           ),
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 42),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 42),
           tooltip: '表情与贴纸',
           onPressed: widget.sending ? null : () => _composer.toggleEmoji(),
         ),
@@ -453,14 +453,17 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
 
         // 输入框
         Expanded(
-          child: SizedBox(
-            height: 42,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: 42,
+              maxHeight: 100,
+            ),
             child: TextField(
               focusNode: _composer.focusNode,
               controller: _composer.textController,
               enabled: !widget.sending,
               minLines: 1,
-              maxLines: 1,
+              maxLines: 4,
               textAlignVertical: TextAlignVertical.center,
               style: const TextStyle(
                 fontSize: 13.5,
@@ -491,13 +494,10 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
-                  vertical: 0,
+                  vertical: 10,
                 ),
               ),
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) {
-                if (canSubmit) widget.onSubmit();
-              },
+              textInputAction: TextInputAction.newline,
             ),
           ),
         ),

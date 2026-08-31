@@ -468,19 +468,20 @@ func (imp *importer) upsertToy(ctx context.Context, tx *sql.Tx, entry *toyEntry,
 	if t.AssetPath != "" {
 		assetKey = filepath.Base(t.AssetPath)
 	}
+	// coupon_url 由管理员在后台维护，导入不写入也不覆盖。
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO ranking_toys (
 			id, rank, name, merchant, release_year, description, tags, asset_key,
 			want_count, rating_total_centi, rating_count, category, segments, active,
 			source_provider, source_toy_id, source_updated_at,
 			source_want_count, source_rating_total_centi, source_rating_count,
-			cover_media_id, hero_media_id, coupon_url, source_url, updated_at
+			cover_media_id, hero_media_id, source_url, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12, $13, true,
 			$14, $15, $16,
 			$17, $18, $19,
-			NULLIF($20, ''), NULLIF($21, ''), $22, $23, now()
+			NULLIF($20, ''), NULLIF($21, ''), $22, now()
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			rank = EXCLUDED.rank,
@@ -504,7 +505,6 @@ func (imp *importer) upsertToy(ctx context.Context, tx *sql.Tx, entry *toyEntry,
 			source_rating_count = EXCLUDED.source_rating_count,
 			cover_media_id = EXCLUDED.cover_media_id,
 			hero_media_id = EXCLUDED.hero_media_id,
-			coupon_url = EXCLUDED.coupon_url,
 			source_url = EXCLUDED.source_url,
 			updated_at = now()`,
 		"byj-"+entry.sourceID, entry.rank, t.Name, t.Merchant, t.ReleaseYear, t.Description,
@@ -512,7 +512,7 @@ func (imp *importer) upsertToy(ctx context.Context, tx *sql.Tx, entry *toyEntry,
 		wantCount, ratingTotal, ratingCount, category, segments,
 		sourceProvider, entry.sourceID, nullableTime(t.UpdatedAt),
 		t.WantCount, int64(math.Round(t.Rating*100))*int64(t.ReviewCount), t.ReviewCount,
-		coverID, heroID, t.ShopLink, "https://beiyoujiang.com/bang/"+entry.sourceID)
+		coverID, heroID, "https://beiyoujiang.com/bang/"+entry.sourceID)
 	return err
 }
 

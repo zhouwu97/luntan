@@ -340,7 +340,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, int]:
             json.dumps(tags, ensure_ascii=False), "", int(detail.get("wantCount") or snapshot_item.get("wantCount") or 0),
             source_total_centi, review_count, category, json.dumps([stimulation] if stimulation else [], ensure_ascii=False),
             SOURCE_PROVIDER, source_id, iso(updated_at), cover_media_id, hero_media_id,
-            str(detail.get("shopLink") or snapshot_item.get("shopLink") or ""), f"https://beiyoujiang.com/bang/{source_id}",
+            f"https://beiyoujiang.com/bang/{source_id}",
         ])
         star_counts = detail.get("starCounts") if isinstance(detail.get("starCounts"), dict) else {}
         for star in range(1, 6):
@@ -385,7 +385,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, int]:
     write_csv(args.output_dir / "users.csv", ["id", "username", "status", "created_at", "updated_at"], list(users.values()))
     write_csv(args.output_dir / "profiles.csv", ["user_id", "nickname", "avatar_media_id", "bio", "level", "experience", "created_at", "updated_at", "trust_level"], list(profiles.values()))
     write_csv(args.output_dir / "media.csv", ["id", "owner_id", "object_key", "original_name", "mime_type", "width", "height", "size", "sha256", "status", "created_at", "updated_at", "completed_at"], media_rows)
-    write_csv(args.output_dir / "toys.csv", ["id", "rank", "name", "merchant", "release_year", "description", "tags", "asset_key", "source_want_count", "source_rating_total_centi", "source_rating_count", "category", "segments", "source_provider", "source_toy_id", "source_updated_at", "cover_media_id", "hero_media_id", "coupon_url", "source_url"], toy_rows)
+    write_csv(args.output_dir / "toys.csv", ["id", "rank", "name", "merchant", "release_year", "description", "tags", "asset_key", "source_want_count", "source_rating_total_centi", "source_rating_count", "category", "segments", "source_provider", "source_toy_id", "source_updated_at", "cover_media_id", "hero_media_id", "source_url"], toy_rows)
     write_csv(args.output_dir / "ranks.csv", ["source_provider", "view_key", "tab_key", "category_key", "toy_id", "rank", "is_weekly_top", "snapshot_fetched_at"], rank_rows)
     write_csv(args.output_dir / "comments.csv", ["id", "toy_id", "author_id", "root_id", "parent_id", "reply_to_user_id", "content", "like_count", "source_provider", "source_comment_id", "created_at", "updated_at", "depth"], comment_rows)
     write_csv(args.output_dir / "comment_media.csv", ["comment_id", "media_id", "sort_order", "created_at"], comment_media_rows)
@@ -427,10 +427,10 @@ INSERT INTO media_assets (id, owner_id, object_key, original_name, mime_type, wi
 SELECT id, owner_id, object_key, original_name, mime_type, width, height, size, sha256, status, created_at, updated_at, completed_at, NULL FROM import_media
 ON CONFLICT (id) DO UPDATE SET owner_id = EXCLUDED.owner_id, object_key = EXCLUDED.object_key, original_name = EXCLUDED.original_name, mime_type = EXCLUDED.mime_type, width = EXCLUDED.width, height = EXCLUDED.height, size = EXCLUDED.size, sha256 = EXCLUDED.sha256, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at, completed_at = EXCLUDED.completed_at, deleted_at = NULL;
 
-CREATE TEMP TABLE import_toys (id text, rank integer, name text, merchant text, release_year integer, description text, tags jsonb, asset_key text, source_want_count bigint, source_rating_total_centi bigint, source_rating_count bigint, category text, segments jsonb, source_provider text, source_toy_id text, source_updated_at timestamptz, cover_media_id text, hero_media_id text, coupon_url text, source_url text) ON COMMIT DROP;
+CREATE TEMP TABLE import_toys (id text, rank integer, name text, merchant text, release_year integer, description text, tags jsonb, asset_key text, source_want_count bigint, source_rating_total_centi bigint, source_rating_count bigint, category text, segments jsonb, source_provider text, source_toy_id text, source_updated_at timestamptz, cover_media_id text, hero_media_id text, source_url text) ON COMMIT DROP;
 \\copy import_toys FROM '{psql_path(bundle / "toys.csv")}' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8');
-INSERT INTO ranking_toys (id, rank, name, merchant, release_year, description, tags, asset_key, want_count, rating_total_centi, rating_count, active, category, segments, source_provider, source_toy_id, source_updated_at, source_want_count, source_rating_total_centi, source_rating_count, cover_media_id, hero_media_id, coupon_url, source_url)
-SELECT id, rank, name, merchant, release_year, description, ARRAY(SELECT jsonb_array_elements_text(tags)), asset_key, source_want_count, source_rating_total_centi, source_rating_count, true, category, ARRAY(SELECT jsonb_array_elements_text(segments)), source_provider, source_toy_id, source_updated_at, source_want_count, source_rating_total_centi, source_rating_count, NULLIF(cover_media_id, ''), NULLIF(hero_media_id, ''), coupon_url, source_url FROM import_toys
+INSERT INTO ranking_toys (id, rank, name, merchant, release_year, description, tags, asset_key, want_count, rating_total_centi, rating_count, active, category, segments, source_provider, source_toy_id, source_updated_at, source_want_count, source_rating_total_centi, source_rating_count, cover_media_id, hero_media_id, source_url)
+SELECT id, rank, name, merchant, release_year, description, ARRAY(SELECT jsonb_array_elements_text(tags)), asset_key, source_want_count, source_rating_total_centi, source_rating_count, true, category, ARRAY(SELECT jsonb_array_elements_text(segments)), source_provider, source_toy_id, source_updated_at, source_want_count, source_rating_total_centi, source_rating_count, NULLIF(cover_media_id, ''), NULLIF(hero_media_id, ''), source_url FROM import_toys
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name, merchant = EXCLUDED.merchant, release_year = EXCLUDED.release_year, description = EXCLUDED.description, tags = EXCLUDED.tags, asset_key = EXCLUDED.asset_key, active = true, category = EXCLUDED.category, segments = EXCLUDED.segments,
   source_provider = EXCLUDED.source_provider, source_toy_id = EXCLUDED.source_toy_id, source_updated_at = EXCLUDED.source_updated_at,
@@ -438,7 +438,7 @@ ON CONFLICT (id) DO UPDATE SET
   rating_total_centi = EXCLUDED.source_rating_total_centi + GREATEST(ranking_toys.rating_total_centi - ranking_toys.source_rating_total_centi, 0),
   rating_count = EXCLUDED.source_rating_count + GREATEST(ranking_toys.rating_count - ranking_toys.source_rating_count, 0),
   source_want_count = EXCLUDED.source_want_count, source_rating_total_centi = EXCLUDED.source_rating_total_centi, source_rating_count = EXCLUDED.source_rating_count,
-  cover_media_id = EXCLUDED.cover_media_id, hero_media_id = EXCLUDED.hero_media_id, coupon_url = EXCLUDED.coupon_url, source_url = EXCLUDED.source_url, updated_at = now();
+  cover_media_id = EXCLUDED.cover_media_id, hero_media_id = EXCLUDED.hero_media_id, source_url = EXCLUDED.source_url, updated_at = now();
 
 CREATE TEMP TABLE import_ranks (source_provider text, view_key text, tab_key text, category_key text, toy_id text, rank integer, is_weekly_top boolean, snapshot_fetched_at timestamptz) ON COMMIT DROP;
 \\copy import_ranks FROM '{psql_path(bundle / "ranks.csv")}' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8');

@@ -884,6 +884,7 @@ class MockPublishRepository implements PublishRepository {
         title: title,
         body: content,
         section: section,
+        type: type,
         topic: topic,
         isPoll: type == 'poll',
       ),

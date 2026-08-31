@@ -74,6 +74,7 @@ class PostDraft {
     required this.title,
     required this.body,
     required this.section,
+    this.type = 'normal',
     this.media = const [],
     this.mediaIds = const [],
     this.communityId,
@@ -87,6 +88,7 @@ class PostDraft {
   final String title;
   final String body;
   final ForumSection section;
+  final String type;
   final List<MediaAsset> media;
   final List<String> mediaIds;
   final String? communityId;
@@ -285,6 +287,14 @@ class ForumStore extends ChangeNotifier {
 
   void addPost(PostDraft draft) {
     final now = DateTime.now();
+    final postType = switch (draft.type) {
+      'activity' => PostType.activity,
+      'poll' => PostType.poll,
+      _ => draft.isPoll ? PostType.poll : PostType.normal,
+    };
+    final tag = draft.topic == 'outfit'
+        ? '穿搭分享'
+        : (postType == PostType.activity ? '活动' : draft.section.label);
     final post = Post(
       id: 'user-${now.microsecondsSinceEpoch}',
       authorId: _currentUser.id,
@@ -293,14 +303,14 @@ class ForumStore extends ChangeNotifier {
       community: communities.firstWhere(
         (item) => item.id == draft.section.communityId,
       ),
-      type: draft.isPoll ? PostType.poll : PostType.normal,
+      type: postType,
       title: draft.title,
       content: draft.body,
       createdAt: now,
       updatedAt: now,
       publishedAt: now,
       viewCount: 1,
-      tags: [draft.section.label],
+      tags: [tag],
       extraTag: '新发布',
       media: draft.media,
     );

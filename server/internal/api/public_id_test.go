@@ -42,10 +42,29 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 	if body == "" || !strings.Contains(body, `"public_id":"10000"`) {
 		t.Fatalf("public_id missing from response: %s", body)
 	}
-	if !strings.Contains(body, `"avatar_url":`) || !strings.Contains(body, `"comment_count":7`) {
+	if !strings.Contains(body, `"avatar_url":`) || !strings.Contains(body, `"comment_count":0`) {
 		t.Fatalf("avatar_url or comment_count missing from response: %s", body)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListUserCommentsForbiddenForOtherUsers(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1/comments", nil)
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 FORBIDDEN, got status=%d body=%s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "FORBIDDEN") {
+		t.Fatalf("expected FORBIDDEN code, got body=%s", res.Body.String())
 	}
 }

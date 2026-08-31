@@ -326,6 +326,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     final availableCommunitiesFuture = apiMode
         ? _loadPublishCommunities()
         : null;
+    final canPublishActivity = authController?.user?.canModerate == true ||
+        authController?.user?.capability('can_manage_activities') == true ||
+        authController?.user?.capability('can_publish_activity') == true ||
+        !apiMode;
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
         builder: (_) => PostEditorScreen(
@@ -339,6 +343,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               : selectHomeCommunities(store.communities),
           availableCommunitiesFuture: availableCommunitiesFuture,
           draftStorageFuture: draftStorageFuture,
+          canPublishActivity: canPublishActivity,
         ),
       ),
     );
@@ -364,7 +369,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
       final communityId = result.communityId ?? result.section.communityId;
       await publishController.publish(
         communityId: communityId,
-        type: result.isPoll ? 'poll' : 'normal',
+        type: result.isPoll ? 'poll' : result.type,
         title: result.title,
         content: result.body,
         mediaIds: result.mediaIds,

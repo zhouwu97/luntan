@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -429,4 +430,65 @@ func (s *Server) reorderRankingToys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "updated": len(input.ToyIDs)})
+}
+
+// setRankingToyCoupon 由管理员维护商品优惠券链接；传空串表示清除。
+func (s *Server) setRankingToyCoupon(w http.ResponseWriter, r *http.Request, toyID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	operator, ok := s.requireAdminRoleManager(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		CouponURL *string `json:"coupon_url"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "请求体格式错误"})
+		return
+	}
+	couponURL := ""
+	if input.CouponURL != nil {
+		couponURL = strings.TrimSpace(*input.CouponURL)
+	}
+	if couponURL != "" {
+		parsed, err := url.Parse(couponURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_COUPON_URL", Message: "优惠券链接必须是合法的 http(s) 地址"})
+			return
+		}
+		couponURL = parsed.String()
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(r.Context(), `UPDATE ranking_toys SET coupon_url = NULLIF($2, ''), updated_at = now() WHERE id = $1 AND active = true`, toyID, couponURL)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if affected == 0 {
+		writeAuthError(w, r, ErrRankingToyNotFound)
+		return
+	}
+	if err := appendAdminLogTx(r.Context(), tx, operator.ID, "ranking_toy.set_coupon", "ranking_toy", toyID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+		"coupon_url": couponURL,
+	}, time.Now().UTC()); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "coupon_url": couponURL})
 }

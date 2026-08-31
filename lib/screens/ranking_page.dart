@@ -672,6 +672,7 @@ class _RankingPageState extends State<RankingPage> {
           canComment: widget.canComment,
           canLike: widget.canLike,
           canVote: widget.canVote,
+          canManageRanking: widget.canManageRanking,
           onRequireAuth: widget.onRequireAuth,
         ),
       ),
@@ -1386,6 +1387,7 @@ class RankingItemDetailPage extends StatefulWidget {
     this.canComment = false,
     this.canLike = false,
     this.canVote = false,
+    this.canManageRanking = false,
     this.onRequireAuth,
   });
 
@@ -1395,6 +1397,7 @@ class RankingItemDetailPage extends StatefulWidget {
   final bool canComment;
   final bool canLike;
   final bool canVote;
+  final bool canManageRanking;
   final VoidCallback? onRequireAuth;
 
   @override
@@ -1534,9 +1537,56 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     });
   }
 
+  /// 管理员在详情页直接维护优惠券链接；空串表示清除。
+  Future<void> _editCoupon() async {
+    final controller = TextEditingController(
+      text: _remoteDetail?.toy.couponUrl ?? item.couponUrl ?? '',
+    );
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('编辑优惠券链接'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            hintText: '粘贴 http(s) 链接，清空后保存即删除',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || !mounted) return;
+    try {
+      final toy = await widget.repository!.setCouponUrl(
+        toyId: item.id,
+        couponUrl: result,
+      );
+      _replaceToy(toy);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.isEmpty ? '优惠券链接已清除' : '优惠券链接已更新')),
+        );
+      }
+    } catch (error) {
+      _handleWriteError(error, fallback: '优惠券链接保存失败，请重试');
+    }
+  }
+
   Future<void> _setWanted() async {
     final nextWanted = !_wanted;
-    // 游客也可以管理本机“想冲”清单；源站优惠链接不依赖登录态。
+    // 游客也可以管理本机“想冲”清单；优惠券链接由管理员统一维护。
     if (!_hasServer || !widget.isAuthenticated || !widget.canVote) {
       setState(() => _wanted = nextWanted);
       if (nextWanted && mounted) {
@@ -1833,11 +1883,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
               _DetailTopBar(
                 onBack: () => Navigator.of(context).maybePop(),
                 onShare: () async {
-                  final shareUrl =
-                      item.sourceUrl ??
-                      AppLinks.ranking(
-                        item.id.isNotEmpty ? item.id : '${item.rank}',
-                      );
+                  final shareUrl = AppLinks.ranking(
+                    item.id.isNotEmpty ? item.id : '${item.rank}',
+                  );
                   try {
                     await Share.share(shareUrl, subject: '分享榜单商品');
                   } catch (_) {
@@ -1849,6 +1897,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                     }
                   }
                 },
+                onEditCoupon: widget.canManageRanking &&
+                        widget.repository != null &&
+                        _hasServer
+                    ? _editCoupon
+                    : null,
               ),
               Expanded(
                 child: Scrollbar(
@@ -1948,7 +2001,7 @@ class RankingCouponPage extends StatelessWidget {
     if (link == null || link.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('该商品暂未提供优惠券链接')));
+      ).showSnackBar(const SnackBar(content: Text('暂时没找到优惠券')));
       return;
     }
     final opened = await launchUrl(
@@ -2013,7 +2066,7 @@ class RankingCouponPage extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.only(bottom: 12),
                 child: Text(
-                  '该商品暂未提供优惠券链接',
+                  '暂时没找到优惠券',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
                 ),
@@ -2107,10 +2160,15 @@ class RankingPurchasePage extends StatelessWidget {
 }
 
 class _DetailTopBar extends StatelessWidget {
-  const _DetailTopBar({required this.onBack, required this.onShare});
+  const _DetailTopBar({
+    required this.onBack,
+    required this.onShare,
+    this.onEditCoupon,
+  });
 
   final VoidCallback onBack;
   final VoidCallback onShare;
+  final VoidCallback? onEditCoupon;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -2137,6 +2195,22 @@ class _DetailTopBar extends StatelessWidget {
             child: Icon(Icons.toys, size: 23, color: Color(0xFF1D2A42)),
           ),
         ),
+        if (onEditCoupon != null)
+          SizedBox(
+            width: 54,
+            height: 54,
+            child: Tooltip(
+              message: '编辑优惠券',
+              child: IconButton(
+                onPressed: onEditCoupon,
+                icon: const Icon(
+                  Icons.local_offer_outlined,
+                  size: 19,
+                  color: Color(0xFF556176),
+                ),
+              ),
+            ),
+          ),
         SizedBox(
           width: 54,
           height: 54,

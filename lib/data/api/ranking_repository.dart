@@ -336,6 +336,19 @@ class RankingRepository {
     );
   }
 
+  /// 管理员维护优惠券链接；传空串表示清除。
+  Future<RankingToy> setCouponUrl({
+    required String toyId,
+    required String couponUrl,
+  }) {
+    return _client
+        .putJson(
+          '/api/v1/admin/ranking/toys/$toyId/coupon',
+          body: {'coupon_url': couponUrl},
+        )
+        .then((_) async => (await detail(toyId)).toy);
+  }
+
   Future<RankingToy> rate({required String toyId, required int score}) async {
     final payload = await _client.postJson(
       '/api/v1/ranking/toys/$toyId/rating',

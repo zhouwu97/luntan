@@ -29,6 +29,7 @@ class PostEditorScreen extends StatefulWidget {
     this.initialDraft,
     this.draftStorage,
     this.draftStorageFuture,
+    this.canPublishActivity = false,
   });
 
   final String initialCommunityId;
@@ -41,6 +42,7 @@ class PostEditorScreen extends StatefulWidget {
   final ComposerDraftSnapshot? initialDraft;
   final ComposerDraftStorage? draftStorage;
   final Future<ComposerDraftStorage>? draftStorageFuture;
+  final bool canPublishActivity;
 
   @override
   State<PostEditorScreen> createState() => _PostEditorScreenState();
@@ -63,11 +65,32 @@ class _DraftImage {
   bool pendingDelete = false;
 }
 
+class ComposerCategoryItem {
+  const ComposerCategoryItem({
+    required this.id,
+    required this.label,
+    required this.communityId,
+    this.postType = 'normal',
+    this.topic,
+    this.requiresAdmin = false,
+  });
+
+  final String id;
+  final String label;
+  final String communityId;
+  final String postType;
+  final String? topic;
+  final bool requiresAdmin;
+}
+
 class _PostEditorScreenState extends State<PostEditorScreen> {
   final titleController = TextEditingController();
   final bodyController = TextEditingController();
+  String? selectedCategoryId;
   String? topic;
   String? communityId;
+  String postType = 'normal';
+
   late final List<Community> _availableCommunities = [
     ...widget.availableCommunities,
   ];
@@ -117,38 +140,98 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   List<MediaAsset> get sampleMedia =>
       ForumStore.seeded().posts.expand((post) => post.images).take(9).toList();
 
+  List<ComposerCategoryItem> get _categoryItems {
+    final list = <ComposerCategoryItem>[
+      const ComposerCategoryItem(
+        id: 'community-unboxing',
+        label: '大型拆箱',
+        communityId: 'community-unboxing',
+      ),
+      const ComposerCategoryItem(
+        id: 'community-campus',
+        label: '酱紫社区',
+        communityId: 'community-campus',
+      ),
+      const ComposerCategoryItem(
+        id: 'community-daily',
+        label: '杂鱼日常',
+        communityId: 'community-daily',
+      ),
+      const ComposerCategoryItem(
+        id: 'outfit',
+        label: '穿搭分享',
+        communityId: 'community-campus',
+        topic: 'outfit',
+      ),
+    ];
+    if (widget.canPublishActivity) {
+      list.add(
+        const ComposerCategoryItem(
+          id: 'activity',
+          label: '活动',
+          communityId: 'community-campus',
+          postType: 'activity',
+          requiresAdmin: true,
+        ),
+      );
+    }
+    return list;
+  }
+
   @override
   void initState() {
     super.initState();
     _draftStorage = widget.draftStorage;
     _restoringDraft =
         widget.initialDraft == null && widget.draftStorageFuture != null;
-    communityId = _resolveInitialCommunityId();
+    
+    _initCategorySelection();
+
     final draft = widget.initialDraft;
     if (draft != null) unawaited(_applyDraft(draft));
     unawaited(_loadCommunities());
     unawaited(_loadDraftStorage());
   }
 
-  String? _resolveInitialCommunityId() {
-    final requested = widget.initialCommunityId;
-    if (requested.isNotEmpty) return requested;
-    return _defaultCommunityId(_availableCommunities);
+  void _initCategorySelection() {
+    final initialId = widget.initialCommunityId;
+    if (initialId == 'community-unboxing') {
+      selectedCategoryId = 'community-unboxing';
+      communityId = 'community-unboxing';
+    } else if (initialId == 'community-daily') {
+      selectedCategoryId = 'community-daily';
+      communityId = 'community-daily';
+    } else {
+      selectedCategoryId = 'community-campus';
+      communityId = 'community-campus';
+    }
   }
 
-  String? _defaultCommunityId(List<Community> communities) {
-    for (final community in communities) {
-      if (community.id == 'community-campus') return community.id;
-    }
-    return communities.isEmpty ? null : communities.first.id;
+  void _selectCategory(ComposerCategoryItem item) {
+    setState(() {
+      selectedCategoryId = item.id;
+      communityId = item.communityId;
+      topic = item.topic;
+      postType = item.postType;
+      errorText = null;
+    });
+    _scheduleDraftSave();
   }
 
   Future<void> _applyDraft(ComposerDraftSnapshot draft) async {
     titleController.text = draft.title;
     bodyController.text = draft.body;
-    communityId =
-        draft.communityId ?? _defaultCommunityId(_availableCommunities);
+    communityId = draft.communityId ?? 'community-campus';
     topic = draft.topic;
+    if (draft.topic == 'outfit') {
+      selectedCategoryId = 'outfit';
+    } else if (draft.communityId == 'community-unboxing') {
+      selectedCategoryId = 'community-unboxing';
+    } else if (draft.communityId == 'community-daily') {
+      selectedCategoryId = 'community-daily';
+    } else {
+      selectedCategoryId = 'community-campus';
+    }
     _restoredMediaIds.addAll(draft.uploadedMediaIds);
     final restoredImages = <_DraftImage>[];
     for (final draftImg in draft.images) {
@@ -192,9 +275,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         _availableCommunities
           ..clear()
           ..addAll(communities);
-        if (!_availableCommunities.any((item) => item.id == communityId)) {
-          communityId = _defaultCommunityId(_availableCommunities);
-        }
         _loadingCommunities = false;
       });
     } catch (_) {
@@ -202,15 +282,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       setState(() {
         _loadingCommunities = false;
         _communitiesLoadFailed = true;
-        errorText = '可发布分类加载失败，请稍后重试';
       });
     }
-  }
-
-  void _retryCommunities() {
-    if (_loadingCommunities) return;
-    setState(() => errorText = null);
-    unawaited(_loadCommunities());
   }
 
   Future<void> _loadDraftStorage() async {
@@ -261,7 +334,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   void dispose() {
     _draftSaveTimer?.cancel();
     if (!_submitted && !_keepDraftMedia && _usesRealUpload) {
-      // 用户放弃发布时清理已经上传但仍未入帖的媒体，避免服务端堆积 pending。
       final mediaIds = <String>{
         ..._restoredMediaIds,
         ...images.map((image) => image.mediaId).whereType<String>(),
@@ -281,14 +353,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
 
   void submit() {
     if (submitting) return;
-    if (widget.availableCommunitiesFuture != null &&
-        _availableCommunities.isEmpty) {
-      return setState(
-        () => errorText = _loadingCommunities
-            ? '正在加载可发布分类，请稍候'
-            : '当前没有可发布的分类，请稍后重试',
-      );
-    }
     final title = titleController.text.trim();
     final body = bodyController.text.trim();
     if (title.isEmpty) return setState(() => errorText = '请输入标题');
@@ -415,6 +479,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         title: title,
         body: body,
         section: _sectionForCommunityId(communityId),
+        type: postType,
         communityId: communityId,
         media: selectedMedia,
         mediaIds: mediaIds,
@@ -429,7 +494,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       try {
         await _clearDraft();
       } catch (_) {
-        // 帖子已经成功入库；本地草稿清理失败不会把成功结果伪装成发布失败。
+        // 帖子已经成功入库
       }
       if (!mounted) return;
       _submitted = true;
@@ -522,7 +587,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       if (totalBytes > maxTotalBytes) {
         throw const PublishException('图片总量不能超过 30 MB');
       }
-      // 摘要计算放到 isolate，避免大图在编辑器 UI isolate 中阻塞掉帧。
       final digest = await compute(_sha256Hex, bytes);
       final mediaId = await publisher.uploadMedia(
         fileName: image.file.name,
@@ -533,8 +597,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         height: image.height ?? 0,
       );
       if (!mounted) {
-        // 取消编辑器后，上传协程仍可能晚于 dispose 返回 media_id；
-        // 此时页面已无法把媒体挂到帖子，立即回收避免孤儿媒体。
         await publisher.deleteMedia(mediaId).catchError((error) {
           if (kDebugMode) {
             debugPrint('[Composer] Failed to delete orphan media after unmount: $error');
@@ -563,7 +625,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       });
       _scheduleDraftSave();
     } finally {
-      // 图片预览会按需从 XFile 重新读取；上传完成后不把原始字节长期挂在状态树上。
       image.bytes = null;
     }
   }
@@ -618,116 +679,182 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         unawaited(_closeEditor());
       },
       child: Scaffold(
-        backgroundColor: AppTheme.background,
+        backgroundColor: const Color(0xFFFBFDFF),
         appBar: AppBar(
+          elevation: 0,
+          backgroundColor: const Color(0xFFFBFDFF),
           title: const Text(
             '发布帖子',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF17283A),
+            ),
           ),
           leading: TextButton(
             onPressed: submitting ? null : () => unawaited(_closeEditor()),
-            child: const Text('取消'),
+            child: const Text(
+              '取消',
+              style: TextStyle(
+                color: Color(0xFF46627E),
+                fontSize: 14,
+              ),
+            ),
           ),
           actions: [
             Padding(
-              padding: const EdgeInsets.only(right: 10),
-              child: FilledButton(
-                onPressed: submitting ? null : submit,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: SizedBox(
+                  height: 38,
+                  child: FilledButton(
+                    onPressed: submitting ? null : submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(19),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                    ),
+                    child: Text(
+                      submitting ? '发布中…' : '发布',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
-                child: Text(submitting ? '发布中…' : '发布'),
               ),
             ),
           ],
         ),
         body: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(15, 14, 15, 30),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
             children: [
-              _CommunitySelector(
-                communities: _availableCommunities,
-                selectedCommunityId: communityId,
-                onChanged: (value) {
-                  setState(() => communityId = value);
-                  _scheduleDraftSave();
-                },
-                enabled: !submitting && !_restoringDraft,
-                loading: _loadingCommunities,
-                loadFailed: _communitiesLoadFailed,
-                onRetry: _retryCommunities,
+              const Text(
+                '发布到',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF51677D),
+                ),
+              ),
+              const SizedBox(height: 9),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final item in _categoryItems)
+                    _CategoryButton(
+                      item: item,
+                      selected: selectedCategoryId == item.id,
+                      onTap: submitting || _restoringDraft
+                          ? null
+                          : () => _selectCategory(item),
+                    ),
+                ],
               ),
               if (errorText != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.only(top: 10),
                   child: Text(
                     errorText!,
-                    style: const TextStyle(color: AppTheme.pink, fontSize: 12),
+                    style: const TextStyle(color: Color(0xFFD95E79), fontSize: 12),
                   ),
                 ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               TextField(
                 controller: titleController,
                 enabled: !submitting && !_restoringDraft,
                 maxLength: 40,
-                onChanged: (_) => _scheduleDraftSave(),
+                style: const TextStyle(
+                  fontSize: 16,
+                  color: Color(0xFF17283A),
+                  fontWeight: FontWeight.w600,
+                ),
+                onChanged: (_) {
+                  setState(() {});
+                  _scheduleDraftSave();
+                },
                 decoration: const InputDecoration(
-                  labelText: '标题',
                   hintText: '给帖子起一个清楚的标题',
+                  hintStyle: TextStyle(fontSize: 15, color: Color(0xFFA8B4C1)),
+                  counterText: '',
+                  border: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFFE5EDF5)),
+                  ),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFFE5EDF5)),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppTheme.primary, width: 1.5),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
-              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${titleController.text.length}/40',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF9AA8B6)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
               TextField(
                 controller: bodyController,
                 enabled: !submitting && !_restoringDraft,
                 maxLength: 2000,
                 minLines: 8,
                 maxLines: 12,
-                onChanged: (_) => _scheduleDraftSave(),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF17283A),
+                  height: 1.7,
+                ),
+                onChanged: (_) {
+                  setState(() {});
+                  _scheduleDraftSave();
+                },
                 decoration: const InputDecoration(
-                  labelText: '正文',
-                  hintText: '分享你的真实体验、问题或发现…',
+                  hintText: '分享你的真实体验、问题或发现……',
+                  hintStyle: TextStyle(fontSize: 14, color: Color(0xFFA8B4C1)),
+                  counterText: '',
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.only(top: 10),
                 ),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String?>(
-                initialValue: topic,
-                decoration: const InputDecoration(
-                  labelText: '内容主题（可选）',
-                  helperText: '选择后，内容会进入对应主题页；不再按是否有图片猜测',
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${bodyController.text.length}/2000',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF9AA8B6)),
+                  ),
                 ),
-                items: const [
-                  DropdownMenuItem<String?>(value: null, child: Text('不设置')),
-                  DropdownMenuItem<String?>(
-                    value: 'outfit',
-                    child: Text('穿搭分享'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'activity',
-                    child: Text('活动'),
-                  ),
-                  DropdownMenuItem<String?>(
-                    value: 'game_share',
-                    child: Text('玩法分享'),
-                  ),
-                ],
-                onChanged: submitting
-                    ? null
-                    : (value) {
-                        setState(() => topic = value);
-                        _scheduleDraftSave();
-                      },
               ),
-              const SizedBox(height: 16),
+              Container(
+                height: 1,
+                color: const Color(0xFFE5EDF5),
+                margin: const EdgeInsets.symmetric(vertical: 14),
+              ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
                     '图片',
                     style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF51677D),
                     ),
                   ),
                   Text(
@@ -735,8 +862,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                         ? '${images.length} / $maxImages'
                         : '${selectedMedia.length} / $maxImages',
                     style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
+                      color: Color(0xFF7B8EA1),
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -752,6 +879,25 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                 ),
               const SizedBox(height: 10),
               _buildImagesGrid(),
+              const SizedBox(height: 16),
+              const Row(
+                children: [
+                  Icon(Icons.description_outlined, size: 13, color: Color(0xFF9CAAB8)),
+                  SizedBox(width: 4),
+                  Text(
+                    '草稿会自动保存',
+                    style: TextStyle(fontSize: 10, color: Color(0xFF9CAAB8)),
+                  ),
+                ],
+              ),
+              if (errorText != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    errorText!,
+                    style: const TextStyle(color: Color(0xFFD95E79), fontSize: 11),
+                  ),
+                ),
             ],
           ),
         ),
@@ -819,128 +965,66 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   }
 }
 
-/// 发帖分类选择器，视觉与首页三段 Tab 一致：三个正式板块（大型拆箱 /
-/// 酱紫社区 / 杂鱼日常），不再提供“发布社区”下拉框。
-class _CommunitySelector extends StatelessWidget {
-  const _CommunitySelector({
-    required this.communities,
-    required this.selectedCommunityId,
-    required this.onChanged,
-    required this.enabled,
-    required this.loading,
-    required this.loadFailed,
-    required this.onRetry,
-  });
-
-  final List<Community> communities;
-  final String? selectedCommunityId;
-  final ValueChanged<String> onChanged;
-  final bool enabled;
-  final bool loading;
-  final bool loadFailed;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 46,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceBlue,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: communities.isEmpty
-          ? loading
-                ? const Center(
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          loadFailed ? '分类加载失败' : '暂无可用分类',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      if (loadFailed)
-                        InkWell(
-                          onTap: onRetry,
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 12),
-                            child: Text(
-                              '重试',
-                              style: TextStyle(
-                                color: AppTheme.primary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  )
-          : Row(
-              children: communities
-                  .map(
-                    (community) => Expanded(
-                      child: _CommunitySegment(
-                        label: community.name,
-                        active: selectedCommunityId == community.id,
-                        onTap: enabled ? () => onChanged(community.id) : null,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-    );
-  }
-}
-
-class _CommunitySegment extends StatelessWidget {
-  const _CommunitySegment({
-    required this.label,
-    required this.active,
+class _CategoryButton extends StatelessWidget {
+  const _CategoryButton({
+    required this.item,
+    required this.selected,
     required this.onTap,
   });
 
-  final String label;
-  final bool active;
+  final ComposerCategoryItem item;
+  final bool selected;
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 2),
-    child: GestureDetector(
+  Widget build(BuildContext context) {
+    return InkWell(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: AppMotion.duration(context, AppMotion.normal),
-        curve: AppMotion.emphasized,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+      borderRadius: BorderRadius.circular(11),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? AppTheme.textPrimary : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? Colors.white : AppTheme.textSecondary,
-            fontSize: 13,
-            fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+          color: selected ? const Color(0xFFEAF3FF) : Colors.white,
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: selected ? const Color(0xFF8ABAFF) : const Color(0xFFDFE8F1),
+            width: 1,
           ),
         ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              item.label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: selected ? const Color(0xFF2F74C8) : const Color(0xFF5F7387),
+              ),
+            ),
+            if (item.requiresAdmin) ...[
+              const SizedBox(width: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF8F4),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: const Text(
+                  '管理员',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: Color(0xFF258C76),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _DraftImageGridThumb extends StatelessWidget {
@@ -1009,9 +1093,9 @@ class _DraftImageGridThumb extends StatelessWidget {
               child: Container(
                 color: Colors.black54,
                 alignment: Alignment.center,
-                child: Column(
+                child: const Column(
                   mainAxisSize: MainAxisSize.min,
-                  children: const [
+                  children: [
                     Icon(Icons.refresh, color: Colors.white, size: 22),
                     SizedBox(height: 2),
                     Text(
@@ -1066,27 +1150,30 @@ class _AddImageGridTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Ink(
+      borderRadius: BorderRadius.circular(13),
+      child: Container(
         decoration: BoxDecoration(
-          color: AppTheme.surfaceBlue,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.border),
+          color: const Color(0xFFF8FBFE),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(
+            color: const Color(0xFFCBD9E7),
+            style: BorderStyle.solid,
+          ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(
               Icons.add_photo_alternate_outlined,
-              size: 28,
-              color: AppTheme.textSecondary,
+              size: 24,
+              color: Color(0xFF758BA2),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               label,
               style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
+                color: Color(0xFF758BA2),
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
             ),

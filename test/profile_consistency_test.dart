@@ -324,10 +324,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('5 积分'), findsOneWidget);
-      expect(find.text('等级经验'), findsOneWidget);
-      expect(find.text('80 / 150 EXP'), findsOneWidget);
-      expect(find.text('30 / 100 EXP'), findsNothing);
+      expect(find.text('当前可用积分 5'), findsOneWidget);
 
       await tester.tap(find.text('个人主页'));
       await tester.pumpAndSettle();
@@ -505,10 +502,28 @@ void main() {
       expect(find.text('321'), findsOneWidget);
       expect(find.text('654'), findsOneWidget);
       expect(find.text('987'), findsOneWidget);
-      expect(find.text('100%'), findsNothing);
+      // 他人主页只展示帖子，无评论Tab
+      expect(find.text('评论 2'), findsNothing);
+      expect(find.text('帖子 1'), findsOneWidget);
+      expect(find.text('真实开箱体验分享'), findsOneWidget);
 
-      // 评论 Tab 走 UserRepository.listComments（/users/{id}/comments），
-      // 不再依赖从未注入的 profileRepository。
+      // 本人主页保留评论 Tab
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UserProfileScreen(
+            repository: repository,
+            userId: 'user_100',
+            isAuthenticated: true,
+            canFollow: false,
+            isSelf: true,
+            onRequireAuth: () {},
+            onFeedback: (_) {},
+            onOpenPostId: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('评论 2'), findsOneWidget);
       await tester.tap(find.text('评论 2'));
       await tester.pumpAndSettle();
       expect(find.text('这条评论的正文预览'), findsOneWidget);

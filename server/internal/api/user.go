@@ -106,6 +106,9 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		item.ViewerState["is_blocked"] = isBlocked
 		item.ViewerState["can_follow"] = capabilitiesForUser(viewer)[capFollow] && viewerID != item.ID && !isBlocked
 	}
+	if !hasViewer || (viewerID != item.ID && !capabilitiesForUser(viewer)[capModerate]) {
+		item.CommentCount = 0
+	}
 	httpserver.WriteJSON(w, http.StatusOK, item)
 }
 
@@ -263,10 +266,21 @@ func (s *Server) listUserRelations(w http.ResponseWriter, r *http.Request, userI
 	})
 }
 
-// listUserComments 提供他人主页「评论」Tab 的数据，复用 /me/comments 的轻量查询
-// 与响应结构；评论没有仅本人可见的状态，本人查看自己也走该端点。
+// listUserComments 提供主页「评论」Tab 的数据；
+// 隐私规则：仅本人和具备管理员审核权限的账号可查看，其余用户访问一律返回 403。
 func (s *Server) listUserComments(w http.ResponseWriter, r *http.Request, userID string) {
 	if !s.requireDatabase(w, r) {
+		return
+	}
+	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
+	isSelf := hasViewer && viewer.ID == userID
+	isAdmin := hasViewer && capabilitiesForUser(viewer)[capModerate]
+	if !isSelf && !isAdmin {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusForbidden,
+			Code:    "FORBIDDEN",
+			Message: "无权查看他人评论历史",
+		})
 		return
 	}
 	limit, err := parseLimit(r.URL.Query().Get("limit"))

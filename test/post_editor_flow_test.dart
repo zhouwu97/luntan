@@ -165,5 +165,108 @@ void main() {
       'luntan.composer.draft.v2.global',
     );
   });
+
+  testWidgets('发帖页不再展示内容主题下拉框', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostEditorScreen(
+          initialCommunityId: 'community-campus',
+          availableCommunities: ForumStore.seeded().communities,
+          onPublish: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('内容主题（可选）'), findsNothing);
+    expect(find.text('选择后，内容会进入对应主题页；不再按是否有图片猜测'), findsNothing);
+  });
+
+  testWidgets('普通用户不展示活动分类，管理员展示活动分类', (tester) async {
+    // 1. 普通用户
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostEditorScreen(
+          initialCommunityId: 'community-campus',
+          availableCommunities: ForumStore.seeded().communities,
+          canPublishActivity: false,
+          onPublish: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('大型拆箱'), findsOneWidget);
+    expect(find.text('酱紫社区'), findsOneWidget);
+    expect(find.text('杂鱼日常'), findsOneWidget);
+    expect(find.text('穿搭分享'), findsOneWidget);
+    expect(find.text('活动'), findsNothing);
+
+    // 2. 管理员用户
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostEditorScreen(
+          initialCommunityId: 'community-campus',
+          availableCommunities: ForumStore.seeded().communities,
+          canPublishActivity: true,
+          onPublish: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('活动'), findsOneWidget);
+    expect(find.text('管理员'), findsOneWidget);
+  });
+
+  testWidgets('选择活动分类发布时携带 type=activity', (tester) async {
+    PostDraft? published;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostEditorScreen(
+          initialCommunityId: 'community-campus',
+          availableCommunities: ForumStore.seeded().communities,
+          canPublishActivity: true,
+          onPublish: (draft) async => published = draft,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), '周末活动标题');
+    await tester.enterText(find.byType(TextField).at(1), '周末活动正文');
+    await tester.tap(find.text('活动'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '发布'));
+    await tester.pumpAndSettle();
+
+    expect(published, isNotNull);
+    expect(published!.type, 'activity');
+  });
+
+  testWidgets('选择穿搭分享分类发布时携带 topic=outfit', (tester) async {
+    PostDraft? published;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostEditorScreen(
+          initialCommunityId: 'community-campus',
+          availableCommunities: ForumStore.seeded().communities,
+          onPublish: (draft) async => published = draft,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), '穿搭分享标题');
+    await tester.enterText(find.byType(TextField).at(1), '穿搭分享正文');
+    await tester.tap(find.text('穿搭分享'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '发布'));
+    await tester.pumpAndSettle();
+
+    expect(published, isNotNull);
+    expect(published!.topic, 'outfit');
+    expect(published!.type, 'normal');
+  });
 }
 

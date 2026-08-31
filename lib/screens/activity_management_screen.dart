@@ -11,12 +11,10 @@ class ActivityManagementScreen extends StatefulWidget {
     super.key,
     required this.repository,
     required this.onFeedback,
-    this.onOpenCreateActivity,
   });
 
   final PlatformRepository repository;
   final ValueChanged<String> onFeedback;
-  final VoidCallback? onOpenCreateActivity;
 
   @override
   State<ActivityManagementScreen> createState() => _ActivityManagementScreenState();
@@ -151,13 +149,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            onPressed: () {
-              if (widget.onOpenCreateActivity != null) {
-                widget.onOpenCreateActivity!();
-              } else {
-                _openEditor();
-              }
-            },
+            onPressed: _openEditor,
             icon: const Icon(Icons.add_rounded),
             tooltip: '新建活动',
           ),
@@ -281,13 +273,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                               ),
                               const SizedBox(height: 16),
                               FilledButton.icon(
-                                onPressed: () {
-                                  if (widget.onOpenCreateActivity != null) {
-                                    widget.onOpenCreateActivity!();
-                                  } else {
-                                    _openEditor();
-                                  }
-                                },
+                                onPressed: _openEditor,
                                 icon: const Icon(Icons.add_rounded, size: 18),
                                 label: const Text('新建活动'),
                                 style: FilledButton.styleFrom(

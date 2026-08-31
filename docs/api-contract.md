@@ -70,6 +70,10 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 `phase`（已发布时为 `upcoming|active|ended`）。兼容字段 `status` 在草稿/下架时表示
 发布状态，在已发布时表示按 `start_at/end_at` 动态计算的阶段；时间阶段不会写回发布状态。
 
+活动是独立业务实体，不是普通帖子的 `type`。客户端创建或编辑活动必须使用上述
+`/admin/activities` 接口；向 `/posts` 写入 `type=activity` 会返回
+`ACTIVITY_USE_ACTIVITY_API`（409）。历史帖子中的该类型仅作读取兼容。
+
 ### Feed
 
 | 方法 | 路径 | 登录 | 说明 |
@@ -222,7 +226,9 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 
 上传流程：本地压缩 → 计算 SHA-256 → `upload-token` 换取对象存储直传地址 →
 直传 → `complete` → `posts` 引用 `media_ids`。未 `complete` 的媒体视为
-pending，服务端有清理接口。
+pending，服务端有清理接口。媒体响应不返回对象存储内部 `object_key`；客户端只应
+保存 `media_id` 并通过受控媒体 URL 展示。帖子、评论只有在已发布且审核状态为
+`normal` 时才能使媒体公开可见。
 
 ### 积分商店 Store
 

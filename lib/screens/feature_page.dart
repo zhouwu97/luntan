@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/interaction_controller.dart';
-import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../data/mock_forum_data.dart';
 import '../data/api/platform_repository.dart';
@@ -99,7 +98,7 @@ class _FeaturePageState extends State<FeaturePage> {
   @override
   void initState() {
     super.initState();
-    if (type != FeatureType.ranking && feedRepository != null) {
+    if (type != FeatureType.ranking && type != FeatureType.activity && feedRepository != null) {
       remoteFuture = _remotePosts();
     }
     if (type == FeatureType.activity && platformRepository != null) {
@@ -109,7 +108,7 @@ class _FeaturePageState extends State<FeaturePage> {
 
   void _retry() {
     setState(() {
-      if (type != FeatureType.ranking && feedRepository != null) {
+      if (type != FeatureType.ranking && type != FeatureType.activity && feedRepository != null) {
         remoteFuture = _remotePosts();
       }
       if (type == FeatureType.activity && platformRepository != null) {
@@ -136,7 +135,6 @@ class _FeaturePageState extends State<FeaturePage> {
             sort: type == FeatureType.hot ? 'hot' : 'recommended',
             limit: 50,
             postType: switch (type) {
-              FeatureType.activity => 'activity',
               FeatureType.gameShare => 'game_share',
               _ => null,
             },
@@ -162,11 +160,6 @@ class _FeaturePageState extends State<FeaturePage> {
     if (type == FeatureType.outfit) {
       return store.posts.where((post) => post.tag == '穿搭分享').take(6).toList();
     }
-    if (type == FeatureType.activity) {
-      return store.posts
-          .where((post) => post.type == PostType.activity)
-          .toList();
-    }
     return const <Post>[];
   }
 
@@ -186,53 +179,36 @@ class _FeaturePageState extends State<FeaturePage> {
       );
     }
     if (type == FeatureType.activity) {
-      if (feedRepository != null || platformRepository != null) {
-        return Scaffold(
-          appBar: AppBar(title: Text(title)),
-          body: FutureBuilder<List<Post>>(
-            future: remoteFuture ?? Future.value(_posts()),
-            builder: (context, postSnapshot) {
-              if (postSnapshot.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (postSnapshot.hasError) {
-                return Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        '活动内容加载失败',
-                        style: TextStyle(color: AppTheme.textSecondary),
-                      ),
-                      TextButton(onPressed: _retry, child: const Text('返回重试')),
-                    ],
-                  ),
-                );
-              }
-              final posts = postSnapshot.data ?? const <Post>[];
-              if (posts.isNotEmpty) {
-                return _body(posts);
-              }
-              if (activityFuture != null) {
-                return FutureBuilder<List<ActivityItem>>(
-                  future: activityFuture,
-                  builder: (context, actSnapshot) {
-                    if (actSnapshot.connectionState != ConnectionState.done) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final activities = actSnapshot.data ?? const <ActivityItem>[];
-                    if (activities.isNotEmpty) {
-                      return _activitiesBody(activities);
-                    }
-                    return _body(_posts());
-                  },
-                );
-              }
-              return _body(_posts());
-            },
-          ),
-        );
-      }
+      if (platformRepository == null) return _activityEmptyState();
+      return Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: FutureBuilder<List<ActivityItem>>(
+          future: activityFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      '活动内容加载失败',
+                      style: TextStyle(color: AppTheme.textSecondary),
+                    ),
+                    TextButton(onPressed: _retry, child: const Text('返回重试')),
+                  ],
+                ),
+              );
+            }
+            final activities = snapshot.data ?? const <ActivityItem>[];
+            return activities.isEmpty
+                ? _activityEmptyState()
+                : _activitiesBody(activities);
+          },
+        ),
+      );
     }
     if (feedRepository != null) {
       return Scaffold(

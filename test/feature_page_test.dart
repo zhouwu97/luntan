@@ -45,6 +45,37 @@ class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
   }
 }
 
+class _ActivityFeatureFeed implements FeedRepository, QueryableFeedRepository {
+  @override
+  Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
+      getFeed(cursor: cursor, limit: limit);
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
+    String? postType,
+    bool? hasMedia,
+    String? topic,
+  }) async {
+    return FeedPage(items: [
+      Post(
+        id: 'legacy-activity-post',
+        authorId: 'admin',
+        communityId: 'community-campus',
+        title: '旧活动帖子',
+        content: '旧活动正文',
+        type: PostType.activity,
+        createdAt: DateTime(2026, 9, 1),
+        updatedAt: DateTime(2026, 9, 1),
+      ),
+    ]);
+  }
+}
+
 void main() {
   testWidgets('玩具排行榜复刻网站结构与排行内容', (tester) async {
     final interactionController = InteractionController(
@@ -243,5 +274,38 @@ void main() {
     expect(find.text('14:00'), findsOneWidget);
     expect(find.text('社区活动室'), findsOneWidget);
     expect(find.byIcon(Icons.auto_awesome_rounded), findsNothing);
+  });
+
+  testWidgets('活动页以活动实体为唯一数据源，不被旧活动帖子遮蔽', (tester) async {
+    final interactionController = InteractionController(
+      repository: MockInteractionRepository(),
+    );
+    final activityItem = ActivityItem(
+      id: 'act-ssot',
+      title: '活动实体标题',
+      description: '活动实体描述',
+      status: 'upcoming',
+      startAt: DateTime(2026, 9, 5, 14, 0),
+      createdBy: 'admin',
+      createdAt: DateTime(2026, 9, 1),
+      updatedAt: DateTime(2026, 9, 1),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeaturePage(
+          type: FeatureType.activity,
+          store: ForumStore.uiOnly(),
+          onOpenPost: (_) {},
+          interactionController: interactionController,
+          feedRepository: _ActivityFeatureFeed(),
+          platformRepository: _FakePlatformRepository([activityItem]),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('活动实体标题'), findsOneWidget);
+    expect(find.text('旧活动帖子'), findsNothing);
   });
 }

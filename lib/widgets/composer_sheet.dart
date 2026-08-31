@@ -20,7 +20,6 @@ class PostEditorScreen extends StatefulWidget {
     super.key,
     required this.initialCommunityId,
     required this.onPublish,
-    this.initialPostType,
     this.userId,
     this.publishController,
     this.enableSampleMedia = true,
@@ -29,11 +28,9 @@ class PostEditorScreen extends StatefulWidget {
     this.initialDraft,
     this.draftStorage,
     this.draftStorageFuture,
-    this.canPublishActivity = false,
   });
 
   final String initialCommunityId;
-  final String? initialPostType;
   final Future<void> Function(PostDraft draft) onPublish;
   final String? userId;
   final PublishController? publishController;
@@ -43,7 +40,6 @@ class PostEditorScreen extends StatefulWidget {
   final ComposerDraftSnapshot? initialDraft;
   final ComposerDraftStorage? draftStorage;
   final Future<ComposerDraftStorage>? draftStorageFuture;
-  final bool canPublishActivity;
 
   @override
   State<PostEditorScreen> createState() => _PostEditorScreenState();
@@ -163,17 +159,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         topic: 'outfit',
       ),
     ];
-    if (widget.canPublishActivity) {
-      list.add(
-        const ComposerCategoryItem(
-          id: 'activity',
-          label: '活动',
-          communityId: 'community-campus',
-          postType: 'activity',
-          requiresAdmin: true,
-        ),
-      );
-    }
     return list;
   }
 
@@ -193,12 +178,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   }
 
   void _initCategorySelection() {
-    if (widget.initialPostType == 'activity' || widget.initialCommunityId == 'activity') {
-      selectedCategoryId = 'activity';
-      communityId = 'community-campus';
-      postType = 'activity';
-      return;
-    }
     final initialId = widget.initialCommunityId;
     if (initialId == 'community-unboxing') {
       selectedCategoryId = 'community-unboxing';

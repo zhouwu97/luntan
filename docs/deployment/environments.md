@@ -4,9 +4,11 @@
 | --- | --- | --- | --- | --- |
 | dev | `dev` | 本地/临时 PostgreSQL | 可为空，上传接口返回不可用 | 可执行开发 seed，禁止真实 PII |
 | staging | `staging` | 独立测试 PostgreSQL | 独立 bucket 和签名密钥 | 运行迁移、smoke、E2E |
-| production | `production` | 生产 PostgreSQL | 生产 bucket、版本和生命周期策略 | 只读发布镜像，迁移需审批 |
+| production | `production` | 生产 PostgreSQL | 私有生产 bucket、版本和生命周期策略 | 只读发布镜像，迁移需审批 |
 
 所有环境通过环境变量注入连接串和密钥；不把 `.env`、数据库密码、对象存储签名密钥提交到仓库。
+
+生产媒体默认建议使用 `MEDIA_DELIVERY_MODE=gateway`：`media/` 源图所在 bucket/prefix 必须关闭匿名读取，`STORAGE_INTERNAL_BASE_URL` 仅供 API/Nginx 访问，且 `MEDIA_INTERNAL_ACCEL_PREFIX` 对应的 Nginx location 必须使用 `internal`。上线前的 ACL、CDN 缓存和匿名请求检查见 [`media-gateway.md`](media-gateway.md)。
 
 `APP_ENV` 只接受 `dev`、`development`、`test`、`qa`、`staging` 和 `production`；`prod`、`prd` 等近似拼写会直接阻止服务启动。验证码哈希使用独立的 `AUTH_CODE_HASH_SECRET`，生产环境至少 32 字节。`ALLOW_DEV_AUTH_CODE` 默认关闭，只有 development/test 可显式开启，且不会被 production 配置接受。
 

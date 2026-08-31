@@ -127,6 +127,8 @@ bucket/prefix，nginx/CDN 不得把 `/media/` 映射为公开静态目录。应�
 `private, no-store`。部署本次修复前，必须撤销旧的 `/media/` 公共映射并清理
 CDN/浏览器缓存；已经发出的公开源图直链无法通过数据库状态追回。
 
+生产 gateway 的 bucket ACL、内网源站和 Nginx `internal` location 必须一起配置，具体检查清单见 [`docs/deployment/media-gateway.md`](docs/deployment/media-gateway.md)。应用启动校验只能验证环境变量一致性，不能代替对象存储控制台的匿名访问验证。
+
 QA 数据现状（2026-08-29）：90 个榜单商品、1245 条商品评价；310 篇帖子、2284 条评论，全部位于正式板块（酱紫社区 284 / 大型拆箱 14 / 杂鱼日常 12）。QA 也通过 HTTPS 反向代理统一承载 API、媒体和 Web；生产构建仍必须声明 `APP_ENV=production` 并使用正式生产域名。
 
 连接 QA 启动示例：

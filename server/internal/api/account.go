@@ -34,7 +34,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.ExecContext(r.Context(), `
 		UPDATE user_profiles
-		SET nickname = '已注销用户', avatar_media_id = NULL, bio = '', updated_at = now()
+		SET nickname = '已注销用户', avatar_media_id = NULL, background_media_id = NULL, bio = '', updated_at = now()
 		WHERE user_id = $1`, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -72,11 +72,13 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// 媒体标记删除后逐个登记 outbox 事件，由 Worker 物理清理对象存储中的
-	// 源文件与衍生图，否则注销后这些对象仍留在公开可读的存储里。
+	// 源文件与衍生图。仍被公开帖子、社区、活动等业务资源引用的媒体必须
+	// 保留，否则“保留公开内容”的注销语义会留下坏图。
 	mediaRows, err := tx.QueryContext(r.Context(), `
-		UPDATE media_assets
+		UPDATE media_assets AS ma
 		SET status = 'deleted', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
-		WHERE owner_id = $1 AND deleted_at IS NULL
+		WHERE ma.owner_id = $1 AND ma.deleted_at IS NULL
+		  AND NOT (`+mediaInUseExpr+`)
 		RETURNING id`, user.ID)
 	if err != nil {
 		writeInternalError(w, r, err)

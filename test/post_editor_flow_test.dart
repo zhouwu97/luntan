@@ -182,14 +182,13 @@ void main() {
     expect(find.text('选择后，内容会进入对应主题页；不再按是否有图片猜测'), findsNothing);
   });
 
-  testWidgets('普通用户不展示活动分类，管理员展示活动分类', (tester) async {
-    // 1. 普通用户
+  testWidgets('活动不再作为普通帖子分类，统一从活动管理创建', (tester) async {
+    // 普通帖子编辑器不再承载活动实体，避免误写入 posts.type=activity。
     await tester.pumpWidget(
       MaterialApp(
         home: PostEditorScreen(
           initialCommunityId: 'community-campus',
           availableCommunities: ForumStore.seeded().communities,
-          canPublishActivity: false,
           onPublish: (_) async {},
         ),
       ),
@@ -202,46 +201,20 @@ void main() {
     expect(find.text('穿搭分享'), findsOneWidget);
     expect(find.text('活动'), findsNothing);
 
-    // 2. 管理员用户
+    // 管理员也使用独立的活动管理编辑器。
     await tester.pumpWidget(
       MaterialApp(
         home: PostEditorScreen(
           initialCommunityId: 'community-campus',
           availableCommunities: ForumStore.seeded().communities,
-          canPublishActivity: true,
           onPublish: (_) async {},
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('活动'), findsOneWidget);
-    expect(find.text('管理员'), findsOneWidget);
-  });
-
-  testWidgets('选择活动分类发布时携带 type=activity', (tester) async {
-    PostDraft? published;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PostEditorScreen(
-          initialCommunityId: 'community-campus',
-          availableCommunities: ForumStore.seeded().communities,
-          canPublishActivity: true,
-          onPublish: (draft) async => published = draft,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextField).at(0), '周末活动标题');
-    await tester.enterText(find.byType(TextField).at(1), '周末活动正文');
-    await tester.tap(find.text('活动'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '发布'));
-    await tester.pumpAndSettle();
-
-    expect(published, isNotNull);
-    expect(published!.type, 'activity');
+    expect(find.text('活动'), findsNothing);
+    expect(find.text('管理员'), findsNothing);
   });
 
   testWidgets('选择穿搭分享分类发布时携带 topic=outfit', (tester) async {
@@ -269,4 +242,3 @@ void main() {
     expect(published!.type, 'normal');
   });
 }
-

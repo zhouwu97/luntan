@@ -29,7 +29,7 @@ var (
 	ErrMediaNotFound      = errors.New("media not found")
 	ErrStorageUnavailable = storage.ErrStorageUnavailable
 	ErrMediaNotOwned      = errors.New("media is not owned by user")
-	ErrMediaInUse         = errors.New("media is attached to a post")
+	ErrMediaInUse         = errors.New("media is referenced by a business resource")
 )
 
 type mediaStorage = storage.ObjectStorage
@@ -121,7 +121,6 @@ func (s *Server) createMediaUploadToken(w http.ResponseWriter, r *http.Request) 
 	}
 	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{
 		"media_id":      mediaID,
-		"object_key":    objectKey,
 		"upload_url":    uploadURL,
 		"upload_method": "PUT",
 		"expires_at":    expiresAt,
@@ -228,6 +227,9 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 const mediaInUseExpr = `EXISTS (SELECT 1 FROM post_media pm WHERE pm.media_id = ma.id)
 		OR EXISTS (SELECT 1 FROM comment_media cm WHERE cm.media_id = ma.id)
 		OR EXISTS (SELECT 1 FROM moderation_appeal_media mam WHERE mam.media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM user_profiles up WHERE up.avatar_media_id = ma.id OR up.background_media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM communities c WHERE c.avatar_media_id = ma.id OR c.banner_media_id = ma.id)
+		OR EXISTS (SELECT 1 FROM activities a WHERE a.cover_media_id = ma.id AND a.deleted_at IS NULL)
 		OR EXISTS (SELECT 1 FROM ranking_toy_submissions rts WHERE rts.cover_media_id = ma.id)
 		OR EXISTS (SELECT 1 FROM ranking_toys rt WHERE rt.cover_media_id = ma.id OR rt.hero_media_id = ma.id)
 		OR EXISTS (SELECT 1 FROM ranking_toy_comment_media rtcm WHERE rtcm.media_id = ma.id)`
@@ -309,7 +311,9 @@ func (s *Server) deleteMedia(w http.ResponseWriter, r *http.Request, mediaID str
 }
 
 func mediaResponse(asset mediaAsset) map[string]any {
-	return map[string]any{"id": asset.ID, "object_key": asset.ObjectKey, "mime_type": asset.MimeType, "width": asset.Width, "height": asset.Height, "size": asset.Size, "sha256": asset.SHA256, "status": asset.Status, "created_at": asset.CreatedAt, "updated_at": asset.UpdatedAt, "completed_at": nullableTime(asset.CompletedAt)}
+	// object_key 是存储层内部寻址信息。客户端只需要 media_id 和受控 URL，
+	// 泄露该字段会让网关私有化失去明确的边界。
+	return map[string]any{"id": asset.ID, "mime_type": asset.MimeType, "width": asset.Width, "height": asset.Height, "size": asset.Size, "sha256": asset.SHA256, "status": asset.Status, "created_at": asset.CreatedAt, "updated_at": asset.UpdatedAt, "completed_at": nullableTime(asset.CompletedAt)}
 }
 
 func nullableTime(value sql.NullTime) any {
@@ -388,13 +392,19 @@ const mediaPublicVisibilityExpr = `EXISTS (
 			SELECT 1 FROM post_media pm
 			JOIN posts p ON p.id = pm.post_id
 			WHERE pm.media_id = ma.id AND p.deleted_at IS NULL AND p.publication_status = 'published'
+			  AND p.moderation_status = 'normal'
 		) OR EXISTS (
 			SELECT 1 FROM comment_media cm
 			JOIN comments c ON c.id = cm.comment_id
 			WHERE cm.media_id = ma.id AND c.deleted_at IS NULL AND c.publication_status = 'published'
+			  AND c.moderation_status = 'normal'
 		) OR EXISTS (
 			SELECT 1 FROM user_profiles up
 			WHERE up.avatar_media_id = ma.id OR up.background_media_id = ma.id
+		) OR EXISTS (
+			SELECT 1 FROM communities c
+			WHERE (c.avatar_media_id = ma.id OR c.banner_media_id = ma.id)
+			  AND c.deleted_at IS NULL AND c.status = 'active'
 		) OR EXISTS (
 			SELECT 1 FROM activities act
 			WHERE act.cover_media_id = ma.id AND act.deleted_at IS NULL
@@ -590,17 +600,19 @@ func (s *Server) serveMediaFileGateway(w http.ResponseWriter, r *http.Request, b
 	s.serveAuthorizedMediaObject(w, r, backend, objectKey, "private, no-store")
 }
 
-// serveMediaFileDirect 维持 direct 模式的历史行为：免鉴权兜底与公开 Feed 对
-// 齐，仅拒绝 censored 媒体的源图与普通变体（黑名单），路径安全由存储层
-// objectPath 校验。
+// serveMediaFileDirect 维持 direct 模式的历史 object-key 兼容，同时对自有
+// media/ 媒体复用公开引用门禁，确保帖子/评论审核中时不会因为分发模式不同
+// 而暴露附件。非 media/ 的 ranking/imported 导入资源仍由其公开前缀负责。
 func (s *Server) serveMediaFileDirect(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey string) {
 	// 安全保护：censored 媒体的源图永远不能通过通用媒体路由访问，包括
 	// 管理员。管理员必须使用 private/no-store 的 source 接口，从而避免
 	// 这个公开路由或共享 CDN 缓存住原图。
 	managedSource := false
+	isPublicMedia := true
 	if s.db != nil {
 		var isCensoredRaw bool
-		err := s.db.QueryRowContext(r.Context(), `
+		key := strings.TrimLeft(objectKey, "/")
+		query := `
 			SELECT
 				EXISTS (
 					SELECT 1
@@ -628,10 +640,60 @@ func (s *Server) serveMediaFileDirect(w http.ResponseWriter, r *http.Request, ba
 					WHERE mv.object_key = $1
 					  AND ma.deleted_at IS NULL
 					  AND mv.variant NOT LIKE 'censored_%'
-				)`, objectKey).Scan(&isCensoredRaw, &managedSource)
+				)`
+		var err error
+		if strings.HasPrefix(key, "media/") {
+			query = `
+				SELECT
+					EXISTS (
+						SELECT 1 FROM media_assets ma
+						WHERE ma.object_key = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
+						  AND (` + mediaPublicVisibilityExpr + `)
+					) OR EXISTS (
+						SELECT 1 FROM media_variants mv
+						JOIN media_assets ma ON ma.id = mv.media_id
+						WHERE mv.object_key = $1 AND mv.status = 'ready'
+						  AND ma.status = 'ready' AND ma.deleted_at IS NULL
+						  AND (` + mediaPublicVisibilityExpr + `)
+					),
+					EXISTS (
+						SELECT 1
+						FROM media_assets
+						WHERE object_key = $1
+						  AND moderation_status = 'censored'
+						  AND deleted_at IS NULL
+					) OR EXISTS (
+						SELECT 1
+						FROM media_variants mv
+						JOIN media_assets ma ON ma.id = mv.media_id
+						WHERE mv.object_key = $1
+						  AND ma.moderation_status = 'censored'
+						  AND ma.deleted_at IS NULL
+						  AND mv.variant NOT LIKE 'censored_%'
+					),
+					EXISTS (
+						SELECT 1
+						FROM media_assets
+						WHERE object_key = $1 AND deleted_at IS NULL
+					) OR EXISTS (
+						SELECT 1
+						FROM media_variants mv
+						JOIN media_assets ma ON ma.id = mv.media_id
+						WHERE mv.object_key = $1
+						  AND ma.deleted_at IS NULL
+						  AND mv.variant NOT LIKE 'censored_%'
+					)`
+			err = s.db.QueryRowContext(r.Context(), query, objectKey).Scan(&isPublicMedia, &isCensoredRaw, &managedSource)
+		} else {
+			err = s.db.QueryRowContext(r.Context(), query, objectKey).Scan(&isCensoredRaw, &managedSource)
+		}
 		if err == nil {
 			if isCensoredRaw {
 				writeAuthError(w, r, ErrPermissionDenied)
+				return
+			}
+			if !isPublicMedia {
+				writeAuthError(w, r, ErrMediaNotFound)
 				return
 			}
 		} else {

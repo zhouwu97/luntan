@@ -85,7 +85,7 @@ func TestServeMediaFileRejectsUncensoredVariantWhenAssetIsCensored(t *testing.T)
 	}
 	mock.ExpectQuery(`(?s)SELECT.*EXISTS.*FROM media_assets.*media_variants`).
 		WithArgs(objectKey).
-		WillReturnRows(sqlmock.NewRows([]string{"is_censored_raw", "managed_source"}).AddRow(true, true))
+		WillReturnRows(sqlmock.NewRows([]string{"is_public_media", "is_censored_raw", "managed_source"}).AddRow(true, true, true))
 
 	s := &Server{db: db, mediaStorage: store}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/"+objectKey, nil)

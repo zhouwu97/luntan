@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	ErrCommunityNotFound      = errors.New("community not found")
-	ErrPostNotFound           = errors.New("post not found")
-	ErrForbidden              = errors.New("forbidden")
-	ErrIdempotencyKeyRequired = errors.New("idempotency key required")
-	ErrInvalidPost            = errors.New("invalid post")
-	ErrMarketDisabled         = errors.New("market post type is disabled")
+	ErrCommunityNotFound         = errors.New("community not found")
+	ErrPostNotFound              = errors.New("post not found")
+	ErrForbidden                 = errors.New("forbidden")
+	ErrIdempotencyKeyRequired    = errors.New("idempotency key required")
+	ErrInvalidPost               = errors.New("invalid post")
+	ErrMarketDisabled            = errors.New("market post type is disabled")
+	ErrActivityManagedSeparately = errors.New("activity posts must use the activity entity API")
 )
 
 type postWriteInput struct {
@@ -79,11 +80,17 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, ErrMarketDisabled)
 		return
 	}
+	canModerate := false
 	if input.Type == "activity" {
-		if !s.canModerate(r, user) {
+		canModerate = s.canModerate(r, user)
+		if !canModerate {
 			writeAuthError(w, r, ErrPermissionDenied)
 			return
 		}
+	}
+	if err := validatePostTypeTransition("", input.Type, canModerate); err != nil {
+		writeAuthError(w, r, err)
+		return
 	}
 	if !validPostInput(input) {
 		writeAuthError(w, r, ErrInvalidPost)
@@ -228,6 +235,14 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID strin
 		writeAuthError(w, r, ErrForbidden)
 		return
 	}
+	canModerate := false
+	if input.Type == "activity" {
+		canModerate = s.canModerate(r, user)
+	}
+	if err := validatePostTypeTransition(current.Type, input.Type, canModerate); err != nil {
+		writeAuthError(w, r, err)
+		return
+	}
 	if err := ensureCommunity(r.Context(), tx, input.CommunityID); err != nil {
 		writeAuthError(w, r, err)
 		return
@@ -250,6 +265,23 @@ func (s *Server) updatePost(w http.ResponseWriter, r *http.Request, postID strin
 	if err := replaceMedia(r.Context(), tx, postID, user.ID, input.MediaIDs, now); err != nil {
 		writeAuthError(w, r, err)
 		return
+	}
+	switch {
+	case input.Type == "poll" && current.Type != "poll":
+		if err := insertPollTx(r.Context(), tx, postID, input.Poll); err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
+	case input.Type == "poll" && current.Type == "poll":
+		if err := replacePollTx(r.Context(), tx, postID, input.Poll); err != nil {
+			writeAuthError(w, r, err)
+			return
+		}
+	case input.Type != "poll" && current.Type == "poll":
+		if err := deletePollTx(r.Context(), tx, postID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
@@ -320,6 +352,22 @@ func validPostInput(input postWriteInput) bool {
 	default:
 		return false
 	}
+}
+
+// validatePostTypeTransition 将 type 当作带业务副作用的状态，而不是普通
+// 字符串。活动由 activities 表承载；poll 则必须与 polls/poll_options 一起
+// 在同一事务中创建、替换或清理。
+func validatePostTypeTransition(currentType, nextType string, canModerate bool) error {
+	if nextType == "activity" {
+		if !canModerate {
+			return ErrPermissionDenied
+		}
+		return ErrActivityManagedSeparately
+	}
+	if nextType == "poll" || currentType == "poll" {
+		return nil
+	}
+	return nil
 }
 
 func ensureCommunity(ctx context.Context, queryer queryRowContext, communityID string) error {

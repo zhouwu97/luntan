@@ -189,7 +189,7 @@ func TestDirectRawMediaBlockedWhenCensored(t *testing.T) {
 	// Anonymous / normal user requests raw image that is censored
 	mock.ExpectQuery(`(?s)SELECT.*EXISTS.*FROM media_assets.*media_variants`).
 		WithArgs("media/u1/sensitive.jpg").
-		WillReturnRows(sqlmock.NewRows([]string{"is_censored_raw", "managed_source"}).AddRow(true, true))
+		WillReturnRows(sqlmock.NewRows([]string{"is_public_media", "is_censored_raw", "managed_source"}).AddRow(true, true, true))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media/u1/sensitive.jpg", nil)
 	res := httptest.NewRecorder()

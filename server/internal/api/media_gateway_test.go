@@ -78,6 +78,42 @@ func TestGatewayMediaVariantServesPublicVariantOfPublishedPost(t *testing.T) {
 	}
 }
 
+func TestGatewayMediaVariantRejectsPendingPost(t *testing.T) {
+	s, mock, _ := newGatewayTestServer(t, "gateway")
+	mock.ExpectQuery(`(?s)SELECT ma\.mime_type.*JOIN media_variants mv.*p\.moderation_status = 'normal'`).
+		WithArgs("media_pending_post", "detail").
+		WillReturnRows(sqlmock.NewRows([]string{"mime_type", "moderation_status", "object_key"}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media_pending_post/detail", nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, "media_pending_post/detail")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for pending post media", rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func TestGatewayMediaVariantRejectsPendingComment(t *testing.T) {
+	s, mock, _ := newGatewayTestServer(t, "gateway")
+	mock.ExpectQuery(`(?s)SELECT ma\.mime_type.*JOIN media_variants mv.*c\.moderation_status = 'normal'`).
+		WithArgs("media_pending_comment", "detail").
+		WillReturnRows(sqlmock.NewRows([]string{"mime_type", "moderation_status", "object_key"}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media_pending_comment/detail", nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, "media_pending_comment/detail")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for pending comment media", rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
 func TestGatewayMediaVariantServesCensoredVariantWithImmutableCache(t *testing.T) {
 	s, mock, store := newGatewayTestServer(t, "gateway")
 	key := "media/u-1/media_abc_censored_beef_thumb.jpg"
@@ -254,7 +290,7 @@ func TestDirectModeKeepsBlacklistBehavior(t *testing.T) {
 	}
 	mock.ExpectQuery(`(?s)SELECT.*EXISTS.*FROM media_assets.*media_variants`).
 		WithArgs(key).
-		WillReturnRows(sqlmock.NewRows([]string{"is_censored_raw", "managed_source"}).AddRow(false, true))
+		WillReturnRows(sqlmock.NewRows([]string{"is_public_media", "is_censored_raw", "managed_source"}).AddRow(true, false, true))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/"+key, nil)
 	rec := httptest.NewRecorder()
@@ -265,6 +301,25 @@ func TestDirectModeKeepsBlacklistBehavior(t *testing.T) {
 	}
 	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
 		t.Fatalf("Cache-Control = %q, want private, no-store for managed source", got)
+	}
+}
+
+func TestDirectModeRejectsPendingPostMedia(t *testing.T) {
+	s, mock, _ := newGatewayTestServer(t, "direct")
+	key := "media/u-1/media_pending.jpg"
+	mock.ExpectQuery(`(?s)SELECT.*p\.moderation_status = 'normal'.*media_variants`).
+		WithArgs(key).
+		WillReturnRows(sqlmock.NewRows([]string{"is_public_media", "is_censored_raw", "managed_source"}).AddRow(false, false, true))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/"+key, nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, key)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for pending media in direct mode", rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
 	}
 }
 

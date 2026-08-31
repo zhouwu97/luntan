@@ -1080,6 +1080,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_POST", Message: "帖子内容不合法"}
 	case errors.Is(err, ErrMarketDisabled):
 		appErr = httpserver.AppError{Status: http.StatusGone, Code: "FEATURE_DISABLED", Message: "该帖子类型已停止使用"}
+	case errors.Is(err, ErrActivityManagedSeparately):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "ACTIVITY_USE_ACTIVITY_API", Message: "活动必须通过活动管理接口创建或编辑"}
 	case errors.Is(err, ErrInsufficientPoints):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "INSUFFICIENT_POINTS", Message: "积分不足"}
 	case errors.Is(err, ErrBookmarkFolderNotFound):
@@ -1097,7 +1099,7 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrMediaNotOwned):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "MEDIA_NOT_OWNED", Message: "没有操作该媒体的权限"}
 	case errors.Is(err, ErrMediaInUse):
-		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "MEDIA_IN_USE", Message: "媒体已被帖子使用，请先在帖子编辑中移除"}
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "MEDIA_IN_USE", Message: "媒体已被业务资源使用，请先解除引用"}
 	case errors.Is(err, ErrStorageUnavailable):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "STORAGE_UNAVAILABLE", Message: "媒体存储暂时不可用"}
 	case errors.Is(err, ErrCommentNotFound):

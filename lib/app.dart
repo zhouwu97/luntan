@@ -319,7 +319,6 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   void _openPostEditor({
     required String initialCommunityId,
-    String? initialPostType,
   }) {
     final currentUserId =
         authController?.user?.id ?? (apiMode ? 'anonymous' : 'mock-user');
@@ -329,15 +328,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     final availableCommunitiesFuture = apiMode
         ? _loadPublishCommunities()
         : null;
-    final canPublishActivity = authController?.user?.canModerate == true ||
-        authController?.user?.capability('can_manage_activities') == true ||
-        authController?.user?.capability('can_publish_activity') == true ||
-        !apiMode;
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
         builder: (_) => PostEditorScreen(
           initialCommunityId: initialCommunityId,
-          initialPostType: initialPostType,
           onPublish: _publishDraft,
           userId: currentUserId,
           publishController: apiMode ? publishController : null,
@@ -347,7 +341,6 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               : selectHomeCommunities(store.communities),
           availableCommunitiesFuture: availableCommunitiesFuture,
           draftStorageFuture: draftStorageFuture,
-          canPublishActivity: canPublishActivity,
         ),
       ),
     );
@@ -747,10 +740,6 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         builder: (_) => ActivityManagementScreen(
           repository: platform,
           onFeedback: _showQuickFeedback,
-          onOpenCreateActivity: () => _openPostEditor(
-            initialCommunityId: 'community-campus',
-            initialPostType: 'activity',
-          ),
         ),
       ),
     );

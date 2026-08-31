@@ -1,4 +1,10 @@
-# 全部为 generic-api-key 对 mock 图片文件名（thumb_XX.webp / .jpg assetKey）的误报
-0ef0c1877d42b7b0b3d048e890a4f44a637e5157:lib/data/repositories/mock_repositories.dart:generic-api-key
-69540e112cb8c5c6db88cd958e349ae0f56a5d25:test/ranking_discovery_test.dart:generic-api-key
-0806da1a43fc62c472bd422a3b58c48966067411:test/ranking_repository_test.dart:generic-api-key
+# 这些命中是榜单测试数据中的媒体文件名字段（asset_key），不是凭据。
+# 按指纹精确忽略历史误报，避免扩大到同名字段的未知值。
+0ef0c1877d42b7b0b3d048e890a4f44a637e5157:lib/data/repositories/mock_repositories.dart:generic-api-key:30
+0ef0c1877d42b7b0b3d048e890a4f44a637e5157:lib/data/repositories/mock_repositories.dart:generic-api-key:45
+0ef0c1877d42b7b0b3d048e890a4f44a637e5157:lib/data/repositories/mock_repositories.dart:generic-api-key:60
+0ef0c1877d42b7b0b3d048e890a4f44a637e5157:lib/data/repositories/mock_repositories.dart:generic-api-key:75
+0ef0c1877d42b7b0b3d048e890a4f44a637e5157:lib/data/repositories/mock_repositories.dart:generic-api-key:90
+69540e112cb8c5c6db88cd958e349ae0f56a5d25:test/ranking_discovery_test.dart:generic-api-key:48
+0806da1a43fc62c472bd422a3b58c48966067411:test/ranking_repository_test.dart:generic-api-key:26
+0806da1a43fc62c472bd422a3b58c48966067411:test/ranking_repository_test.dart:generic-api-key:80

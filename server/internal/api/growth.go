@@ -317,6 +317,28 @@ func insertPollTx(ctx context.Context, tx *sql.Tx, postID string, input *pollInp
 	return nil
 }
 
+func replacePollTx(ctx context.Context, tx *sql.Tx, postID string, input *pollInput) error {
+	if err := deletePollTx(ctx, tx, postID); err != nil {
+		return err
+	}
+	return insertPollTx(ctx, tx, postID, input)
+}
+
+func deletePollTx(ctx context.Context, tx *sql.Tx, postID string) error {
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM poll_votes
+		WHERE poll_id IN (SELECT id FROM polls WHERE post_id = $1)`, postID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM poll_options
+		WHERE poll_id IN (SELECT id FROM polls WHERE post_id = $1)`, postID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM polls WHERE post_id = $1`, postID)
+	return err
+}
+
 func (s *Server) ranking(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return

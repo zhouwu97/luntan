@@ -42,7 +42,7 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 	if body == "" || !strings.Contains(body, `"public_id":"10000"`) {
 		t.Fatalf("public_id missing from response: %s", body)
 	}
-	if !strings.Contains(body, `"avatar_url":`) || !strings.Contains(body, `"comment_count":0`) {
+	if !strings.Contains(body, `"avatar_url":`) || !strings.Contains(body, `"comment_count":7`) {
 		t.Fatalf("avatar_url or comment_count missing from response: %s", body)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -50,21 +50,30 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 	}
 }
 
-func TestListUserCommentsForbiddenForOtherUsers(t *testing.T) {
-	db, _, err := sqlmock.New()
+func TestListUserCommentsAllowedForOtherUsers(t *testing.T) {
+	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
+	created := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*c\.author_id = \$1.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
+		WithArgs("u1", 21).
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
+			AddRow("c1", "p1", "帖子标题", "公开评论内容", "cm1", "社区", int64(1), int64(0), int64(0), created, created))
+
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1/comments", nil)
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
 
-	if res.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 FORBIDDEN, got status=%d body=%s", res.Code, res.Body.String())
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got status=%d body=%s", res.Code, res.Body.String())
 	}
-	if !strings.Contains(res.Body.String(), "FORBIDDEN") {
-		t.Fatalf("expected FORBIDDEN code, got body=%s", res.Body.String())
+	if !strings.Contains(res.Body.String(), `"comment_id":"c1"`) {
+		t.Fatalf("expected comment_id in body, got %s", res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

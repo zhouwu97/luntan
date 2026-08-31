@@ -224,6 +224,18 @@ class _CommentItemState extends State<CommentItem>
                                   ),
                                 ),
                               ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(
+                                relativeTimeLabel(comment.createdAt),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF99A8B7),
+                                ),
+                              ),
                               const Spacer(),
                               Text(
                                 '${comment.floor ?? widget.floor} 楼',
@@ -233,14 +245,6 @@ class _CommentItemState extends State<CommentItem>
                                 ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            relativeTimeLabel(comment.createdAt),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Color(0xFF99A8B7),
-                            ),
                           ),
                         ],
                       ),

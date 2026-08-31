@@ -502,12 +502,18 @@ void main() {
       expect(find.text('321'), findsOneWidget);
       expect(find.text('654'), findsOneWidget);
       expect(find.text('987'), findsOneWidget);
-      // 他人主页只展示帖子，无评论Tab
-      expect(find.text('评论 2'), findsNothing);
+      // 他人主页同样展示双 Tab（帖子与评论）
       expect(find.text('帖子 1'), findsOneWidget);
+      expect(find.text('评论 2'), findsOneWidget);
       expect(find.text('真实开箱体验分享'), findsOneWidget);
 
-      // 本人主页保留评论 Tab
+      // 点击他人主页评论 Tab 可查看评论 Feed
+      await tester.tap(find.text('评论 2'));
+      await tester.pumpAndSettle();
+      expect(find.text('这条评论的正文预览'), findsOneWidget);
+      expect(find.text('回复帖子：真实开箱体验分享'), findsOneWidget);
+
+      // 本人主页同样保留双 Tab
       await tester.pumpWidget(
         MaterialApp(
           home: UserProfileScreen(

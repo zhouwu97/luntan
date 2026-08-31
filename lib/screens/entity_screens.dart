@@ -113,14 +113,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     _selfSummary = widget.profileSummary;
     _future = _load();
     _postsFuture = _loadInitialPosts();
-    if (widget.isSelf) {
-      _commentsFuture = _loadInitialComments();
-      _commentsScrollController.addListener(_loadMoreCommentsWhenNeeded);
-    } else {
-      _commentsFuture = Future<ProfileListPage?>.value(null);
-    }
+    _commentsFuture = _loadInitialComments();
     _loadPoints();
     _postsScrollController.addListener(_loadMorePostsWhenNeeded);
+    _commentsScrollController.addListener(_loadMoreCommentsWhenNeeded);
   }
 
   @override
@@ -226,8 +222,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       );
       if (!mounted) return;
       setState(() {
-        final ids = _comments.map((c) => c.id).toSet();
-        _comments.addAll(page.items.where((c) => ids.add(c.id)));
+        final ids = _comments.map((c) => c.commentId ?? c.id).toSet();
+        _comments.addAll(
+          page.items.where((c) => ids.add(c.commentId ?? c.id)),
+        );
         final nextCursor = page.nextCursor;
         _hasMoreComments = page.hasMore && nextCursor != _nextCommentsCursor;
         _nextCommentsCursor = nextCursor;
@@ -1050,69 +1048,46 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Tab 切换条（仅本人主页显示切换Tab，他人主页只显示帖子指示条）
-                    if (widget.isSelf)
-                      Container(
-                        height: 52,
-                        decoration: const BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: Color(0xFFEEF1F4),
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _HomeTabButton(
-                                label:
-                                    '帖子 ${postCount > 0 ? postCount : _posts.length}',
-                                active: _currentTab == 0,
-                                onTap: () => setState(() => _currentTab = 0),
-                              ),
-                            ),
-                            Expanded(
-                              child: _HomeTabButton(
-                                label:
-                                    '评论 ${commentCount > 0 ? commentCount : _comments.length}',
-                                active: _currentTab == 1,
-                                onTap: () {
-                                  if (_comments.isEmpty) {
-                                    _commentsFuture = _loadInitialComments();
-                                  }
-                                  setState(() => _currentTab = 1);
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Container(
-                        height: 52,
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        alignment: Alignment.centerLeft,
-                        decoration: const BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: Color(0xFFEEF1F4),
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                        child: Text(
-                          '帖子 ${postCount > 0 ? postCount : _posts.length}',
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
+                    // Tab 切换条
+                    Container(
+                      height: 52,
+                      decoration: const BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Color(0xFFEEF1F4),
+                            width: 1,
                           ),
                         ),
                       ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _HomeTabButton(
+                              label:
+                                  '帖子 ${postCount > 0 ? postCount : _posts.length}',
+                              active: _currentTab == 0,
+                              onTap: () => setState(() => _currentTab = 0),
+                            ),
+                          ),
+                          Expanded(
+                            child: _HomeTabButton(
+                              label:
+                                  '评论 ${commentCount > 0 ? commentCount : _comments.length}',
+                              active: _currentTab == 1,
+                              onTap: () {
+                                if (_comments.isEmpty) {
+                                  _commentsFuture = _loadInitialComments();
+                                }
+                                setState(() => _currentTab = 1);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     // Feed 流列表
                     Expanded(
-                      child: (!widget.isSelf || _currentTab == 0)
+                      child: _currentTab == 0
                           ? _buildPostsFeed(nickname, isLocked, level)
                           : _buildCommentsFeed(nickname, isLocked, level),
                     ),

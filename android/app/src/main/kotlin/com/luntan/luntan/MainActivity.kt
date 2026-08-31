@@ -1,6 +1,8 @@
 package com.luntan.luntan
 
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -9,6 +11,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -32,6 +35,14 @@ class MainActivity : FlutterActivity() {
                         val apk = validatedUpdateApk(path)
                         if (apk == null) {
                             result.error("INVALID_APK_PATH", "APK 路径不合法或文件不存在", null)
+                            return@setMethodCallHandler
+                        }
+                        if (!isTrustedUpdateApk(apk)) {
+                            result.error(
+                                "UNTRUSTED_UPDATE_APK",
+                                "安装包校验失败：包名、版本或签名与本应用不一致",
+                                null,
+                            )
                             return@setMethodCallHandler
                         }
                         if (!canInstallPackages()) {
@@ -87,5 +98,65 @@ class MainActivity : FlutterActivity() {
         if (!apk.path.startsWith(root.path + File.separator)) return null
         if (!apk.isFile || !apk.name.endsWith(".apk", ignoreCase = true)) return null
         return apk
+    }
+
+    /**
+     * 安装前的独立信任根校验：不信任更新 API 自述的 sha256/URL，直接比对本机当前
+     * 安装包的签名。包名必须一致、versionCode 不得低于当前、签名证书集合必须与
+     * 当前安装包完全一致，任一不满足即拒绝调起安装器。
+     */
+    private fun isTrustedUpdateApk(apk: File): Boolean {
+        val flags = PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+        val archiveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageManager.getPackageArchiveInfo(
+                apk.absolutePath,
+                PackageManager.PackageInfoFlags.of(flags.toLong()),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageArchiveInfo(apk.absolutePath, flags)
+        } ?: return false
+        if (archiveInfo.packageName != packageName) return false
+        if (versionCodeOf(archiveInfo) < installedVersionCode()) return false
+
+        val selfInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageManager.getPackageInfo(
+                packageName,
+                PackageManager.PackageInfoFlags.of(flags.toLong()),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, flags)
+        }
+        val selfCerts = signingCertSha256(selfInfo) ?: return false
+        val apkCerts = signingCertSha256(archiveInfo) ?: return false
+        return selfCerts == apkCerts
+    }
+
+    private fun installedVersionCode(): Long {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        return versionCodeOf(info)
+    }
+
+    private fun versionCodeOf(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+
+    private fun signingCertSha256(info: PackageInfo): Set<String>? {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures
+        }
+        if (signatures.isNullOrEmpty()) return null
+        val digest = MessageDigest.getInstance("SHA-256")
+        return signatures.map { sig ->
+            digest.digest(sig.toByteArray()).joinToString("") { "%02x".format(it) }
+        }.toSet()
     }
 }

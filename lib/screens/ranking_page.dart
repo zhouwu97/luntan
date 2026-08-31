@@ -1934,11 +1934,6 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                     }
                   }
                 },
-                onEditCoupon: widget.canManageRanking &&
-                        widget.repository != null &&
-                        _hasServer
-                    ? _editCoupon
-                    : null,
               ),
               Expanded(
                 child: Scrollbar(
@@ -1984,6 +1979,13 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                           onWant: _setWanted,
                           onOwn: _setOwned,
                         ),
+                        if (widget.canManageRanking &&
+                            widget.repository != null &&
+                            _hasServer)
+                          _DetailCouponAdminCard(
+                            couponUrl: displayItem.couponUrl,
+                            onEdit: _editCoupon,
+                          ),
                         _ReviewSection(
                           sortByWeight: _sortByWeight,
                           comments: _serverComments,
@@ -2197,15 +2199,10 @@ class RankingPurchasePage extends StatelessWidget {
 }
 
 class _DetailTopBar extends StatelessWidget {
-  const _DetailTopBar({
-    required this.onBack,
-    required this.onShare,
-    this.onEditCoupon,
-  });
+  const _DetailTopBar({required this.onBack, required this.onShare});
 
   final VoidCallback onBack;
   final VoidCallback onShare;
-  final VoidCallback? onEditCoupon;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -2232,22 +2229,6 @@ class _DetailTopBar extends StatelessWidget {
             child: Icon(Icons.toys, size: 23, color: Color(0xFF1D2A42)),
           ),
         ),
-        if (onEditCoupon != null)
-          SizedBox(
-            width: 54,
-            height: 54,
-            child: Tooltip(
-              message: '编辑优惠券',
-              child: IconButton(
-                onPressed: onEditCoupon,
-                icon: const Icon(
-                  Icons.local_offer_outlined,
-                  size: 19,
-                  color: Color(0xFF556176),
-                ),
-              ),
-            ),
-          ),
         SizedBox(
           width: 54,
           height: 54,
@@ -2266,6 +2247,73 @@ class _DetailTopBar extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// 管理员在商品详情页内维护优惠券链接的入口卡片。
+class _DetailCouponAdminCard extends StatelessWidget {
+  const _DetailCouponAdminCard({required this.couponUrl, required this.onEdit});
+
+  final String? couponUrl;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCoupon = couponUrl != null && couponUrl!.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 2, 24, 14),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE8ECF2)),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.local_offer_outlined,
+              size: 18,
+              color: Color(0xFF55739A),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '优惠券链接（仅管理员可见）',
+                    style: TextStyle(
+                      color: Color(0xFF2D3441),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasCoupon ? couponUrl! : '暂未设置，点击“添加”为该商品配券',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            TextButton.icon(
+              onPressed: onEdit,
+              icon: Icon(
+                hasCoupon ? Icons.edit_outlined : Icons.add_link_outlined,
+                size: 15,
+              ),
+              label: Text(hasCoupon ? '编辑' : '添加'),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF55739A),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _DetailProductIntro extends StatelessWidget {

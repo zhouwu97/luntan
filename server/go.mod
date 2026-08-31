@@ -2,9 +2,11 @@ module github.com/zhouwu97/luntan/server
 
 go 1.26
 
+toolchain go1.26.6
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/redis/go-redis/v9 v9.7.3
 	golang.org/x/crypto v0.37.0
 	golang.org/x/image v0.45.0

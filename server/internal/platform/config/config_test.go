@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadDefaults(t *testing.T) {
 	t.Setenv("APP_ENV", "")
@@ -38,6 +41,7 @@ func TestValidateProduction(t *testing.T) {
 		t.Fatalf("expected error for empty production config")
 	}
 
+	cfg.MediaDeliveryMode = "direct"
 	cfg.DatabaseURL = "postgres://localhost/db"
 	if err := cfg.Validate(); err == nil || err.Error() != "production requires RATE_LIMIT_ENABLED=true" {
 		t.Fatalf("expected rate limit error, got: %v", err)
@@ -62,9 +66,71 @@ func TestValidateProduction(t *testing.T) {
 	}
 }
 
+func TestValidateProductionRequiresExplicitMediaDeliveryMode(t *testing.T) {
+	t.Setenv("STORAGE_INTERNAL_BASE_URL", "")
+	cfg := Config{
+		AppEnv:                     "production",
+		DatabaseURL:                "postgres://localhost/db",
+		RateLimitEnabled:           true,
+		RedisURL:                   "redis://localhost:6379/0",
+		AuthCodeHashSecret:         "01234567890123456789012345678901",
+		ObjectStorageUploadBaseURL: "https://upload.example.com",
+		ObjectStorageSigningSecret: "secret",
+		ObjectStoragePublicBaseURL: "https://cdn.example.com",
+	}
+	if err := cfg.Validate(); err == nil || err.Error() != "production requires MEDIA_DELIVERY_MODE=gateway or direct" {
+		t.Fatalf("expected explicit media delivery mode error, got: %v", err)
+	}
+	cfg.MediaDeliveryMode = "signed-urls"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "MEDIA_DELIVERY_MODE must be gateway or direct") {
+		t.Fatalf("unknown mode must be rejected, got: %v", err)
+	}
+}
+
+func TestValidateGatewayModeInvariants(t *testing.T) {
+	base := Config{
+		AppEnv:                     "production",
+		MediaDeliveryMode:          "gateway",
+		DatabaseURL:                "postgres://localhost/db",
+		RateLimitEnabled:           true,
+		RedisURL:                   "redis://localhost:6379/0",
+		AuthCodeHashSecret:         "01234567890123456789012345678901",
+		ObjectStorageUploadBaseURL: "https://upload.example.com",
+		ObjectStorageSigningSecret: "secret",
+	}
+	t.Run("gateway forbids public base url", func(t *testing.T) {
+		cfg := base
+		cfg.ObjectStoragePublicBaseURL = "https://cdn.example.com"
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "forbids OBJECT_STORAGE_PUBLIC_BASE_URL") {
+			t.Fatalf("gateway must forbid public base url, got: %v", err)
+		}
+	})
+	t.Run("gateway requires internal storage url", func(t *testing.T) {
+		t.Setenv("STORAGE_INTERNAL_BASE_URL", "")
+		cfg := base
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "requires STORAGE_INTERNAL_BASE_URL") {
+			t.Fatalf("gateway must require internal storage url, got: %v", err)
+		}
+	})
+	t.Run("gateway without public base url is valid", func(t *testing.T) {
+		t.Setenv("STORAGE_INTERNAL_BASE_URL", "http://storage.internal:9000")
+		cfg := base
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("gateway config should be valid, got: %v", err)
+		}
+	})
+	t.Run("gateway forbids public base url outside production too", func(t *testing.T) {
+		cfg := Config{AppEnv: "qa", MediaDeliveryMode: "gateway", ObjectStoragePublicBaseURL: "https://cdn.example.com"}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "forbids OBJECT_STORAGE_PUBLIC_BASE_URL") {
+			t.Fatalf("gateway/public mutual exclusion must hold in any env, got: %v", err)
+		}
+	})
+}
+
 func TestValidateProductionRejectsPlainTextClientFacingURLs(t *testing.T) {
 	base := Config{
 		AppEnv:                     "production",
+		MediaDeliveryMode:          "direct",
 		DatabaseURL:                "postgres://localhost/db",
 		RateLimitEnabled:           true,
 		RedisURL:                   "redis://localhost:6379/0",
@@ -117,6 +183,7 @@ func TestValidateProductionAllowsInternalStorageHTTP(t *testing.T) {
 	t.Setenv("STORAGE_INTERNAL_BASE_URL", "http://storage.internal:9000")
 	cfg := Config{
 		AppEnv:                     "production",
+		MediaDeliveryMode:          "direct",
 		DatabaseURL:                "postgres://localhost/db",
 		RateLimitEnabled:           true,
 		RedisURL:                   "redis://localhost:6379/0",

@@ -360,19 +360,240 @@ func newMediaID() (string, error) {
 	return "media_" + hex.EncodeToString(raw[:]), nil
 }
 
-// serveMediaFile 处理 GET/HEAD /api/v1/media-file/{objectKey} 的媒体下载兜底。
-// 未配置 OBJECT_STORAGE_PUBLIC_BASE_URL 时，publicMediaURL 返回该路由的根
-// 相对地址。免鉴权与公开 Feed 对齐；路径安全由存储层 objectPath 校验。
-// 公开派生变体内容不可变（写入时经 SHA256 校验），响应下发一年期 immutable
-// 缓存头供浏览器/CDN 长缓存；受审核管理的源图/普通变体则使用 private/no-store。
-// 本地存储返回 *os.File 时由 http.ServeContent 额外提供 Range 与条件请求支持。
-func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKey string) {
+// 公开图片变体白名单：gateway 鉴权模型下普通媒体只放行这三类派生变体。
+var publicImageVariants = map[string]bool{
+	"original": true,
+	"detail":   true,
+	"thumb":    true,
+}
+
+// knownGatewayVariants 枚举 /api/v1/media-file/{mediaID}/{variant} 中第二段
+// 的合法取值；不在表内的变体名直接 404，不回退为 objectKey 解析。
+var knownGatewayVariants = map[string]bool{
+	"source":            true,
+	"original":          true,
+	"detail":            true,
+	"thumb":             true,
+	"censored_original": true,
+	"censored_detail":   true,
+	"censored_thumb":    true,
+}
+
+// mediaPublicVisibilityExpr 枚举媒体对匿名访客公开的资源引用（默认拒绝的
+// 白名单另一半：媒体本身必须挂在公开可见的资源上）。新增公开引用媒体的
+// 业务表时必须同步补到这里，否则已发布内容里的媒体会被网关 404。
+// 刻意排除 moderation_appeal_media（申诉私有）与 ranking_toy_submissions
+// （待审提交不公开）。
+const mediaPublicVisibilityExpr = `EXISTS (
+			SELECT 1 FROM post_media pm
+			JOIN posts p ON p.id = pm.post_id
+			WHERE pm.media_id = ma.id AND p.deleted_at IS NULL AND p.publication_status = 'published'
+		) OR EXISTS (
+			SELECT 1 FROM comment_media cm
+			JOIN comments c ON c.id = cm.comment_id
+			WHERE cm.media_id = ma.id AND c.deleted_at IS NULL AND c.publication_status = 'published'
+		) OR EXISTS (
+			SELECT 1 FROM user_profiles up
+			WHERE up.avatar_media_id = ma.id OR up.background_media_id = ma.id
+		) OR EXISTS (
+			SELECT 1 FROM activities act
+			WHERE act.cover_media_id = ma.id AND act.deleted_at IS NULL
+			  AND act.status IN ('upcoming', 'active', 'ended')
+		) OR EXISTS (
+			SELECT 1 FROM ranking_toys rt
+			WHERE rt.cover_media_id = ma.id OR rt.hero_media_id = ma.id
+		) OR EXISTS (
+			SELECT 1 FROM ranking_toy_comment_media rtcm
+			JOIN ranking_toy_comments rtc ON rtc.id = rtcm.comment_id
+			WHERE rtcm.media_id = ma.id AND rtc.deleted_at IS NULL
+		)`
+
+// parseGatewayMediaPath 解析 /api/v1/media-file/{mediaID}/{variant} 受控网关
+// 形态。客户端永远不需要知道内部 object key；首段必须是 media_ 前缀的媒体
+// ID，避免与 media/{userID}/{mediaID} 形态的历史 objectKey 混淆。
+func parseGatewayMediaPath(rest string) (mediaID, variant string, ok bool) {
+	segments := strings.Split(rest, "/")
+	if len(segments) != 2 {
+		return "", "", false
+	}
+	id, name := segments[0], segments[1]
+	if !strings.HasPrefix(id, "media_") || len(id) <= len("media_") {
+		return "", "", false
+	}
+	if !knownGatewayVariants[name] {
+		return "", "", false
+	}
+	return id, name, true
+}
+
+// isGatewayShapedPath 判断路径是否是“媒体 ID/变体”形态（无论变体名是否合法），
+// 用于把非法变体名的请求与历史 objectKey 区分开。
+func isGatewayShapedPath(rest string) bool {
+	segments := strings.Split(rest, "/")
+	if len(segments) != 2 {
+		return false
+	}
+	id := segments[0]
+	return strings.HasPrefix(id, "media_") && len(id) > len("media_")
+}
+
+// publicVariantAllowed 实现公开变体白名单：censored 媒体只放行 censored_*
+// 打码变体；普通媒体放行 original/detail/thumb；source 仅视频放行（其唯一
+// 可播放表示，且视频不支持打码）。其余一律拒绝。
+func publicVariantAllowed(mimeType, moderationStatus, variant string) bool {
+	if moderationStatus == "censored" {
+		return strings.HasPrefix(variant, "censored_")
+	}
+	if moderationStatus != "normal" {
+		return false
+	}
+	if variant == "source" {
+		return strings.HasPrefix(mimeType, "video/")
+	}
+	return publicImageVariants[variant]
+}
+
+// mediaCacheControl 保持既有缓存纪律：censored_* 打码变体是内容寻址的不可变
+// 对象，下发一年期 immutable；其余对象下发 private/no-store，避免之后切换为
+// censored 时浏览器/CDN 仍持有未打码内容。
+func mediaCacheControl(moderationStatus, variant string) string {
+	if moderationStatus == "censored" && strings.HasPrefix(variant, "censored_") {
+		return "public, max-age=31536000, immutable"
+	}
+	return "private, no-store"
+}
+
+// serveMediaFile 处理 GET/HEAD /api/v1/media-file/... 的媒体下载。
+//
+// 两种 URL 形态：
+//   - /api/v1/media-file/{mediaID}/{variant}：受控网关形态，客户端不接触内部
+//     object key，任何分发模式下都执行“默认拒绝 + 公开变体白名单 + 资源公开
+//     可见”校验；
+//   - /api/v1/media-file/{objectKey}：历史兜底形态。direct 模式维持原有
+//     censored 黑名单行为（bucket 尚未切私有时回滚安全），gateway 模式切换为
+//     默认拒绝：图片源图与非白名单变体一律 404，仅对尚未回填衍生图的存量
+//     公开媒体保留源图过渡豁免（跑完 cmd/media-backfill 后自动锁死）。
+//
+// censored_* 打码变体内容不可变（写入时经 SHA256 校验），下发一年期 immutable
+// 缓存头；受审核管理的对象下发 private/no-store。gateway 模式配置
+// MEDIA_INTERNAL_ACCEL_PREFIX 时通过 X-Accel-Redirect 把数据面交给 Nginx
+// internal location，Go 只做控制面鉴权。
+func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, rest string) {
 	backend := s.mediaStorage
 	if backend == nil {
 		writeAuthError(w, r, ErrStorageUnavailable)
 		return
 	}
+	if mediaID, variant, ok := parseGatewayMediaPath(rest); ok {
+		s.serveGatewayMediaVariant(w, r, backend, mediaID, variant)
+		return
+	}
+	// media_x/y 形态但变体名不在白名单：明确是网关形态的非法请求，直接 404，
+	// 不回退为 objectKey 解析（历史 objectKey 不会长成 media_ 前缀的两段式）。
+	if isGatewayShapedPath(rest) {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	if s.mediaDeliveryMode != "gateway" {
+		s.serveMediaFileDirect(w, r, backend, rest)
+		return
+	}
+	s.serveMediaFileGateway(w, r, backend, rest)
+}
 
+// gatewayAuthorizationReady 保证网关鉴权 fail-closed：没有数据库就无法校验
+// 公开性，直接拒绝而不是退化为公开兜底。
+func (s *Server) gatewayAuthorizationReady(w http.ResponseWriter, r *http.Request) bool {
+	if s.db == nil {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return false
+	}
+	return true
+}
+
+// serveGatewayMediaVariant 处理 {mediaID}/{variant} 形态：按媒体 ID 与变体名
+// 解析出对象后执行公开变体白名单与资源公开可见校验。
+func (s *Server) serveGatewayMediaVariant(w http.ResponseWriter, r *http.Request, backend mediaStorage, mediaID, variant string) {
+	if !s.gatewayAuthorizationReady(w, r) {
+		return
+	}
+	var mimeType, moderationStatus, objectKey string
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT ma.mime_type, COALESCE(ma.moderation_status, 'normal'), mv.object_key
+		FROM media_assets ma
+		JOIN media_variants mv ON mv.media_id = ma.id AND mv.variant = $2 AND mv.status = 'ready'
+		WHERE ma.id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
+		  AND `+mediaPublicVisibilityExpr, mediaID, variant).Scan(&mimeType, &moderationStatus, &objectKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if !publicVariantAllowed(mimeType, moderationStatus, variant) {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	s.serveAuthorizedMediaObject(w, r, backend, objectKey, mediaCacheControl(moderationStatus, variant))
+}
+
+// serveMediaFileGateway 处理 gateway 模式下的 {objectKey} 历史形态：先把
+// object key 解析回（媒体, 变体），再走同一套默认拒绝校验。
+func (s *Server) serveMediaFileGateway(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey string) {
+	if !s.gatewayAuthorizationReady(w, r) {
+		return
+	}
+	var mimeType, moderationStatus, variantName string
+	var hasProcessedVariants bool
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT ma.mime_type, COALESCE(ma.moderation_status, 'normal'),
+			COALESCE((SELECT mv.variant FROM media_variants mv
+				WHERE mv.media_id = ma.id AND mv.object_key = $1 AND mv.status = 'ready'
+				ORDER BY mv.variant LIMIT 1), ''),
+			EXISTS (SELECT 1 FROM media_variants pv
+				WHERE pv.media_id = ma.id AND pv.status = 'ready'
+				  AND pv.variant IN ('original', 'detail', 'thumb'))
+		FROM media_assets ma
+		WHERE ma.status = 'ready' AND ma.deleted_at IS NULL
+		  AND (ma.object_key = $1 OR EXISTS (SELECT 1 FROM media_variants kv
+				WHERE kv.media_id = ma.id AND kv.object_key = $1 AND kv.status = 'ready'))
+		  AND `+mediaPublicVisibilityExpr, objectKey).Scan(&mimeType, &moderationStatus, &variantName, &hasProcessedVariants)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if variantName != "" {
+		if !publicVariantAllowed(mimeType, moderationStatus, variantName) {
+			writeAuthError(w, r, ErrMediaNotFound)
+			return
+		}
+		s.serveAuthorizedMediaObject(w, r, backend, objectKey, mediaCacheControl(moderationStatus, variantName))
+		return
+	}
+	// 请求的是源对象：非 normal 状态（censored 等）与已生成衍生图的图片一律
+	// 拒绝；视频源是唯一可播放表示放行；尚未回填衍生图的存量图片源暂时放行
+	// （过渡豁免，media-backfill 后自动锁死）。
+	if moderationStatus != "normal" {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	if !strings.HasPrefix(mimeType, "video/") && hasProcessedVariants {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	s.serveAuthorizedMediaObject(w, r, backend, objectKey, "private, no-store")
+}
+
+// serveMediaFileDirect 维持 direct 模式的历史行为：免鉴权兜底与公开 Feed 对
+// 齐，仅拒绝 censored 媒体的源图与普通变体（黑名单），路径安全由存储层
+// objectPath 校验。
+func (s *Server) serveMediaFileDirect(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey string) {
 	// 安全保护：censored 媒体的源图永远不能通过通用媒体路由访问，包括
 	// 管理员。管理员必须使用 private/no-store 的 source 接口，从而避免
 	// 这个公开路由或共享 CDN 缓存住原图。
@@ -418,7 +639,26 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 			return
 		}
 	}
+	cacheControl := "public, max-age=31536000, immutable"
+	if managedSource {
+		// 普通状态的源图也不能被浏览器/CDN 长期缓存，否则之后切换为
+		// censored 时旧缓存仍可能继续展示未打码内容。
+		cacheControl = "private, no-store"
+	}
+	s.serveAuthorizedMediaObject(w, r, backend, objectKey, cacheControl)
+}
 
+// serveAuthorizedMediaObject 输出已通过鉴权校验的对象。gateway 模式配置了
+// MEDIA_INTERNAL_ACCEL_PREFIX 时只下发 X-Accel-Redirect，由 Nginx 承担字节流
+// （含 Range/条件请求）；否则回退 Go 进程内拉流，本地存储返回 ReadSeeker 时
+// 由 http.ServeContent 额外提供 Range 与条件请求支持。
+func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey, cacheControl string) {
+	if s.mediaDeliveryMode == "gateway" && s.mediaAccelPrefix != "" {
+		w.Header().Set("Cache-Control", cacheControl)
+		w.Header().Set("X-Accel-Redirect", s.mediaAccelPrefix+"/"+objectKey)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	rc, size, contentType, err := backend.Get(r.Context(), objectKey)
 	if err != nil {
 		switch {
@@ -432,13 +672,7 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 		return
 	}
 	defer rc.Close()
-	if managedSource {
-		// 普通状态的源图也不能被浏览器/CDN 长期缓存，否则之后切换为
-		// censored 时旧缓存仍可能继续展示未打码内容。
-		w.Header().Set("Cache-Control", "private, no-store")
-	} else {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	}
+	w.Header().Set("Cache-Control", cacheControl)
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}

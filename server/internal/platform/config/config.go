@@ -23,10 +23,17 @@ type Config struct {
 	AllowLegacyUsernameRegistration bool
 	TrustedProxyCIDRs               []string
 	MetricsAllowedCIDRs             []string
+	MediaDeliveryMode               string
+	MediaInternalAccelPrefix        string
 	AppReleaseManifestPath          string
 	AppReleasePublicBaseURL         string
 	AppReleaseDownloadBaseURL       string
 }
+
+const (
+	envMediaDeliveryGateway = "gateway"
+	envMediaDeliveryDirect  = "direct"
+)
 
 const (
 	envDevelopment = "development"
@@ -57,6 +64,8 @@ func Load() Config {
 		AllowLegacyUsernameRegistration: strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_LEGACY_USERNAME_REGISTRATION")), "true"),
 		TrustedProxyCIDRs:               splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
 		MetricsAllowedCIDRs:             splitCSV(os.Getenv("METRICS_ALLOWED_CIDRS")),
+		MediaDeliveryMode:               strings.ToLower(strings.TrimSpace(os.Getenv("MEDIA_DELIVERY_MODE"))),
+		MediaInternalAccelPrefix:        normalizeMediaAccelPrefix(os.Getenv("MEDIA_INTERNAL_ACCEL_PREFIX")),
 		AppReleaseManifestPath:          strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),
 		AppReleasePublicBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_PUBLIC_BASE_URL")), "/"),
 		AppReleaseDownloadBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_DOWNLOAD_BASE_URL")), "/"),
@@ -77,8 +86,24 @@ func (c Config) Validate() error {
 	if c.AllowLegacyUsernameRegistration && appEnv != envDevelopment && appEnv != envTest {
 		return fmt.Errorf("ALLOW_LEGACY_USERNAME_REGISTRATION is only allowed in development or test")
 	}
+	// 媒体分发模式是安全不变量：gateway（受控媒体网关，私有源站 + 默认拒绝）
+	// 与 direct（对象存储公开直链）互斥，未知取值一律拒绝启动。
+	switch c.MediaDeliveryMode {
+	case "", envMediaDeliveryDirect, envMediaDeliveryGateway:
+	default:
+		return fmt.Errorf("MEDIA_DELIVERY_MODE must be gateway or direct, got %q", c.MediaDeliveryMode)
+	}
+	if c.MediaDeliveryMode == envMediaDeliveryGateway && strings.TrimSpace(c.ObjectStoragePublicBaseURL) != "" {
+		return fmt.Errorf("MEDIA_DELIVERY_MODE=gateway forbids OBJECT_STORAGE_PUBLIC_BASE_URL; clients must receive gateway URLs only")
+	}
 	if appEnv != envProduction {
 		return nil
+	}
+	if c.MediaDeliveryMode == "" {
+		return fmt.Errorf("production requires MEDIA_DELIVERY_MODE=gateway or direct")
+	}
+	if c.MediaDeliveryMode == envMediaDeliveryGateway && strings.TrimSpace(os.Getenv("STORAGE_INTERNAL_BASE_URL")) == "" {
+		return fmt.Errorf("MEDIA_DELIVERY_MODE=gateway requires STORAGE_INTERNAL_BASE_URL for the internal origin link")
 	}
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("production requires DATABASE_URL")
@@ -106,17 +131,21 @@ func (c Config) Validate() error {
 	if parsed.Scheme != "https" {
 		return fmt.Errorf("OBJECT_STORAGE_UPLOAD_BASE_URL must use HTTPS in production")
 	}
-	publicURL := strings.TrimSpace(c.ObjectStoragePublicBaseURL)
-	if publicURL == "" {
-		return fmt.Errorf("production requires OBJECT_STORAGE_PUBLIC_BASE_URL")
-	}
-	parsedPublic, err := url.Parse(publicURL)
-	if err != nil || parsedPublic.Scheme == "" || parsedPublic.Host == "" ||
-		(parsedPublic.Scheme != "http" && parsedPublic.Scheme != "https") {
-		return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must be a complete HTTP(S) URL")
-	}
-	if parsedPublic.Scheme != "https" {
-		return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS in production")
+	// gateway 模式下客户端只应拿到网关 URL，公开直链前缀必须为空（已在上方
+	// 校验互斥）；direct 模式沿用公开直链不变量。
+	if c.MediaDeliveryMode != envMediaDeliveryGateway {
+		publicURL := strings.TrimSpace(c.ObjectStoragePublicBaseURL)
+		if publicURL == "" {
+			return fmt.Errorf("production requires OBJECT_STORAGE_PUBLIC_BASE_URL (or MEDIA_DELIVERY_MODE=gateway)")
+		}
+		parsedPublic, err := url.Parse(publicURL)
+		if err != nil || parsedPublic.Scheme == "" || parsedPublic.Host == "" ||
+			(parsedPublic.Scheme != "http" && parsedPublic.Scheme != "https") {
+			return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must be a complete HTTP(S) URL")
+		}
+		if parsedPublic.Scheme != "https" {
+			return fmt.Errorf("OBJECT_STORAGE_PUBLIC_BASE_URL must use HTTPS in production")
+		}
 	}
 	// STORAGE_INTERNAL_BASE_URL 只在服务端与存储服务之间的内网链路使用，
 	// 不进入客户端，允许按内网拓扑继续使用 HTTP。
@@ -167,6 +196,19 @@ func normalizeAppEnv(value string) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid APP_ENV %q", value)
 	}
+}
+
+// normalizeMediaAccelPrefix 规范 Nginx internal location 前缀：以 / 开头、
+// 不以 / 结尾；空值表示未启用 X-Accel-Redirect 数据面。
+func normalizeMediaAccelPrefix(value string) string {
+	prefix := strings.TrimSpace(value)
+	if prefix == "" {
+		return ""
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	return strings.TrimRight(prefix, "/")
 }
 
 func splitCSV(value string) []string {

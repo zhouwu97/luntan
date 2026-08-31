@@ -217,6 +217,8 @@ flutter build web --release --base-href=/forum/ \
 | `WEB_BASE_URL` | 分享链接域名，默认 `https://luntan.app` | 客户端 |
 | `MEDIA_STORAGE_DIR` | 本地媒体目录兜底（dev/QA），生产使用外部对象存储 | 服务端 |
 | `OBJECT_STORAGE_PUBLIC_BASE_URL` | ranking/imported 等明确公开资源的访问前缀；不得公开 `media/` 源图 | 服务端 |
+| `MEDIA_DELIVERY_MODE` | 媒体分发模式：`direct`（对象存储公开直链，要求 `OBJECT_STORAGE_PUBLIC_BASE_URL`）或 `gateway`（受控媒体网关，要求 `STORAGE_INTERNAL_BASE_URL` 且禁止 `OBJECT_STORAGE_PUBLIC_BASE_URL`）；production 必须显式指定，未知值拒绝启动 | 服务端 |
+| `MEDIA_INTERNAL_ACCEL_PREFIX` | gateway 模式下 Nginx internal location 前缀（如 `/_protected_media`），配置后媒体路由经 `X-Accel-Redirect` 交由 Nginx 承担字节流；留空回退 Go 进程内拉流 | 服务端 |
 | `OBJECT_STORAGE_UPLOAD_BASE_URL` / `OBJECT_STORAGE_SIGNING_SECRET` | 媒体上传地址与 HMAC 签名 | 服务端 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮箱验证码发送；生产缺失时 API 拒绝启动 | 服务端 |
 | `TRUSTED_PROXY_CIDRS` | 明确声明可信反向代理网段，服务端据此解析 `X-Forwarded-For` | 服务端 |

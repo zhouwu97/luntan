@@ -26,6 +26,14 @@ type Server struct {
 	webOrigin          string
 	authCodeHashSecret string
 	allowDevAuthCode   bool
+	// mediaDeliveryMode 控制 /api/v1/media-file 的鉴权模型：direct 维持
+	// “公开兜底 + censored 黑名单”的历史行为（回滚安全），gateway 切换为
+	// 默认拒绝 + 公开变体白名单的受控媒体网关。
+	mediaDeliveryMode string
+	// mediaAccelPrefix 非空且处于 gateway 模式时，媒体路由通过
+	// X-Accel-Redirect 把字节流交给 Nginx internal location（数据面），
+	// Go 只承担鉴权控制面。
+	mediaAccelPrefix string
 	// moderationSem 限制同步图片打码处理的并发数；超时的处理 goroutine 会
 	// 持有名额直到真正结束，防止僵尸解码任务无限堆积。
 	moderationSem chan struct{}
@@ -103,6 +111,8 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 		webOrigin:          configuredWebOrigin(),
 		authCodeHashSecret: configuredAuthCodeHashSecret(),
 		allowDevAuthCode:   devAuthCodeEnabled(appEnv),
+		mediaDeliveryMode:  mediaDeliveryModeFromEnv(),
+		mediaAccelPrefix:   mediaInternalAccelPrefixFromEnv(),
 		moderationSem:      make(chan struct{}, 2),
 	}
 }
@@ -139,6 +149,8 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 		webOrigin:          configuredWebOrigin(),
 		authCodeHashSecret: configuredAuthCodeHashSecret(),
 		allowDevAuthCode:   devAuthCodeEnabled(appEnv),
+		mediaDeliveryMode:  mediaDeliveryModeFromEnv(),
+		mediaAccelPrefix:   mediaInternalAccelPrefixFromEnv(),
 		moderationSem:      make(chan struct{}, 2),
 	}
 }
@@ -703,6 +715,25 @@ func appEnvironment() string {
 		return "development"
 	}
 	return normalizeAppEnvironment(value)
+}
+
+// mediaDeliveryModeFromEnv 读取媒体分发模式；空值与 "direct" 等价（历史行为），
+// "gateway" 启用默认拒绝的受控媒体网关。生产启动校验由 config.Validate 承担。
+func mediaDeliveryModeFromEnv() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("MEDIA_DELIVERY_MODE")))
+}
+
+// mediaInternalAccelPrefixFromEnv 读取 Nginx internal location 前缀；空值表示
+// 网关回退为 Go 进程内拉流。规范化为以 / 开头、不以 / 结尾。
+func mediaInternalAccelPrefixFromEnv() string {
+	prefix := strings.TrimSpace(os.Getenv("MEDIA_INTERNAL_ACCEL_PREFIX"))
+	if prefix == "" {
+		return ""
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	return strings.TrimRight(prefix, "/")
 }
 
 func normalizeAppEnvironment(value string) string {

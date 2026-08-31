@@ -111,7 +111,7 @@ func (s *Server) toggleBookmark(w http.ResponseWriter, r *http.Request, postID s
 			writeInternalError(w, r, err)
 			return
 		}
-	} else if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1`, postID); err != nil {
+	} else if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1 AND folder_id IN (SELECT id FROM bookmark_folders WHERE user_id = $2)`, postID, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

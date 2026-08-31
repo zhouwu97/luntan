@@ -145,6 +145,16 @@ func TestRegisteredCapabilitiesAllowPublishing(t *testing.T) {
 	}
 }
 
+func TestCapabilityAggregationNeverDowngradesManageUsers(t *testing.T) {
+	caps := capabilitiesForUser(auth.User{ID: "multi-role-1", AccountType: "email"})
+	applyPermissionCapability(caps, "platform_admin", "user.manage")
+	// 数据库返回的角色行没有顺序保证：后应用的低权限角色不能把已授予的能力回写为 false。
+	applyPermissionCapability(caps, "moderator", "user.manage")
+	if !caps[capManageUsers] {
+		t.Fatal("多角色聚合后 can_manage_users 不能被后续角色覆盖回 false")
+	}
+}
+
 func TestActiveMuteRemovesCommentCapabilityAndExposesExpiry(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

@@ -93,7 +93,8 @@ func applyPermissionCapability(caps map[string]bool, role, permission string) {
 			caps[capBanIP] = true
 		}
 	case "user.manage":
-		caps[capManageUsers] = role == "platform_admin" || role == "super_admin"
+		// 多角色聚合时行序不定，capability 只能从 false → true 累积，不能被回写。
+		caps[capManageUsers] = caps[capManageUsers] || role == "platform_admin" || role == "super_admin"
 	}
 	if role == "super_admin" {
 		caps[capManageAdmins] = true

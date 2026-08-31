@@ -352,10 +352,12 @@ func (s *Server) deleteBookmarkFolder(w http.ResponseWriter, r *http.Request, fo
 		FROM bookmark_folder_items old
 		WHERE old.folder_id = $2
 		  AND NOT EXISTS (
-			SELECT 1 FROM bookmark_folder_items other
-			WHERE other.post_id = old.post_id AND other.folder_id <> $2
+			SELECT 1
+			FROM bookmark_folder_items other
+			JOIN bookmark_folders f ON f.id = other.folder_id
+			WHERE other.post_id = old.post_id AND other.folder_id <> $2 AND f.user_id = $3
 		  )
-		ON CONFLICT (folder_id, post_id) DO NOTHING`, defaultID, folderID); err != nil {
+		ON CONFLICT (folder_id, post_id) DO NOTHING`, defaultID, folderID, user.ID); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -556,7 +558,7 @@ func (s *Server) setPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 			writeInternalError(w, r, err)
 			return
 		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1`, postID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1 AND folder_id IN (SELECT id FROM bookmark_folders WHERE user_id = $2)`, postID, user.ID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -571,7 +573,7 @@ func (s *Server) setPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 			writeInternalError(w, r, err)
 			return
 		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1`, postID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM bookmark_folder_items WHERE post_id = $1 AND folder_id IN (SELECT id FROM bookmark_folders WHERE user_id = $2)`, postID, user.ID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

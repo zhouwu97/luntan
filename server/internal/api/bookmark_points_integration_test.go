@@ -348,3 +348,160 @@ func TestAwardPointsTxIsIdempotentAgainstConcurrentTransactionsAgainstPostgres(t
 		t.Fatalf("同一积分事件生成 %d 条流水，want 1", transactionCount)
 	}
 }
+
+// TestBookmarkDeleteOnlyTouchesOwnFoldersAgainstPostgres 验证取消收藏、清空/重分配收藏夹
+// 和删除自定义收藏夹只触达当前用户自己的数据，不能影响其他用户在同一帖子上的收藏。
+func TestBookmarkDeleteOnlyTouchesOwnFoldersAgainstPostgres(t *testing.T) {
+	server, db, userA, postID := businessIntegrationFixture(t, PointRewardRules{})
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userB, err := auth.NewService(db).Register(context.Background(), auth.RegisterInput{
+		Username: "biz_integration_b_" + suffix,
+		Password: "安全密码12345",
+		Nickname: "跨用户收藏集成B",
+	}, auth.SessionMetadata{UserAgent: "bookmark-points-integration", IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, query := range []string{
+			`DELETE FROM bookmark_folders WHERE user_id = $1`,
+			`DELETE FROM bookmarks WHERE user_id = $1`,
+			`DELETE FROM point_transactions WHERE user_id = $1`,
+			`DELETE FROM refresh_tokens WHERE user_id = $1`,
+			`DELETE FROM sessions WHERE user_id = $1`,
+			`DELETE FROM user_auth_methods WHERE user_id = $1`,
+			`DELETE FROM user_profiles WHERE user_id = $1`,
+			`DELETE FROM users WHERE id = $1`,
+		} {
+			if _, err := db.Exec(query, userB.User.ID); err != nil {
+				t.Logf("清理B用户数据失败 query=%q err=%v", query, err)
+			}
+		}
+	})
+
+	defaultFolderOf := func(token string) string {
+		t.Helper()
+		status, body := callBusinessAPI(server, http.MethodGet, "/api/v1/me/bookmark-folders", token, nil, nil)
+		if status != http.StatusOK {
+			t.Fatalf("读取收藏夹 status=%d body=%s", status, body)
+		}
+		var response struct {
+			Items []struct {
+				ID        string `json:"id"`
+				IsDefault bool   `json:"is_default"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatal(err)
+		}
+		for _, folder := range response.Items {
+			if folder.IsDefault {
+				return folder.ID
+			}
+		}
+		t.Fatal("没有默认收藏夹")
+		return ""
+	}
+	folderItems := func(folderID string) int {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM bookmark_folder_items WHERE folder_id = $1 AND post_id = $2`, folderID, postID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	bookmarkFact := func(userID string) int {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM bookmarks WHERE post_id = $1 AND user_id = $2`, postID, userID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	postBookmarkCount := func() int {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT bookmark_count FROM posts WHERE id = $1`, postID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+
+	defaultA := defaultFolderOf(userA.AccessToken)
+	folderB := createBusinessFolder(t, server, userB.AccessToken, "B的自定义夹", "folder-b-"+postID)
+
+	// A、B 各自收藏同一帖子：A 进默认夹，B 放进自定义夹。
+	if status, body := callBusinessAPI(server, http.MethodPut, "/api/v1/posts/"+postID+"/bookmark", userA.AccessToken, nil, nil); status != http.StatusOK {
+		t.Fatalf("A 收藏 status=%d body=%s", status, body)
+	}
+	if status, body := callBusinessAPI(server, http.MethodPut, "/api/v1/posts/"+postID+"/bookmark-folders", userB.AccessToken, map[string]any{"folder_ids": []string{folderB}}, nil); status != http.StatusOK {
+		t.Fatalf("B 分配收藏夹 status=%d body=%s", status, body)
+	}
+	if got := bookmarkFact(userA.User.ID); got != 1 {
+		t.Fatalf("A 收藏事实=%d, want 1", got)
+	}
+	if got := bookmarkFact(userB.User.ID); got != 1 {
+		t.Fatalf("B 收藏事实=%d, want 1", got)
+	}
+	if got := postBookmarkCount(); got != 2 {
+		t.Fatalf("bookmark_count=%d, want 2", got)
+	}
+
+	// A 取消收藏：只清 A 自己的 folder_items，B 的收藏与夹内关系必须原样。
+	if status, body := callBusinessAPI(server, http.MethodDelete, "/api/v1/posts/"+postID+"/bookmark", userA.AccessToken, nil, nil); status != http.StatusOK {
+		t.Fatalf("A 取消收藏 status=%d body=%s", status, body)
+	}
+	if got := bookmarkFact(userA.User.ID); got != 0 {
+		t.Fatalf("A 取消后收藏事实=%d, want 0", got)
+	}
+	if got := folderItems(defaultA); got != 0 {
+		t.Fatalf("A 取消后默认夹条目=%d, want 0", got)
+	}
+	if got := bookmarkFact(userB.User.ID); got != 1 {
+		t.Fatalf("B 收藏事实被 A 的取消操作破坏=%d, want 1", got)
+	}
+	if got := folderItems(folderB); got != 1 {
+		t.Fatalf("B 自定义夹条目被 A 的取消操作破坏=%d, want 1", got)
+	}
+	if got := postBookmarkCount(); got != 1 {
+		t.Fatalf("A 取消后 bookmark_count=%d, want 1", got)
+	}
+
+	// A 重新收藏后再走 PUT 清空路径，同样不能波及 B。
+	if status, body := callBusinessAPI(server, http.MethodPut, "/api/v1/posts/"+postID+"/bookmark", userA.AccessToken, nil, nil); status != http.StatusOK {
+		t.Fatalf("A 再次收藏 status=%d body=%s", status, body)
+	}
+	if status, body := callBusinessAPI(server, http.MethodPut, "/api/v1/posts/"+postID+"/bookmark-folders", userA.AccessToken, map[string]any{"folder_ids": []string{}}, nil); status != http.StatusOK {
+		t.Fatalf("A 清空收藏夹 status=%d body=%s", status, body)
+	}
+	if got := bookmarkFact(userA.User.ID); got != 0 {
+		t.Fatalf("A 清空后收藏事实=%d, want 0", got)
+	}
+	if got := folderItems(folderB); got != 1 {
+		t.Fatalf("B 自定义夹条目被 A 的清空操作破坏=%d, want 1", got)
+	}
+
+	// 删除 A 的自定义收藏夹时，B 是否收藏过该帖不能阻止 A 的帖子回迁默认夹。
+	folderA := createBusinessFolder(t, server, userA.AccessToken, "A的自定义夹", "folder-a-"+postID)
+	if status, body := callBusinessAPI(server, http.MethodPut, "/api/v1/posts/"+postID+"/bookmark", userA.AccessToken, nil, nil); status != http.StatusOK {
+		t.Fatalf("A 第三次收藏 status=%d body=%s", status, body)
+	}
+	if status, body := callBusinessAPI(server, http.MethodPut, "/api/v1/posts/"+postID+"/bookmark-folders", userA.AccessToken, map[string]any{"folder_ids": []string{folderA}}, nil); status != http.StatusOK {
+		t.Fatalf("A 移入自定义夹 status=%d body=%s", status, body)
+	}
+	if got := folderItems(defaultA); got != 0 {
+		t.Fatalf("A 移入自定义夹后默认夹条目=%d, want 0", got)
+	}
+	if status, body := callBusinessAPI(server, http.MethodDelete, "/api/v1/me/bookmark-folders/"+folderA, userA.AccessToken, nil, nil); status != http.StatusNoContent {
+		t.Fatalf("A 删除自定义夹 status=%d body=%s", status, body)
+	}
+	if got := bookmarkFact(userA.User.ID); got != 1 {
+		t.Fatalf("删除收藏夹不应取消收藏事实=%d, want 1", got)
+	}
+	if got := folderItems(defaultA); got != 1 {
+		t.Fatalf("帖子没有回迁到 A 的默认夹，条目=%d, want 1", got)
+	}
+	if got := folderItems(folderB); got != 1 {
+		t.Fatalf("B 自定义夹条目被 A 的删夹操作破坏=%d, want 1", got)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -676,7 +677,9 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 		WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND u.deleted_at IS NULL
 		FOR UPDATE OF rt`, tokenHash(refreshToken)).Scan(&oldRefreshID, &sessionID, &user.ID, &user.Username, &user.Status, &user.Nickname, &user.Level, &user.Experience, &user.AccountType, &user.Email, &user.EmailVerified, &verifiedAt, &expiresAt, &user.HasPassword)
 	if errors.Is(err, sql.ErrNoRows) {
-		return AuthResponse{}, ErrInvalidToken
+		// 主查询只匹配未撤销 token；无命中时先排除“旧 token 重放”，
+		// 重放意味着整个 session 族已泄漏，需要整体撤销。
+		return AuthResponse{}, s.revokeSessionOnReplay(ctx, tx, tokenHash(refreshToken), metadata)
 	}
 	if err != nil {
 		return AuthResponse{}, err
@@ -718,6 +721,46 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, metadata Ses
 		return AuthResponse{}, err
 	}
 	return AuthResponse{TokenPair: TokenPair{AccessToken: accessToken, RefreshToken: newRefreshToken, TokenType: "Bearer", ExpiresIn: int64(accessTokenLifetime.Seconds())}, User: user}, nil
+}
+
+// revokeSessionOnReplay 处理“已撤销的 refresh token 再次出现”。同一 session
+// 即同一设备族，重放意味着该族已泄漏：整个 session 与其全部 refresh token
+// 都要撤销，写入风险事件后按无效 token 返回。
+func (s *Service) revokeSessionOnReplay(ctx context.Context, tx *sql.Tx, hashedToken string, metadata SessionMetadata) error {
+	var (
+		sessionID string
+		userID    string
+		revokedAt sql.NullTime
+	)
+	err := tx.QueryRowContext(ctx, `SELECT session_id, user_id, revoked_at FROM refresh_tokens WHERE token_hash = $1`, hashedToken).Scan(&sessionID, &userID, &revokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrInvalidToken
+	}
+	if err != nil {
+		return err
+	}
+	if !revokedAt.Valid {
+		// token 未被撤销但主查询未命中：多为用户被删除等状态变化，按无效返回。
+		return ErrInvalidToken
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, now()), last_used_at = now() WHERE session_id = $1 AND revoked_at IS NULL`, sessionID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND revoked_at IS NULL`, sessionID); err != nil {
+		return err
+	}
+	metadataJSON, err := json.Marshal(map[string]any{"session_id": sessionID})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO risk_events (id, user_id, event_type, severity, ip_address, metadata, created_at) VALUES ($1, $2, 'refresh_token_replay', 'high', $3, $4::jsonb, now())`, newID("risk"), userID, metadata.IPAddress, string(metadataJSON)); err != nil {
+		return err
+	}
+	// Refresh 的 defer tx.Rollback() 会吞掉上述撤销动作，必须显式提交。
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return ErrInvalidToken
 }
 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {

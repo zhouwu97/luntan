@@ -25,6 +25,8 @@ var (
 	ErrEmailCodeExpired   = errors.New("email code expired")
 	ErrEmailCodeRateLimit = errors.New("email code rate limited")
 	ErrMailUnavailable    = errors.New("mail service unavailable")
+
+	ErrLegacyRegistrationDisabled = errors.New("legacy username registration is disabled")
 )
 
 const emailCodeLifetime = 10 * time.Minute

@@ -68,6 +68,48 @@ func TestRegisterRejectsWeakPasswordBeforeDatabaseAccess(t *testing.T) {
 	}
 }
 
+func TestLegacyUsernameRegistrationDisabledInProduction(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("ALLOW_LEGACY_USERNAME_REGISTRATION", "")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(`{"username":"legacy_user","password":"安全密码12345"}`))
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden || !strings.Contains(res.Body.String(), `"code":"LEGACY_REGISTRATION_DISABLED"`) {
+		t.Fatalf("legacy register response: status=%d body=%s", res.Code, res.Body.String())
+	}
+	// 关闭的入口不允许触达数据库。
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLegacyUsernameRegistrationExplicitOverride(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("ALLOW_LEGACY_USERNAME_REGISTRATION", "true")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// 显式开启时进入 legacy 分支，弱密码仍由服务层拒绝（403 开关放行后才触达）。
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", strings.NewReader(`{"username":"legacy_user","password":"安全密码12345"}`))
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code == http.StatusForbidden {
+		t.Fatalf("显式开启后不应再返回 403: body=%s", res.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreatePostRequiresBearerToken(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

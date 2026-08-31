@@ -8,23 +8,24 @@ import (
 )
 
 type Config struct {
-	AppEnv                     string
-	HTTPPort                   string
-	DatabaseURL                string
-	LogLevel                   string
-	RedisURL                   string
-	ObjectStorageUploadBaseURL string
-	ObjectStoragePublicBaseURL string
-	ObjectStorageSigningSecret string
-	AuthCodeHashSecret         string
-	WebOrigin                  string
-	RateLimitEnabled           bool
-	AllowDevAuthCode           bool
-	TrustedProxyCIDRs          []string
-	MetricsAllowedCIDRs        []string
-	AppReleaseManifestPath     string
-	AppReleasePublicBaseURL    string
-	AppReleaseDownloadBaseURL  string
+	AppEnv                          string
+	HTTPPort                        string
+	DatabaseURL                     string
+	LogLevel                        string
+	RedisURL                        string
+	ObjectStorageUploadBaseURL      string
+	ObjectStoragePublicBaseURL      string
+	ObjectStorageSigningSecret      string
+	AuthCodeHashSecret              string
+	WebOrigin                       string
+	RateLimitEnabled                bool
+	AllowDevAuthCode                bool
+	AllowLegacyUsernameRegistration bool
+	TrustedProxyCIDRs               []string
+	MetricsAllowedCIDRs             []string
+	AppReleaseManifestPath          string
+	AppReleasePublicBaseURL         string
+	AppReleaseDownloadBaseURL       string
 }
 
 const (
@@ -41,23 +42,24 @@ func Load() Config {
 		appEnv = normalized
 	}
 	return Config{
-		AppEnv:                     appEnv,
-		HTTPPort:                   valueOrDefault("HTTP_PORT", "8080"),
-		DatabaseURL:                os.Getenv("DATABASE_URL"),
-		LogLevel:                   valueOrDefault("LOG_LEVEL", "info"),
-		RedisURL:                   os.Getenv("REDIS_URL"),
-		ObjectStorageUploadBaseURL: os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"),
-		ObjectStoragePublicBaseURL: os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL"),
-		ObjectStorageSigningSecret: os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
-		AuthCodeHashSecret:         strings.TrimSpace(os.Getenv("AUTH_CODE_HASH_SECRET")),
-		WebOrigin:                  strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
-		RateLimitEnabled:           strings.EqualFold(strings.TrimSpace(os.Getenv("RATE_LIMIT_ENABLED")), "true"),
-		AllowDevAuthCode:           strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEV_AUTH_CODE")), "true"),
-		TrustedProxyCIDRs:          splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
-		MetricsAllowedCIDRs:        splitCSV(os.Getenv("METRICS_ALLOWED_CIDRS")),
-		AppReleaseManifestPath:     strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),
-		AppReleasePublicBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_PUBLIC_BASE_URL")), "/"),
-		AppReleaseDownloadBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_DOWNLOAD_BASE_URL")), "/"),
+		AppEnv:                          appEnv,
+		HTTPPort:                        valueOrDefault("HTTP_PORT", "8080"),
+		DatabaseURL:                     os.Getenv("DATABASE_URL"),
+		LogLevel:                        valueOrDefault("LOG_LEVEL", "info"),
+		RedisURL:                        os.Getenv("REDIS_URL"),
+		ObjectStorageUploadBaseURL:      os.Getenv("OBJECT_STORAGE_UPLOAD_BASE_URL"),
+		ObjectStoragePublicBaseURL:      os.Getenv("OBJECT_STORAGE_PUBLIC_BASE_URL"),
+		ObjectStorageSigningSecret:      os.Getenv("OBJECT_STORAGE_SIGNING_SECRET"),
+		AuthCodeHashSecret:              strings.TrimSpace(os.Getenv("AUTH_CODE_HASH_SECRET")),
+		WebOrigin:                       strings.TrimSpace(os.Getenv("WEB_ORIGIN")),
+		RateLimitEnabled:                strings.EqualFold(strings.TrimSpace(os.Getenv("RATE_LIMIT_ENABLED")), "true"),
+		AllowDevAuthCode:                strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEV_AUTH_CODE")), "true"),
+		AllowLegacyUsernameRegistration: strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_LEGACY_USERNAME_REGISTRATION")), "true"),
+		TrustedProxyCIDRs:               splitCSV(os.Getenv("TRUSTED_PROXY_CIDRS")),
+		MetricsAllowedCIDRs:             splitCSV(os.Getenv("METRICS_ALLOWED_CIDRS")),
+		AppReleaseManifestPath:          strings.TrimSpace(os.Getenv("APP_RELEASE_MANIFEST_PATH")),
+		AppReleasePublicBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_PUBLIC_BASE_URL")), "/"),
+		AppReleaseDownloadBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("APP_RELEASE_DOWNLOAD_BASE_URL")), "/"),
 	}
 }
 
@@ -71,6 +73,9 @@ func (c Config) Validate() error {
 	}
 	if c.AllowDevAuthCode && appEnv != envDevelopment && appEnv != envTest {
 		return fmt.Errorf("ALLOW_DEV_AUTH_CODE is only allowed in development or test")
+	}
+	if c.AllowLegacyUsernameRegistration && appEnv != envDevelopment && appEnv != envTest {
+		return fmt.Errorf("ALLOW_LEGACY_USERNAME_REGISTRATION is only allowed in development or test")
 	}
 	if appEnv != envProduction {
 		return nil

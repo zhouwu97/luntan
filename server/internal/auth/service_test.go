@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -80,6 +81,50 @@ func TestLogoutRevokesRefreshTokenAndItsSessionIdempotently(t *testing.T) {
 
 	if err := NewService(db).Logout(context.Background(), "refresh-token"); err != nil {
 		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshReplayRevokesSession(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	// 主查询只匹配未撤销 token：模拟旧 token 被轮换撤销后的重放。
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username)`)).WithArgs(sqlmock.AnyArg()).WillReturnError(sql.ErrNoRows)
+	// 重放检测按 token hash 复查（包含已撤销行）。
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT session_id, user_id, revoked_at FROM refresh_tokens WHERE token_hash = $1`)).WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "user_id", "revoked_at"}).AddRow("ses_1", "user_1", time.Now().UTC()))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, now()), last_used_at = now() WHERE session_id = $1 AND revoked_at IS NULL`)).WithArgs("ses_1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1 AND revoked_at IS NULL`)).WithArgs("ses_1").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO risk_events`)).WithArgs(sqlmock.AnyArg(), "user_1", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	_, err = NewService(db).Refresh(context.Background(), "replayed-refresh-token", SessionMetadata{UserAgent: "ua", IPAddress: "192.0.2.9"})
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("replayed refresh error = %v, want ErrInvalidToken", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRefreshUnknownTokenReturnsInvalidWithoutSideEffects(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT rt.id, rt.session_id, u.id, u.username, u.status, COALESCE(up.nickname, u.username)`)).WithArgs(sqlmock.AnyArg()).WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT session_id, user_id, revoked_at FROM refresh_tokens WHERE token_hash = $1`)).WithArgs(sqlmock.AnyArg()).WillReturnError(sql.ErrNoRows)
+
+	if _, err := NewService(db).Refresh(context.Background(), "unknown-token", SessionMetadata{}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("unknown token error = %v, want ErrInvalidToken", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

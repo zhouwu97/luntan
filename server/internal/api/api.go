@@ -655,7 +655,11 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 兼容旧 username + password 注册
+	// 兼容旧 username + password 注册；生产环境默认关闭，防止绕过邮箱验证码批量造号。
+	if !legacyRegistrationEnabled(appEnvironment()) {
+		writeAuthError(w, r, ErrLegacyRegistrationDisabled)
+		return
+	}
 	response, err := s.authService.Register(r.Context(), auth.RegisterInput{
 		Username: input.Username,
 		Password: input.Password,
@@ -702,6 +706,18 @@ func devAuthCodeEnabled(appEnv string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_DEV_AUTH_CODE")), "true")
+}
+
+// legacyRegistrationEnabled 控制无邮箱验证码的旧 username 注册入口：
+// 显式配置优先；未配置时开发/测试环境默认允许，其余环境（含生产）默认关闭。
+func legacyRegistrationEnabled(appEnv string) bool {
+	switch strings.TrimSpace(strings.ToLower(os.Getenv("ALLOW_LEGACY_USERNAME_REGISTRATION"))) {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	return appEnv == "development" || appEnv == "test"
 }
 
 func isAdministrativePath(path string) bool {
@@ -974,6 +990,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusTooManyRequests, Code: "EMAIL_CODE_RATE_LIMITED", Message: "验证码发送太频繁，请稍后再试"}
 	case errors.Is(err, ErrMailUnavailable):
 		appErr = httpserver.AppError{Status: http.StatusServiceUnavailable, Code: "MAIL_UNAVAILABLE", Message: "邮件服务暂时不可用"}
+	case errors.Is(err, ErrLegacyRegistrationDisabled):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "LEGACY_REGISTRATION_DISABLED", Message: "当前环境已关闭用户名注册，请使用邮箱验证码注册"}
 	case errors.Is(err, auth.ErrInvalidToken):
 		appErr = httpserver.AppError{Status: http.StatusUnauthorized, Code: "INVALID_TOKEN", Message: "登录状态已失效"}
 	case errors.Is(err, auth.ErrUserDisabled):

@@ -41,6 +41,7 @@ func TestRefreshRotatesTokenAgainstPostgres(t *testing.T) {
 	t.Cleanup(func() {
 		// 测试用户没有业务数据，按外键依赖顺序清理即可。
 		for _, query := range []string{
+			`DELETE FROM risk_events WHERE user_id = $1`,
 			`DELETE FROM refresh_tokens WHERE user_id = $1`,
 			`DELETE FROM sessions WHERE user_id = $1`,
 			`DELETE FROM user_auth_methods WHERE user_id = $1`,
@@ -80,8 +81,43 @@ func TestRefreshRotatesTokenAgainstPostgres(t *testing.T) {
 		t.Fatalf("replaced_by_id = %q, want %q", replacedBy, replacementID)
 	}
 
+	// 旧 token 重放：判定该 session 族泄漏，整个 session（含最新 token）都应被撤销。
 	if _, err := NewService(db).Refresh(context.Background(), response.RefreshToken, SessionMetadata{}); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("reusing the old refresh token error = %v, want ErrInvalidToken", err)
+	}
+	sessionIDOf := func(tokenHashValue string) string {
+		t.Helper()
+		var sessionID string
+		if err := db.QueryRow(`SELECT session_id FROM refresh_tokens WHERE token_hash = $1`, tokenHashValue).Scan(&sessionID); err != nil {
+			t.Fatal(err)
+		}
+		return sessionID
+	}
+	familySessionID := sessionIDOf(tokenHash(rotated.RefreshToken))
+	var pendingTokens int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE session_id = $1 AND revoked_at IS NULL`, familySessionID).Scan(&pendingTokens); err != nil {
+		t.Fatal(err)
+	}
+	if pendingTokens != 0 {
+		t.Fatalf("重放后该 session 仍有 %d 个未撤销的 refresh token", pendingTokens)
+	}
+	var activeSessions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE id = $1 AND revoked_at IS NULL`, familySessionID).Scan(&activeSessions); err != nil {
+		t.Fatal(err)
+	}
+	if activeSessions != 0 {
+		t.Fatal("重放后 session 未被撤销")
+	}
+	var riskEvents int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM risk_events WHERE event_type = 'refresh_token_replay' AND metadata->>'session_id' = $1`, familySessionID).Scan(&riskEvents); err != nil {
+		t.Fatal(err)
+	}
+	if riskEvents == 0 {
+		t.Fatal("重放未写入 risk_events 审计")
+	}
+	// 重放后连最新的 refresh token 也必须失效。
+	if _, err := NewService(db).Refresh(context.Background(), rotated.RefreshToken, SessionMetadata{}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("重放撤销后最新 token 也应失效: %v", err)
 	}
 }
 

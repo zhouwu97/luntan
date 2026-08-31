@@ -384,6 +384,7 @@ class AdminSummary {
     required this.roles,
     required this.actionCount,
     this.lastActionAt,
+    this.avatarUrl,
   });
 
   final String id;
@@ -394,6 +395,7 @@ class AdminSummary {
   final List<String> roles;
   final int actionCount;
   final DateTime? lastActionAt;
+  final String? avatarUrl;
 }
 
 class AdminCandidate {
@@ -402,12 +404,14 @@ class AdminCandidate {
     required this.username,
     required this.nickname,
     required this.email,
+    this.avatarUrl,
   });
 
   final String id;
   final String username;
   final String nickname;
   final String email;
+  final String? avatarUrl;
 }
 
 class ManagedUserPage {
@@ -1102,6 +1106,7 @@ class PlatformRepository {
             : const <String>[],
         actionCount: _int(value['action_count']),
         lastActionAt: _nullableDate(value['last_action_at']),
+        avatarUrl: _nullableString(value['avatar_url']),
       );
     }).toList();
   }
@@ -1120,6 +1125,7 @@ class PlatformRepository {
         username: _string(value['username']),
         nickname: _string(value['nickname']),
         email: _string(value['email']),
+        avatarUrl: _nullableString(value['avatar_url']),
       );
     }).toList();
   }

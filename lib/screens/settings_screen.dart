@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'app_update_sheet.dart';
 import '../controllers/app_update_coordinator.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 
 /// 个人中心的完整设置页。
 ///
@@ -15,6 +16,8 @@ class SettingsCenterScreen extends StatelessWidget {
     required this.onFeedback,
     this.isGuest = false,
     this.accountSubtitle,
+    this.accountDisplayName,
+    this.accountAvatarUrl,
     this.onRequireAuth,
     this.onOpenGovernance,
     this.onOpenAppeals,
@@ -29,6 +32,8 @@ class SettingsCenterScreen extends StatelessWidget {
   final ValueChanged<String> onFeedback;
   final bool isGuest;
   final String? accountSubtitle;
+  final String? accountDisplayName;
+  final String? accountAvatarUrl;
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenGovernance;
   final VoidCallback? onOpenAppeals;
@@ -66,6 +71,8 @@ class SettingsCenterScreen extends StatelessWidget {
             isGuest: isGuest,
             email: email,
             isVerified: isEmailVerified,
+            avatarUrl: accountAvatarUrl,
+            displayName: accountDisplayName ?? '圣',
             onTap: isGuest ? onRequireAuth : null,
           ),
           const SizedBox(height: 16),
@@ -373,16 +380,24 @@ class _AccountHeaderCard extends StatelessWidget {
     required this.isGuest,
     required this.email,
     required this.isVerified,
+    this.avatarUrl,
+    this.displayName = '圣',
     this.onTap,
   });
 
   final bool isGuest;
   final String email;
   final bool isVerified;
+  final String? avatarUrl;
+  final String displayName;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final fallbackChar = isGuest
+        ? '游'
+        : (displayName.trim().isNotEmpty ? displayName.trim().characters.first : '圣');
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -401,31 +416,37 @@ class _AccountHeaderCard extends StatelessWidget {
             child: Row(
               children: [
                 // 头像
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF6F9FFF), Color(0xFF5483ED)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primary.withValues(alpha: 0.25),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: AppNetworkImage(
+                      url: avatarUrl,
+                      width: 44,
+                      height: 44,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_) => Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF6F9FFF), Color(0xFF5483ED)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          fallbackChar,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 18,
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    isGuest ? '游' : '圣',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
                     ),
                   ),
                 ),

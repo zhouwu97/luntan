@@ -253,15 +253,20 @@ class ProfileScreen extends StatelessWidget {
                   final userPosts = store.posts
                       .where((p) => p.authorId == (currentUserId ?? ''))
                       .toList();
+                  final email = currentUser?.email?.trim();
+                  final accountLabel = (email != null && email.isNotEmpty)
+                      ? email
+                      : (isGuest ? '未登录游客' : _safePublicAccountLabel(null, currentUser?.username ?? ''));
                   return _ProfileCard(
                     nickname: currentUser?.nickname.isNotEmpty == true
                         ? currentUser!.nickname
                         : '游客',
                     username: currentUser?.username ?? 'guest_user',
+                    accountLabel: accountLabel,
                     level: effectiveLevel,
                     trustLevel: 'new',
                     signature: '还没有个性签名，点进主页完善资料',
-                    avatarUrl: null,
+                    avatarUrl: currentUser?.avatarUrl,
                     postCount: userPosts.length,
                     commentCount: 0,
                     followerCount: 0,
@@ -371,6 +376,8 @@ class ProfileScreen extends StatelessWidget {
       MaterialPageRoute<void>(
         builder: (_) => SettingsCenterScreen(
           isGuest: isGuest,
+          accountDisplayName: currentUser?.nickname,
+          accountAvatarUrl: currentUser?.avatarUrl,
           accountSubtitle:
               currentUser?.email ?? (isApiMode ? '未登录 · 游客体验' : null),
           onRequireAuth: onRequireAuth,
@@ -743,37 +750,44 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     },
   );
 
-  Widget _content(ProfileSummary profile) => Scaffold(
-    body: SafeArea(
-      bottom: false,
-      child: RefreshIndicator(
-        onRefresh: _refresh,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-          children: [
-            _ProfileTopbar(
-              onMessages: widget.onOpenMessages,
-              onSettings: () => _showSettings(context),
-            ),
-            const SizedBox(height: 14),
-            _ProfileCard(
-              nickname: profile.nickname.isNotEmpty ? profile.nickname : '游客',
-              username: profile.username,
-              level: profile.level,
-              trustLevel: profile.trustLevel,
-              signature: profile.signature.isNotEmpty
-                  ? profile.signature
-                  : '还没有个性签名，点进主页完善资料',
-              avatarUrl: profile.avatarUrl,
-              postCount: profile.postCount,
-              commentCount: profile.commentCount,
-              followerCount: profile.followerCount,
-              followingCount: profile.followingCount,
-              isGuest: widget.isGuest,
-              experience: profile.experience,
-              onRequireAuth: widget.onRequireAuth,
-              onTapEntry: () => _openHomepage(profile),
-              onTapStat: (label) {
+  Widget _content(ProfileSummary profile) {
+    final email = widget.currentUser?.email?.trim();
+    final accountLabel = (email != null && email.isNotEmpty)
+        ? email
+        : _safePublicAccountLabel(profile.publicId, profile.username);
+
+    return Scaffold(
+      body: SafeArea(
+        bottom: false,
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+            children: [
+              _ProfileTopbar(
+                onMessages: widget.onOpenMessages,
+                onSettings: () => _showSettings(context, profile),
+              ),
+              const SizedBox(height: 14),
+              _ProfileCard(
+                nickname: profile.nickname.isNotEmpty ? profile.nickname : '游客',
+                username: profile.username,
+                accountLabel: accountLabel,
+                level: profile.level,
+                trustLevel: profile.trustLevel,
+                signature: profile.signature.isNotEmpty
+                    ? profile.signature
+                    : '还没有个性签名，点进主页完善资料',
+                avatarUrl: profile.avatarUrl,
+                postCount: profile.postCount,
+                commentCount: profile.commentCount,
+                followerCount: profile.followerCount,
+                followingCount: profile.followingCount,
+                isGuest: widget.isGuest,
+                experience: profile.experience,
+                onRequireAuth: widget.onRequireAuth,
+                onTapEntry: () => _openHomepage(profile),
+                onTapStat: (label) {
                 if (label == '粉丝') {
                   if (widget.onOpenRelations != null) {
                     widget.onOpenRelations!(profile.id, true);
@@ -859,6 +873,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
       ),
     ),
   );
+}
 
   void _openHistory() {
     Navigator.of(context).push(
@@ -938,12 +953,16 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
     );
   }
 
-  void _showSettings(BuildContext context) {
+  void _showSettings(BuildContext context, [ProfileSummary? profile]) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SettingsCenterScreen(
           isGuest: widget.isGuest,
-          accountSubtitle: widget.accountSubtitle,
+          accountDisplayName: profile?.nickname ?? widget.currentUser?.nickname,
+          accountAvatarUrl: profile?.avatarUrl ?? widget.currentUser?.avatarUrl,
+          accountSubtitle: widget.currentUser?.email?.trim().isNotEmpty == true
+              ? widget.currentUser!.email
+              : widget.accountSubtitle,
           onRequireAuth: widget.onRequireAuth,
           onOpenMessages: widget.onOpenMessages,
           onFeedback: widget.onFeedback,
@@ -1559,10 +1578,27 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
   );
 }
 
+String _safePublicAccountLabel(String? publicId, String username) {
+  final pid = publicId?.trim();
+  if (pid != null && pid.isNotEmpty && pid != '0') {
+    return 'ID: $pid';
+  }
+  final trimmed = username.trim();
+  if (trimmed.startsWith('email_') || trimmed.startsWith('usr_') || trimmed.startsWith('acct_')) {
+    final idx = trimmed.indexOf('_');
+    return 'ID: ${trimmed.substring(idx + 1)}';
+  }
+  if (trimmed.isNotEmpty) {
+    return '@$trimmed';
+  }
+  return '';
+}
+
 class _ProfileCard extends StatelessWidget {
   const _ProfileCard({
     required this.nickname,
     required this.username,
+    this.accountLabel,
     required this.level,
     required this.trustLevel,
     required this.signature,
@@ -1580,6 +1616,7 @@ class _ProfileCard extends StatelessWidget {
 
   final String nickname;
   final String username;
+  final String? accountLabel;
   final int level;
   final String trustLevel;
   final String signature;
@@ -1596,6 +1633,19 @@ class _ProfileCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayAccount = accountLabel?.trim().isNotEmpty == true
+        ? accountLabel!.trim()
+        : _safePublicAccountLabel(null, username);
+
+    final String secondLine;
+    if (isGuest) {
+      secondLine = '@$username · Lv.$level · 信任 $trustLevel';
+    } else {
+      secondLine = displayAccount.isNotEmpty
+          ? '$displayAccount · Lv.$level'
+          : 'Lv.$level';
+    }
+
     return Container(
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -1672,7 +1722,7 @@ class _ProfileCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          '@$username · Lv.$level · 信任 $trustLevel',
+                          secondLine,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Color(0xFF71869B),

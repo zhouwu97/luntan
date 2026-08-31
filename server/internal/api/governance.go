@@ -99,13 +99,15 @@ func (s *Server) listAdmins(w http.ResponseWriter, r *http.Request) {
 	queryText := strings.TrimSpace(r.URL.Query().Get("q"))
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT u.id, u.username, COALESCE(up.nickname, u.username), COALESCE(u.email, ''), u.status,
+		       COALESCE(avatar.object_key, ''),
 		       string_agg(DISTINCT rl.name, ', ' ORDER BY rl.name), count(DISTINCT al.id), max(al.created_at)
 		FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles rl ON rl.id = ur.role_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets avatar ON avatar.id = up.avatar_media_id AND avatar.status = 'ready' AND avatar.deleted_at IS NULL
 		LEFT JOIN audit_logs al ON al.operator_id = u.id
 		WHERE rl.name IN ('community_moderator', 'community_owner', 'platform_moderator', 'platform_admin', 'super_admin')
-		  AND ($1 = '' OR u.username ILIKE '%' || $1 || '%' OR COALESCE(up.nickname, '') ILIKE '%' || $1 || '%')
-		GROUP BY u.id, u.username, up.nickname, u.email, u.status
+		  AND ($1 = '' OR u.username ILIKE '%' || $1 || '%' OR COALESCE(up.nickname, '') ILIKE '%' || $1 || '%' OR COALESCE(u.email, '') ILIKE '%' || $1 || '%')
+		GROUP BY u.id, u.username, up.nickname, u.email, u.status, avatar.object_key
 		ORDER BY u.username ASC`, queryText)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -114,14 +116,17 @@ func (s *Server) listAdmins(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var id, username, nickname, email, status, roles string
+		var id, username, nickname, email, status, avatarObjectKey, roles string
 		var actionCount int64
 		var lastAction sql.NullTime
-		if err := rows.Scan(&id, &username, &nickname, &email, &status, &roles, &actionCount, &lastAction); err != nil {
+		if err := rows.Scan(&id, &username, &nickname, &email, &status, &avatarObjectKey, &roles, &actionCount, &lastAction); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 		item := map[string]any{"id": id, "username": username, "nickname": nickname, "email": email, "status": status, "roles": strings.Split(roles, ", "), "action_count": actionCount}
+		if avatarObjectKey != "" {
+			item["avatar_url"] = publicMediaURL(avatarObjectKey)
+		}
 		if lastAction.Valid {
 			item["last_action_at"] = lastAction.Time
 		}
@@ -141,8 +146,13 @@ func (s *Server) getAdmin(w http.ResponseWriter, r *http.Request, adminID string
 		}
 		return
 	}
-	var username, nickname, email, status string
-	if err := s.db.QueryRowContext(r.Context(), `SELECT u.username, COALESCE(up.nickname, u.username), COALESCE(u.email, ''), u.status FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id WHERE u.id = $1 AND u.deleted_at IS NULL`, adminID).Scan(&username, &nickname, &email, &status); errors.Is(err, sql.ErrNoRows) {
+	var username, nickname, email, status, avatarObjectKey string
+	if err := s.db.QueryRowContext(r.Context(), `
+		SELECT u.username, COALESCE(up.nickname, u.username), COALESCE(u.email, ''), u.status, COALESCE(avatar.object_key, '')
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets avatar ON avatar.id = up.avatar_media_id AND avatar.status = 'ready' AND avatar.deleted_at IS NULL
+		WHERE u.id = $1 AND u.deleted_at IS NULL`, adminID).Scan(&username, &nickname, &email, &status, &avatarObjectKey); errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	} else if err != nil {
@@ -195,7 +205,11 @@ func (s *Server) getAdmin(w http.ResponseWriter, r *http.Request, adminID string
 		}
 		actions = append(actions, map[string]any{"id": id, "action": action, "target_type": targetType, "target_id": targetID, "reason": reason, "created_at": createdAt})
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": adminID, "username": username, "nickname": nickname, "email": email, "status": status, "roles": roles, "permissions": permissions, "recent_actions": actions})
+	resp := map[string]any{"id": adminID, "username": username, "nickname": nickname, "email": email, "status": status, "roles": roles, "permissions": permissions, "recent_actions": actions}
+	if avatarObjectKey != "" {
+		resp["avatar_url"] = publicMediaURL(avatarObjectKey)
+	}
+	httpserver.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) riskOverview(w http.ResponseWriter, r *http.Request) {
@@ -321,8 +335,10 @@ func (s *Server) listAdminCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 	queryText := strings.TrimSpace(r.URL.Query().Get("q"))
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT u.id, u.username, COALESCE(up.nickname, u.username), COALESCE(u.email, '')
-		FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
+		SELECT u.id, u.username, COALESCE(up.nickname, u.username), COALESCE(u.email, ''), COALESCE(avatar.object_key, '')
+		FROM users u
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets avatar ON avatar.id = up.avatar_media_id AND avatar.status = 'ready' AND avatar.deleted_at IS NULL
 		WHERE u.deleted_at IS NULL AND u.status = 'active'
 		  AND ($1 = '' OR u.username ILIKE '%' || $1 || '%' OR COALESCE(up.nickname, '') ILIKE '%' || $1 || '%' OR COALESCE(u.email, '') ILIKE '%' || $1 || '%')
 		ORDER BY u.username ASC LIMIT 50`, queryText)
@@ -333,12 +349,16 @@ func (s *Server) listAdminCandidates(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var id, username, nickname, email string
-		if err := rows.Scan(&id, &username, &nickname, &email); err != nil {
+		var id, username, nickname, email, avatarObjectKey string
+		if err := rows.Scan(&id, &username, &nickname, &email, &avatarObjectKey); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "username": username, "nickname": nickname, "email": email})
+		item := map[string]any{"id": id, "username": username, "nickname": nickname, "email": email}
+		if avatarObjectKey != "" {
+			item["avatar_url"] = publicMediaURL(avatarObjectKey)
+		}
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)

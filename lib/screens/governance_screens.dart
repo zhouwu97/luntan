@@ -8,6 +8,23 @@ import '../data/api/platform_repository.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
+
+String _safePublicAccountLabel(String? publicId, String username) {
+  final pid = publicId?.trim();
+  if (pid != null && pid.isNotEmpty && pid != '0') {
+    return 'ID: $pid';
+  }
+  final trimmed = username.trim();
+  if (trimmed.startsWith('email_') || trimmed.startsWith('usr_') || trimmed.startsWith('acct_')) {
+    final idx = trimmed.indexOf('_');
+    return 'ID: ${trimmed.substring(idx + 1)}';
+  }
+  if (trimmed.isNotEmpty) {
+    return '@$trimmed';
+  }
+  return '';
+}
 
 String _formatRoleName(String raw) {
   if (raw.isEmpty) return '普通用户';
@@ -1763,7 +1780,7 @@ class _AdminListScreenState extends State<AdminListScreen> {
                     onSubmitted: (_) => _search(),
                     style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
                     decoration: const InputDecoration(
-                      hintText: '搜索管理员用户名或昵称',
+                      hintText: '搜索管理员昵称或邮箱',
                       hintStyle: TextStyle(fontSize: 12.5, color: Color(0xFF8B9FB3)),
                       border: InputBorder.none,
                       isDense: true,
@@ -1819,6 +1836,9 @@ class _AdminListScreenState extends State<AdminListScreen> {
                   itemBuilder: (_, index) {
                     final item = items[index];
                     final name = item.nickname.isEmpty ? item.username : item.nickname;
+                    final accountText = item.email.trim().isNotEmpty
+                        ? item.email.trim()
+                        : _safePublicAccountLabel(null, item.username);
                     return Container(
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -1836,20 +1856,33 @@ class _AdminListScreenState extends State<AdminListScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                             child: Row(
                               children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.softViolet,
-                                    borderRadius: BorderRadius.circular(13),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    name.characters.isEmpty ? '?' : name.characters.first,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF6B42A6),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(13),
+                                  child: SizedBox(
+                                    width: 40,
+                                    height: 40,
+                                    child: AppNetworkImage(
+                                      url: item.avatarUrl,
+                                      width: 40,
+                                      height: 40,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_) => Container(
+                                        width: 40,
+                                        height: 40,
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.softViolet,
+                                          borderRadius: BorderRadius.circular(13),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          name.characters.isEmpty ? '?' : name.characters.first,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFF6B42A6),
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1868,7 +1901,7 @@ class _AdminListScreenState extends State<AdminListScreen> {
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        '${item.username} · ${item.roles.map(_formatRoleName).join('、')}',
+                                        '$accountText · ${item.roles.map(_formatRoleName).join('、')}',
                                         style: const TextStyle(
                                           fontSize: 11,
                                           color: AppTheme.textSecondary,
@@ -2047,13 +2080,38 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                   itemBuilder: (_, index) {
                     final item = items[index];
                     final name = item.nickname.isEmpty ? item.username : item.nickname;
+                    final candidateAccount = item.email.trim().isNotEmpty
+                        ? item.email.trim()
+                        : _safePublicAccountLabel(null, item.username);
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      leading: CircleAvatar(
-                        backgroundColor: const Color(0xFFE3EDFB),
-                        child: Text(
-                          name.characters.isEmpty ? '?' : name.characters.first,
-                          style: const TextStyle(color: Color(0xFF2C568D), fontWeight: FontWeight.w700),
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(13),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: AppNetworkImage(
+                            url: item.avatarUrl,
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_) => Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE3EDFB),
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                name.characters.isEmpty ? '?' : name.characters.first,
+                                style: const TextStyle(
+                                  color: Color(0xFF2C568D),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                       title: Text(
@@ -2061,7 +2119,7 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                       ),
                       subtitle: Text(
-                        '${item.username} · ${item.email.isEmpty ? '未绑定邮箱' : item.email}',
+                        candidateAccount.isEmpty ? '未绑定邮箱' : candidateAccount,
                         style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
                       ),
                       trailing: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.primary, size: 20),

@@ -58,6 +58,21 @@ android {
         versionName = flutter.versionName
     }
 
+    // 正式包固定 ARM64。jni、datastore 等依赖自带多 ABI 的 so；
+    // AGP 8 的 ndk.abiFilters 不会过滤依赖 AAR 的 so（defaultConfig/buildType
+    // 均实测无效），只能按路径 excludes。仅 release 任务生效，debug 模拟器不受影响。
+    if (releaseTaskRequested) {
+        packaging {
+            jniLibs {
+                excludes += setOf(
+                    "**/armeabi-v7a/**",
+                    "**/x86_64/**",
+                    "**/x86/**",
+                )
+            }
+        }
+    }
+
     signingConfigs {
         if (releaseSigningConfigured) {
             create("release") {

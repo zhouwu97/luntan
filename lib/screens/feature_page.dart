@@ -252,126 +252,184 @@ class _FeaturePageState extends State<FeaturePage> {
 
   Widget _activitiesBody(List<ActivityItem> activities) => CustomScrollView(
     slivers: [
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
-        sliver: SliverToBoxAdapter(child: _postIntro()),
-      ),
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        sliver: SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) => _activityPublicCard(activities[index]),
-            childCount: activities.length,
+      const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(14, 8, 14, 6),
+          child: Text(
+            '近期活动',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppTheme.textSecondary,
+            ),
           ),
+        ),
+      ),
+      SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) => _activityItemCard(activities[index]),
+          childCount: activities.length,
         ),
       ),
       const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
     ],
   );
 
-  Widget _activityPublicCard(ActivityItem item) {
+  Widget _activityItemCard(ActivityItem item) {
     final statusColor = switch (item.status) {
       'active' => AppTheme.primary,
       'upcoming' => AppTheme.orange,
-      'ended' => Colors.blueGrey,
+      'ended' => const Color(0xFF8A98A6),
       _ => AppTheme.textSecondary,
     };
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AppTheme.border),
+
+    final startAt = item.startAt;
+    final dayStr = startAt != null ? startAt.day.toString().padLeft(2, '0') : '--';
+    final monthStr = startAt != null ? '${startAt.month} 月' : '';
+    final timeStr = startAt != null
+        ? '${startAt.hour.toString().padLeft(2, '0')}:${startAt.minute.toString().padLeft(2, '0')}'
+        : '';
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFEDF2F7), width: 0.8),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
+        padding: const EdgeInsets.all(12),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            SizedBox(
+              width: 44,
+              child: Column(
+                children: [
+                  Text(
+                    dayStr,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
+                      height: 1.1,
+                    ),
+                  ),
+                  if (monthStr.isNotEmpty)
+                    Text(
+                      monthStr,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF5B6E80),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        item.statusLabel,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (item.description.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      item.description,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF63788B),
+                        height: 1.4,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (timeStr.isNotEmpty || item.location.isNotEmpty) ...[
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 4,
+                      children: [
+                        if (timeStr.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.access_time_outlined,
+                                size: 13,
+                                color: Color(0xFF7D90A2),
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                timeStr,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF7D90A2),
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (item.location.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.location_on_outlined,
+                                size: 13,
+                                color: Color(0xFF7D90A2),
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                item.location,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF7D90A2),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
             if (item.coverUrl != null && item.coverUrl!.isNotEmpty) ...[
+              const SizedBox(width: 10),
               ClipRRect(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 child: SizedBox(
-                  height: 140,
-                  width: double.infinity,
+                  width: 78,
+                  height: 62,
                   child: AppNetworkImage(
                     url: item.coverUrl!,
                     fit: BoxFit.cover,
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    item.title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.textPrimary,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    item.statusLabel,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (item.description.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                item.description,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppTheme.textSecondary,
-                  height: 1.4,
-                ),
-              ),
-            ],
-            if (item.startAt != null || item.location.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                children: [
-                  if (item.startAt != null)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.access_time_rounded, size: 14, color: AppTheme.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${item.startAt!.month}/${item.startAt!.day} 开始',
-                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                  if (item.location.isNotEmpty)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.location_on_outlined, size: 14, color: AppTheme.textSecondary),
-                        const SizedBox(width: 4),
-                        Text(
-                          item.location,
-                          style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                        ),
-                      ],
-                    ),
-                ],
               ),
             ],
           ],
@@ -380,60 +438,128 @@ class _FeaturePageState extends State<FeaturePage> {
     );
   }
 
-  Widget _body(List<Post> posts) => CustomScrollView(
-    slivers: [
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
-        sliver: SliverToBoxAdapter(child: _postIntro()),
+  Widget _activityEmptyState() => Center(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 60),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFAFCFE),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFDDE6EF)),
+            ),
+            child: const Icon(
+              Icons.calendar_today_outlined,
+              size: 20,
+              color: Color(0xFF8497AA),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '暂无活动',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '管理员发布活动后，会直接显示在这里。',
+            style: TextStyle(
+              fontSize: 12,
+              color: Color(0xFF8A9BAD),
+              height: 1.5,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
-      if (posts.isEmpty)
-        const SliverFillRemaining(
-          hasScrollBody: false,
-          child: Center(
-            child: Text(
-              '这里还没有内容',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-          ),
-        )
-      else
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _postCard(posts[index]),
-              childCount: posts.length,
-            ),
-          ),
-        ),
-      const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
-    ],
+    ),
   );
 
-  Widget _postIntro() => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      gradient: AppTheme.primaryGradient,
-      borderRadius: BorderRadius.circular(22),
-    ),
+  Widget _hotMetaHeader() => const Padding(
+    padding: EdgeInsets.fromLTRB(14, 8, 14, 4),
     child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 30),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            _description(type),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              height: 1.5,
-              fontWeight: FontWeight.w700,
-            ),
+        Text(
+          '按热度排序',
+          style: TextStyle(
+            fontSize: 12,
+            color: AppTheme.textSecondary,
+          ),
+        ),
+        Text(
+          '最多展示 20 条',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF536B81),
           ),
         ),
       ],
     ),
   );
+
+  Widget _body(List<Post> posts) {
+    if (posts.isEmpty) {
+      if (type == FeatureType.activity) {
+        return _activityEmptyState();
+      }
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 60),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFAFCFE),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFDDE6EF)),
+                ),
+                child: const Icon(
+                  Icons.inbox_outlined,
+                  size: 20,
+                  color: Color(0xFF8497AA),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '这里还没有内容',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return CustomScrollView(
+      slivers: [
+        if (type == FeatureType.hot)
+          SliverToBoxAdapter(child: _hotMetaHeader()),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => _postCard(posts[index]),
+            childCount: posts.length,
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+      ],
+    );
+  }
 
   Widget _postCard(Post post) => ForumPostCard(
     post: post,
@@ -446,13 +572,4 @@ class _FeaturePageState extends State<FeaturePage> {
     interactionListenable:
         widget.interactionController.interactionsFor(post.id),
   );
-
-  String _description(FeatureType type) => switch (type) {
-    FeatureType.ranking => '社区用户真实评分的玩具榜单，按综合口碑和体验反馈展示。',
-    FeatureType.hot => '社区里正在被大家讨论的内容，今天也来逛逛吧。',
-    FeatureType.outfit => '开箱图、结构展示和穿搭分享，都可以在这里找到。',
-    FeatureType.activity => '社区活动和公告集中展示，打开帖子查看参与方式。',
-    FeatureType.gameShare => '分享慢玩、清洗、收纳和配菜玩法，找到一起交流的同好。',
-    FeatureType.myReplies => '这里会展示你参与过的回复，先去帖子里聊两句吧。',
-  };
 }

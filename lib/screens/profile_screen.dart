@@ -281,9 +281,6 @@ class ProfileScreen extends StatelessWidget {
                   animation: store,
                   builder: (context, _) => _PointsBalanceCard(
                     balance: store.points,
-                    level: effectiveLevel,
-                    growth: currentUser?.growth,
-                    experience: currentUser?.experience ?? 0,
                     onOpenPoints: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => PointsCenterScreen(store: store),
@@ -797,9 +794,6 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                 future: pointsFuture,
                 builder: (context, snapshot) => _PointsBalanceCard(
                   balance: snapshot.data?.balance,
-                  level: profile.level,
-                  growth: profile.growth,
-                  experience: profile.experience,
                   onOpenPoints: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => PointsCenterScreen(
@@ -1865,38 +1859,16 @@ class _StatButton extends StatelessWidget {
 class _PointsBalanceCard extends StatelessWidget {
   const _PointsBalanceCard({
     required this.balance,
-    required this.level,
-    this.growth,
-    this.experience = 0,
     required this.onOpenPoints,
     required this.onOpenStore,
   });
 
   final int? balance;
-  final int level;
-  final GrowthState? growth;
-  final int experience;
   final VoidCallback onOpenPoints;
   final VoidCallback onOpenStore;
 
   @override
   Widget build(BuildContext context) {
-    final isLocked = level == 0 || growth?.levelLocked == true;
-    // 经验展示使用累计值与下一级累计阈值；本级内经验仅用于计算进度条宽度。
-    final currentExperience = growth?.experience ?? experience;
-    final expInLevel = growth?.experienceInLevel ?? currentExperience;
-    final nextLevelThreshold =
-        growth?.nextLevelExperience ?? (!isLocked && level == 1 ? 50 : null);
-    final expReq =
-        growth?.experienceRequiredInLevel ??
-        (nextLevelThreshold == null
-            ? null
-            : nextLevelThreshold - (growth?.levelStartExperience ?? 0));
-    final factor = expReq != null && expReq > 0
-        ? (expInLevel / expReq).clamp(0.05, 1.0)
-        : 0.18;
-    final isMaxLevel = !isLocked && nextLevelThreshold == null;
-
     return Container(
       decoration: BoxDecoration(
         gradient: const LinearGradient(
@@ -1906,7 +1878,7 @@ class _PointsBalanceCard extends StatelessWidget {
           stops: [0.0, 0.58, 1.0],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Color(0xFFD7E8FB)),
+        border: Border.all(color: const Color(0xFFD7E8FB)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x0D5A9EFF),
@@ -1992,125 +1964,39 @@ class _PointsBalanceCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // 等级经验进度行：积分余额与经验进度是两套独立数据。
-          if (isLocked)
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE2EDF8),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    'Lv.0',
-                    style: TextStyle(
-                      color: Color(0xFF537494),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '累计经验 $currentExperience EXP · 🔒 注册后解锁等级',
+          InkWell(
+            onTap: onOpenPoints,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Text(
+                    '当前可用积分 ${balance ?? 0}',
                     style: const TextStyle(
                       color: Color(0xFF6D84A0),
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-              ],
-            )
-          else if (isMaxLevel)
-            Row(
-              children: [
-                const Text(
-                  '等级经验',
-                  style: TextStyle(
-                    color: Color(0xFF6D84A0),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Lv.$level',
-                  style: const TextStyle(
-                    color: Color(0xFF6D84A0),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    '$currentExperience EXP · 已达最高等级',
-                    style: const TextStyle(
+                  const Spacer(),
+                  const Text(
+                    '查看积分明细',
+                    style: TextStyle(
                       color: Color(0xFF8598AA),
-                      fontSize: 9.5,
+                      fontSize: 10.5,
                     ),
                   ),
-                ),
-              ],
-            )
-          else
-            Row(
-              children: [
-                Text(
-                  '等级经验',
-                  style: const TextStyle(
-                    color: Color(0xFF6D84A0),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Lv.$level',
-                  style: const TextStyle(
-                    color: Color(0xFF6D84A0),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(99),
-                    child: Container(
-                      height: 5,
-                      color: const Color(0x2E739CC2),
-                      alignment: Alignment.centerLeft,
-                      child: FractionallySizedBox(
-                        widthFactor: factor,
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [AppTheme.primary, AppTheme.sky],
-                            ),
-                            borderRadius: BorderRadius.all(Radius.circular(99)),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Text(
-                  '$currentExperience / ${nextLevelThreshold!} EXP',
-                  style: const TextStyle(
+                  const SizedBox(width: 2),
+                  const Icon(
+                    Icons.chevron_right,
+                    size: 14,
                     color: Color(0xFF8598AA),
-                    fontSize: 9.5,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
+          ),
         ],
       ),
     );

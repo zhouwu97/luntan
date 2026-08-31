@@ -491,14 +491,14 @@ class _RankingPageState extends State<RankingPage> {
 
   String get _selectedTabKey => _sourceTabKeys[_selectedTab];
 
-  String? get _selectedCategoryKey => _selectedCategory < 0
-      ? null
-      : _sourceCategoryKeys[_selectedCategory];
+  String? get _selectedCategoryKey =>
+      _selectedCategory < 0 ? null : _sourceCategoryKeys[_selectedCategory];
 
   Future<void> _loadRemoteRanking() async {
     if (_loadingRemote) return;
     _loadingRemote = true;
-    final isDefaultView = _selectedTabKey.isEmpty && _selectedCategoryKey == null;
+    final isDefaultView =
+        _selectedTabKey.isEmpty && _selectedCategoryKey == null;
     final cache = widget.cache ?? await RankingCache.create();
     if (isDefaultView) {
       final cached = await cache.read();
@@ -554,9 +554,7 @@ class _RankingPageState extends State<RankingPage> {
     final score = toy.score == toy.score.roundToDouble()
         ? toy.score.toStringAsFixed(0)
         : toy.score.toStringAsFixed(1);
-    final remoteUrl = useHero
-        ? (toy.heroUrl ?? toy.coverUrl)
-        : toy.coverUrl;
+    final remoteUrl = useHero ? (toy.heroUrl ?? toy.coverUrl) : toy.coverUrl;
     return RankingItem(
       id: toy.id,
       rank: toy.rank,
@@ -578,14 +576,18 @@ class _RankingPageState extends State<RankingPage> {
   }
 
   List<RankingItem> get _allSourceItems {
-    if (widget.repository != null) return _allRemoteItems ?? _remoteItems ?? const [];
+    if (widget.repository != null) {
+      return _allRemoteItems ?? _remoteItems ?? const [];
+    }
     return [_topRankingItem, ..._mainRankingItems];
   }
 
   List<RankingItem> get _filteredItems {
     final query = _searchQuery.trim().toLowerCase();
     if (widget.repository != null) {
-      final source = query.isEmpty ? (_remoteItems ?? const <RankingItem>[]) : _allSourceItems;
+      final source = query.isEmpty
+          ? (_remoteItems ?? const <RankingItem>[])
+          : _allSourceItems;
       if (query.isEmpty) return source;
       return source.where((item) {
         final matchesName = item.name.toLowerCase().contains(query);
@@ -724,8 +726,7 @@ class _RankingPageState extends State<RankingPage> {
               setState(() => _searchQuery = '');
             },
             actions: [
-              if (widget.repository != null &&
-                  widget.publishRepository != null)
+              if (widget.repository != null && widget.publishRepository != null)
                 Tooltip(
                   message: '投稿新玩具',
                   child: IconButton(
@@ -760,7 +761,9 @@ class _RankingPageState extends State<RankingPage> {
   );
 
   Widget _rankingScrollView() {
-    if (widget.repository != null && _remoteError != null && _remoteItems == null) {
+    if (widget.repository != null &&
+        _remoteError != null &&
+        _remoteItems == null) {
       return _RankingLoadError(onRetry: _loadRemoteRanking);
     }
     if (widget.repository != null && _remoteItems == null) {
@@ -882,10 +885,7 @@ class _RankingPageState extends State<RankingPage> {
         final item = listItems[index - headers.length];
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: _RankingCard(
-            item: item,
-            onTap: () => _openRankingItem(item),
-          ),
+          child: _RankingCard(item: item, onTap: () => _openRankingItem(item)),
         );
       },
     );
@@ -1435,7 +1435,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       segments: toy.segments,
       ratingDistribution:
           _remoteDetail?.ratingDistribution ?? item.ratingDistribution,
-      remoteImageUrl: toy.heroUrl ?? toy.coverUrl ?? item.remoteImageUrl,
+      remoteImageUrl: toy.coverUrl ?? toy.heroUrl ?? item.remoteImageUrl,
       couponUrl: toy.couponUrl ?? item.couponUrl,
       sourceUrl: toy.sourceUrl ?? item.sourceUrl,
     );
@@ -1519,9 +1519,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       widget.onRequireAuth?.call();
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error, fallback: fallback))));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(userFacingApiMessage(error, fallback: fallback))),
+    );
   }
 
   void _replaceToy(RankingToy toy) {

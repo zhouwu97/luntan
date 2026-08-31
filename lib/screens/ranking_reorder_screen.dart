@@ -145,75 +145,132 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '拖动调整综合热榜名次，保存后立即生效',
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const Text(
+                  '长按并拖动左侧把手调整顺序\n松手后立即保存',
+                  style: TextStyle(
+                    color: Color(0xFF72879A),
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
                 ),
-              ),
+                Text(
+                  saving ? '保存中…' : '${items.length} 项',
+                  style: TextStyle(
+                    color: saving
+                        ? const Color(0xFF2B6DBA)
+                        : const Color(0xFF7A8B9B),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
-            child: ReorderableListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-              itemCount: items.length,
-              // 3.41.8 无 onReorderItem，待 SDK 统一后迁移
-              // ignore: deprecated_member_use
-              onReorder: _reorder,
-              buildDefaultDragHandles: false,
-              itemBuilder: (context, index) {
-                final item = items[index];
-                return Card(
-                  key: ValueKey(item.id),
-                  margin: const EdgeInsets.only(bottom: 10),
-                  child: ListTile(
-                    leading: SizedBox(
-                      width: 48,
-                      child: Row(
-                        children: [
-                          ReorderableDragStartListener(
-                            index: index,
-                            child: const Icon(
-                              Icons.drag_handle,
-                              color: AppTheme.primary,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 28),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFEAF0F6)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: ReorderableListView.builder(
+                itemCount: items.length,
+                // ignore: deprecated_member_use
+                onReorder: _reorder,
+                buildDefaultDragHandles: false,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  final isFirst = index == 0;
+                  return Container(
+                    key: ValueKey(item.id),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: isFirst
+                          ? null
+                          : const Border(
+                              top: BorderSide(
+                                color: Color(0xFFEDF2F6),
+                                width: 1,
+                              ),
+                            ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        ReorderableDragStartListener(
+                          index: index,
+                          child: const SizedBox(
+                            width: 28,
+                            height: 38,
+                            child: Center(
+                              child: Icon(
+                                Icons.drag_handle,
+                                color: Color(0xFF91A3B5),
+                                size: 20,
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${index + 1}',
+                        ),
+                        const SizedBox(width: 6),
+                        SizedBox(
+                          width: 24,
+                          child: Text(
+                            (index + 1).toString().padLeft(2, '0'),
                             style: const TextStyle(
-                              fontWeight: FontWeight.w800,
                               color: AppTheme.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                item.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF203244),
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                [
+                                  rankingToyCategoryLabel(item.category),
+                                  if (item.merchant.isNotEmpty) item.merchant,
+                                ].join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: Color(0xFF7A8FA2),
+                                  letterSpacing: 0.1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    title: Text(
-                      item.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 5),
-                      child: Text(
-                        [
-                          rankingToyCategoryLabel(item.category),
-                          if (item.merchant.isNotEmpty) item.merchant,
-                        ].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppTheme.textSecondary),
-                      ),
-                    ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ],

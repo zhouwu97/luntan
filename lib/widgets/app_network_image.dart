@@ -140,15 +140,27 @@ class AppNetworkImage extends StatelessWidget {
           autoHeight ??= _autoCacheSide(constraints.maxHeight, dpr);
         }
         final ratio = aspectRatio;
-        if (ratio != null && ratio > 0 && autoWidth != null) {
-          // 解码目标按原图比例展开、长边封顶；比例正确的位图交给
-          // cover/contain 去裁切或留白，而不是在解码阶段被压扁。
-          final rawHeight = (autoWidth / ratio).round();
-          if (rawHeight > 4096) {
-            autoHeight = 4096;
-            autoWidth = (4096 * ratio).round().clamp(1, 4096);
-          } else {
-            autoHeight = rawHeight.clamp(1, 4096);
+        if (ratio != null && ratio > 0) {
+          if (autoWidth != null) {
+            // 解码目标按原图比例展开、长边封顶；比例正确的位图交给
+            // cover/contain 去裁切或留白，而不是在解码阶段被压扁。
+            final rawHeight = (autoWidth / ratio).round();
+            if (rawHeight > 4096) {
+              autoHeight = 4096;
+              autoWidth = (4096 * ratio).round().clamp(1, 4096);
+            } else {
+              autoHeight = rawHeight.clamp(1, 4096);
+            }
+          } else if (autoHeight != null) {
+            autoWidth = (autoHeight * ratio).round().clamp(1, 4096);
+          }
+        } else {
+          // 不知道原图比例时绝对不要同时指定解码宽高。
+          //
+          // 只限制一个方向，让 Flutter 根据原始图片比例
+          // 自动计算另一方向，否则非方图/长图会在解码阶段被拉伸。
+          if (autoWidth != null && autoHeight != null) {
+            autoHeight = null;
           }
         }
 

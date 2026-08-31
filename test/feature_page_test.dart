@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:luntan/data/api/api_client.dart';
+import 'package:luntan/data/api/platform_repository.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/domain/models.dart';
@@ -8,6 +10,16 @@ import 'package:luntan/domain/repositories.dart';
 import 'package:luntan/screens/feature_page.dart';
 import 'package:luntan/screens/ranking_page.dart';
 import 'package:luntan/controllers/interaction_controller.dart';
+
+class _FakePlatformRepository extends PlatformRepository {
+  _FakePlatformRepository(this._activities)
+      : super(ApiClient(baseUri: Uri.parse('http://localhost')));
+
+  final List<ActivityItem> _activities;
+
+  @override
+  Future<List<ActivityItem>> listPublicActivities() async => _activities;
+}
 
 class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
   int calls = 0;
@@ -145,5 +157,91 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('NO.1 本周霸权'), findsNothing);
     expect(find.text('可可狼姬'), findsOneWidget);
+  });
+
+  testWidgets('热门帖子展示极简元信息且不再包含大横幅', (tester) async {
+    final interactionController = InteractionController(
+      repository: MockInteractionRepository(),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeaturePage(
+          type: FeatureType.hot,
+          store: ForumStore.seeded(),
+          onOpenPost: (_) {},
+          interactionController: interactionController,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('按热度排序'), findsOneWidget);
+    expect(find.text('最多展示 20 条'), findsOneWidget);
+    expect(find.byIcon(Icons.auto_awesome_rounded), findsNothing);
+    expect(find.textContaining('社区里正在被大家讨论的内容'), findsNothing);
+  });
+
+  testWidgets('活动页无活动时展示极简空状态', (tester) async {
+    final interactionController = InteractionController(
+      repository: MockInteractionRepository(),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeaturePage(
+          type: FeatureType.activity,
+          store: ForumStore.uiOnly(),
+          onOpenPost: (_) {},
+          interactionController: interactionController,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('暂无活动'), findsOneWidget);
+    expect(find.text('管理员发布活动后，会直接显示在这里。'), findsOneWidget);
+    expect(find.byIcon(Icons.calendar_today_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.auto_awesome_rounded), findsNothing);
+  });
+
+  testWidgets('活动页有活动时展示紧凑活动列表', (tester) async {
+    final interactionController = InteractionController(
+      repository: MockInteractionRepository(),
+    );
+    final activityItem = ActivityItem(
+      id: 'act-1',
+      title: '秋季社区线下交流',
+      description: '带上你最近在玩的东西，现场交流使用和保养经验。',
+      location: '社区活动室',
+      status: 'active',
+      startAt: DateTime(2026, 9, 5, 14, 0),
+      createdBy: 'admin',
+      createdAt: DateTime(2026, 9, 1),
+      updatedAt: DateTime(2026, 9, 1),
+    );
+    final platformRepo = _FakePlatformRepository([activityItem]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FeaturePage(
+          type: FeatureType.activity,
+          store: ForumStore.uiOnly(),
+          onOpenPost: (_) {},
+          interactionController: interactionController,
+          platformRepository: platformRepo,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('近期活动'), findsOneWidget);
+    expect(find.text('秋季社区线下交流'), findsOneWidget);
+    expect(find.text('进行中'), findsOneWidget);
+    expect(find.text('05'), findsOneWidget);
+    expect(find.text('9 月'), findsOneWidget);
+    expect(find.text('14:00'), findsOneWidget);
+    expect(find.text('社区活动室'), findsOneWidget);
+    expect(find.byIcon(Icons.auto_awesome_rounded), findsNothing);
   });
 }

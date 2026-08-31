@@ -64,6 +64,7 @@ class UserProfileScreen extends StatefulWidget {
     this.isSelf = false,
     this.profileSummary,
     this.onProfileUpdated,
+    this.initialTab = 0,
   });
 
   final UserRepository repository;
@@ -81,6 +82,7 @@ class UserProfileScreen extends StatefulWidget {
   final bool isSelf;
   final ProfileSummary? profileSummary;
   final VoidCallback? onProfileUpdated;
+  final int initialTab;
 
   @override
   State<UserProfileScreen> createState() => _UserProfileScreenState();
@@ -95,7 +97,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   int? _pointsBalance;
   bool _busy = false;
   bool _mediaBusy = false;
-  int _currentTab = 0; // 0: 帖子, 1: 评论
+  late int _currentTab; // 0: 帖子, 1: 评论
   final ScrollController _postsScrollController = ScrollController();
   final ScrollController _commentsScrollController = ScrollController();
   final List<UserPost> _posts = <UserPost>[];
@@ -110,6 +112,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   void initState() {
     super.initState();
+    _currentTab = widget.initialTab == 1 ? 1 : 0;
     _selfSummary = widget.profileSummary;
     _future = _load();
     _postsFuture = _loadInitialPosts();
@@ -223,9 +226,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (!mounted) return;
       setState(() {
         final ids = _comments.map((c) => c.commentId ?? c.id).toSet();
-        _comments.addAll(
-          page.items.where((c) => ids.add(c.commentId ?? c.id)),
-        );
+        _comments.addAll(page.items.where((c) => ids.add(c.commentId ?? c.id)));
         final nextCursor = page.nextCursor;
         _hasMoreComments = page.hasMore && nextCursor != _nextCommentsCursor;
         _nextCommentsCursor = nextCursor;
@@ -272,7 +273,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         userId: profile.id,
         active: !profile.isFollowing,
       );
-      if (mounted) setState(() { _future = _load(); });
+      if (mounted)
+        setState(() {
+          _future = _load();
+        });
     } catch (error) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '关注操作失败'));
@@ -295,7 +299,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       await widget.repository.setBlock(userId: profile.id, active: active);
       if (mounted) {
         widget.onFeedback(active ? '已拉黑该用户' : '已取消拉黑');
-        setState(() { _future = _load(); });
+        setState(() {
+          _future = _load();
+        });
       }
     } catch (error) {
       if (mounted) {
@@ -446,7 +452,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (mounted) {
         widget.onFeedback(isAvatar ? '头像已更新' : '主页背景已更新');
         widget.onProfileUpdated?.call();
-        setState(() { _future = _load(); });
+        setState(() {
+          _future = _load();
+        });
       }
     } catch (error, stackTrace) {
       debugPrint('changeProfileImage failed: $error');
@@ -483,7 +491,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   ),
                   const SizedBox(height: 8),
                   TextButton(
-                    onPressed: () => setState(() { _future = _load(); }),
+                    onPressed: () => setState(() {
+                      _future = _load();
+                    }),
                     child: const Text('重试'),
                   ),
                 ],
@@ -507,7 +517,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             : (profile?.bio.isNotEmpty == true ? profile!.bio : '');
         final postCount =
             _selfSummary?.postCount ?? profile?.postCount ?? _posts.length;
-        final commentCount = _selfSummary?.commentCount ??
+        final commentCount =
+            _selfSummary?.commentCount ??
             _profile?.commentCount ??
             _comments.length;
         final followerCount =
@@ -557,7 +568,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   Positioned.fill(
                     child: GestureDetector(
                       onTap: widget.isSelf
-                          ? () => _changeProfileImage(ProfileImageKind.background)
+                          ? () =>
+                                _changeProfileImage(ProfileImageKind.background)
                           : null,
                       child: Stack(
                         fit: StackFit.expand,
@@ -722,7 +734,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                                 child: Text(
                                                   nickname.isEmpty
                                                       ? '游'
-                                                      : nickname.characters.first,
+                                                      : nickname
+                                                            .characters
+                                                            .first,
                                                   style: const TextStyle(
                                                     color: Color(0xFF417CC0),
                                                     fontSize: 29,
@@ -1952,7 +1966,10 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       } else {
         await mutation.setFollow(communityId: community.id, active: active);
       }
-      if (mounted) setState(() { _future = _load(); });
+      if (mounted)
+        setState(() {
+          _future = _load();
+        });
     } catch (error) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '操作失败'));
@@ -2108,8 +2125,8 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
               onBookmark: () => widget.onToggleBookmark(post),
               onMenu: () => widget.onFeedback('更多操作请在帖子详情中进行'),
               onAuthorTap: widget.onOpenUserId,
-              interactionListenable:
-                  widget.interactionController.interactionsFor(post.id),
+              interactionListenable: widget.interactionController
+                  .interactionsFor(post.id),
             );
           }, childCount: feed.items.length),
         ),

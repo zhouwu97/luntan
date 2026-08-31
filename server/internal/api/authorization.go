@@ -14,22 +14,23 @@ var ErrCapabilityRequired = errors.New("capability required")
 var ErrUserMuted = errors.New("user is muted")
 
 const (
-	capPublish         = "can_publish"
-	capCreatePoll      = "can_create_poll"
-	capManageBookmarks = "can_manage_bookmarks"
-	capBookmark        = "can_bookmark"
-	capComment         = "can_comment"
-	capLike            = "can_like"
-	capReport          = "can_report"
-	capFollow          = "can_follow"
-	capUploadMedia     = "can_upload_media"
-	capVote            = "can_vote"
-	capManageProfile   = "can_manage_profile"
-	capModerate        = "can_moderate"
-	capManageAdmins    = "can_manage_admins"
-	capBanIP           = "can_ban_ip"
-	capViewAdminLogs   = "can_view_admin_logs"
-	capManageUsers     = "can_manage_users"
+	capPublish           = "can_publish"
+	capCreatePoll        = "can_create_poll"
+	capManageBookmarks   = "can_manage_bookmarks"
+	capBookmark          = "can_bookmark"
+	capComment           = "can_comment"
+	capLike              = "can_like"
+	capReport            = "can_report"
+	capFollow            = "can_follow"
+	capUploadMedia       = "can_upload_media"
+	capVote              = "can_vote"
+	capManageProfile     = "can_manage_profile"
+	capModerate          = "can_moderate"
+	capManageAdmins      = "can_manage_admins"
+	capBanIP             = "can_ban_ip"
+	capViewAdminLogs     = "can_view_admin_logs"
+	capManageUsers       = "can_manage_users"
+	capReviewStoreOrders = "can_review_store_orders"
 )
 
 // capabilitiesForUser 是未查询角色权限前的基础能力集合。
@@ -39,22 +40,23 @@ const (
 func capabilitiesForUser(user auth.User) map[string]bool {
 	if user.ID == "" && user.Username == "" && user.AccountType == "" {
 		return map[string]bool{
-			capPublish:         false,
-			capCreatePoll:      false,
-			capManageBookmarks: false,
-			capBookmark:        false,
-			capComment:         false,
-			capLike:            false,
-			capReport:          false,
-			capFollow:          false,
-			capUploadMedia:     false,
-			capVote:            false,
-			capManageProfile:   false,
-			capModerate:        false,
-			capManageAdmins:    false,
-			capBanIP:           false,
-			capViewAdminLogs:   false,
-			capManageUsers:     false,
+			capPublish:           false,
+			capCreatePoll:        false,
+			capManageBookmarks:   false,
+			capBookmark:          false,
+			capComment:           false,
+			capLike:              false,
+			capReport:            false,
+			capFollow:            false,
+			capUploadMedia:       false,
+			capVote:              false,
+			capManageProfile:     false,
+			capModerate:          false,
+			capManageAdmins:      false,
+			capBanIP:             false,
+			capViewAdminLogs:     false,
+			capManageUsers:       false,
+			capReviewStoreOrders: false,
 		}
 	}
 	registered := user.AccountType != "guest"
@@ -66,17 +68,18 @@ func capabilitiesForUser(user auth.User) map[string]bool {
 		capComment:         true,
 		// 游客点赞属于低风险参与行为，保留历史产品规则；发布、收藏、关注等
 		// 会形成长期账户资产或扩散关系的能力仍需邮箱账号。
-		capLike:          true,
-		capReport:        true,
-		capFollow:        registered,
-		capUploadMedia:   registered,
-		capVote:          registered,
-		capManageProfile: registered,
-		capModerate:      false,
-		capManageAdmins:  false,
-		capBanIP:         false,
-		capViewAdminLogs: false,
-		capManageUsers:   false,
+		capLike:              true,
+		capReport:            true,
+		capFollow:            registered,
+		capUploadMedia:       registered,
+		capVote:              registered,
+		capManageProfile:     registered,
+		capModerate:          false,
+		capManageAdmins:      false,
+		capBanIP:             false,
+		capViewAdminLogs:     false,
+		capManageUsers:       false,
+		capReviewStoreOrders: false,
 	}
 }
 
@@ -95,6 +98,8 @@ func applyPermissionCapability(caps map[string]bool, role, permission string) {
 	case "user.manage":
 		// 多角色聚合时行序不定，capability 只能从 false → true 累积，不能被回写。
 		caps[capManageUsers] = caps[capManageUsers] || role == "platform_admin" || role == "super_admin"
+	case "store.order.review":
+		caps[capReviewStoreOrders] = true
 	}
 	if role == "super_admin" {
 		caps[capManageAdmins] = true

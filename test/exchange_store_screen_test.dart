@@ -48,7 +48,7 @@ void main() {
     await tester.tap(find.text('兑换').first);
     await tester.pumpAndSettle();
 
-    expect(store.points, 3920);
+    expect(store.points, 3980);
     await tester.scrollUntilVisible(
       find.text('我的兑换'),
       280,
@@ -56,7 +56,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('我的兑换'), findsOneWidget);
-    expect(find.text('待领取'), findsOneWidget);
+    expect(find.text('待审核'), findsOneWidget);
     expect(find.text('还没有兑换记录'), findsNothing);
   });
 

@@ -122,7 +122,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     NotificationCategory.moderation: _TabState(),
   };
 
-  _TabState get _currentState => _tabStates[filter] ?? _tabStates[NotificationCategory.all]!;
+  _TabState get _currentState =>
+      _tabStates[filter] ?? _tabStates[NotificationCategory.all]!;
   List<ForumNotification> get items => _currentState.items;
 
   @override
@@ -144,8 +145,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (scrollController.position.extentAfter < 220) loadMore();
   }
 
-  Future<void> _loadTab(NotificationCategory category, {bool forceRefresh = false}) async {
-    final tabState = _tabStates[category] ?? _tabStates[NotificationCategory.all]!;
+  Future<void> _loadTab(
+    NotificationCategory category, {
+    bool forceRefresh = false,
+  }) async {
+    final tabState =
+        _tabStates[category] ?? _tabStates[NotificationCategory.all]!;
     if (tabState.loading) return;
     if (tabState.loaded && !forceRefresh) {
       if (mounted) setState(() {});
@@ -165,7 +170,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
 
     try {
-      final page = await widget.repository.listNotifications(category: category);
+      final page = await widget.repository.listNotifications(
+        category: category,
+      );
       if (!mounted || generation != _generation) return;
       setState(() {
         tabState.items
@@ -190,7 +197,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> loadMore() async {
     final tabState = _currentState;
-    if (tabState.loading || loadingMore || !tabState.hasMore || tabState.nextCursor == null) {
+    if (tabState.loading ||
+        loadingMore ||
+        !tabState.hasMore ||
+        tabState.nextCursor == null) {
       return;
     }
     final generation = _generation;
@@ -203,7 +213,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         cursor: requestedCursor,
         category: requestedCategory,
       );
-      if (!mounted || generation != _generation || filter != requestedCategory) {
+      if (!mounted ||
+          generation != _generation ||
+          filter != requestedCategory) {
         return;
       }
       setState(() {
@@ -264,6 +276,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       unawaited(_markNotificationRead(item));
     }
     if (item.type == 'system' ||
+        item.type == 'store.order.reviewed' ||
         item.type == 'announcement' ||
         item.type.startsWith('community.')) {
       if (widget.onOpenNotification != null) {
@@ -301,7 +314,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       onOpenSystem: widget.onOpenSystem,
       onFeedback: (msg) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(msg)));
         }
       },
     );
@@ -358,10 +373,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             child: _NoticeKindTabs(selected: filter, onChanged: _selectFilter),
           ),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: load,
-              child: _buildBody(),
-            ),
+            child: RefreshIndicator(onRefresh: load, child: _buildBody()),
           ),
         ],
       ),
@@ -627,7 +639,10 @@ class NotificationDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('通知详情', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text(
+          '通知详情',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
         backgroundColor: AppTheme.background,
         elevation: 0,
       ),
@@ -636,7 +651,11 @@ class NotificationDetailScreen extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppTheme.textPrimary),
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              color: AppTheme.textPrimary,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -652,7 +671,14 @@ class NotificationDetailScreen extends StatelessWidget {
               boxShadow: const [AppTheme.cardShadow],
             ),
             padding: const EdgeInsets.all(18),
-            child: Text(body, style: const TextStyle(height: 1.65, fontSize: 13.5, color: AppTheme.textPrimary)),
+            child: Text(
+              body,
+              style: const TextStyle(
+                height: 1.65,
+                fontSize: 13.5,
+                color: AppTheme.textPrimary,
+              ),
+            ),
           ),
           if (onOpenTarget != null) ...[
             const SizedBox(height: 16),
@@ -662,7 +688,9 @@ class NotificationDetailScreen extends StatelessWidget {
               label: const Text('查看相关内容'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTheme.primary,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ],

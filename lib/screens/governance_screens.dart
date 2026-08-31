@@ -16,7 +16,9 @@ String _safePublicAccountLabel(String? publicId, String username) {
     return 'ID: $pid';
   }
   final trimmed = username.trim();
-  if (trimmed.startsWith('email_') || trimmed.startsWith('usr_') || trimmed.startsWith('acct_')) {
+  if (trimmed.startsWith('email_') ||
+      trimmed.startsWith('usr_') ||
+      trimmed.startsWith('acct_')) {
     final idx = trimmed.indexOf('_');
     return 'ID: ${trimmed.substring(idx + 1)}';
   }
@@ -56,6 +58,7 @@ String _formatPermissionName(String permission) => switch (permission) {
   'user.manage' => '用户状态与处罚',
   'user.ban.global' => '全局网络封禁',
   'admin.manage' => '管理员授权',
+  'store.order.review' => '兑换申请审核',
   _ => permission,
 };
 
@@ -73,6 +76,8 @@ String _formatActionCode(String action) => switch (action) {
   'recommendation.add' => '添加首页推荐',
   'recommendation.remove' => '移除首页推荐',
   'recommendation.reorder' => '调整推荐顺序',
+  'store.order.approve' => '兑换审核通过',
+  'store.order.reject' => '兑换审核不通过',
   _ => action,
 };
 
@@ -84,6 +89,7 @@ String _formatTargetType(String type) => switch (type) {
   'moderation_case' => '审核案件',
   'moderation_action' => '处罚记录',
   'appeal' || 'moderation_appeal' => '申诉记录',
+  'store_order' => '兑换订单',
   _ => type.isEmpty ? '目标对象' : type,
 };
 
@@ -121,6 +127,7 @@ class GovernanceCenterScreen extends StatefulWidget {
     this.onOpenRecommendations,
     this.onOpenActivities,
     this.onOpenRankingSubmissions,
+    this.onOpenStoreOrderReview,
     this.onOpenAdmins,
     this.onOpenUsers,
     this.onOpenRisk,
@@ -135,6 +142,7 @@ class GovernanceCenterScreen extends StatefulWidget {
   final VoidCallback? onOpenRecommendations;
   final VoidCallback? onOpenActivities;
   final VoidCallback? onOpenRankingSubmissions;
+  final VoidCallback? onOpenStoreOrderReview;
   final VoidCallback? onOpenAdmins;
   final VoidCallback? onOpenUsers;
   final VoidCallback? onOpenRisk;
@@ -159,7 +167,9 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
   Future<void> _loadLiveStats() async {
     if (widget.repository != null) {
       try {
-        final cases = await widget.repository!.listModerationCases(status: 'pending');
+        final cases = await widget.repository!.listModerationCases(
+          status: 'pending',
+        );
         if (mounted) setState(() => _pendingCasesCount = cases.items.length);
       } catch (_) {}
       try {
@@ -169,8 +179,11 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
     }
     if (widget.appealRepository != null) {
       try {
-        final appeals = await widget.appealRepository!.listModerationAppeals(status: 'pending');
-        if (mounted) setState(() => _pendingAppealsCount = appeals.items.length);
+        final appeals = await widget.appealRepository!.listModerationAppeals(
+          status: 'pending',
+        );
+        if (mounted)
+          setState(() => _pendingAppealsCount = appeals.items.length);
       } catch (_) {}
     }
   }
@@ -181,6 +194,7 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
       widget.onOpenRecommendations != null ||
       widget.onOpenActivities != null ||
       widget.onOpenRankingSubmissions != null ||
+      widget.onOpenStoreOrderReview != null ||
       widget.onOpenAdmins != null ||
       widget.onOpenUsers != null ||
       widget.onOpenRisk != null ||
@@ -193,7 +207,10 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
       return Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: const Text('治理中心', style: TextStyle(fontWeight: FontWeight.w800)),
+          title: const Text(
+            '治理中心',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
           backgroundColor: AppTheme.background,
           elevation: 0,
         ),
@@ -211,7 +228,9 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
         widget.onOpenAppeals != null ||
         widget.onOpenRecommendations != null ||
         widget.onOpenActivities != null ||
-        widget.onOpenRankingSubmissions != null;
+        widget.onOpenRankingSubmissions != null ||
+        widget.onOpenStoreOrderReview != null;
+
     final hasUserGroup =
         widget.onOpenUsers != null ||
         widget.onOpenAdmins != null ||
@@ -374,6 +393,18 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
                     badgeColor: AppTheme.primary,
                     onTap: widget.onOpenRankingSubmissions!,
                   ),
+                if (widget.onOpenStoreOrderReview != null)
+                  _GovernanceRow(
+                    icon: Icons.card_giftcard_outlined,
+                    iconBg: AppTheme.softRose,
+                    iconColor: AppTheme.pink,
+                    title: '兑换审核',
+                    subtitle: '查看用户发帖与评论，审核积分兑换申请',
+                    badgeText: '运营',
+                    badgeBg: AppTheme.softRose,
+                    badgeColor: AppTheme.pink,
+                    onTap: widget.onOpenStoreOrderReview!,
+                  ),
               ],
             ),
             const SizedBox(height: 16),
@@ -502,7 +533,12 @@ class _GovernanceSection extends StatelessWidget {
           for (var i = 0; i < children.length; i++) ...[
             children[i],
             if (i < children.length - 1)
-              const Divider(height: 1, indent: 58, endIndent: 14, color: Color(0xFFEDF2F7)),
+              const Divider(
+                height: 1,
+                indent: 58,
+                endIndent: 14,
+                color: Color(0xFFEDF2F7),
+              ),
           ],
         ],
       ),
@@ -567,14 +603,17 @@ class _GovernanceRow extends StatelessWidget {
                             title,
                             style: const TextStyle(
                               fontSize: 14,
-                               fontWeight: FontWeight.w700,
+                              fontWeight: FontWeight.w700,
                               color: AppTheme.textPrimary,
                             ),
                           ),
                           if (badgeText != null) ...[
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1.5,
+                              ),
                               decoration: BoxDecoration(
                                 color: badgeBg ?? AppTheme.softBlue,
                                 borderRadius: BorderRadius.circular(5),
@@ -787,17 +826,27 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
-                const Icon(Icons.search_rounded, color: Color(0xFF5E748A), size: 20),
+                const Icon(
+                  Icons.search_rounded,
+                  color: Color(0xFF5E748A),
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: searchController,
                     textInputAction: TextInputAction.search,
                     onSubmitted: (_) => _search(),
-                    style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
                     decoration: const InputDecoration(
                       hintText: '搜索用户 ID、用户名、昵称或邮箱',
-                      hintStyle: TextStyle(fontSize: 12.5, color: Color(0xFF8B9FB3)),
+                      hintStyle: TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF8B9FB3),
+                      ),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -809,7 +858,11 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                       searchController.clear();
                       _search();
                     },
-                    child: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF7A8FA5)),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: Color(0xFF7A8FA5),
+                    ),
                   ),
               ],
             ),
@@ -832,9 +885,7 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: _buildBody(),
-        ),
+        Expanded(child: _buildBody()),
       ],
     ),
   );
@@ -889,9 +940,17 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(height: 12, width: 100, color: const Color(0xFFEAF0F6)),
+                    Container(
+                      height: 12,
+                      width: 100,
+                      color: const Color(0xFFEAF0F6),
+                    ),
                     const SizedBox(height: 8),
-                    Container(height: 10, width: 160, color: const Color(0xFFEAF0F6)),
+                    Container(
+                      height: 10,
+                      width: 160,
+                      color: const Color(0xFFEAF0F6),
+                    ),
                   ],
                 ),
               ),
@@ -905,14 +964,23 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 36,
+              color: AppTheme.textSecondary,
+            ),
             const SizedBox(height: 10),
-            Text(_errorText!, style: const TextStyle(color: AppTheme.pink, fontSize: 13)),
+            Text(
+              _errorText!,
+              style: const TextStyle(color: AppTheme.pink, fontSize: 13),
+            ),
             const SizedBox(height: 12),
             FilledButton.tonal(
               onPressed: _loadFirstPage,
               style: FilledButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               child: const Text('重新加载'),
             ),
@@ -938,7 +1006,11 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.person_search_rounded, size: 28, color: Color(0xFF6B8299)),
+                    child: const Icon(
+                      Icons.person_search_rounded,
+                      size: 28,
+                      color: Color(0xFF6B8299),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   const Text(
@@ -952,7 +1024,10 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                   const SizedBox(height: 4),
                   const Text(
                     '请尝试调整搜索关键词或状态筛选',
-                    style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -990,7 +1065,10 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                 borderRadius: BorderRadius.circular(16),
                 onTap: () => _open(user),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                   child: Row(
                     children: [
                       Container(
@@ -1047,21 +1125,30 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
                               Wrap(
                                 spacing: 4,
                                 runSpacing: 4,
-                                children: user.roles.map((r) => Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.softBlue,
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    _formatRoleName(r),
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
-                                )).toList(),
+                                children: user.roles
+                                    .map(
+                                      (r) => Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 5,
+                                          vertical: 1,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.softBlue,
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _formatRoleName(r),
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.primary,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
                               ),
                             ],
                           ],
@@ -1114,7 +1201,10 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
         child: Center(
           child: Text(
             '已加载全部 ${_items.length} 位用户',
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 11.5,
+            ),
           ),
         ),
       );
@@ -1137,7 +1227,11 @@ class _ManagedUserListScreenState extends State<ManagedUserListScreen> {
       ),
       child: Text(
         label,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -1272,7 +1366,9 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
             Card(
               child: ListTile(
                 leading: CircleAvatar(
-                  child: Text(name.characters.isEmpty ? '?' : name.characters.first),
+                  child: Text(
+                    name.characters.isEmpty ? '?' : name.characters.first,
+                  ),
                 ),
                 title: Text(
                   name,
@@ -1326,13 +1422,13 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
                       ),
                     ]
                   : user.roles
-                      .map(
-                        (r) => Chip(
-                          avatar: const Icon(Icons.badge_outlined, size: 16),
-                          label: Text(_formatRoleName(r)),
-                        ),
-                      )
-                      .toList(),
+                        .map(
+                          (r) => Chip(
+                            avatar: const Icon(Icons.badge_outlined, size: 16),
+                            label: Text(_formatRoleName(r)),
+                          ),
+                        )
+                        .toList(),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -1344,7 +1440,10 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
               const Card(
                 child: Padding(
                   padding: EdgeInsets.all(18),
-                  child: Text('暂无处罚记录', style: TextStyle(color: AppTheme.textSecondary)),
+                  child: Text(
+                    '暂无处罚记录',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
                 ),
               )
             else
@@ -1352,8 +1451,13 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
                 (item) => Card(
                   child: ListTile(
                     dense: true,
-                    leading: const Icon(Icons.warning_amber_outlined, color: Colors.orange),
-                    title: Text('${_formatActionCode(item['type']?.toString() ?? '')}：${item['reason'] ?? ''}'),
+                    leading: const Icon(
+                      Icons.warning_amber_outlined,
+                      color: Colors.orange,
+                    ),
+                    title: Text(
+                      '${_formatActionCode(item['type']?.toString() ?? '')}：${item['reason'] ?? ''}',
+                    ),
                     subtitle: Text('${item['starts_at'] ?? ''}'),
                   ),
                 ),
@@ -1368,28 +1472,30 @@ class _ManagedUserDetailScreenState extends State<ManagedUserDetailScreen> {
               const Card(
                 child: Padding(
                   padding: EdgeInsets.all(18),
-                  child: Text('暂无帖子记录', style: TextStyle(color: AppTheme.textSecondary)),
+                  child: Text(
+                    '暂无帖子记录',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
                 ),
               )
             else
-              ...user.recentPosts.map(
-                (item) {
-                  final postId = (item['id'] ?? '').toString();
-                  final canOpen = widget.onOpenPostId != null && postId.isNotEmpty;
-                  return Card(
-                    child: ListTile(
-                      dense: true,
-                      title: Text(
-                        '${item['title'] ?? '无标题'}',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text('${item['content'] ?? ''}'),
-                      trailing: canOpen ? const Icon(Icons.chevron_right) : null,
-                      onTap: canOpen ? () => widget.onOpenPostId!(postId) : null,
+              ...user.recentPosts.map((item) {
+                final postId = (item['id'] ?? '').toString();
+                final canOpen =
+                    widget.onOpenPostId != null && postId.isNotEmpty;
+                return Card(
+                  child: ListTile(
+                    dense: true,
+                    title: Text(
+                      '${item['title'] ?? '无标题'}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                  );
-                },
-              ),
+                    subtitle: Text('${item['content'] ?? ''}'),
+                    trailing: canOpen ? const Icon(Icons.chevron_right) : null,
+                    onTap: canOpen ? () => widget.onOpenPostId!(postId) : null,
+                  ),
+                );
+              }),
           ],
         );
       },
@@ -1439,12 +1545,21 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+                const Icon(
+                  Icons.error_outline_rounded,
+                  size: 36,
+                  color: AppTheme.textSecondary,
+                ),
                 const SizedBox(height: 10),
-                const Text('加载账号状态失败', style: TextStyle(color: AppTheme.pink, fontSize: 13)),
+                const Text(
+                  '加载账号状态失败',
+                  style: TextStyle(color: AppTheme.pink, fontSize: 13),
+                ),
                 const SizedBox(height: 12),
                 FilledButton.tonal(
-                  onPressed: () => setState(() => future = widget.repository.getAccountStatus()),
+                  onPressed: () => setState(
+                    () => future = widget.repository.getAccountStatus(),
+                  ),
                   child: const Text('重新加载'),
                 ),
               ],
@@ -1454,7 +1569,8 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
         final data = snapshot.data!;
         final active = data.status == 'active';
         return RefreshIndicator(
-          onRefresh: () async => setState(() => future = widget.repository.getAccountStatus()),
+          onRefresh: () async =>
+              setState(() => future = widget.repository.getAccountStatus()),
           child: ListView(
             padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
             children: [
@@ -1478,7 +1594,9 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                       ),
                       alignment: Alignment.center,
                       child: Icon(
-                        active ? Icons.verified_user_rounded : Icons.warning_amber_rounded,
+                        active
+                            ? Icons.verified_user_rounded
+                            : Icons.warning_amber_rounded,
                         color: active ? AppTheme.mint : AppTheme.pink,
                         size: 24,
                       ),
@@ -1498,9 +1616,13 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            active ? '账号状态正常 · 无违规记录' : '账号处于${_statusLabel(data.status)}状态',
+                            active
+                                ? '账号状态正常 · 无违规记录'
+                                : '账号处于${_statusLabel(data.status)}状态',
                             style: TextStyle(
-                              color: active ? const Color(0xFF2C8C77) : const Color(0xFFD44333),
+                              color: active
+                                  ? const Color(0xFF2C8C77)
+                                  : const Color(0xFFD44333),
                               fontWeight: FontWeight.w700,
                               fontSize: 12,
                             ),
@@ -1509,7 +1631,10 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFEDF5FC),
                         borderRadius: BorderRadius.circular(6),
@@ -1545,18 +1670,30 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                       borderRadius: BorderRadius.circular(11),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.mail_outline_rounded, color: AppTheme.primary, size: 18),
+                    child: const Icon(
+                      Icons.mail_outline_rounded,
+                      color: AppTheme.primary,
+                      size: 18,
+                    ),
                   ),
                   title: Text(
                     data.email.isEmpty ? '未绑定邮箱' : data.email,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                    ),
                   ),
                   subtitle: Text(
                     data.emailVerified ? '邮箱已完成验证' : '邮箱未验证',
-                    style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                   trailing: Icon(
-                    data.emailVerified ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                    data.emailVerified
+                        ? Icons.check_circle_rounded
+                        : Icons.info_outline_rounded,
                     color: data.emailVerified ? AppTheme.mint : AppTheme.orange,
                     size: 20,
                   ),
@@ -1569,7 +1706,11 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                 padding: EdgeInsets.only(left: 4, bottom: 8),
                 child: Text(
                   '处罚与限制记录',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.textPrimary),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
               ),
               if (data.punishments.isEmpty)
@@ -1579,15 +1720,25 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: AppTheme.border),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 24,
+                    horizontal: 16,
+                  ),
                   alignment: Alignment.center,
                   child: const Column(
                     children: [
-                      Icon(Icons.shield_outlined, size: 32, color: Color(0xFF8B9FB3)),
+                      Icon(
+                        Icons.shield_outlined,
+                        size: 32,
+                        color: Color(0xFF8B9FB3),
+                      ),
                       SizedBox(height: 8),
                       Text(
                         '当前没有处罚与限制记录',
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12.5,
+                        ),
                       ),
                     ],
                   ),
@@ -1614,7 +1765,11 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                             borderRadius: BorderRadius.circular(11),
                           ),
                           alignment: Alignment.center,
-                          child: Icon(_iconForPunishment(item.type), color: AppTheme.pink, size: 18),
+                          child: Icon(
+                            _iconForPunishment(item.type),
+                            color: AppTheme.pink,
+                            size: 18,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -1623,12 +1778,19 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                             children: [
                               Text(
                                 _punishmentTitle(item),
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.5,
+                                ),
                               ),
                               const SizedBox(height: 3),
                               Text(
                                 '${item.reason}\n${_dateLabel(item.startsAt)}${item.endsAt == null ? ' · 长期' : ' — ${_dateLabel(item.endsAt!)}'}',
-                                style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary, height: 1.35),
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppTheme.textSecondary,
+                                  height: 1.35,
+                                ),
                               ),
                             ],
                           ),
@@ -1638,9 +1800,14 @@ class _AccountStatusScreenState extends State<AccountStatusScreen> {
                             onPressed: () => widget.onOpenAction!(item.id),
                             style: FilledButton.styleFrom(
                               visualDensity: VisualDensity.compact,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
-                            child: const Text('申诉', style: TextStyle(fontSize: 11)),
+                            child: const Text(
+                              '申诉',
+                              style: TextStyle(fontSize: 11),
+                            ),
                           ),
                       ],
                     ),
@@ -1771,17 +1938,27 @@ class _AdminListScreenState extends State<AdminListScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
-                const Icon(Icons.search_rounded, color: Color(0xFF5E748A), size: 20),
+                const Icon(
+                  Icons.search_rounded,
+                  color: Color(0xFF5E748A),
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: searchController,
                     textInputAction: TextInputAction.search,
                     onSubmitted: (_) => _search(),
-                    style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                    ),
                     decoration: const InputDecoration(
                       hintText: '搜索管理员昵称或邮箱',
-                      hintStyle: TextStyle(fontSize: 12.5, color: Color(0xFF8B9FB3)),
+                      hintStyle: TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF8B9FB3),
+                      ),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -1793,7 +1970,11 @@ class _AdminListScreenState extends State<AdminListScreen> {
                       searchController.clear();
                       _search();
                     },
-                    child: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF7A8FA5)),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: Color(0xFF7A8FA5),
+                    ),
                   ),
               ],
             ),
@@ -1811,10 +1992,15 @@ class _AdminListScreenState extends State<AdminListScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('加载失败', style: TextStyle(color: AppTheme.pink)),
+                      const Text(
+                        '加载失败',
+                        style: TextStyle(color: AppTheme.pink),
+                      ),
                       const SizedBox(height: 8),
                       TextButton(
-                        onPressed: () => setState(() => future = widget.repository.listAdmins()),
+                        onPressed: () => setState(
+                          () => future = widget.repository.listAdmins(),
+                        ),
                         child: const Text('点击重试'),
                       ),
                     ],
@@ -1824,18 +2010,24 @@ class _AdminListScreenState extends State<AdminListScreen> {
               final items = snapshot.data!;
               if (items.isEmpty) {
                 return const Center(
-                  child: Text('暂无管理员数据', style: TextStyle(color: AppTheme.textSecondary)),
+                  child: Text(
+                    '暂无管理员数据',
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
                 );
               }
               return RefreshIndicator(
-                onRefresh: () async => setState(() => future = widget.repository.listAdmins()),
+                onRefresh: () async =>
+                    setState(() => future = widget.repository.listAdmins()),
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(14, 4, 14, 80),
                   itemCount: items.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (_, index) {
                     final item = items[index];
-                    final name = item.nickname.isEmpty ? item.username : item.nickname;
+                    final name = item.nickname.isEmpty
+                        ? item.username
+                        : item.nickname;
                     final accountText = item.email.trim().isNotEmpty
                         ? item.email.trim()
                         : _safePublicAccountLabel(null, item.username);
@@ -1853,7 +2045,10 @@ class _AdminListScreenState extends State<AdminListScreen> {
                           borderRadius: BorderRadius.circular(16),
                           onTap: () => widget.onOpenAdmin(item.id),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
                             child: Row(
                               children: [
                                 ClipRRect(
@@ -1871,11 +2066,15 @@ class _AdminListScreenState extends State<AdminListScreen> {
                                         height: 40,
                                         decoration: BoxDecoration(
                                           color: AppTheme.softViolet,
-                                          borderRadius: BorderRadius.circular(13),
+                                          borderRadius: BorderRadius.circular(
+                                            13,
+                                          ),
                                         ),
                                         alignment: Alignment.center,
                                         child: Text(
-                                          name.characters.isEmpty ? '?' : name.characters.first,
+                                          name.characters.isEmpty
+                                              ? '?'
+                                              : name.characters.first,
                                           style: const TextStyle(
                                             fontSize: 16,
                                             fontWeight: FontWeight.w800,
@@ -1889,7 +2088,8 @@ class _AdminListScreenState extends State<AdminListScreen> {
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         name,
@@ -2013,7 +2213,11 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
           const SizedBox(height: 12),
           const Text(
             '选择授权用户',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+            ),
           ),
           const SizedBox(height: 12),
           Container(
@@ -2025,7 +2229,11 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
-                const Icon(Icons.search_rounded, color: Color(0xFF5E748A), size: 18),
+                const Icon(
+                  Icons.search_rounded,
+                  color: Color(0xFF5E748A),
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -2035,7 +2243,10 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                     style: const TextStyle(fontSize: 12.5),
                     decoration: const InputDecoration(
                       hintText: '搜索用户名、昵称或邮箱',
-                      hintStyle: TextStyle(fontSize: 12, color: Color(0xFF8B9FB3)),
+                      hintStyle: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8B9FB3),
+                      ),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -2047,7 +2258,11 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                       searchController.clear();
                       _search();
                     },
-                    child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF7A8FA5)),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: Color(0xFF7A8FA5),
+                    ),
                   ),
               ],
             ),
@@ -2071,20 +2286,32 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                 final items = snapshot.data ?? const <AdminCandidate>[];
                 if (items.isEmpty) {
                   return const Center(
-                    child: Text('没有匹配的可授权用户', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5)),
+                    child: Text(
+                      '没有匹配的可授权用户',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12.5,
+                      ),
+                    ),
                   );
                 }
                 return ListView.separated(
                   itemCount: items.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1, color: Color(0xFFEDF2F7)),
+                  separatorBuilder: (_, _) =>
+                      const Divider(height: 1, color: Color(0xFFEDF2F7)),
                   itemBuilder: (_, index) {
                     final item = items[index];
-                    final name = item.nickname.isEmpty ? item.username : item.nickname;
+                    final name = item.nickname.isEmpty
+                        ? item.username
+                        : item.nickname;
                     final candidateAccount = item.email.trim().isNotEmpty
                         ? item.email.trim()
                         : _safePublicAccountLabel(null, item.username);
                     return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(13),
                         child: SizedBox(
@@ -2104,7 +2331,9 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                               ),
                               alignment: Alignment.center,
                               child: Text(
-                                name.characters.isEmpty ? '?' : name.characters.first,
+                                name.characters.isEmpty
+                                    ? '?'
+                                    : name.characters.first,
                                 style: const TextStyle(
                                   color: Color(0xFF2C568D),
                                   fontWeight: FontWeight.w700,
@@ -2116,13 +2345,23 @@ class _AdminCandidatePickerState extends State<_AdminCandidatePicker> {
                       ),
                       title: Text(
                         name,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                        ),
                       ),
                       subtitle: Text(
                         candidateAccount.isEmpty ? '未绑定邮箱' : candidateAccount,
-                        style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: AppTheme.textSecondary,
+                        ),
                       ),
-                      trailing: const Icon(Icons.add_circle_outline_rounded, color: AppTheme.primary, size: 20),
+                      trailing: const Icon(
+                        Icons.add_circle_outline_rounded,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
                       onTap: () => Navigator.pop(context, item),
                     );
                   },
@@ -2498,7 +2737,8 @@ class _RevokeAdminRolesDialog extends StatefulWidget {
   const _RevokeAdminRolesDialog();
 
   @override
-  State<_RevokeAdminRolesDialog> createState() => _RevokeAdminRolesDialogState();
+  State<_RevokeAdminRolesDialog> createState() =>
+      _RevokeAdminRolesDialogState();
 }
 
 class _RevokeAdminRolesDialogState extends State<_RevokeAdminRolesDialog> {
@@ -2546,10 +2786,7 @@ class _RevokeAdminRolesDialogState extends State<_RevokeAdminRolesDialog> {
         onPressed: () => Navigator.pop(context, null),
         child: const Text('取消'),
       ),
-      FilledButton(
-        onPressed: _submit,
-        child: const Text('确认撤销'),
-      ),
+      FilledButton(onPressed: _submit, child: const Text('确认撤销')),
     ],
   );
 }
@@ -2674,7 +2911,10 @@ class _AdminDetailScreenState extends State<AdminDetailScreen> {
             ...data.roles.map(
               (role) => Card(
                 child: ListTile(
-                  leading: const Icon(Icons.badge_outlined, color: AppTheme.primary),
+                  leading: const Icon(
+                    Icons.badge_outlined,
+                    color: AppTheme.primary,
+                  ),
                   title: Text(_formatRoleName(role['name'] ?? '')),
                   subtitle: Text(
                     (role['community_id'] ?? '').isEmpty
@@ -2698,10 +2938,15 @@ class _AdminDetailScreenState extends State<AdminDetailScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: data.permissions
-                        .map((permission) => Chip(
-                              avatar: const Icon(Icons.check_circle_outline, size: 16),
-                              label: Text(_formatPermissionName(permission)),
-                            ))
+                        .map(
+                          (permission) => Chip(
+                            avatar: const Icon(
+                              Icons.check_circle_outline,
+                              size: 16,
+                            ),
+                            label: Text(_formatPermissionName(permission)),
+                          ),
+                        )
                         .toList(),
                   ),
                 ),
@@ -2788,7 +3033,8 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
           IconButton(
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => IPRestrictionsScreen(repository: widget.repository),
+                builder: (_) =>
+                    IPRestrictionsScreen(repository: widget.repository),
               ),
             ),
             icon: const Icon(Icons.public_off_outlined),
@@ -2813,12 +3059,21 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+                const Icon(
+                  Icons.error_outline_rounded,
+                  size: 36,
+                  color: AppTheme.textSecondary,
+                ),
                 const SizedBox(height: 10),
-                const Text('加载风控数据失败', style: TextStyle(color: AppTheme.pink, fontSize: 13)),
+                const Text(
+                  '加载风控数据失败',
+                  style: TextStyle(color: AppTheme.pink, fontSize: 13),
+                ),
                 const SizedBox(height: 12),
                 FilledButton.tonal(
-                  onPressed: () => setState(() => future = widget.repository.getRiskOverview()),
+                  onPressed: () => setState(
+                    () => future = widget.repository.getRiskOverview(),
+                  ),
                   child: const Text('重新加载'),
                 ),
               ],
@@ -2827,7 +3082,8 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
         }
         final data = snapshot.data!;
         return RefreshIndicator(
-          onRefresh: () async => setState(() => future = widget.repository.getRiskOverview()),
+          onRefresh: () async =>
+              setState(() => future = widget.repository.getRiskOverview()),
           child: ListView(
             padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
             children: [
@@ -2870,7 +3126,11 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
                 padding: EdgeInsets.only(left: 4, bottom: 8),
                 child: Text(
                   '最近风险事件',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.textPrimary),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
               ),
               if (data.events.isEmpty)
@@ -2880,97 +3140,111 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: AppTheme.border),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 24,
+                    horizontal: 16,
+                  ),
                   alignment: Alignment.center,
                   child: const Column(
                     children: [
-                      Icon(Icons.shield_rounded, size: 32, color: Color(0xFF8B9FB3)),
+                      Icon(
+                        Icons.shield_rounded,
+                        size: 32,
+                        color: Color(0xFF8B9FB3),
+                      ),
                       SizedBox(height: 8),
                       Text(
                         '暂无风险事件',
-                        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12.5),
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12.5,
+                        ),
                       ),
                     ],
                   ),
                 )
               else
-                ...data.events.map(
-                  (event) {
-                    final isHigh = event.severity == 'high';
-                    final isMed = event.severity == 'medium';
-                    final iconBg = isHigh ? AppTheme.softRose : (isMed ? AppTheme.softAmber : AppTheme.softMint);
-                    final iconColor = isHigh ? AppTheme.pink : (isMed ? AppTheme.orange : AppTheme.mint);
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.border),
-                        boxShadow: const [AppTheme.cardShadow],
-                      ),
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: iconBg,
-                              borderRadius: BorderRadius.circular(11),
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              isHigh ? Icons.error_outline_rounded : Icons.shield_outlined,
-                              color: iconColor,
-                              size: 20,
-                            ),
+                ...data.events.map((event) {
+                  final isHigh = event.severity == 'high';
+                  final isMed = event.severity == 'medium';
+                  final iconBg = isHigh
+                      ? AppTheme.softRose
+                      : (isMed ? AppTheme.softAmber : AppTheme.softMint);
+                  final iconColor = isHigh
+                      ? AppTheme.pink
+                      : (isMed ? AppTheme.orange : AppTheme.mint);
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.border),
+                      boxShadow: const [AppTheme.cardShadow],
+                    ),
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: iconBg,
+                            borderRadius: BorderRadius.circular(11),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _formatRiskEventType(event.eventType),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13.5,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  '${event.ipAddress.isEmpty ? '未知 IP' : event.ipAddress} · ${_formatRiskSeverity(event.severity)}',
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  event.eventType,
-                                  style: const TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 10,
-                                    color: Color(0xFF91A2B2),
-                                  ),
-                                ),
-                              ],
-                            ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            isHigh
+                                ? Icons.error_outline_rounded
+                                : Icons.shield_outlined,
+                            color: iconColor,
+                            size: 20,
                           ),
-                          Text(
-                            '${event.createdAt.hour.toString().padLeft(2, '0')}:${event.createdAt.minute.toString().padLeft(2, '0')}',
-                            style: const TextStyle(
-                              color: Color(0xFF7190B1),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _formatRiskEventType(event.eventType),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.5,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${event.ipAddress.isEmpty ? '未知 IP' : event.ipAddress} · ${_formatRiskSeverity(event.severity)}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                event.eventType,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 10,
+                                  color: Color(0xFF91A2B2),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                        ),
+                        Text(
+                          '${event.createdAt.hour.toString().padLeft(2, '0')}:${event.createdAt.minute.toString().padLeft(2, '0')}',
+                          style: const TextStyle(
+                            color: Color(0xFF7190B1),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
             ],
           ),
         );
@@ -2978,7 +3252,13 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
     ),
   );
 
-  Widget _metricCard(String label, String value, IconData icon, Color bg, Color iconColor) => Container(
+  Widget _metricCard(
+    String label,
+    String value,
+    IconData icon,
+    Color bg,
+    Color iconColor,
+  ) => Container(
     decoration: BoxDecoration(
       color: Colors.white,
       borderRadius: BorderRadius.circular(16),
@@ -3002,7 +3282,11 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
         const SizedBox(height: 8),
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppTheme.textPrimary),
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: AppTheme.textPrimary,
+          ),
         ),
         const SizedBox(height: 1),
         Text(
@@ -3274,7 +3558,10 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
               final item = items[index];
               return Card(
                 child: ListTile(
-                  leading: const Icon(Icons.verified_user_outlined, color: AppTheme.primary),
+                  leading: const Icon(
+                    Icons.verified_user_outlined,
+                    color: AppTheme.primary,
+                  ),
                   title: Text(_formatActionCode(item.action)),
                   subtitle: Text(
                     '${_formatTargetType(item.targetType)} #${item.targetId}\n理由：${item.reason.isEmpty ? '无' : item.reason}\nIP：${item.ipAddress.isEmpty ? '未知' : item.ipAddress}\n前序哈希：${_short(item.previousHash)}\n当前哈希：${_short(item.hash)}',

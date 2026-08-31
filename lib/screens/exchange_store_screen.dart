@@ -89,7 +89,7 @@ class ExchangeStoreScreen extends StatelessWidget {
                   ),
                   title: Text(product.name),
                   subtitle: Text('${product.points} 积分'),
-                  trailing: const Text('待领取'),
+                  trailing: const Text('待审核'),
                 ),
               ),
           ],
@@ -101,11 +101,7 @@ class ExchangeStoreScreen extends StatelessWidget {
   void _redeem(BuildContext context, StoreProduct product) {
     final success = store!.redeem(product);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          success ? '已兑换${product.name}，请留意领取通知' : '积分不足，再攒一攒就可以兑换啦',
-        ),
-      ),
+      SnackBar(content: Text(success ? '兑换申请已提交，等待管理员审核' : '积分不足，再攒一攒就可以兑换啦')),
     );
   }
 }
@@ -232,7 +228,24 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                             subtitle: Text(
                               '${order.points} 积分 · ${relativeTimeLabel(order.createdAt)}',
                             ),
-                            trailing: Text(_orderStatus(order.status)),
+                            trailing: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(_orderStatus(order.status)),
+                                if (order.status == 'rejected' &&
+                                    order.reviewReason.isNotEmpty)
+                                  Text(
+                                    order.reviewReason,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         )
                         .toList(),
@@ -270,7 +283,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       });
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('已兑换${product.name}，请留意领取通知')));
+      ).showSnackBar(const SnackBar(content: Text('兑换申请已提交，等待管理员审核')));
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -285,6 +298,9 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   }
 
   String _orderStatus(String status) => switch (status) {
+    'pending_review' => '待审核',
+    'approved' => '审核通过 · 待领取',
+    'rejected' => '审核未通过',
     'pending' => '待领取',
     'claimed' => '已领取',
     'completed' => '已完成',

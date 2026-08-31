@@ -226,6 +226,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/admin/users":
 		s.listManagedUsers(w, r)
 		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/store/orders":
+		s.listAdminStoreOrders(w, r)
+		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/store/orders/"):
+		orderID := strings.TrimPrefix(path, "/api/v1/admin/store/orders/")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.getAdminStoreOrder(w, r, orderID)
+			return
+		}
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/store/orders/") && strings.HasSuffix(path, "/review"):
+		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/store/orders/"), "/review")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.reviewAdminStoreOrder(w, r, orderID)
+			return
+		}
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/users/"):
 		s.getManagedUser(w, r, strings.TrimPrefix(path, "/api/v1/admin/users/"))
 		return
@@ -1084,6 +1099,12 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "ACTIVITY_USE_ACTIVITY_API", Message: "活动必须通过活动管理接口创建或编辑"}
 	case errors.Is(err, ErrInsufficientPoints):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "INSUFFICIENT_POINTS", Message: "积分不足"}
+	case errors.Is(err, ErrInvalidStoreOrderReview):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STORE_ORDER_REVIEW", Message: "审核决定或审核说明不合法"}
+	case errors.Is(err, ErrStoreOrderNotFound):
+		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "STORE_ORDER_NOT_FOUND", Message: "兑换订单不存在"}
+	case errors.Is(err, ErrStoreOrderAlreadyReview):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_ORDER_ALREADY_REVIEWED", Message: "该兑换订单已被处理"}
 	case errors.Is(err, ErrBookmarkFolderNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "BOOKMARK_FOLDER_NOT_FOUND", Message: "收藏夹不存在"}
 	case errors.Is(err, ErrDefaultBookmarkFolder):

@@ -38,6 +38,7 @@ import 'screens/my_appeals_screen.dart';
 import 'screens/governance_screens.dart';
 import 'screens/activity_management_screen.dart';
 import 'screens/ranking_submission_review_screen.dart';
+import 'screens/store_order_review_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
@@ -93,8 +94,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   bool get canManageUsers => currentUser?.canManageUsers == true;
   bool get canViewAdminLogs => currentUser?.canViewAdminLogs == true;
   bool get canBanIP => currentUser?.canBanIP == true;
+  bool get canReviewStoreOrders => currentUser?.canReviewStoreOrders == true;
   bool get canAccessGovernance =>
       canModerate ||
+      canReviewStoreOrders ||
       canManageAdmins ||
       canManageUsers ||
       canViewAdminLogs ||
@@ -317,9 +320,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
   }
 
-  void _openPostEditor({
-    required String initialCommunityId,
-  }) {
+  void _openPostEditor({required String initialCommunityId}) {
     final currentUserId =
         authController?.user?.id ?? (apiMode ? 'anonymous' : 'mock-user');
     final draftStorageFuture = ComposerDraftStorage.create(
@@ -385,9 +386,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
       if (!mounted) return;
       setState(() => currentTab = 0);
-      _showQuickFeedback(
-        isPending ? '帖子已提交，正在等待审核' : '帖子已发布',
-      );
+      _showQuickFeedback(isPending ? '帖子已提交，正在等待审核' : '帖子已发布');
     } catch (error) {
       throw PublishException(
         userFacingApiMessage(error, fallback: '发布失败，草稿内容已保留，请重试'),
@@ -582,7 +581,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
   }
 
-  void openUserProfile(String userId) {
+  void openUserProfile(String userId, {int initialTab = 0}) {
     final users = repositories.users;
     if (users == null) {
       _showQuickFeedback('当前模式暂不支持用户主页');
@@ -599,6 +598,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           onFeedback: _showQuickFeedback,
           onOpenPostId: openPostById,
           onOpenRelations: openUserRelations,
+          initialTab: initialTab,
         ),
       ),
     );
@@ -718,6 +718,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           onOpenRankingSubmissions: apiMode && canManageAdmins
               ? openRankingSubmissionReview
               : null,
+          onOpenStoreOrderReview: canReviewStoreOrders
+              ? openStoreOrderReview
+              : null,
           onOpenAdmins: canManageAdmins ? openAdmins : null,
           onOpenUsers: canManageUsers ? openUserManagement : null,
           onOpenRisk: canViewAdminLogs ? openRiskCenter : null,
@@ -774,6 +777,25 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
       MaterialPageRoute<void>(
         builder: (_) => RankingSubmissionReviewScreen(
           platformRepository: platform,
+          onFeedback: _showQuickFeedback,
+        ),
+      ),
+    );
+  }
+
+  void openStoreOrderReview() {
+    if (apiMode && !canReviewStoreOrders) {
+      _showQuickFeedback('你暂时没有兑换审核权限');
+      return;
+    }
+    final platform = repositories.platform;
+    if (platform == null) return;
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => StoreOrderReviewScreen(
+          repository: platform,
+          onOpenUserActivity: (userId, tab) =>
+              openUserProfile(userId, initialTab: tab),
           onFeedback: _showQuickFeedback,
         ),
       ),

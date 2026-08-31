@@ -77,7 +77,8 @@ class AuthUser {
       emailVerifiedAt: emailVerifiedAt ?? this.emailVerifiedAt,
       hasPassword: hasPassword ?? this.hasPassword,
       commentRestricted: commentRestricted ?? this.commentRestricted,
-      commentRestrictedUntil: commentRestrictedUntil ?? this.commentRestrictedUntil,
+      commentRestrictedUntil:
+          commentRestrictedUntil ?? this.commentRestrictedUntil,
       capabilities: capabilities ?? this.capabilities,
     );
   }
@@ -125,6 +126,8 @@ class AuthUser {
 
   bool get canBanIP => capability('can_ban_ip');
 
+  bool get canReviewStoreOrders => capability('can_review_store_orders');
+
   /// 统一读取业务能力，兼容旧服务端未返回完整 capabilities 的会话。
   bool can(String name) => switch (name) {
     'can_publish' => canPublish,
@@ -142,6 +145,7 @@ class AuthUser {
     'can_manage_users' => canManageUsers,
     'can_ban_ip' => canBanIP,
     'can_view_admin_logs' => canViewAdminLogs,
+    'can_review_store_orders' => canReviewStoreOrders,
     _ => capability(name),
   };
 }
@@ -368,10 +372,14 @@ class AuthRepository {
       nickname: _string(json['nickname']),
       level: growth.level,
       experience: experience,
-      avatarMediaId: json['avatar_media_id'] is String && (json['avatar_media_id'] as String).isNotEmpty
+      avatarMediaId:
+          json['avatar_media_id'] is String &&
+              (json['avatar_media_id'] as String).isNotEmpty
           ? json['avatar_media_id'] as String
           : null,
-      avatarUrl: json['avatar_url'] is String && (json['avatar_url'] as String).isNotEmpty
+      avatarUrl:
+          json['avatar_url'] is String &&
+              (json['avatar_url'] as String).isNotEmpty
           ? json['avatar_url'] as String
           : null,
       growth: growth,

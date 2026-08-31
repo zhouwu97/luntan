@@ -570,7 +570,7 @@ class ProfileScreen extends StatelessWidget {
 
   void _redeem(BuildContext context, StoreProduct product) {
     final success = store.redeem(product);
-    onFeedback(success ? '已兑换${product.name}，请留意领取通知' : '积分不足，再攒一攒就可以兑换啦');
+    onFeedback(success ? '兑换申请已提交，等待管理员审核' : '积分不足，再攒一攒就可以兑换啦');
   }
 }
 

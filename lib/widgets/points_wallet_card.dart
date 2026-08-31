@@ -44,7 +44,7 @@ class PointsWalletCard extends StatelessWidget {
     );
 
     return Container(
-      constraints: const BoxConstraints(minHeight: 132),
+      constraints: const BoxConstraints(minHeight: 160),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
@@ -73,7 +73,11 @@ class PointsWalletCard extends StatelessWidget {
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.filter_vintage, size: 12, color: Color(0xFFF5AEC8)),
+                    Icon(
+                      Icons.filter_vintage,
+                      size: 12,
+                      color: Color(0xFFF5AEC8),
+                    ),
                     SizedBox(width: 5),
                     Text(
                       '论坛周边兑换',
@@ -130,6 +134,25 @@ class PointsWalletCard extends StatelessWidget {
                       TextSpan(text: '20', style: gainStyle),
                       const TextSpan(text: ' 积分'),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 5),
+                const Text(
+                  '兑换需人工审核，水贴、水回复产生的积分不计入兑换资格。',
+                  style: TextStyle(
+                    fontSize: 10,
+                    height: 1.45,
+                    color: Color(0xFF8C6677),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                const Text(
+                  '提交后管理员会查看发帖与评论，审核未通过会告知原因。',
+                  style: TextStyle(
+                    fontSize: 10,
+                    height: 1.45,
+                    color: Color(0xFF9A858D),
                   ),
                 ),
                 const SizedBox(height: 2),

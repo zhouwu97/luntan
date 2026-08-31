@@ -49,7 +49,7 @@ void main() {
         (request) async => request.url.path == '/api/v1/me/store-orders'
             ? http.Response.bytes(
                 utf8.encode(
-                  '{"items":[{"id":"order-1","product_id":"p1","product_name":"贴纸包","points":350,"status":"pending","created_at":"2026-08-24T08:00:00Z"}]}',
+                  '{"items":[{"id":"order-1","product_id":"p1","product_name":"贴纸包","points":350,"status":"rejected","review_reason":"存在较多无意义刷屏回复","reviewed_at":"2026-08-25T08:00:00Z","created_at":"2026-08-24T08:00:00Z"}]}',
                 ),
                 200,
                 headers: const {
@@ -65,7 +65,9 @@ void main() {
     expect(orders.single.id, 'order-1');
     expect(orders.single.productName, '贴纸包');
     expect(orders.single.points, 350);
-    expect(orders.single.status, 'pending');
+    expect(orders.single.status, 'rejected');
+    expect(orders.single.reviewReason, '存在较多无意义刷屏回复');
+    expect(orders.single.reviewedAt, isNotNull);
     client.close();
   });
 

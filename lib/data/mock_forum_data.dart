@@ -142,6 +142,7 @@ class ForumStore extends ChangeNotifier {
   FeedSort selectedSort = FeedSort.recommended;
   bool isRefreshing = false;
   int points = 3980;
+  int reservedPoints = 0;
   final List<StoreProduct> redeemedProducts = <StoreProduct>[];
   int publishedCount = 119;
   int replyCount = 2584;
@@ -378,8 +379,8 @@ class ForumStore extends ChangeNotifier {
   }
 
   bool redeem(StoreProduct product) {
-    if (points < product.points) return false;
-    points -= product.points;
+    if (points - reservedPoints < product.points) return false;
+    reservedPoints += product.points;
     redeemedProducts.insert(0, product);
     notifyListeners();
     return true;

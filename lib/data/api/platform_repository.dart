@@ -54,6 +54,8 @@ class ForumNotification {
   bool get isModeration =>
       type.startsWith('moderation.') || type.startsWith('appeal.');
 
+  bool get isSystem => type == 'store.order.reviewed';
+
   String? get moderationActionId {
     final value = targetData['moderation_action_id'];
     return value is String && value.isNotEmpty ? value : null;
@@ -61,6 +63,7 @@ class ForumNotification {
 
   NotificationCategory get category {
     if (isModeration) return NotificationCategory.moderation;
+    if (isSystem) return NotificationCategory.system;
     if (type.startsWith('community.') ||
         type == 'announcement' ||
         type == 'event') {
@@ -633,6 +636,75 @@ class RankingToySubmission {
   final List<String> tags;
 }
 
+class AdminStoreOrder {
+  const AdminStoreOrder({
+    required this.id,
+    required this.userId,
+    required this.username,
+    required this.nickname,
+    required this.productId,
+    required this.productName,
+    required this.points,
+    required this.status,
+    required this.createdAt,
+    required this.userPoints,
+    this.reviewedBy = '',
+    this.reviewedAt,
+    this.reviewReason = '',
+  });
+
+  final String id;
+  final String userId;
+  final String username;
+  final String nickname;
+  final String productId;
+  final String productName;
+  final int points;
+  final String status;
+  final DateTime createdAt;
+  final int userPoints;
+  final String reviewedBy;
+  final DateTime? reviewedAt;
+  final String reviewReason;
+}
+
+class AdminStoreOrderDetail extends AdminStoreOrder {
+  const AdminStoreOrderDetail({
+    required super.id,
+    required super.userId,
+    required super.username,
+    required super.nickname,
+    required super.productId,
+    required super.productName,
+    required super.points,
+    required super.status,
+    required super.createdAt,
+    required super.userPoints,
+    super.reviewedBy,
+    super.reviewedAt,
+    super.reviewReason,
+    required this.reservedPoints,
+    required this.availablePoints,
+    required this.pointSources,
+  });
+
+  final int reservedPoints;
+  final int availablePoints;
+  final List<StorePointSource> pointSources;
+}
+
+class StorePointSource {
+  const StorePointSource({
+    required this.source,
+    required this.points,
+    required this.count,
+  });
+
+  final String source;
+  final int points;
+  final int count;
+}
+
 class PlatformRepository {
   PlatformRepository(this._client);
 
@@ -949,6 +1021,88 @@ class PlatformRepository {
     await _client.postJson(
       '/api/v1/admin/ranking/submissions/$id/review',
       body: {'action': approve ? 'approve' : 'reject', 'note': ?note},
+    );
+  }
+
+  Future<List<AdminStoreOrder>> listStoreOrders({
+    String status = 'pending_review',
+    int limit = 50,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/admin/store/orders',
+      queryParameters: {'status': status, 'limit': '$limit'},
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <AdminStoreOrder>[];
+    return raw.whereType<Map>().map(_adminStoreOrderFromJson).toList();
+  }
+
+  Future<AdminStoreOrderDetail> getStoreOrder(String id) async {
+    final payload = await _client.getJson('/api/v1/admin/store/orders/$id');
+    final rawSources = payload['point_sources'];
+    final sources = rawSources is List
+        ? rawSources.whereType<Map>().map((item) {
+            final value = Map<String, dynamic>.from(item);
+            return StorePointSource(
+              source: _string(value['source']),
+              points: _int(value['points']),
+              count: _int(value['count']),
+            );
+          }).toList()
+        : const <StorePointSource>[];
+    final base = _adminStoreOrderFromJson(payload);
+    return AdminStoreOrderDetail(
+      id: base.id,
+      userId: base.userId,
+      username: base.username,
+      nickname: base.nickname,
+      productId: base.productId,
+      productName: base.productName,
+      points: base.points,
+      status: base.status,
+      createdAt: base.createdAt,
+      userPoints: base.userPoints,
+      reviewedBy: base.reviewedBy,
+      reviewedAt: base.reviewedAt,
+      reviewReason: base.reviewReason,
+      reservedPoints: _int(payload['reserved_points']),
+      availablePoints: _int(payload['available_points']),
+      pointSources: sources,
+    );
+  }
+
+  Future<void> reviewStoreOrder({
+    required String id,
+    required String decision,
+    String reason = '',
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/store/orders/$id/review',
+      body: {'decision': decision, 'reason': reason},
+    );
+  }
+
+  AdminStoreOrder _adminStoreOrderFromJson(dynamic raw) {
+    final value = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : const <String, dynamic>{};
+    return AdminStoreOrder(
+      id: _string(value['id']),
+      userId: _string(value['user_id']),
+      username: _string(value['username']),
+      nickname: _string(
+        value['nickname'],
+        fallback: _string(value['username']),
+      ),
+      productId: _string(value['product_id']),
+      productName: _string(value['product_name']),
+      points: _int(value['points']),
+      status: _string(value['status'], fallback: 'pending_review'),
+      createdAt: _date(value['created_at']),
+      userPoints: _int(value['user_points']),
+      reviewedBy: _string(value['reviewed_by']),
+      reviewedAt: _nullableDate(value['reviewed_at']),
+      reviewReason: _string(value['review_reason']),
     );
   }
 

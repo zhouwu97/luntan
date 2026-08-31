@@ -52,6 +52,8 @@ class StoreOrder {
     required this.points,
     required this.status,
     required this.createdAt,
+    this.reviewReason = '',
+    this.reviewedAt,
   });
 
   final String id;
@@ -60,6 +62,8 @@ class StoreOrder {
   final int points;
   final String status;
   final DateTime createdAt;
+  final String reviewReason;
+  final DateTime? reviewedAt;
 }
 
 class StoreRepository {
@@ -125,6 +129,8 @@ class StoreRepository {
         points: _int(data['points']),
         status: _string(data['status']),
         createdAt: _date(data['created_at'], DateTime.now().toUtc()),
+        reviewReason: _string(data['review_reason']),
+        reviewedAt: _nullableDate(data['reviewed_at']),
       );
     }).toList();
   }
@@ -143,4 +149,6 @@ class StoreRepository {
       value is num ? value.toInt() : int.tryParse('$value') ?? 0;
   DateTime _date(dynamic value, DateTime fallback) =>
       value is String ? DateTime.tryParse(value) ?? fallback : fallback;
+  DateTime? _nullableDate(dynamic value) =>
+      value is String ? DateTime.tryParse(value) : null;
 }

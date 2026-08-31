@@ -224,7 +224,15 @@ class AppUpdateService {
   static const _maxDownloadRedirects = 5;
 
   static Set<String> _buildAllowedHosts(Uri baseUri) {
-    final hosts = <String>{baseUri.host.toLowerCase()};
+    final baseHost = baseUri.host.toLowerCase();
+    final hosts = <String>{baseHost};
+    // 官方 API 与静态下载 CDN 是两个域名，但共同属于官方发布链路。
+    // 仅对官方 API 主机启用这个内置例外；自定义部署仍必须显式配置
+    // UPDATE_ALLOWED_HOSTS，避免把任意更新源错误地放宽到官方 CDN。
+    if (baseHost ==
+        Uri.parse(defaultOfficialUpdateBaseUrl).host.toLowerCase()) {
+      hosts.add(defaultOfficialUpdateDownloadHost);
+    }
     const configuredHosts = String.fromEnvironment('UPDATE_ALLOWED_HOSTS');
     for (final entry in configuredHosts.split(',')) {
       final host = entry.trim().toLowerCase();

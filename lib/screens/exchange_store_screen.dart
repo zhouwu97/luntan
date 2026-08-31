@@ -31,6 +31,8 @@ class ExchangeStoreScreen extends StatelessWidget {
           children: [
             PointsWalletCard(
               balance: localStore.points,
+              reservedPoints: localStore.reservedPoints,
+              availablePoints: localStore.points - localStore.reservedPoints,
               onOpenDetails: () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -49,6 +51,38 @@ class ExchangeStoreScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            if (localStore.redeemedProducts.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.softAmber,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.hourglass_top_rounded,
+                      size: 17,
+                      color: AppTheme.orange,
+                    ),
+                    SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        '已有兑换申请审核中，审核完成后才可再次申请。',
+                        style: TextStyle(
+                          color: AppTheme.orange,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -62,6 +96,7 @@ class ExchangeStoreScreen extends StatelessWidget {
               itemBuilder: (_, index) => _ProductCard(
                 product: storeProducts[index],
                 onRedeem: () => _redeem(context, storeProducts[index]),
+                blocked: localStore.redeemedProducts.isNotEmpty,
               ),
             ),
             const SizedBox(height: 24),
@@ -120,6 +155,9 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   late Future<List<StoreOrder>> ordersFuture;
 
   final Set<String> _redeeming = <String>{};
+  bool _ordersLoading = true;
+  bool _hasPendingReview = false;
+  int _reservedPoints = 0;
   // 兑换幂等键按商品持久到请求成功为止，弱网重试时复用同一个键，
   // 避免服务端把重试当成新订单重复扣积分。
   final Map<String, String> _pendingRedeemKeys = <String, String>{};
@@ -129,7 +167,28 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
     super.initState();
     productsFuture = widget.repository.products();
     balanceFuture = widget.repository.balance();
-    ordersFuture = widget.repository.orders();
+    ordersFuture = _loadOrders();
+  }
+
+  Future<List<StoreOrder>> _loadOrders() async {
+    try {
+      final orders = await widget.repository.orders();
+      if (mounted) {
+        setState(() {
+          _ordersLoading = false;
+          _hasPendingReview = orders.any(
+            (order) => order.status == 'pending_review',
+          );
+          _reservedPoints = orders
+              .where((order) => order.status == 'pending_review')
+              .fold(0, (total, order) => total + order.points);
+        });
+      }
+      return orders;
+    } catch (_) {
+      if (mounted) setState(() => _ordersLoading = false);
+      rethrow;
+    }
   }
 
   @override
@@ -155,6 +214,10 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                   balance: balance.data ?? 0,
                   balanceLoading:
                       balance.connectionState != ConnectionState.done,
+                  reservedPoints: _reservedPoints,
+                  availablePoints: balance.data == null
+                      ? null
+                      : balance.data! - _reservedPoints,
                   onOpenDetails: () {
                     Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -176,6 +239,38 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              if (_hasPendingReview)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.softAmber,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.hourglass_top_rounded,
+                        size: 17,
+                        color: AppTheme.orange,
+                      ),
+                      SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          '已有兑换申请审核中，审核完成后才可再次申请。',
+                          style: TextStyle(
+                            color: AppTheme.orange,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -190,6 +285,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                   product: items[index],
                   onRedeem: () => _redeem(items[index]),
                   busy: _redeeming.contains(items[index].id),
+                  blocked: _ordersLoading || _hasPendingReview,
                 ),
               ),
               const SizedBox(height: 24),
@@ -260,6 +356,12 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   }
 
   Future<void> _redeem(ApiStoreProduct product) async {
+    if (_ordersLoading || _hasPendingReview) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已有兑换申请审核中，请等待审核完成后再申请')));
+      return;
+    }
     if (_redeeming.contains(product.id)) return;
     setState(() => _redeeming.add(product.id));
     try {
@@ -279,7 +381,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       setState(() {
         productsFuture = widget.repository.products();
         balanceFuture = widget.repository.balance();
-        ordersFuture = widget.repository.orders();
+        ordersFuture = _loadOrders();
       });
       ScaffoldMessenger.of(
         context,
@@ -314,10 +416,12 @@ class _ApiProductCard extends StatelessWidget {
     required this.product,
     required this.onRedeem,
     this.busy = false,
+    this.blocked = false,
   });
   final ApiStoreProduct product;
   final VoidCallback onRedeem;
   final bool busy;
+  final bool blocked;
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(13),
@@ -370,12 +474,12 @@ class _ApiProductCard extends StatelessWidget {
             SizedBox(
               height: 30,
               child: FilledButton(
-                onPressed: busy ? null : onRedeem,
+                onPressed: busy || blocked ? null : onRedeem,
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                 ),
                 child: Text(
-                  busy ? '兑换中…' : '兑换',
+                  blocked ? '审核中' : (busy ? '兑换中…' : '兑换'),
                   style: const TextStyle(fontSize: 11),
                 ),
               ),
@@ -388,10 +492,15 @@ class _ApiProductCard extends StatelessWidget {
 }
 
 class _ProductCard extends StatelessWidget {
-  const _ProductCard({required this.product, required this.onRedeem});
+  const _ProductCard({
+    required this.product,
+    required this.onRedeem,
+    this.blocked = false,
+  });
 
   final StoreProduct product;
   final VoidCallback onRedeem;
+  final bool blocked;
 
   @override
   Widget build(BuildContext context) {
@@ -446,11 +555,14 @@ class _ProductCard extends StatelessWidget {
               SizedBox(
                 height: 30,
                 child: FilledButton(
-                  onPressed: onRedeem,
+                  onPressed: blocked ? null : onRedeem,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                   ),
-                  child: const Text('兑换', style: TextStyle(fontSize: 11)),
+                  child: Text(
+                    blocked ? '审核中' : '兑换',
+                    style: const TextStyle(fontSize: 11),
+                  ),
                 ),
               ),
             ],

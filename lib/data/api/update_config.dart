@@ -6,6 +6,12 @@ import 'dart:core';
 /// 更新检查默认直接连接官方更新服务，确保用户随时能收到版本通知并下载官方 APK。
 const defaultOfficialUpdateBaseUrl = 'https://shengbeijiang.com';
 
+/// 官方更新接口当前把 APK 放在独立静态下载域名上。
+///
+/// 该域名属于官方发布链路，客户端可默认信任；其他自定义 CDN 仍必须通过
+/// `UPDATE_ALLOWED_HOSTS` 在构建时显式编入，不能因为配置错误而放宽白名单。
+const defaultOfficialUpdateDownloadHost = 'download.shengbeijiang.com';
+
 const _configuredAppEnv = String.fromEnvironment(
   'APP_ENV',
   defaultValue: 'development',

@@ -705,6 +705,52 @@ class StorePointSource {
   final int count;
 }
 
+class AdminStoreOrderPage {
+  const AdminStoreOrderPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<AdminStoreOrder> items;
+  final String? nextCursor;
+  final bool hasMore;
+}
+
+class AdminStoreRewardContent {
+  const AdminStoreRewardContent({
+    required this.id,
+    required this.source,
+    required this.targetType,
+    required this.targetId,
+    required this.points,
+    required this.reason,
+    required this.earnedAt,
+    required this.titleAtReward,
+    required this.contentAtReward,
+    required this.currentTitle,
+    required this.currentContent,
+    required this.currentStatus,
+    required this.editedSinceReward,
+    required this.snapshotAvailable,
+  });
+
+  final String id;
+  final String source;
+  final String targetType;
+  final String targetId;
+  final int points;
+  final String reason;
+  final DateTime earnedAt;
+  final String titleAtReward;
+  final String contentAtReward;
+  final String currentTitle;
+  final String currentContent;
+  final String currentStatus;
+  final bool editedSinceReward;
+  final bool snapshotAvailable;
+}
+
 class PlatformRepository {
   PlatformRepository(this._client);
 
@@ -1027,14 +1073,30 @@ class PlatformRepository {
   Future<List<AdminStoreOrder>> listStoreOrders({
     String status = 'pending_review',
     int limit = 50,
+  }) async => (await listStoreOrderPage(status: status, limit: limit)).items;
+
+  Future<AdminStoreOrderPage> listStoreOrderPage({
+    String status = 'pending_review',
+    int limit = 50,
+    String? cursor,
   }) async {
+    final query = <String, String>{
+      'status': status,
+      'limit': '$limit',
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
     final payload = await _client.getJson(
       '/api/v1/admin/store/orders',
-      queryParameters: {'status': status, 'limit': '$limit'},
+      queryParameters: query,
     );
     final raw = payload['items'];
-    if (raw is! List) return const <AdminStoreOrder>[];
-    return raw.whereType<Map>().map(_adminStoreOrderFromJson).toList();
+    return AdminStoreOrderPage(
+      items: raw is List
+          ? raw.whereType<Map>().map(_adminStoreOrderFromJson).toList()
+          : const <AdminStoreOrder>[],
+      nextCursor: _nullableString(payload['next_cursor']),
+      hasMore: payload['has_more'] == true,
+    );
   }
 
   Future<AdminStoreOrderDetail> getStoreOrder(String id) async {
@@ -1080,6 +1142,35 @@ class PlatformRepository {
       '/api/v1/admin/store/orders/$id/review',
       body: {'decision': decision, 'reason': reason},
     );
+  }
+
+  Future<List<AdminStoreRewardContent>> getStoreOrderRewardContent(
+    String id,
+  ) async {
+    final payload = await _client.getJson(
+      '/api/v1/admin/store/orders/$id/reward-content',
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <AdminStoreRewardContent>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      return AdminStoreRewardContent(
+        id: _string(value['id']),
+        source: _string(value['source']),
+        targetType: _string(value['target_type']),
+        targetId: _string(value['target_id']),
+        points: _int(value['points']),
+        reason: _string(value['reason']),
+        earnedAt: _date(value['earned_at']),
+        titleAtReward: _string(value['title_at_reward']),
+        contentAtReward: _string(value['content_at_reward']),
+        currentTitle: _string(value['current_title']),
+        currentContent: _string(value['current_content']),
+        currentStatus: _string(value['current_status']),
+        editedSinceReward: value['edited_since_reward'] == true,
+        snapshotAvailable: value['snapshot_available'] == true,
+      );
+    }).toList();
   }
 
   AdminStoreOrder _adminStoreOrderFromJson(dynamic raw) {

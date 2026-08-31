@@ -531,6 +531,20 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	var pendingOrderID string
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT id
+		FROM store_orders
+		WHERE user_id = $1 AND status = 'pending_review'
+		LIMIT 1`, user.ID).Scan(&pendingOrderID)
+	if err == nil {
+		writeAuthError(w, r, ErrStoreOrderReviewPending)
+		return
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		writeInternalError(w, r, err)
+		return
+	}
 	var productName string
 	var points int64
 	if err := tx.QueryRowContext(r.Context(), `SELECT name, points FROM store_products WHERE id = $1 AND active = true FOR UPDATE`, input.ProductID).Scan(&productName, &points); err == sql.ErrNoRows {

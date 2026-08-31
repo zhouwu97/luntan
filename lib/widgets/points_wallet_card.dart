@@ -8,11 +8,15 @@ class PointsWalletCard extends StatelessWidget {
     super.key,
     required this.balance,
     this.balanceLoading = false,
+    this.reservedPoints = 0,
+    this.availablePoints,
     this.onOpenDetails,
   });
 
   final int balance;
   final bool balanceLoading;
+  final int reservedPoints;
+  final int? availablePoints;
   final VoidCallback? onOpenDetails;
 
   @override
@@ -42,6 +46,7 @@ class PointsWalletCard extends StatelessWidget {
         ),
       ],
     );
+    final usablePoints = availablePoints ?? balance - reservedPoints;
 
     return Container(
       constraints: const BoxConstraints(minHeight: 160),
@@ -119,6 +124,18 @@ class PointsWalletCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (reservedPoints > 0) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '审核中冻结 $reservedPoints · 可用 ${usablePoints < 0 ? 0 : usablePoints} 积分',
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      height: 1.35,
+                      color: Color(0xFF9A6D38),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 11),
                 Text.rich(
                   TextSpan(

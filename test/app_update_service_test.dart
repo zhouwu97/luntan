@@ -62,6 +62,26 @@ void main() {
     expect(info.downloadUrl, '/api/v1/app/releases/3/download');
   });
 
+  test('官方更新服务允许其静态下载域名', () async {
+    final payload = jsonDecode(updatePayload()) as Map<String, dynamic>
+      ..['download_url'] =
+          'https://download.shengbeijiang.com/releases/3/app-release.apk';
+    final service = AppUpdateService(
+      baseUri: Uri.parse('https://shengbeijiang.com'),
+      productionBuild: true,
+      client: MockClient(
+        (_) async => http.Response.bytes(utf8.encode(jsonEncode(payload)), 200),
+      ),
+    );
+
+    final info = await service.checkUpdate(
+      versionName: '1.0.0',
+      versionCode: 1,
+    );
+
+    expect(info.downloadUrl, contains('download.shengbeijiang.com'));
+  });
+
   test('checkUpdate 网络失败与 5xx 分类正确', () async {
     final client = MockClient((request) async {
       throw http.ClientException('boom');

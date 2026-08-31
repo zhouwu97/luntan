@@ -229,6 +229,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/admin/store/orders":
 		s.listAdminStoreOrders(w, r)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/store/orders/") && strings.HasSuffix(path, "/reward-content"):
+		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/store/orders/"), "/reward-content")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.getAdminStoreOrderRewardContent(w, r, orderID)
+			return
+		}
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/store/orders/"):
 		orderID := strings.TrimPrefix(path, "/api/v1/admin/store/orders/")
 		if orderID != "" && !strings.Contains(orderID, "/") {
@@ -1105,6 +1111,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "STORE_ORDER_NOT_FOUND", Message: "兑换订单不存在"}
 	case errors.Is(err, ErrStoreOrderAlreadyReview):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_ORDER_ALREADY_REVIEWED", Message: "该兑换订单已被处理"}
+	case errors.Is(err, ErrStoreOrderReviewPending):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_ORDER_REVIEW_PENDING", Message: "已有兑换申请正在审核，请等待审核完成后再申请"}
 	case errors.Is(err, ErrBookmarkFolderNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "BOOKMARK_FOLDER_NOT_FOUND", Message: "收藏夹不存在"}
 	case errors.Is(err, ErrDefaultBookmarkFolder):

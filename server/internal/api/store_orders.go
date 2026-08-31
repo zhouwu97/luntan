@@ -3,9 +3,12 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +20,7 @@ var (
 	ErrInvalidStoreOrderReview = errors.New("invalid store order review")
 	ErrStoreOrderNotFound      = errors.New("store order not found")
 	ErrStoreOrderAlreadyReview = errors.New("store order already reviewed")
+	ErrStoreOrderReviewPending = errors.New("store order review pending")
 )
 
 func (s *Server) requireStoreOrderReviewer(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
@@ -40,6 +44,28 @@ func validStoreOrderStatus(status string) bool {
 	}
 }
 
+type storeOrderCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
+func encodeStoreOrderCursor(cursor storeOrderCursor) string {
+	data, _ := json.Marshal(cursor)
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func decodeStoreOrderCursor(value string) (storeOrderCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return storeOrderCursor{}, err
+	}
+	var cursor storeOrderCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" || cursor.CreatedAt.IsZero() {
+		return storeOrderCursor{}, errors.New("invalid store order cursor")
+	}
+	return cursor, nil
+}
+
 func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -60,6 +86,19 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
 		return
 	}
+	args := []any{status}
+	where := "o.status = $1"
+	if rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor")); rawCursor != "" {
+		cursor, decodeErr := decodeStoreOrderCursor(rawCursor)
+		if decodeErr != nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "兑换订单游标无效"})
+			return
+		}
+		where += " AND (o.created_at, o.id) < ($2, $3)"
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT o.id, o.user_id, u.username, COALESCE(up.nickname, u.username),
 		       p.id, p.name, o.points, o.status, o.created_at,
@@ -69,20 +108,27 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON u.id = o.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN store_products p ON p.id = o.product_id
-		WHERE o.status = $1
+		WHERE `+where+`
 		ORDER BY o.created_at DESC, o.id DESC
-		LIMIT $2`, status, limit)
+		LIMIT $`+strconv.Itoa(limitPosition), args...)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0, limit)
+	items := make([]map[string]any, 0, limit+1)
+	var lastCursor storeOrderCursor
 	for rows.Next() {
 		item, err := scanAdminStoreOrder(rows)
 		if err != nil {
 			writeInternalError(w, r, err)
 			return
+		}
+		if len(items) < limit {
+			lastCursor = storeOrderCursor{
+				CreatedAt: item["created_at"].(time.Time),
+				ID:        item["id"].(string),
+			}
 		}
 		items = append(items, item)
 	}
@@ -90,7 +136,15 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore {
+		nextCursor = encodeStoreOrderCursor(lastCursor)
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
 type storeOrderRowScanner interface {
@@ -168,6 +222,148 @@ func (s *Server) getAdminStoreOrder(w http.ResponseWriter, r *http.Request, orde
 	order["available_points"] = order["user_points"].(int64) - reserved
 	order["point_sources"] = sources
 	httpserver.WriteJSON(w, http.StatusOK, order)
+}
+
+// getAdminStoreOrderRewardContent 将正向积分流水按业务幂等键还原到原始内容。
+// 这里不复用普通用户主页查询，因为普通查询会隐藏已删除、待审核和被编辑后的内容。
+func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.Request, orderID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	if _, ok := s.requireStoreOrderReviewer(w, r); !ok {
+		return
+	}
+	var userID string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT user_id FROM store_orders WHERE id = $1`, orderID).Scan(&userID); errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrStoreOrderNotFound)
+		return
+	} else if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT pt.id, pt.source, pt.delta, pt.reason, pt.created_at, pt.idempotency_key,
+		       p.id, p.title, p.content,
+		       pr.id, COALESCE(pr.title, p.title), COALESCE(pr.content, p.content),
+		       c.id, c.content, COALESCE(NULLIF(c.original_content, ''), c.content),
+		       parent.title,
+		       CASE
+		         WHEN pt.source = 'post' AND p.id IS NULL THEN 'missing'
+		         WHEN pt.source = 'post' AND (p.deleted_at IS NOT NULL OR p.publication_status = 'deleted' OR p.post_status = 'deleted') THEN 'deleted'
+		         WHEN pt.source = 'post' AND (p.publication_status <> 'published' OR p.moderation_status <> 'normal' OR p.post_status <> 'published') THEN 'unavailable'
+		         WHEN pt.source = 'comment' AND c.id IS NULL THEN 'missing'
+		         WHEN pt.source = 'comment' AND (c.deleted_at IS NOT NULL OR c.publication_status = 'deleted') THEN 'deleted'
+		         WHEN pt.source = 'comment' AND (c.publication_status <> 'published' OR c.moderation_status <> 'normal') THEN 'unavailable'
+		         ELSE 'normal'
+		       END,
+		       CASE
+		         WHEN pt.source = 'post' THEN COALESCE(pr.title, p.title) IS DISTINCT FROM p.title
+		              OR COALESCE(pr.content, p.content) IS DISTINCT FROM p.content
+		         WHEN pt.source = 'comment' THEN COALESCE(NULLIF(c.original_content, ''), c.content) IS DISTINCT FROM c.content
+		         ELSE false
+		       END
+		FROM point_transactions pt
+		LEFT JOIN posts p
+		       ON pt.source = 'post'
+		      AND pt.idempotency_key = 'post:create:' || p.id
+		      AND p.author_id = pt.user_id
+		LEFT JOIN LATERAL (
+			SELECT pr0.id, pr0.title, pr0.content
+			FROM post_revisions pr0
+			WHERE pr0.post_id = p.id
+			ORDER BY pr0.created_at ASC, pr0.id ASC
+			LIMIT 1
+		) pr ON true
+		LEFT JOIN comments c
+		       ON pt.source = 'comment'
+		      AND pt.idempotency_key = 'comment:create:' || c.id
+		      AND c.author_id = pt.user_id
+		LEFT JOIN posts parent ON parent.id = c.post_id
+		WHERE pt.user_id = $1
+		  AND pt.delta > 0
+		  AND ((pt.source = 'post' AND pt.idempotency_key LIKE 'post:create:%')
+		    OR (pt.source = 'comment' AND pt.idempotency_key LIKE 'comment:create:%'))
+		ORDER BY pt.created_at DESC, pt.id DESC`, userID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var transactionID, source, reason, idempotencyKey string
+		var delta int64
+		var earnedAt time.Time
+		var postID, postTitle, postContent, postRevisionID, rewardTitle, rewardContent sql.NullString
+		var commentID, commentContent, commentOriginalContent, parentTitle sql.NullString
+		var currentStatus sql.NullString
+		var edited bool
+		if err := rows.Scan(
+			&transactionID, &source, &delta, &reason, &earnedAt, &idempotencyKey,
+			&postID, &postTitle, &postContent, &postRevisionID, &rewardTitle, &rewardContent,
+			&commentID, &commentContent, &commentOriginalContent, &parentTitle,
+			&currentStatus, &edited,
+		); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+
+		targetID := strings.TrimPrefix(idempotencyKey, source+":create:")
+		titleAtReward := ""
+		contentAtReward := ""
+		currentTitle := ""
+		currentContent := ""
+		snapshotAvailable := false
+		if source == "post" {
+			if postID.Valid {
+				targetID = postID.String
+			}
+			titleAtReward = rewardTitle.String
+			contentAtReward = rewardContent.String
+			currentTitle = postTitle.String
+			currentContent = postContent.String
+			snapshotAvailable = postRevisionID.Valid
+		} else {
+			if commentID.Valid {
+				targetID = commentID.String
+			}
+			titleAtReward = parentTitle.String
+			if commentOriginalContent.Valid {
+				contentAtReward = commentOriginalContent.String
+			} else {
+				contentAtReward = commentContent.String
+			}
+			currentTitle = parentTitle.String
+			currentContent = commentContent.String
+			snapshotAvailable = commentOriginalContent.Valid || commentContent.Valid
+		}
+		if targetID == "" {
+			currentStatus = sql.NullString{String: "missing", Valid: true}
+		}
+		items = append(items, map[string]any{
+			"id":                  transactionID,
+			"source":              source,
+			"target_type":         source,
+			"target_id":           targetID,
+			"points":              delta,
+			"reason":              reason,
+			"earned_at":           earnedAt,
+			"title_at_reward":     titleAtReward,
+			"content_at_reward":   contentAtReward,
+			"current_title":       currentTitle,
+			"current_content":     currentContent,
+			"current_status":      currentStatus.String,
+			"edited_since_reward": edited,
+			"snapshot_available":  snapshotAvailable,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (s *Server) loadAdminStoreOrder(ctx context.Context, queryer interface {
@@ -272,7 +468,7 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		if _, err := tx.ExecContext(r.Context(), `
 			INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key)
 			VALUES ($1, $2, 'store', $3, $4, $5, $6)
-			ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`, newPostID(), userID, -points, newBalance, productName, "store:approve:"+orderID); err != nil {
+			`, newPostID(), userID, -points, newBalance, productName, "store:approve:"+orderID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

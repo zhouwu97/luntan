@@ -24,20 +24,73 @@ class StoreOrderReviewScreen extends StatefulWidget {
 }
 
 class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
-  late Future<List<AdminStoreOrder>> _future;
+  final List<AdminStoreOrder> _items = <AdminStoreOrder>[];
+  String? _nextCursor;
+  String? _error;
+  String? _loadMoreError;
+  bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.repository.listStoreOrders();
+    _loadFirstPage();
   }
 
-  Future<void> _refresh() async {
+  Future<void> _loadFirstPage() async {
     setState(() {
-      _future = widget.repository.listStoreOrders();
+      _loading = true;
+      _error = null;
+      _loadMoreError = null;
+      _items.clear();
+      _nextCursor = null;
+      _hasMore = false;
     });
-    await _future;
+    try {
+      final page = await widget.repository.listStoreOrderPage();
+      if (!mounted) return;
+      setState(() {
+        _items.addAll(page.items);
+        _nextCursor = page.nextCursor;
+        _hasMore = page.hasMore;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '$error';
+      });
+    }
   }
+
+  Future<void> _loadMore() async {
+    final cursor = _nextCursor;
+    if (_loadingMore || !_hasMore || cursor == null || cursor.isEmpty) return;
+    setState(() {
+      _loadingMore = true;
+      _loadMoreError = null;
+    });
+    try {
+      final page = await widget.repository.listStoreOrderPage(cursor: cursor);
+      if (!mounted) return;
+      setState(() {
+        _items.addAll(page.items);
+        _nextCursor = page.nextCursor;
+        _hasMore = page.hasMore;
+        _loadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMore = false;
+        _loadMoreError = '$error';
+      });
+    }
+  }
+
+  Future<void> _refresh() => _loadFirstPage();
 
   Future<void> _openDetail(AdminStoreOrder item) async {
     final changed = await Navigator.of(context).push<bool>(
@@ -51,9 +104,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       ),
     );
     if (changed == true && mounted) {
-      setState(() {
-        _future = widget.repository.listStoreOrders();
-      });
+      await _loadFirstPage();
     }
   }
 
@@ -69,58 +120,68 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
         backgroundColor: AppTheme.background,
         elevation: 0,
       ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: FutureBuilder<List<AdminStoreOrder>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return ListView(
-                children: const [
-                  SizedBox(height: 220),
-                  Center(child: CircularProgressIndicator()),
-                ],
-              );
-            }
-            if (snapshot.hasError) {
-              return ListView(
-                padding: const EdgeInsets.all(22),
-                children: [
-                  const SizedBox(height: 120),
-                  const Center(child: Text('兑换申请加载失败')),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: OutlinedButton(
-                      onPressed: () => setState(
-                        () => _future = widget.repository.listStoreOrders(),
-                      ),
-                      child: const Text('重新加载'),
-                    ),
-                  ),
-                ],
-              );
-            }
-            final items = snapshot.data ?? const <AdminStoreOrder>[];
-            if (items.isEmpty) {
-              return ListView(
-                children: const [
-                  SizedBox(height: 180),
-                  Center(child: Text('当前没有待审核的兑换申请')),
-                ],
-              );
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 30),
-              itemCount: items.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) => _StoreOrderListTile(
-                item: items[index],
-                onTap: () => _openDetail(items[index]),
-              ),
+      body: RefreshIndicator(onRefresh: _refresh, child: _buildBody()),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading && _items.isEmpty) {
+      return ListView(
+        children: const [
+          SizedBox(height: 220),
+          Center(child: CircularProgressIndicator()),
+        ],
+      );
+    }
+    if (_error != null && _items.isEmpty) {
+      return ListView(
+        padding: const EdgeInsets.all(22),
+        children: [
+          const SizedBox(height: 120),
+          const Center(child: Text('兑换申请加载失败')),
+          const SizedBox(height: 12),
+          Center(
+            child: OutlinedButton(
+              onPressed: _loadFirstPage,
+              child: const Text('重新加载'),
+            ),
+          ),
+        ],
+      );
+    }
+    if (_items.isEmpty) {
+      return ListView(
+        children: const [
+          SizedBox(height: 180),
+          Center(child: Text('当前没有待审核的兑换申请')),
+        ],
+      );
+    }
+    final footerCount = _hasMore ? 1 : 0;
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 30),
+      itemCount: _items.length + footerCount,
+      separatorBuilder: (_, index) => index < _items.length - 1
+          ? const SizedBox(height: 10)
+          : const SizedBox(height: 6),
+      itemBuilder: (context, index) {
+        if (index == _items.length) {
+          if (_loadingMore) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
             );
-          },
-        ),
-      ),
+          }
+          return OutlinedButton(
+            onPressed: _loadMore,
+            child: Text(_loadMoreError == null ? '加载更多申请' : '加载失败，点击重试'),
+          );
+        }
+        return _StoreOrderListTile(
+          item: _items[index],
+          onTap: () => _openDetail(_items[index]),
+        );
+      },
     );
   }
 }
@@ -216,6 +277,7 @@ class StoreOrderReviewDetailScreen extends StatefulWidget {
 class _StoreOrderReviewDetailScreenState
     extends State<StoreOrderReviewDetailScreen> {
   late Future<AdminStoreOrderDetail> _future;
+  late Future<List<AdminStoreRewardContent>> _rewardContentFuture;
   final TextEditingController _reasonController = TextEditingController();
   bool _busy = false;
 
@@ -223,6 +285,9 @@ class _StoreOrderReviewDetailScreenState
   void initState() {
     super.initState();
     _future = widget.repository.getStoreOrder(widget.orderId);
+    _rewardContentFuture = widget.repository.getStoreOrderRewardContent(
+      widget.orderId,
+    );
   }
 
   @override
@@ -238,6 +303,8 @@ class _StoreOrderReviewDetailScreenState
       return;
     }
     if (_busy) return;
+    final confirmed = await _confirmReview(order, decision, reason);
+    if (!mounted || confirmed != true) return;
     setState(() => _busy = true);
     try {
       await widget.repository.reviewStoreOrder(
@@ -252,6 +319,35 @@ class _StoreOrderReviewDetailScreenState
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<bool?> _confirmReview(
+    AdminStoreOrderDetail order,
+    String decision,
+    String reason,
+  ) {
+    final approving = decision == 'approve';
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(approving ? '确认通过兑换申请？' : '确认拒绝兑换申请？'),
+        content: Text(
+          approving
+              ? '用户：${_displayName(order)}\n商品：${order.productName}\n将扣除：${order.points} 积分'
+              : '用户：${_displayName(order)}\n商品：${order.productName}\n拒绝原因：$reason',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(approving ? '确认通过' : '确认拒绝'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -296,6 +392,8 @@ class _StoreOrderReviewDetailScreenState
                 _pointSourceCard(order.pointSources),
                 const SizedBox(height: 12),
               ],
+              _rewardContentSection(),
+              const SizedBox(height: 12),
               if (order.status == 'pending_review') _reviewCard(order),
               if (order.status != 'pending_review' &&
                   order.reviewReason.isNotEmpty)
@@ -361,6 +459,145 @@ class _StoreOrderReviewDetailScreenState
           ),
         ),
     ]);
+  }
+
+  Widget _rewardContentSection() {
+    return FutureBuilder<List<AdminStoreRewardContent>>(
+      future: _rewardContentFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _detailCard([
+            const Text(
+              '获得积分的内容记录',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(),
+          ]);
+        }
+        if (snapshot.hasError) {
+          return _detailCard([
+            const Text(
+              '获得积分的内容记录',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '积分内容记录加载失败，请稍后重试。',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ]);
+        }
+        final items = snapshot.data ?? const <AdminStoreRewardContent>[];
+        if (items.isEmpty) {
+          return _detailCard([
+            const Text(
+              '获得积分的内容记录',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '暂时没有可追溯的发帖或评论奖励流水。',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ]);
+        }
+        return _detailCard([
+          const Text(
+            '获得积分的内容记录',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '以下内容按实际积分流水关联，积分可能因每日上限而低于固定奖励值。',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          for (final item in items) _rewardContentTile(item),
+        ]);
+      },
+    );
+  }
+
+  Widget _rewardContentTile(AdminStoreRewardContent item) {
+    final status = _rewardStatusLabel(item.currentStatus);
+    final edited = item.editedSinceReward ? ' · 已编辑' : '';
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      title: Row(
+        children: [
+          Text(
+            '+${item.points}',
+            style: const TextStyle(
+              color: AppTheme.mint,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(_sourceLabel(item.source))),
+          Text(
+            '$status$edited',
+            style: TextStyle(
+              color: item.currentStatus == 'normal'
+                  ? AppTheme.mint
+                  : AppTheme.orange,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+      subtitle: Text(
+        '${relativeTimeLabel(item.earnedAt)} · ${item.titleAtReward.isEmpty ? '查看内容' : item.titleAtReward}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+      ),
+      children: [
+        if (!item.snapshotAvailable)
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '该流水缺少历史内容快照，以下为当前内容。',
+              style: TextStyle(color: AppTheme.orange, fontSize: 11),
+            ),
+          ),
+        if (item.titleAtReward.isNotEmpty)
+          _contentText(
+            item.targetType == 'post' ? '获得积分时标题' : '所属帖子',
+            item.titleAtReward,
+          ),
+        _contentText('获得积分时内容', item.contentAtReward),
+        if (item.editedSinceReward && item.currentContent.isNotEmpty)
+          _contentText('当前内容', item.currentContent),
+      ],
+    );
+  }
+
+  Widget _contentText(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: '$label：',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              TextSpan(text: value.isEmpty ? '（暂无内容）' : value),
+            ],
+          ),
+          style: const TextStyle(fontSize: 12, height: 1.45),
+        ),
+      ),
+    );
   }
 
   Widget _reviewCard(AdminStoreOrderDetail order) {
@@ -448,6 +685,14 @@ class _StoreOrderReviewDetailScreenState
     'claimed' => '已领取',
     'completed' => '已完成',
     'cancelled' => '已取消',
+    _ => value.isEmpty ? '未知状态' : value,
+  };
+
+  String _rewardStatusLabel(String value) => switch (value) {
+    'normal' => '正常',
+    'deleted' => '已删除',
+    'unavailable' => '当前不可见',
+    'missing' => '内容已不存在',
     _ => value.isEmpty ? '未知状态' : value,
   };
 

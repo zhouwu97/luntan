@@ -295,7 +295,8 @@ func TestPublicUserPostsExposeRealPostCounts(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "title", "content", "community_id", "community_name",
 			"comment_count", "like_count", "bookmark_count", "view_count", "created_at",
-		}).AddRow("post-1", "真实帖子", "正文", "c1", "评测区", 5, 37, 2, 321, created))
+			"publication_status", "moderation_status",
+		}).AddRow("post-1", "真实帖子", "正文", "c1", "评测区", 5, 37, 2, 321, created, "published", "normal"))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1/posts?limit=1", nil)
 	res := httptest.NewRecorder()

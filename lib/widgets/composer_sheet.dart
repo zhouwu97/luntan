@@ -12,7 +12,6 @@ import '../data/composer_draft_storage.dart';
 import '../data/draft_media_store/draft_media_store.dart';
 import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
-import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import 'post_media_preview.dart';
 
@@ -21,6 +20,7 @@ class PostEditorScreen extends StatefulWidget {
     super.key,
     required this.initialCommunityId,
     required this.onPublish,
+    this.initialPostType,
     this.userId,
     this.publishController,
     this.enableSampleMedia = true,
@@ -33,6 +33,7 @@ class PostEditorScreen extends StatefulWidget {
   });
 
   final String initialCommunityId;
+  final String? initialPostType;
   final Future<void> Function(PostDraft draft) onPublish;
   final String? userId;
   final PublishController? publishController;
@@ -95,8 +96,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     ...widget.availableCommunities,
   ];
   ComposerDraftStorage? _draftStorage;
-  bool _loadingCommunities = false;
-  bool _communitiesLoadFailed = false;
   bool _restoringDraft = false;
   List<MediaAsset> selectedMedia = const []; // mock 模式示例图
   final List<_DraftImage> images = <_DraftImage>[];
@@ -194,6 +193,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   }
 
   void _initCategorySelection() {
+    if (widget.initialPostType == 'activity' || widget.initialCommunityId == 'activity') {
+      selectedCategoryId = 'activity';
+      communityId = 'community-campus';
+      postType = 'activity';
+      return;
+    }
     final initialId = widget.initialCommunityId;
     if (initialId == 'community-unboxing') {
       selectedCategoryId = 'community-unboxing';
@@ -262,12 +267,6 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   Future<void> _loadCommunities() async {
     final future = widget.availableCommunitiesFuture;
     if (future == null) return;
-    if (mounted) {
-      setState(() {
-        _loadingCommunities = true;
-        _communitiesLoadFailed = false;
-      });
-    }
     try {
       final communities = await future;
       if (!mounted) return;
@@ -275,15 +274,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         _availableCommunities
           ..clear()
           ..addAll(communities);
-        _loadingCommunities = false;
       });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loadingCommunities = false;
-        _communitiesLoadFailed = true;
-      });
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadDraftStorage() async {

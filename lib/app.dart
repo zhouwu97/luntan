@@ -317,7 +317,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
   }
 
-  void _openPostEditor({required String initialCommunityId}) {
+  void _openPostEditor({
+    required String initialCommunityId,
+    String? initialPostType,
+  }) {
     final currentUserId =
         authController?.user?.id ?? (apiMode ? 'anonymous' : 'mock-user');
     final draftStorageFuture = ComposerDraftStorage.create(
@@ -334,6 +337,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
       MaterialPageRoute<void>(
         builder: (_) => PostEditorScreen(
           initialCommunityId: initialCommunityId,
+          initialPostType: initialPostType,
           onPublish: _publishDraft,
           userId: currentUserId,
           publishController: apiMode ? publishController : null,
@@ -367,7 +371,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   Future<void> _publishDraft(PostDraft result) async {
     try {
       final communityId = result.communityId ?? result.section.communityId;
-      await publishController.publish(
+      final response = await publishController.publish(
         communityId: communityId,
         type: result.isPoll ? 'poll' : result.type,
         title: result.title,
@@ -375,10 +379,22 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         mediaIds: result.mediaIds,
         topic: result.topic,
       );
-      await feedController.setQuery(communityId: communityId, sort: 'latest');
+
+      final moderationStatus =
+          response['moderation_status']?.toString() ?? 'normal';
+      final postStatus = response['post_status']?.toString() ?? 'published';
+      final isPending =
+          moderationStatus == 'pending' || postStatus == 'pending';
+
+      if (!isPending) {
+        await feedController.setQuery(communityId: communityId, sort: 'latest');
+      }
+
       if (!mounted) return;
       setState(() => currentTab = 0);
-      _showQuickFeedback('帖子已发布');
+      _showQuickFeedback(
+        isPending ? '帖子已提交，正在等待审核' : '帖子已发布',
+      );
     } catch (error) {
       throw PublishException(
         userFacingApiMessage(error, fallback: '发布失败，草稿内容已保留，请重试'),
@@ -729,6 +745,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         builder: (_) => ActivityManagementScreen(
           repository: platform,
           onFeedback: _showQuickFeedback,
+          onOpenCreateActivity: () => _openPostEditor(
+            initialCommunityId: 'community-campus',
+            initialPostType: 'activity',
+          ),
         ),
       ),
     );

@@ -18,7 +18,7 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectQuery(`(?s)SELECT u\.id, COALESCE\(u\.public_id::text, ''\), u\.username`).
-		WithArgs("u1").
+		WithArgs("u1", "").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "public_id", "username", "nickname", "avatar_media_id",
 			"avatar_object_key", "background_media_id", "background_object_key", "bio", "level",

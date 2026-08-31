@@ -471,8 +471,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                               const SizedBox(height: 8),
                             ],
-                            Text(
+                            LinkText(
                               post.title,
+                              selectable: true,
                               style: const TextStyle(
                                 fontSize: 20,
                                 height: 1.38,

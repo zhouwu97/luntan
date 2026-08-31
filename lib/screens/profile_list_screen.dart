@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/profile_repository.dart';
+import '../domain/models.dart';
 import '../theme/app_theme.dart';
 
 typedef OpenPostById = void Function(String postId, {String? focusCommentId});
@@ -179,13 +180,38 @@ class _ProfileListScreenState extends State<ProfileListScreen> {
                                 Icons.article_outlined,
                                 color: AppTheme.primary,
                               ),
-                              title: Text(
-                                item.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              title: Row(
+                                children: [
+                                  if (item.moderationStatus == ModerationStatus.pending) ...[
+                                    Container(
+                                      margin: const EdgeInsets.only(right: 6),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFFF7ED),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: const Color(0xFFFFEDD5), width: 0.8),
+                                      ),
+                                      child: const Text(
+                                        '审核中',
+                                        style: TextStyle(
+                                          color: Color(0xFFC2410C),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      item.title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                               subtitle: Padding(
                                 padding: const EdgeInsets.only(top: 4),

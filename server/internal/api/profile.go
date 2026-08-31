@@ -219,7 +219,8 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 		return
 	}
 	// 帖子类个人列表按发布时间；history 使用 viewed_at。
-	query, args, err := profileListQuery(kind, user.ID, r.URL.Query().Get("cursor"), limit)
+	includePending := kind == "posts"
+	query, args, err := profileListQueryFor(kind, user.ID, r.URL.Query().Get("cursor"), limit, includePending)
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 		return
@@ -232,10 +233,10 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 	defer rows.Close()
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
-		var id, title, content, communityID, communityName string
+		var id, title, content, communityID, communityName, publicationStatus, moderationStatus string
 		var createdAt time.Time
 		var commentCount, likeCount, bookmarkCount, viewCount int64
-		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &createdAt); err != nil {
+		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &createdAt, &publicationStatus, &moderationStatus); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -246,6 +247,8 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
 			"view_count":   viewCount,
 			"published_at": createdAt,
+			"publication_status": publicationStatus,
+			"moderation_status": moderationStatus,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -375,7 +378,8 @@ func profileListQueryFor(kind, userID, rawCursor string, limit int, includePendi
 	limitPosition := len(args)
 	return fmt.Sprintf(`
 		SELECT p.id, p.title, LEFT(p.content, 200), p.community_id, c.name,
-		       p.comment_count, p.like_count, p.bookmark_count, p.view_count, %s
+		       p.comment_count, p.like_count, p.bookmark_count, p.view_count, %s,
+		       p.publication_status, p.moderation_status
 		FROM posts p %s
 		WHERE %s ORDER BY %s DESC, p.id DESC LIMIT $%d`, timestampColumn, join, where, timestampColumn, limitPosition), args, nil
 }
@@ -388,7 +392,8 @@ func (s *Server) profileDetailedList(w http.ResponseWriter, r *http.Request, use
 		s.profileDetailedCommentList(w, r, userID, limit)
 		return
 	}
-	query, args, err := profileDetailedListQuery(kind, userID, r.URL.Query().Get("cursor"), limit)
+	includePending := kind == "posts"
+	query, args, err := profileDetailedListQuery(kind, userID, r.URL.Query().Get("cursor"), limit, includePending)
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 		return
@@ -412,12 +417,11 @@ func (s *Server) profileDetailedList(w http.ResponseWriter, r *http.Request, use
 			&row.Type, &row.Title, &row.Content, &row.CommentCount, &row.LikeCount,
 			&row.BookmarkCount, &row.ShareCount, &row.ViewCount, &row.CreatedAt,
 			&row.UpdatedAt, &publishedAt, &sortAt,
+			&row.Publication, &row.Moderation,
 		); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		row.Publication = "published"
-		row.Moderation = "normal"
 		if publishedAt.Valid {
 			row.PublishedAt = &publishedAt.Time
 		}
@@ -500,8 +504,12 @@ func (s *Server) profileDetailedCommentList(w http.ResponseWriter, r *http.Reque
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
-func profileDetailedListQuery(kind, userID, rawCursor string, limit int) (string, []any, error) {
-	where := "p.deleted_at IS NULL AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.type <> 'market'"
+func profileDetailedListQuery(kind, userID, rawCursor string, limit int, includePending bool) (string, []any, error) {
+	moderationFilter := "p.moderation_status = 'normal'"
+	if includePending {
+		moderationFilter = "p.moderation_status IN ('normal', 'pending')"
+	}
+	where := "p.deleted_at IS NULL AND p.publication_status = 'published' AND " + moderationFilter + " AND p.type <> 'market'"
 	args := []any{userID}
 	join := "JOIN communities c ON c.id = p.community_id"
 	timestampColumn := "COALESCE(p.published_at, p.created_at)"
@@ -532,7 +540,8 @@ func profileDetailedListQuery(kind, userID, rawCursor string, limit int) (string
 		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
 		       p.community_id, c.slug, c.name, p.type, p.title, p.content,
 		       p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
-		       p.created_at, p.updated_at, p.published_at, %s AS sort_at
+		       p.created_at, p.updated_at, p.published_at, %s AS sort_at,
+		       p.publication_status, p.moderation_status
 		FROM posts p
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id

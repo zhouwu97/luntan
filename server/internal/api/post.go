@@ -79,6 +79,12 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, ErrMarketDisabled)
 		return
 	}
+	if input.Type == "activity" {
+		if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+			writeAuthError(w, r, ErrPermissionDenied)
+			return
+		}
+	}
 	if !validPostInput(input) {
 		writeAuthError(w, r, ErrInvalidPost)
 		return

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/mock_forum_data.dart';
+import '../domain/models.dart';
 import '../theme/app_theme.dart';
 import 'forum_author_row.dart';
 import 'link_text.dart';
@@ -70,6 +70,42 @@ class ForumPostCard extends StatelessWidget {
                   onAuthorTap: onAuthorTap,
                 ),
                 const SizedBox(height: 9),
+                if (post.moderationStatus == ModerationStatus.pending) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7ED),
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(
+                        color: const Color(0xFFFFEDD5),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(
+                          Icons.hourglass_top_rounded,
+                          size: 13,
+                          color: Color(0xFFC2410C),
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          '审核中 · 仅自己可见',
+                          style: TextStyle(
+                            color: Color(0xFFC2410C),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (post.isPinned ||
                     post.isFeatured ||
                     post.hotSuppressed ||

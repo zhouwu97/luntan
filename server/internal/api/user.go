@@ -55,7 +55,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		       CASE WHEN u.account_type = 'guest' THEN 0 ELSE COALESCE(up.level, 1) END,
 		       COALESCE(up.trust_level, 'new'), u.status, u.created_at,
 		       COALESCE(up.experience, 0), COALESCE(u.account_type, 'email'),
-		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market'),
+		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market' AND (p.moderation_status = 'normal' OR (p.author_id = $2 AND p.moderation_status = 'pending'))),
 		       (SELECT count(*) FROM comments c WHERE c.author_id = u.id AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal'),
 		       (SELECT count(*) FROM user_follows f WHERE f.followee_id = u.id),
 		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
@@ -63,7 +63,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets avatar ON avatar.id = up.avatar_media_id AND avatar.status = 'ready' AND avatar.deleted_at IS NULL
 		LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
-		WHERE u.id = $1 AND u.deleted_at IS NULL`, id).
+		WHERE u.id = $1 AND u.deleted_at IS NULL`, id, viewerID).
 		Scan(&item.ID, &item.PublicID, &item.Username, &item.Nickname, &item.AvatarMediaID, &avatarObjectKey, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
 			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.CommentCount, &item.FollowerCount, &item.FollowingCount)
 	if err == sql.ErrNoRows {
@@ -137,10 +137,10 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 	defer rows.Close()
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
-		var id, title, content, communityID, communityName string
+		var id, title, content, communityID, communityName, publicationStatus, moderationStatus string
 		var createdAt time.Time
 		var commentCount, likeCount, bookmarkCount, viewCount int64
-		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &createdAt); err != nil {
+		if err := rows.Scan(&id, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &createdAt, &publicationStatus, &moderationStatus); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -150,6 +150,9 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
 			"view_count": viewCount,
+			"published_at": createdAt,
+			"publication_status": publicationStatus,
+			"moderation_status": moderationStatus,
 		})
 	}
 	if err := rows.Err(); err != nil {

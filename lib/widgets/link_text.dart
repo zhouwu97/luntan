@@ -68,32 +68,8 @@ bool isContentUrl(String value) {
   return links.length == 1 && links.single.text == trimmed;
 }
 
-/// 外部打开网址（带确认弹窗），失败时返回 false。
+/// 外部打开网址（直接调用系统浏览器跳转），失败时返回 false。
 Future<bool> openExternalLink(BuildContext context, Uri uri) async {
-  final shouldOpen = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('打开网页？'),
-          content: Text(
-            '确定要跳转到以下网址吗？\n${uri.toString()}',
-            maxLines: 5,
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('打开'),
-            ),
-          ],
-        ),
-      ) ??
-      false;
-  if (!shouldOpen) return true;
-
   try {
     return await launchUrl(uri, mode: LaunchMode.externalApplication);
   } catch (_) {

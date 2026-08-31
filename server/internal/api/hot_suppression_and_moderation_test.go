@@ -235,3 +235,31 @@ func TestEnrichPostHotSuppressionHiddenFromNonAdmin(t *testing.T) {
 		t.Fatalf("expected HotSuppressedReason to be empty for non-admin viewer, got %s", resp.HotSuppressedReason)
 	}
 }
+
+func TestCreateActivityPostRequiresAdmin(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Normal user (no moderation permission)
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "has_password"}).
+			AddRow("user_1", "regular_user", "active", "普通用户", 1, 0, "email", "", false, nil, false))
+	mock.ExpectQuery(`(?s)SELECT EXISTS \(.*FROM user_roles ur.*JOIN role_permissions rp.*`).
+		WithArgs("user_1", "moderation.action").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	payload := `{"community_id":"community-campus","type":"activity","title":"普通用户尝试发布活动","content":"正文"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts", bytes.NewReader([]byte(payload)))
+	req.Header.Set("Authorization", "Bearer access-token-normal")
+	req.Header.Set("Idempotency-Key", "idem-act-101")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden when normal user creates activity post, got %d body=%s", res.Code, res.Body.String())
+	}
+}

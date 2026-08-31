@@ -12,7 +12,6 @@ import '../data/api/publish_repository.dart';
 import '../data/api/store_repository.dart';
 import '../data/api/user_repository.dart';
 import '../data/mock_forum_data.dart';
-import '../domain/models.dart';
 import '../theme/app_theme.dart';
 import '../utils/profile_image_crop.dart';
 import '../widgets/app_network_image.dart';
@@ -1555,6 +1554,8 @@ class _ProfileListSheetState extends State<_ProfileListSheet> {
     createdAt: item.publishedAt,
     updatedAt: item.publishedAt,
     publishedAt: item.publishedAt,
+    moderationStatus: item.moderationStatus,
+    publicationStatus: item.publicationStatus,
   );
 }
 

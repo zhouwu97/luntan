@@ -99,19 +99,21 @@ class _FeaturePageState extends State<FeaturePage> {
   @override
   void initState() {
     super.initState();
+    if (type != FeatureType.ranking && feedRepository != null) {
+      remoteFuture = _remotePosts();
+    }
     if (type == FeatureType.activity && platformRepository != null) {
       activityFuture = platformRepository!.listPublicActivities();
-    } else if (type != FeatureType.ranking && feedRepository != null) {
-      remoteFuture = _remotePosts();
     }
   }
 
   void _retry() {
     setState(() {
+      if (type != FeatureType.ranking && feedRepository != null) {
+        remoteFuture = _remotePosts();
+      }
       if (type == FeatureType.activity && platformRepository != null) {
         activityFuture = platformRepository!.listPublicActivities();
-      } else {
-        remoteFuture = _remotePosts();
       }
     });
   }
@@ -183,37 +185,54 @@ class _FeaturePageState extends State<FeaturePage> {
         onRequireAuth: onRequireAuth,
       );
     }
-    if (type == FeatureType.activity && activityFuture != null) {
-      return Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: FutureBuilder<List<ActivityItem>>(
-          future: activityFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      '活动列表加载失败',
-                      style: TextStyle(color: AppTheme.textSecondary),
-                    ),
-                    TextButton(onPressed: _retry, child: const Text('返回重试')),
-                  ],
-                ),
-              );
-            }
-            final activities = snapshot.data ?? const <ActivityItem>[];
-            if (activities.isNotEmpty) {
-              return _activitiesBody(activities);
-            }
-            return _body(_posts());
-          },
-        ),
-      );
+    if (type == FeatureType.activity) {
+      if (feedRepository != null || platformRepository != null) {
+        return Scaffold(
+          appBar: AppBar(title: Text(title)),
+          body: FutureBuilder<List<Post>>(
+            future: remoteFuture ?? Future.value(_posts()),
+            builder: (context, postSnapshot) {
+              if (postSnapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (postSnapshot.hasError) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        '活动内容加载失败',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                      TextButton(onPressed: _retry, child: const Text('返回重试')),
+                    ],
+                  ),
+                );
+              }
+              final posts = postSnapshot.data ?? const <Post>[];
+              if (posts.isNotEmpty) {
+                return _body(posts);
+              }
+              if (activityFuture != null) {
+                return FutureBuilder<List<ActivityItem>>(
+                  future: activityFuture,
+                  builder: (context, actSnapshot) {
+                    if (actSnapshot.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final activities = actSnapshot.data ?? const <ActivityItem>[];
+                    if (activities.isNotEmpty) {
+                      return _activitiesBody(activities);
+                    }
+                    return _body(_posts());
+                  },
+                );
+              }
+              return _body(_posts());
+            },
+          ),
+        );
+      }
     }
     if (feedRepository != null) {
       return Scaffold(

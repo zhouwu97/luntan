@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"path/filepath"
@@ -605,19 +606,52 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			return
 		}
 
+		// 打码是同步 CPU 密集操作，先拿并发名额；超时返回后处理 goroutine
+		// 继续持有名额直到真正结束，防止僵尸解码任务无限堆积。
+		if !s.acquireModerationSlot(r.Context()) {
+			writeInternalError(w, r, errors.New("request cancelled while waiting for moderation capacity"))
+			return
+		}
+		releaseModeration := s.releaseModerationSlot
+
 		rc, _, _, err := s.mediaStorage.Get(r.Context(), objectKey)
 		if err != nil || rc == nil {
+			releaseModeration()
 			writeInternalError(w, r, fmt.Errorf("failed to retrieve source image: %w", err))
 			return
 		}
 		data, readErr := io.ReadAll(rc)
 		_ = rc.Close()
 		if readErr != nil || len(data) == 0 {
+			releaseModeration()
 			writeInternalError(w, r, fmt.Errorf("failed to read source image: %w", readErr))
 			return
 		}
 
-		procRes, procErr := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
+		start := time.Now()
+		type censoredOutcome struct {
+			res *media.ProcessResult
+			err error
+		}
+		done := make(chan censoredOutcome, 1)
+		go func() {
+			defer releaseModeration()
+			res, err := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
+			done <- censoredOutcome{res: res, err: err}
+		}()
+
+		var procRes *media.ProcessResult
+		var procErr error
+		select {
+		case outcome := <-done:
+			procRes, procErr = outcome.res, outcome.err
+		case <-time.After(45 * time.Second):
+			writeInternalError(w, r, fmt.Errorf("censored image processing timed out after 45s"))
+			return
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			log.Printf("[moderation] slow censored processing media=%s elapsed=%s", mediaID, elapsed)
+		}
 		if procErr != nil {
 			writeInternalError(w, r, fmt.Errorf("failed to generate censored variants: %w", procErr))
 			return

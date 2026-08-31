@@ -26,9 +26,32 @@ type Server struct {
 	webOrigin          string
 	authCodeHashSecret string
 	allowDevAuthCode   bool
+	// moderationSem 限制同步图片打码处理的并发数；超时的处理 goroutine 会
+	// 持有名额直到真正结束，防止僵尸解码任务无限堆积。
+	moderationSem chan struct{}
 }
 
 type authenticatedUserContextKey struct{}
+
+// acquireModerationSlot 限流同步图片打码的并发数。零值 Server（仅测试直接
+// 构造）没有初始化 moderationSem，nil channel 会永久阻塞，这里直接放行。
+func (s *Server) acquireModerationSlot(ctx context.Context) bool {
+	if s.moderationSem == nil {
+		return true
+	}
+	select {
+	case s.moderationSem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (s *Server) releaseModerationSlot() {
+	if s.moderationSem != nil {
+		<-s.moderationSem
+	}
+}
 
 // ReadinessCheck 将业务依赖检查接入统一 /ready 端点。保持构造函数返回
 // http.Handler，避免破坏现有测试和调用方，同时允许主进程检查对象存储。
@@ -80,6 +103,7 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 		webOrigin:          configuredWebOrigin(),
 		authCodeHashSecret: configuredAuthCodeHashSecret(),
 		allowDevAuthCode:   devAuthCodeEnabled(appEnv),
+		moderationSem:      make(chan struct{}, 2),
 	}
 }
 
@@ -115,6 +139,7 @@ func NewHandlerWithMedia(db *sql.DB, authService *auth.Service, storage mediaSto
 		webOrigin:          configuredWebOrigin(),
 		authCodeHashSecret: configuredAuthCodeHashSecret(),
 		allowDevAuthCode:   devAuthCodeEnabled(appEnv),
+		moderationSem:      make(chan struct{}, 2),
 	}
 }
 

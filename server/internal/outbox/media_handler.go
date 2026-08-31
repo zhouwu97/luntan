@@ -235,15 +235,24 @@ func (h MediaHandler) handleDelete(ctx context.Context, event Event) error {
 
 	if h.DB != nil {
 		rows, err := h.DB.QueryContext(ctx, `SELECT object_key FROM media_variants WHERE media_id = $1`, payload.MediaID)
-		if err == nil {
-			for rows.Next() {
-				var key string
-				if err := rows.Scan(&key); err == nil && key != "" {
-					keysToDelete = append(keysToDelete, key)
-				}
-			}
-			rows.Close()
+		if err != nil {
+			return fmt.Errorf("list media variants for %s: %w", payload.MediaID, err)
 		}
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan media variant key: %w", err)
+			}
+			if key != "" {
+				keysToDelete = append(keysToDelete, key)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate media variants: %w", err)
+		}
+		rows.Close()
 	}
 
 	for _, k := range payload.Variants {
@@ -252,13 +261,21 @@ func (h MediaHandler) handleDelete(ctx context.Context, event Event) error {
 		}
 	}
 
-	// 物理删除对象存储中保存的源文件及所有生成衍生图
-	if h.Storage != nil && len(keysToDelete) > 0 {
-		_ = h.Storage.DeleteMulti(ctx, keysToDelete)
+	// 物理删除对象存储中保存的源文件及所有生成衍生图。任何失败都必须返回
+	// error 让 Worker 重试，静默吞掉会把删除事件标记为成功并永久泄漏对象。
+	if len(keysToDelete) > 0 {
+		if h.Storage == nil {
+			return fmt.Errorf("media storage unavailable: cannot delete %s", payload.MediaID)
+		}
+		if err := h.Storage.DeleteMulti(ctx, keysToDelete); err != nil {
+			return fmt.Errorf("delete media objects for %s: %w", payload.MediaID, err)
+		}
 	}
 
 	if h.DB != nil {
-		_, _ = h.DB.ExecContext(ctx, `DELETE FROM media_variants WHERE media_id = $1`, payload.MediaID)
+		if _, err := h.DB.ExecContext(ctx, `DELETE FROM media_variants WHERE media_id = $1`, payload.MediaID); err != nil {
+			return fmt.Errorf("delete media variant rows for %s: %w", payload.MediaID, err)
+		}
 	}
 	return nil
 }

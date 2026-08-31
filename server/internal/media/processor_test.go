@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -351,5 +353,45 @@ func TestReadEXIFOrientation(t *testing.T) {
 				t.Errorf("readEXIFOrientation = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// pngWithDeclaredDimensions 构造只含 IHDR 的 PNG：头里声明超大尺寸，
+// 但真实数据只有几十字节，用来锁定“全量解码前先拒绝”的行为。
+func pngWithDeclaredDimensions(t *testing.T, width, height uint32) []byte {
+	t.Helper()
+	sig := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
+	ihdr := make([]byte, 0, 4+4+13+4)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, 13)
+	ihdr = append(ihdr, "IHDR"...)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, width)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, height)
+	ihdr = append(ihdr, 8, 6, 0, 0, 0)
+	ihdr = binary.BigEndian.AppendUint32(ihdr, crc32.ChecksumIEEE(ihdr[4:]))
+	return append(sig, ihdr...)
+}
+
+func TestProcessCensoredImageRejectsOversizedDeclaredDimensions(t *testing.T) {
+	data := pngWithDeclaredDimensions(t, 20000, 20000) // 4 亿像素，远超 40MP 上限
+	if _, err := ProcessCensoredImage(bytes.NewReader(data), []MaskRegion{{X: 0, Y: 0, Width: 0.5, Height: 0.5, Type: "mosaic"}}); err == nil {
+		t.Fatal("expected oversized declared dimensions to be rejected before full decode")
+	} else if !strings.Contains(err.Error(), "exceed censored processing limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProcessCensoredImageAcceptsNormalImage(t *testing.T) {
+	res, err := ProcessCensoredImage(bytes.NewReader(createTestJPEG(640, 480)), []MaskRegion{{X: 0, Y: 0, Width: 0.5, Height: 0.5, Type: "mosaic"}})
+	if err != nil {
+		t.Fatalf("censored processing failed: %v", err)
+	}
+	if res.AppliedRegions == 0 {
+		t.Fatal("expected at least one applied mask region")
+	}
+	if res.Original.Width != 640 || res.Original.Height != 480 {
+		t.Fatalf("original variant = %dx%d, want 640x480", res.Original.Width, res.Original.Height)
+	}
+	if len(res.Original.Data) == 0 || len(res.Detail.Data) == 0 || len(res.Thumb.Data) == 0 {
+		t.Fatal("censored variants must carry encoded image data")
 	}
 }

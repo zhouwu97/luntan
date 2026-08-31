@@ -65,9 +65,40 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		`DELETE FROM poll_votes WHERE user_id = $1`,
 		`DELETE FROM notifications WHERE user_id = $1 OR actor_id = $1`,
 		`DELETE FROM user_roles WHERE user_id = $1`,
-		`UPDATE media_assets SET status = 'deleted', deleted_at = COALESCE(deleted_at, now()), updated_at = now() WHERE owner_id = $1 AND deleted_at IS NULL`,
 	} {
 		if _, err := tx.ExecContext(r.Context(), statement, user.ID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	// 媒体标记删除后逐个登记 outbox 事件，由 Worker 物理清理对象存储中的
+	// 源文件与衍生图，否则注销后这些对象仍留在公开可读的存储里。
+	mediaRows, err := tx.QueryContext(r.Context(), `
+		UPDATE media_assets
+		SET status = 'deleted', deleted_at = COALESCE(deleted_at, now()), updated_at = now()
+		WHERE owner_id = $1 AND deleted_at IS NULL
+		RETURNING id`, user.ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	mediaIDs := make([]string, 0)
+	for mediaRows.Next() {
+		var mediaID string
+		if err := mediaRows.Scan(&mediaID); err != nil {
+			mediaRows.Close()
+			writeInternalError(w, r, err)
+			return
+		}
+		mediaIDs = append(mediaIDs, mediaID)
+	}
+	mediaRows.Close()
+	if err := mediaRows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	for _, mediaID := range mediaIDs {
+		if err := enqueueOutboxTx(tx, "media.delete", "media", mediaID, map[string]any{"media_id": mediaID}, time.Now().UTC()); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

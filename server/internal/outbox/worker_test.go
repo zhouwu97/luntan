@@ -397,3 +397,83 @@ func TestMediaHandlerDeletePhysicallyDeletesAllVariants(t *testing.T) {
 		t.Fatalf("unmet sqlmock expectations: %v", err)
 	}
 }
+
+func TestMediaHandlerDeleteReturnsErrorWhenVariantQueryFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := MediaHandler{DB: db, Storage: storage.NewMemoryStorage()}
+	payload, _ := json.Marshal(MediaDeletePayload{MediaID: "m_qfail", ObjectKey: "media/u1/m_qfail"})
+
+	mock.ExpectQuery(`SELECT object_key FROM media_variants WHERE media_id = \$1`).
+		WithArgs("m_qfail").
+		WillReturnError(errors.New("database down"))
+
+	err = handler.Handle(context.Background(), Event{EventType: "media.delete", Payload: payload})
+	if err == nil || !strings.Contains(err.Error(), "list media variants") {
+		t.Fatalf("expected variant query error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+type failingDeleteStorage struct {
+	storage.ObjectStorage
+}
+
+func (failingDeleteStorage) DeleteMulti(context.Context, []string) error {
+	return errors.New("storage unavailable")
+}
+
+func TestMediaHandlerDeleteReturnsErrorWhenStorageDeleteFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := MediaHandler{DB: db, Storage: failingDeleteStorage{}}
+	payload, _ := json.Marshal(MediaDeletePayload{MediaID: "m_sfail", ObjectKey: "media/u1/m_sfail"})
+
+	mock.ExpectQuery(`SELECT object_key FROM media_variants WHERE media_id = \$1`).
+		WithArgs("m_sfail").
+		WillReturnRows(sqlmock.NewRows([]string{"object_key"}).AddRow("media/u1/m_sfail_thumb.jpg"))
+
+	err = handler.Handle(context.Background(), Event{EventType: "media.delete", Payload: payload})
+	if err == nil || !strings.Contains(err.Error(), "delete media objects") {
+		t.Fatalf("expected storage deletion error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}
+
+func TestMediaHandlerDeleteReturnsErrorWhenVariantRowsDeleteFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	handler := MediaHandler{DB: db, Storage: storage.NewMemoryStorage()}
+	payload, _ := json.Marshal(MediaDeletePayload{MediaID: "m_rfail", ObjectKey: "media/u1/m_rfail"})
+
+	mock.ExpectQuery(`SELECT object_key FROM media_variants WHERE media_id = \$1`).
+		WithArgs("m_rfail").
+		WillReturnRows(sqlmock.NewRows([]string{"object_key"}).AddRow("media/u1/m_rfail_thumb.jpg"))
+	mock.ExpectExec(`DELETE FROM media_variants WHERE media_id = \$1`).
+		WithArgs("m_rfail").
+		WillReturnError(errors.New("row delete failed"))
+
+	err = handler.Handle(context.Background(), Event{EventType: "media.delete", Payload: payload})
+	if err == nil || !strings.Contains(err.Error(), "delete media variant rows") {
+		t.Fatalf("expected variant row deletion error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sqlmock expectations: %v", err)
+	}
+}

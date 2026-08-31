@@ -462,6 +462,10 @@ func applyMaskRegionsWithCount(src image.Image, regions []MaskRegion) (image.Ima
 	return dst, appliedRegions
 }
 
+// maxCensoredImagePixels 限制打码处理的像素总量。全量解码一张 40MP 图片的
+// RGBA 缓冲峰值约 160MB，超过阈值直接拒绝，避免审核接口被超大图拖垮。
+const maxCensoredImagePixels = 40_000_000
+
 // ProcessCensoredImage 对原图源数据应用打码区域后，重新生成打码版 thumb、detail、original 衍生图
 func ProcessCensoredImage(r io.Reader, regions []MaskRegion) (*ProcessResult, error) {
 	data, err := io.ReadAll(r)
@@ -470,6 +474,18 @@ func ProcessCensoredImage(r io.Reader, regions []MaskRegion) (*ProcessResult, er
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty image data")
+	}
+
+	// 只解码图片头拿声明尺寸，在全量解码前拦下超大图。
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode image config: %w", err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, fmt.Errorf("invalid image dimensions: %dx%d", cfg.Width, cfg.Height)
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxCensoredImagePixels {
+		return nil, fmt.Errorf("image dimensions %dx%d exceed censored processing limit (%d pixels)", cfg.Width, cfg.Height, maxCensoredImagePixels)
 	}
 
 	srcImg, format, err := image.Decode(bytes.NewReader(data))

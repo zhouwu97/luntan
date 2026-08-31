@@ -15,6 +15,18 @@ class AppTheme {
   static const pink = Color(0xFFFF86A7);
   static const purple = Color(0xFF9A88E8);
 
+  // 语义软背景色与阴影
+  static const softBlue = Color(0xFFEAF2FF);
+  static const softMint = Color(0xFFE9F8F4);
+  static const softAmber = Color(0xFFFFF2E4);
+  static const softRose = Color(0xFFFDEEF1);
+  static const softViolet = Color(0xFFF0EDFF);
+  static const cardShadow = BoxShadow(
+    color: Color(0x0A2B456B),
+    blurRadius: 14,
+    offset: Offset(0, 4),
+  );
+
   static const surface = Colors.white;
 
   // 论坛 UI 的统一量尺，页面和基础组件只从这里取值，避免局部漂移。

@@ -131,7 +131,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.canModerate(r, user) {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -205,7 +205,7 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.canModerate(r, user) {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -287,7 +287,7 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.canModerate(r, user) {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -366,7 +366,7 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.canModerate(r, user) {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -417,7 +417,7 @@ func (s *Server) offlineAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.canModerate(r, user) {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}
@@ -451,7 +451,7 @@ func (s *Server) deleteAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 	user, ok := s.authenticatedUser(w, r)
-	if !ok || !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !ok || !s.canModerate(r, user) {
 		if ok {
 			writeAuthError(w, r, ErrPermissionDenied)
 		}

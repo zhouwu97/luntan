@@ -714,6 +714,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     navigatorKey.currentState!.push(
       MaterialPageRoute<void>(
         builder: (_) => GovernanceCenterScreen(
+          repository: platform,
+          appealRepository: repositories.appeals,
           onOpenModeration: canModerate ? openModeration : null,
           onOpenAppeals: canModerate && repositories.appeals != null
               ? openModerationAppeals

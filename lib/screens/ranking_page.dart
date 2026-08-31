@@ -1415,6 +1415,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   final _commentController = TextEditingController();
   bool _wanted = false;
   bool _owned = false;
+  bool _wantedSaving = false;
+  bool _ownedSaving = false;
+  int _wantedRequestVersion = 0;
+  int _ownedRequestVersion = 0;
   bool _sortByWeight = true;
   RankingToyDetail? _remoteDetail;
   bool _remoteLoading = false;
@@ -1532,13 +1536,21 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     );
   }
 
-  void _replaceToy(RankingToy toy) {
+  void _replaceToy(
+    RankingToy toy, {
+    bool syncWanted = true,
+    bool syncOwned = true,
+  }) {
     final detail = _remoteDetail;
     if (detail == null) return;
+    final mergedToy = toy.copyWith(
+      wanted: syncWanted ? toy.wanted : _wanted,
+      owned: syncOwned ? toy.owned : _owned,
+    );
     setState(() {
-      _remoteDetail = detail.copyWith(toy: toy);
-      _wanted = toy.wanted;
-      _owned = toy.owned;
+      _remoteDetail = detail.copyWith(toy: mergedToy);
+      if (syncWanted) _wanted = mergedToy.wanted;
+      if (syncOwned) _owned = mergedToy.owned;
     });
   }
 
@@ -1555,9 +1567,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
           controller: controller,
           autofocus: true,
           keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            hintText: '粘贴 http(s) 链接，清空后保存即删除',
-          ),
+          decoration: const InputDecoration(hintText: '粘贴 http(s) 链接，清空后保存即删除'),
         ),
         actions: [
           TextButton(
@@ -1590,6 +1600,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _setWanted() async {
+    if (_wantedSaving) return;
     final nextWanted = !_wanted;
     // 登录态可能在本页面创建后才建立（弹层登录不会重建已推入的路由），
     // 因此不用构造时的登录快照预判：直接尝试服务器，401/403 再回退本机清单。
@@ -1604,41 +1615,41 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       }
       return;
     }
-    setState(() => _wanted = nextWanted);
+
+    final requestVersion = ++_wantedRequestVersion;
+    setState(() {
+      _wanted = nextWanted;
+      _wantedSaving = true;
+    });
+    // 页面展示不依赖 wanted 写入结果；先完成用户操作，再后台同步状态。
+    if (nextWanted && mounted) _openCouponPage(displayItem);
     try {
       final toy = await widget.repository!.setWanted(
         toyId: item.id,
         active: nextWanted,
       );
-      _replaceToy(toy);
-      if (nextWanted && mounted) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => RankingCouponPage(item: displayItem),
-          ),
-        );
+      if (mounted && requestVersion == _wantedRequestVersion) {
+        _replaceToy(toy, syncOwned: false);
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || requestVersion != _wantedRequestVersion) return;
       if (_isAuthOrCapabilityDenied(error)) {
         // 游客或当前身份无投票权限：保留本机“想冲”标记，行为与游客一致。
-        if (nextWanted) {
-          await Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => RankingCouponPage(item: item),
-            ),
-          );
-        }
         return;
       }
       setState(() => _wanted = !nextWanted);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+    } finally {
+      if (mounted && requestVersion == _wantedRequestVersion) {
+        setState(() => _wantedSaving = false);
+      }
     }
   }
 
   Future<void> _setOwned() async {
+    if (_ownedSaving) return;
     final nextOwned = !_owned;
     // 与 _setWanted 同策略：直接尝试服务器，401/403 回退本机“买过”标记。
     if (!_hasServer) {
@@ -1652,31 +1663,48 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       }
       return;
     }
-    setState(() => _owned = nextOwned);
+
+    final requestVersion = ++_ownedRequestVersion;
+    setState(() {
+      _owned = nextOwned;
+      _ownedSaving = true;
+    });
     try {
       final toy = await widget.repository!.setOwned(
         toyId: item.id,
         active: nextOwned,
       );
-      _replaceToy(toy);
+      if (mounted && requestVersion == _ownedRequestVersion) {
+        _replaceToy(toy, syncWanted: false);
+      }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || requestVersion != _ownedRequestVersion) return;
       if (_isAuthOrCapabilityDenied(error)) {
-        if (mounted) {
-          await Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) =>
-                  RankingPurchasePage(item: item, owned: nextOwned),
-            ),
-          );
-        }
+        // 游客或当前身份无服务器写入权限时保留本机标记，继续走本地体验。
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RankingPurchasePage(item: item, owned: nextOwned),
+          ),
+        );
         return;
       }
       setState(() => _owned = !nextOwned);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+    } finally {
+      if (mounted && requestVersion == _ownedRequestVersion) {
+        setState(() => _ownedSaving = false);
+      }
     }
+  }
+
+  void _openCouponPage(RankingItem couponItem) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RankingCouponPage(item: couponItem),
+      ),
+    );
   }
 
   Future<void> _toggleSort() async {
@@ -2292,7 +2320,10 @@ class _DetailCouponAdminCard extends StatelessWidget {
                     hasCoupon ? couponUrl! : '暂未设置，点击“添加”为该商品配券',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
+                    style: const TextStyle(
+                      color: Color(0xFF8A96A9),
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),

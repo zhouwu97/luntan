@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -176,6 +177,46 @@ class ApiClient {
       path: path,
       queryParameters: queryParameters,
     );
+  }
+
+  /// 请求需要鉴权的二进制资源，例如管理员审核源图。
+  /// 非 2xx 响应仍按统一 API 错误格式解析，并复用访问令牌刷新流程。
+  Future<Uint8List> getBytes(
+    String path, {
+    Map<String, String>? headers,
+    Duration? requestTimeout,
+  }) async {
+    var response = await _send(
+      method: 'GET',
+      path: path,
+      headers: headers,
+      requestTimeout: requestTimeout,
+    );
+    if (response.statusCode == 401 &&
+        _tokenStore != null &&
+        await _hasStoredSession() &&
+        _canRefreshForPath(path)) {
+      try {
+        await _refreshSingleFlight();
+      } catch (error) {
+        if (_shouldClearCredentials(error)) _notifySessionInvalidated();
+        rethrow;
+      }
+      response = await _send(
+        method: 'GET',
+        path: path,
+        headers: headers,
+        requestTimeout: requestTimeout,
+      );
+      if (response.statusCode == 401) {
+        await _tokenStore.clear();
+        _notifySessionInvalidated();
+      }
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      _decodeResponse(response);
+    }
+    return Uint8List.fromList(response.bodyBytes);
   }
 
   Future<Map<String, dynamic>> postJson(

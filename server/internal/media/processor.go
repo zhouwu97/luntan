@@ -41,6 +41,7 @@ type ProcessResult struct {
 	OriginalWidth  int
 	OriginalHeight int
 	SourceMimeType string
+	AppliedRegions int
 	Thumb          ProcessedVariant
 	Detail         ProcessedVariant
 	Original       ProcessedVariant
@@ -293,14 +294,23 @@ func applyEXIFOrientation(src image.Image, orientation int) image.Image {
 
 // ApplyMaskRegions 在图像上对指定的归一化比例区域应用马赛克或模糊效果。
 func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
+	result, _ := applyMaskRegionsWithCount(src, regions)
+	return result
+}
+
+// applyMaskRegionsWithCount 同时返回真正落到像素上的区域数量。
+// 坐标合法并不代表在极小图片上一定能形成一个像素宽高的区域，因此审核
+// 流程不能只依赖请求中的 regions 数量判断“已经打码”。
+func applyMaskRegionsWithCount(src image.Image, regions []MaskRegion) (image.Image, int) {
 	if len(regions) == 0 {
-		return src
+		return src, 0
 	}
 	bounds := src.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 	if w <= 0 || h <= 0 {
-		return src
+		return src, 0
 	}
+	appliedRegions := 0
 
 	// 复制到 RGBA 画布进行像素级处理
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -336,6 +346,10 @@ func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
 		if maxY > h {
 			maxY = h
 		}
+		if minX >= maxX || minY >= maxY {
+			continue
+		}
+		appliedRegions++
 
 		if region.Type == "blur" {
 			// 区域高斯/盒式模糊：根据图像分辨率动态计算模糊核半宽
@@ -345,7 +359,7 @@ func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
 			for y := minY; y < maxY; y++ {
 				for x := minX; x < maxX; x++ {
 					var rSum, gSum, bSum, aSum, count uint32
-					for kx := x - radius; kx <= x + radius; kx++ {
+					for kx := x - radius; kx <= x+radius; kx++ {
 						sampleX := kx
 						if sampleX < 0 {
 							sampleX = 0
@@ -372,7 +386,7 @@ func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
 			for y := minY; y < maxY; y++ {
 				for x := minX; x < maxX; x++ {
 					var rSum, gSum, bSum, aSum, count uint32
-					for ky := y - radius; ky <= y + radius; ky++ {
+					for ky := y - radius; ky <= y+radius; ky++ {
 						sampleY := ky
 						if sampleY < 0 {
 							sampleY = 0
@@ -445,7 +459,7 @@ func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
 			}
 		}
 	}
-	return dst
+	return dst, appliedRegions
 }
 
 // ProcessCensoredImage 对原图源数据应用打码区域后，重新生成打码版 thumb、detail、original 衍生图
@@ -465,7 +479,10 @@ func ProcessCensoredImage(r io.Reader, regions []MaskRegion) (*ProcessResult, er
 	srcImg = applyEXIFOrientation(srcImg, readEXIFOrientation(data))
 
 	// 对原尺寸图像应用打码区域
-	censoredImg := ApplyMaskRegions(srcImg, regions)
+	censoredImg, appliedRegions := applyMaskRegionsWithCount(srcImg, regions)
+	if appliedRegions == 0 {
+		return nil, fmt.Errorf("mask regions did not cover any pixels")
+	}
 
 	bounds := censoredImg.Bounds()
 	origW := bounds.Dx()
@@ -506,6 +523,7 @@ func ProcessCensoredImage(r io.Reader, regions []MaskRegion) (*ProcessResult, er
 		OriginalWidth:  origW,
 		OriginalHeight: origH,
 		SourceMimeType: "image/" + format,
+		AppliedRegions: appliedRegions,
 		Thumb:          thumbVariant,
 		Detail:         detailVariant,
 		Original:       origVariant,

@@ -41,7 +41,7 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -102,7 +102,7 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -202,7 +202,7 @@ func (s *Server) removeHomeRecommendation(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -244,7 +244,7 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -304,7 +304,7 @@ func (s *Server) setPostHotSuppression(w http.ResponseWriter, r *http.Request, p
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}

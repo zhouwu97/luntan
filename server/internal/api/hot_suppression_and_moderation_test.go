@@ -2,12 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/zhouwu97/luntan/server/internal/auth"
 )
 
 func TestSetPostHotSuppressionRequiresAdmin(t *testing.T) {
@@ -185,9 +187,9 @@ func TestDirectRawMediaBlockedWhenCensored(t *testing.T) {
 	defer db.Close()
 
 	// Anonymous / normal user requests raw image that is censored
-	mock.ExpectQuery(`(?s)SELECT EXISTS.*FROM media_assets.*WHERE object_key = \$1 AND moderation_status = 'censored'`).
+	mock.ExpectQuery(`(?s)SELECT.*EXISTS.*FROM media_assets.*media_variants`).
 		WithArgs("media/u1/sensitive.jpg").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		WillReturnRows(sqlmock.NewRows([]string{"is_censored_raw", "managed_source"}).AddRow(true, true))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media/u1/sensitive.jpg", nil)
 	res := httptest.NewRecorder()
@@ -212,9 +214,9 @@ func TestEnrichPostHotSuppressionHiddenFromNonAdmin(t *testing.T) {
 	defer db.Close()
 	s.db = db
 
-	mock.ExpectQuery(`(?s)SELECT COALESCE\(ma\.id, ''\), COALESCE\(ma\.object_key, ''\).*FROM post_media pm`).
+	mock.ExpectQuery(`(?s)SELECT ma\.id, ma\.mime_type, ma\.width, ma\.height, ma\.original_name, ma\.object_key.*FROM post_media pm`).
 		WithArgs("post-101").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "object_key", "mime_type", "width", "height", "size_bytes", "sha256", "created_at", "moderation_status"}))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "mime_type", "width", "height", "original_name", "object_key", "moderation_status", "mask_regions"}))
 
 	mock.ExpectQuery(`(?s)SELECT COALESCE\(hot_suppressed, false\), COALESCE\(hot_suppressed_reason, ''\), hot_suppressed_at, COALESCE\(hot_suppressed_by, ''\) FROM posts WHERE id = \$1`).
 		WithArgs("post-101").
@@ -226,13 +228,58 @@ func TestEnrichPostHotSuppressionHiddenFromNonAdmin(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"level", "avatar_media_id", "object_key"}).AddRow(1, "", ""))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/post-101", nil)
-	_ = s.enrichPostResponse(req.Context(), req, &resp, false)
+	if err := s.enrichPostResponse(req.Context(), req, &resp, false); err != nil {
+		t.Fatalf("enrichPostResponse failed: %v", err)
+	}
 
 	if resp.HotSuppressed {
 		t.Fatalf("expected HotSuppressed to be false for non-admin viewer, got %v", resp.HotSuppressed)
 	}
 	if resp.HotSuppressedReason != "" {
 		t.Fatalf("expected HotSuppressedReason to be empty for non-admin viewer, got %s", resp.HotSuppressedReason)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func TestEnrichPostHotSuppressionVisibleToAdmin(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	s := &Server{db: db}
+	resp := postResponse{
+		ID:     "post-102",
+		Author: userSummary{ID: "author-102"},
+	}
+	mock.ExpectQuery(`(?s)SELECT ma\.id, ma\.mime_type, ma\.width, ma\.height, ma\.original_name, ma\.object_key.*FROM post_media pm`).
+		WithArgs("post-102").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "mime_type", "width", "height", "original_name", "object_key", "moderation_status", "mask_regions"}))
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(hot_suppressed, false\), COALESCE\(hot_suppressed_reason, ''\), hot_suppressed_at, COALESCE\(hot_suppressed_by, ''\) FROM posts WHERE id = \$1`).
+		WithArgs("post-102").
+		WillReturnRows(sqlmock.NewRows([]string{"hot_suppressed", "hot_suppressed_reason", "hot_suppressed_at", "hot_suppressed_by"}).
+			AddRow(true, "审核后移出热门", nil, "admin-102"))
+	mock.ExpectQuery(`(?s)SELECT EXISTS \(.*FROM user_roles ur.*`).
+		WithArgs("admin-102", "moderation.action").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`(?s)SELECT CASE WHEN u\.account_type = 'guest' THEN 0 ELSE COALESCE\(up\.level, 1\) END.*FROM users u`).
+		WithArgs("author-102").
+		WillReturnRows(sqlmock.NewRows([]string{"level", "avatar_media_id", "object_key"}).AddRow(1, "", ""))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/post-102", nil)
+	req = req.WithContext(context.WithValue(req.Context(), authenticatedUserContextKey{}, auth.User{ID: "admin-102", AccountType: "email"}))
+	if err := s.enrichPostResponse(req.Context(), req, &resp, false); err != nil {
+		t.Fatalf("enrichPostResponse failed: %v", err)
+	}
+
+	if !resp.HotSuppressed || resp.HotSuppressedReason != "审核后移出热门" || resp.HotSuppressedBy != "admin-102" {
+		t.Fatalf("admin should see suppression metadata, got %+v", resp)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
 	}
 }
 

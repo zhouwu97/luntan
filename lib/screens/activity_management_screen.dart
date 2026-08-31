@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_motion.dart';
 import '../widgets/app_network_image.dart';
 
 class ActivityManagementScreen extends StatefulWidget {
@@ -142,7 +143,12 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('活动管理', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text(
+          '活动管理',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19),
+        ),
+        backgroundColor: AppTheme.background,
+        elevation: 0,
         actions: [
           IconButton(
             onPressed: () {
@@ -162,57 +168,79 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           // 状态筛选 Tab
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
             child: Row(
               children: _statusFilters.map((filter) {
                 final isSelected = _selectedStatus == filter.$1;
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(filter.$2),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      if (selected) {
-                        setState(() {
-                          _selectedStatus = filter.$1;
-                          _load();
-                        });
-                      }
+                  child: GestureDetector(
+                    onTap: () {
+                      if (_selectedStatus == filter.$1) return;
+                      setState(() {
+                        _selectedStatus = filter.$1;
+                        _load();
+                      });
                     },
-                    selectedColor: AppTheme.surfaceBlue,
-                    checkmarkColor: AppTheme.primary,
-                    labelStyle: TextStyle(
-                      color: isSelected ? AppTheme.primary : AppTheme.textSecondary,
-                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.normal,
-                      fontSize: 13,
+                    child: AnimatedContainer(
+                      duration: AppMotion.fast,
+                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6.5),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppTheme.softBlue : Colors.white,
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(
+                          color: isSelected ? const Color(0xFFD7E6FF) : const Color(0xFFD4DFE9),
+                        ),
+                      ),
+                      child: Text(
+                        filter.$2,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                          color: isSelected ? const Color(0xFF3E78CC) : const Color(0xFF6B8197),
+                        ),
+                      ),
                     ),
                   ),
                 );
               }).toList(),
             ),
           ),
-          const Divider(height: 1),
           // 活动列表
           Expanded(
             child: FutureBuilder<List<ActivityItem>>(
               future: _future,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return ListView.separated(
+                    padding: const EdgeInsets.all(14),
+                    itemCount: 3,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (_, _) => Container(
+                      height: 120,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                    ),
+                  );
                 }
                 if (snapshot.hasError) {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+                        const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+                        const SizedBox(height: 10),
                         Text(
                           userFacingApiMessage(snapshot.error ?? Object(), fallback: '活动列表加载失败'),
-                          style: const TextStyle(color: AppTheme.textSecondary),
+                          style: const TextStyle(color: AppTheme.pink, fontSize: 13),
                         ),
                         const SizedBox(height: 12),
-                        OutlinedButton(
+                        FilledButton.tonal(
                           onPressed: _load,
-                          child: const Text('重试'),
+                          child: const Text('重新加载'),
                         ),
                       ],
                     ),
@@ -221,18 +249,53 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
                 final items = snapshot.data ?? [];
                 if (items.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                  return RefreshIndicator(
+                    onRefresh: () async => _load(),
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       children: [
-                        const Icon(Icons.event_busy_outlined, size: 54, color: AppTheme.textSecondary),
-                        const SizedBox(height: 12),
-                        const Text('暂无活动数据', style: TextStyle(color: AppTheme.textSecondary)),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: () => _openEditor(),
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('新建第一个活动'),
+                        const SizedBox(height: 100),
+                        Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 58,
+                                height: 58,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE8F1FA),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                alignment: Alignment.center,
+                                child: const Icon(Icons.event_note_rounded, size: 28, color: Color(0xFF6B8299)),
+                              ),
+                              const SizedBox(height: 14),
+                              const Text(
+                                '暂无活动数据',
+                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF304A65)),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                '点击下方按钮即可创建首个社区活动',
+                                style: TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+                              ),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: () {
+                                  if (widget.onOpenCreateActivity != null) {
+                                    widget.onOpenCreateActivity!();
+                                  } else {
+                                    _openEditor();
+                                  }
+                                },
+                                icon: const Icon(Icons.add_rounded, size: 18),
+                                label: const Text('新建活动'),
+                                style: FilledButton.styleFrom(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -242,7 +305,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                 return RefreshIndicator(
                   onRefresh: () async => _load(),
                   child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
                     itemCount: items.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
@@ -262,13 +325,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openEditor(),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('新建活动'),
-        backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
       ),
     );
   }
@@ -299,11 +355,12 @@ class _ActivityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AppTheme.border),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+        boxShadow: const [AppTheme.cardShadow],
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -312,7 +369,7 @@ class _ActivityCard extends StatelessWidget {
           children: [
             if (item.coverUrl != null && item.coverUrl!.isNotEmpty) ...[
               ClipRRect(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
                 child: SizedBox(
                   height: 120,
                   width: double.infinity,
@@ -330,7 +387,7 @@ class _ActivityCard extends StatelessWidget {
                   child: Text(
                     item.title,
                     style: const TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
                       color: AppTheme.textPrimary,
                     ),
@@ -338,16 +395,16 @@ class _ActivityCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     item.statusLabel,
                     style: TextStyle(
                       color: statusColor,
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -355,13 +412,13 @@ class _ActivityCard extends StatelessWidget {
               ],
             ),
             if (item.description.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 item.description,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 12.5,
                   color: AppTheme.textSecondary,
                   height: 1.4,
                 ),
@@ -374,7 +431,7 @@ class _ActivityCard extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   '${_formatDateTime(item.startAt)} ~ ${_formatDateTime(item.endAt)}',
-                  style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                  style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
                 ),
               ],
             ),
@@ -387,7 +444,7 @@ class _ActivityCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item.location,
-                      style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                      style: const TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -395,32 +452,32 @@ class _ActivityCard extends StatelessWidget {
                 ],
               ),
             ],
-            const SizedBox(height: 12),
-            const Divider(height: 1),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: Color(0xFFEDF2F7)),
+            const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton.icon(
                   onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined, size: 16),
-                  label: const Text('编辑'),
+                  icon: const Icon(Icons.edit_outlined, size: 15),
+                  label: const Text('编辑', style: TextStyle(fontSize: 12)),
                 ),
                 if (item.status == 'draft' || item.status == 'offline')
                   TextButton.icon(
                     onPressed: onPublish,
-                    icon: const Icon(Icons.cloud_upload_outlined, size: 16),
-                    label: const Text('发布'),
+                    icon: const Icon(Icons.cloud_upload_outlined, size: 15),
+                    label: const Text('发布', style: TextStyle(fontSize: 12)),
                   ),
                 if (item.status == 'active' || item.status == 'upcoming')
                   TextButton.icon(
                     onPressed: onOffline,
-                    icon: const Icon(Icons.cloud_off_outlined, size: 16),
-                    label: const Text('下架'),
+                    icon: const Icon(Icons.cloud_off_outlined, size: 15),
+                    label: const Text('下架', style: TextStyle(fontSize: 12)),
                   ),
                 IconButton(
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 18, color: AppTheme.pink),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 17, color: AppTheme.pink),
                   tooltip: '删除活动',
                 ),
               ],

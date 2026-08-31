@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zhouwu97/luntan/server/internal/media"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
@@ -360,9 +362,9 @@ func newMediaID() (string, error) {
 // serveMediaFile 处理 GET/HEAD /api/v1/media-file/{objectKey} 的媒体下载兜底。
 // 未配置 OBJECT_STORAGE_PUBLIC_BASE_URL 时，publicMediaURL 返回该路由的根
 // 相对地址。免鉴权与公开 Feed 对齐；路径安全由存储层 objectPath 校验。
-// 媒体对象内容不可变（写入时经 SHA256 校验），响应下发一年期 immutable
-// 缓存头供浏览器/CDN 长缓存；本地存储返回 *os.File 时由 http.ServeContent
-// 额外提供 Range 与条件请求支持。
+// 公开派生变体内容不可变（写入时经 SHA256 校验），响应下发一年期 immutable
+// 缓存头供浏览器/CDN 长缓存；受审核管理的源图/普通变体则使用 private/no-store。
+// 本地存储返回 *os.File 时由 http.ServeContent 额外提供 Range 与条件请求支持。
 func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKey string) {
 	backend := s.mediaStorage
 	if backend == nil {
@@ -370,25 +372,49 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 		return
 	}
 
-	// 安全保护：若请求的对象键属于已被打码的媒体资产之原图/未打码变体，禁止公开访问，只允许管理员查看
+	// 安全保护：censored 媒体的源图永远不能通过通用媒体路由访问，包括
+	// 管理员。管理员必须使用 private/no-store 的 source 接口，从而避免
+	// 这个公开路由或共享 CDN 缓存住原图。
+	managedSource := false
 	if s.db != nil {
 		var isCensoredRaw bool
-		_ = s.db.QueryRowContext(r.Context(), `
-			SELECT EXISTS (
-				SELECT 1 FROM media_assets
-				WHERE object_key = $1 AND moderation_status = 'censored' AND deleted_at IS NULL
-			) OR EXISTS (
-				SELECT 1 FROM media_variants mv
-				JOIN media_assets ma ON ma.id = mv.media_id
-				WHERE mv.object_key = $1 AND ma.moderation_status = 'censored' AND mv.variant NOT LIKE 'censored_%'
-			)`, objectKey).Scan(&isCensoredRaw)
-
-		if isCensoredRaw {
-			viewer, ok := s.optionalAuthenticatedUser(r.Context(), r)
-			if !ok || (!s.hasGlobalPermission(r, viewer.ID, "moderation.action") && !capabilitiesForUser(viewer)[capModerate]) {
+		err := s.db.QueryRowContext(r.Context(), `
+			SELECT
+				EXISTS (
+					SELECT 1
+					FROM media_assets
+					WHERE object_key = $1
+					  AND moderation_status = 'censored'
+					  AND deleted_at IS NULL
+				) OR EXISTS (
+					SELECT 1
+					FROM media_variants mv
+					JOIN media_assets ma ON ma.id = mv.media_id
+					WHERE mv.object_key = $1
+					  AND ma.moderation_status = 'censored'
+					  AND ma.deleted_at IS NULL
+					  AND mv.variant NOT LIKE 'censored_%'
+				),
+				EXISTS (
+					SELECT 1
+					FROM media_assets
+					WHERE object_key = $1 AND deleted_at IS NULL
+				) OR EXISTS (
+					SELECT 1
+					FROM media_variants mv
+					JOIN media_assets ma ON ma.id = mv.media_id
+					WHERE mv.object_key = $1
+					  AND ma.deleted_at IS NULL
+					  AND mv.variant NOT LIKE 'censored_%'
+				)`, objectKey).Scan(&isCensoredRaw, &managedSource)
+		if err == nil {
+			if isCensoredRaw {
 				writeAuthError(w, r, ErrPermissionDenied)
 				return
 			}
+		} else {
+			writeInternalError(w, r, err)
+			return
 		}
 	}
 
@@ -405,7 +431,13 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 		return
 	}
 	defer rc.Close()
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if managedSource {
+		// 普通状态的源图也不能被浏览器/CDN 长期缓存，否则之后切换为
+		// censored 时旧缓存仍可能继续展示未打码内容。
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
@@ -428,7 +460,7 @@ func (s *Server) getAdminMediaSource(w http.ResponseWriter, r *http.Request, med
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -456,7 +488,7 @@ func (s *Server) getAdminMediaSource(w http.ResponseWriter, r *http.Request, med
 	}
 	defer rc.Close()
 
-	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Cache-Control", "private, no-store")
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	} else if mimeType != "" {
@@ -479,6 +511,36 @@ type moderateMediaInput struct {
 	Reason           string             `json:"reason,omitempty"`
 }
 
+const (
+	maxModerationMaskRegions = 32
+	maxModerationReasonRunes = 500
+)
+
+func validateModerationInput(input moderateMediaInput) (string, string, error) {
+	if utf8.RuneCountInString(input.Reason) > maxModerationReasonRunes {
+		return "INVALID_REASON", "审核理由不能超过 500 个字符", errors.New("moderation reason too long")
+	}
+	if input.ModerationStatus != "censored" {
+		return "", "", nil
+	}
+	if len(input.MaskRegions) == 0 {
+		return "MASK_REGIONS_REQUIRED", "censored 状态必须提供打码区域", errors.New("mask regions required")
+	}
+	if len(input.MaskRegions) > maxModerationMaskRegions {
+		return "TOO_MANY_MASK_REGIONS", "打码区域不能超过 32 个", errors.New("too many mask regions")
+	}
+	for _, region := range input.MaskRegions {
+		if math.IsNaN(region.X) || math.IsNaN(region.Y) || math.IsNaN(region.Width) || math.IsNaN(region.Height) ||
+			math.IsInf(region.X, 0) || math.IsInf(region.Y, 0) || math.IsInf(region.Width, 0) || math.IsInf(region.Height, 0) ||
+			region.X < 0 || region.Y < 0 || region.Width <= 0 || region.Height <= 0 ||
+			region.X > 1 || region.Y > 1 || region.X+region.Width > 1 || region.Y+region.Height > 1 ||
+			(region.Type != "mosaic" && region.Type != "blur") {
+			return "INVALID_MASK_REGION", "打码区域坐标或样式无效", errors.New("invalid mask region")
+		}
+	}
+	return "", "", nil
+}
+
 func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID string) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -487,7 +549,7 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 	if !ok {
 		return
 	}
-	if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+	if !s.canModerate(r, user) {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return
 	}
@@ -503,6 +565,13 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 	if input.ModerationStatus != "censored" && input.ModerationStatus != "normal" {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STATUS", Message: "审核状态只能为 censored 或 normal"})
 		return
+	}
+	if code, message, err := validateModerationInput(input); err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: code, Message: message})
+		return
+	}
+	if input.ModerationStatus == "normal" {
+		input.MaskRegions = nil
 	}
 
 	var objectKey, mimeType string
@@ -530,7 +599,7 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 	now := time.Now().UTC()
 	regionsJSON, _ := json.Marshal(input.MaskRegions)
 
-	if input.ModerationStatus == "censored" && len(input.MaskRegions) > 0 {
+	if input.ModerationStatus == "censored" {
 		if s.mediaStorage == nil {
 			writeInternalError(w, r, errors.New("media storage unavailable"))
 			return
@@ -549,8 +618,12 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		}
 
 		procRes, procErr := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
-		if procErr != nil || procRes == nil {
+		if procErr != nil {
 			writeInternalError(w, r, fmt.Errorf("failed to generate censored variants: %w", procErr))
+			return
+		}
+		if procRes == nil || procRes.AppliedRegions == 0 {
+			writeInternalError(w, r, errors.New("censored image has no applied mask regions"))
 			return
 		}
 
@@ -561,19 +634,44 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		detailKey := fmt.Sprintf("%s_censored_%s_detail.jpg", objectKey, maskHash)
 		thumbKey := fmt.Sprintf("%s_censored_%s_thumb.jpg", objectKey, maskHash)
 
-		// 严格校验每一个变体的上传结果（Fail Closed）
-		if err := s.mediaStorage.Put(r.Context(), origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes); err != nil {
+		// 严格校验每一个变体的上传结果（Fail Closed）；失败时清理已经
+		// 上传的孤儿变体，避免留下无法被 DB 引用的公开对象。
+		writtenKeys := make([]string, 0, 3)
+		cleanupVariants := func() {
+			if len(writtenKeys) == 0 {
+				return
+			}
+			_ = s.mediaStorage.DeleteMulti(r.Context(), writtenKeys)
+			writtenKeys = nil
+		}
+		putVariant := func(key string, variant media.ProcessedVariant) error {
+			if err := s.mediaStorage.Put(r.Context(), key, variant.MimeType, bytes.NewReader(variant.Data), variant.SizeBytes); err != nil {
+				// 允许 Put 在返回错误前已经创建对象；当前 key 也必须纳入清理。
+				writtenKeys = append(writtenKeys, key)
+				cleanupVariants()
+				return err
+			}
+			writtenKeys = append(writtenKeys, key)
+			return nil
+		}
+		if err := putVariant(origKey, procRes.Original); err != nil {
 			writeInternalError(w, r, fmt.Errorf("failed to store censored_original: %w", err))
 			return
 		}
-		if err := s.mediaStorage.Put(r.Context(), detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes); err != nil {
+		if err := putVariant(detailKey, procRes.Detail); err != nil {
 			writeInternalError(w, r, fmt.Errorf("failed to store censored_detail: %w", err))
 			return
 		}
-		if err := s.mediaStorage.Put(r.Context(), thumbKey, procRes.Thumb.MimeType, bytes.NewReader(procRes.Thumb.Data), procRes.Thumb.SizeBytes); err != nil {
+		if err := putVariant(thumbKey, procRes.Thumb); err != nil {
 			writeInternalError(w, r, fmt.Errorf("failed to store censored_thumb: %w", err))
 			return
 		}
+		committed := false
+		defer func() {
+			if !committed {
+				cleanupVariants()
+			}
+		}()
 
 		// 数据库更新与审计日志全部包裹在同一个事务内
 		tx, err := s.db.BeginTx(r.Context(), nil)
@@ -637,6 +735,7 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			writeInternalError(w, r, err)
 			return
 		}
+		committed = true
 	} else {
 		// 恢复正常展示
 		tx, err := s.db.BeginTx(r.Context(), nil)

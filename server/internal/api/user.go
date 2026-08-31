@@ -106,7 +106,7 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		item.ViewerState["is_blocked"] = isBlocked
 		item.ViewerState["can_follow"] = capabilitiesForUser(viewer)[capFollow] && viewerID != item.ID && !isBlocked
 	}
-	if !hasViewer || (viewerID != item.ID && !capabilitiesForUser(viewer)[capModerate]) {
+	if !hasViewer || (viewerID != item.ID && !s.canModerate(r, viewer)) {
 		item.CommentCount = 0
 	}
 	httpserver.WriteJSON(w, http.StatusOK, item)
@@ -149,10 +149,10 @@ func (s *Server) listUserPosts(w http.ResponseWriter, r *http.Request, userID st
 			"community_id": communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
-			"view_count": viewCount,
-			"published_at": createdAt,
+			"view_count":         viewCount,
+			"published_at":       createdAt,
 			"publication_status": publicationStatus,
-			"moderation_status": moderationStatus,
+			"moderation_status":  moderationStatus,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -277,7 +277,7 @@ func (s *Server) listUserComments(w http.ResponseWriter, r *http.Request, userID
 	}
 	viewer, hasViewer := s.optionalAuthenticatedUser(r.Context(), r)
 	isSelf := hasViewer && viewer.ID == userID
-	isAdmin := hasViewer && capabilitiesForUser(viewer)[capModerate]
+	isAdmin := hasViewer && s.canModerate(r, viewer)
 	if !isSelf && !isAdmin {
 		httpserver.WriteAppError(w, r, httpserver.AppError{
 			Status:  http.StatusForbidden,

@@ -44,6 +44,31 @@ class RankingToy {
   final String? heroUrl;
   final String? couponUrl;
   final String? sourceUrl;
+
+  RankingToy copyWith({bool? wanted, bool? owned}) {
+    return RankingToy(
+      id: id,
+      rank: rank,
+      name: name,
+      merchant: merchant,
+      releaseYear: releaseYear,
+      description: description,
+      tags: tags,
+      assetKey: assetKey,
+      wantCount: wantCount,
+      ratingCount: ratingCount,
+      score: score,
+      wanted: wanted ?? this.wanted,
+      owned: owned ?? this.owned,
+      category: category,
+      segments: segments,
+      rating: rating,
+      coverUrl: coverUrl,
+      heroUrl: heroUrl,
+      couponUrl: couponUrl,
+      sourceUrl: sourceUrl,
+    );
+  }
 }
 
 /// 一次榜单拉取的结果：items 为当前视图的有序榜单，weeklyTop 为源站

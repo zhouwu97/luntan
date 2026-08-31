@@ -120,6 +120,13 @@ QA 服务器 `43.161.249.91` 运行完整后端与 Web 客户端，统一通过 
 - 媒体：源站图片已全部下载到服务器本地媒体目录，由 nginx 通过 HTTPS `/imported-media/` 提供，URL 保存在 `media_assets` 表
 - 数据：帖子、评论、榜单商品与评价均来自导入快照，作者为稳定的脱敏本地账号，客户端运行时不直连源站
 
+媒体安全边界：`media_assets.object_key` 对应的用户上传源图必须位于私有
+bucket/prefix，nginx/CDN 不得把 `/media/` 映射为公开静态目录。应用会让
+`media/` 下的展示地址经过 `/api/v1/media-file/`，并在媒体被审核后拒绝源图；
+管理员查看源图只能使用 `/api/v1/admin/media/{id}/source`，该响应为
+`private, no-store`。部署本次修复前，必须撤销旧的 `/media/` 公共映射并清理
+CDN/浏览器缓存；已经发出的公开源图直链无法通过数据库状态追回。
+
 QA 数据现状（2026-08-29）：90 个榜单商品、1245 条商品评价；310 篇帖子、2284 条评论，全部位于正式板块（酱紫社区 284 / 大型拆箱 14 / 杂鱼日常 12）。QA 也通过 HTTPS 反向代理统一承载 API、媒体和 Web；生产构建仍必须声明 `APP_ENV=production` 并使用正式生产域名。
 
 连接 QA 启动示例：
@@ -209,7 +216,7 @@ flutter build web --release --base-href=/forum/ \
 | `API_BASE_URL` | 客户端 API 地址（编译期 dart-define），默认 `https://shengbeijiang.com` | 客户端 |
 | `WEB_BASE_URL` | 分享链接域名，默认 `https://luntan.app` | 客户端 |
 | `MEDIA_STORAGE_DIR` | 本地媒体目录兜底（dev/QA），生产使用外部对象存储 | 服务端 |
-| `OBJECT_STORAGE_PUBLIC_BASE_URL` | 媒体公开访问前缀 | 服务端 |
+| `OBJECT_STORAGE_PUBLIC_BASE_URL` | ranking/imported 等明确公开资源的访问前缀；不得公开 `media/` 源图 | 服务端 |
 | `OBJECT_STORAGE_UPLOAD_BASE_URL` / `OBJECT_STORAGE_SIGNING_SECRET` | 媒体上传地址与 HMAC 签名 | 服务端 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | 邮箱验证码发送；生产缺失时 API 拒绝启动 | 服务端 |
 | `TRUSTED_PROXY_CIDRS` | 明确声明可信反向代理网段，服务端据此解析 `X-Forwarded-For` | 服务端 |

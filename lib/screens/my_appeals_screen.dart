@@ -24,16 +24,45 @@ class _MyAppealsScreenState extends State<MyAppealsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('我的申诉')),
+    backgroundColor: AppTheme.background,
+    appBar: AppBar(
+      title: const Text(
+        '我的申诉',
+        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19),
+      ),
+      backgroundColor: AppTheme.background,
+      elevation: 0,
+    ),
     body: FutureBuilder<AppealPage>(
       future: future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return ListView.separated(
+            padding: const EdgeInsets.all(14),
+            itemCount: 3,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (_, _) => Container(
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.border),
+              ),
+            ),
+          );
         }
         if (snapshot.hasError || !snapshot.hasData) {
           return Center(
-            child: TextButton(onPressed: _reload, child: const Text('加载失败，重试')),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+                const SizedBox(height: 10),
+                const Text('加载申诉记录失败', style: TextStyle(color: AppTheme.pink, fontSize: 13)),
+                const SizedBox(height: 12),
+                FilledButton.tonal(onPressed: _reload, child: const Text('重新加载')),
+              ],
+            ),
           );
         }
         final appeals = snapshot.data!.items;
@@ -41,12 +70,37 @@ class _MyAppealsScreenState extends State<MyAppealsScreen> {
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView(
-              children: const [
-                SizedBox(height: 220),
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                const SizedBox(height: 100),
                 Center(
-                  child: Text(
-                    '还没有申诉记录',
-                    style: TextStyle(color: AppTheme.textSecondary),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F1FA),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.rate_review_outlined, size: 28, color: Color(0xFF6B8299)),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        '还没有申诉记录',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF304A65),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '当你的内容或账号受到处置时，可在此发起申诉复核',
+                        style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -58,7 +112,7 @@ class _MyAppealsScreenState extends State<MyAppealsScreen> {
         return RefreshIndicator(
           onRefresh: _reload,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 30),
+            padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
             children: [
               _SummaryCard(pending: pending, completed: completed),
               const SizedBox(height: 14),
@@ -106,22 +160,26 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(vertical: 18),
     decoration: BoxDecoration(
-      gradient: AppTheme.primaryGradient,
-      borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppTheme.border),
+      boxShadow: const [AppTheme.cardShadow],
     ),
     child: Row(
       children: [
-        _Stat(value: pending, label: '审核中'),
-        _Stat(value: completed, label: '已完成'),
+        _Stat(value: pending, label: '复核中', color: const Color(0xFFBD772F)),
+        Container(width: 1, height: 28, color: const Color(0xFFE2ECF6)),
+        _Stat(value: completed, label: '已完成', color: const Color(0xFF2C8C77)),
       ],
     ),
   );
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({required this.value, required this.label});
+  const _Stat({required this.value, required this.label, required this.color});
   final int value;
   final String label;
+  final Color color;
 
   @override
   Widget build(BuildContext context) => Expanded(
@@ -129,16 +187,16 @@ class _Stat extends StatelessWidget {
       children: [
         Text(
           '$value',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 24,
+          style: TextStyle(
+            color: color,
+            fontSize: 22,
             fontWeight: FontWeight.w900,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11.5, fontWeight: FontWeight.w600),
         ),
       ],
     ),
@@ -151,46 +209,96 @@ class _AppealTile extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    child: ListTile(
-      onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-      leading: CircleAvatar(
-        backgroundColor: AppTheme.surfaceBlue,
-        child: Icon(
-          appeal.status == 'approved'
-              ? Icons.check
-              : appeal.status == 'rejected'
-              ? Icons.close
-              : Icons.hourglass_top,
-          color: AppTheme.primary,
+  Widget build(BuildContext context) {
+    final (statusLabel, statusColor, statusBg) = switch (appeal.status) {
+      'approved' => ('已通过', const Color(0xFF2C8C77), const Color(0xFFEDF8F5)),
+      'rejected' => ('未通过', const Color(0xFFD44333), const Color(0xFFFFECEB)),
+      'reviewing' => ('审核中', const Color(0xFF3E78CC), const Color(0xFFEDF5FC)),
+      _ => ('已提交', const Color(0xFFBD772F), const Color(0xFFFFF4E8)),
+    };
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border),
+        boxShadow: const [AppTheme.cardShadow],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: statusBg,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    appeal.status == 'approved'
+                        ? Icons.check_circle_outline_rounded
+                        : appeal.status == 'rejected'
+                        ? Icons.cancel_outlined
+                        : Icons.hourglass_top_rounded,
+                    color: statusColor,
+                    size: 19,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        appeal.targetTitle?.isNotEmpty == true
+                            ? appeal.targetTitle!
+                            : _actionLabel(appeal.action ?? ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: AppTheme.textPrimary),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${_formatDate(appeal.createdAt)} · 申诉理由：${appeal.reason}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusBg,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: statusColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      title: Text(
-        appeal.targetTitle?.isNotEmpty == true
-            ? appeal.targetTitle!
-            : _actionLabel(appeal.action ?? ''),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontWeight: FontWeight.w800),
-      ),
-      subtitle: Text(
-        '${_statusLabel(appeal.status)} · ${_formatDate(appeal.createdAt)}',
-        style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-      ),
-      trailing: const Icon(Icons.chevron_right),
-    ),
-  );
+    );
+  }
 }
-
-String _statusLabel(String status) => switch (status) {
-  'pending' => '已提交',
-  'reviewing' => '审核中',
-  'approved' => '已通过',
-  'rejected' => '未通过',
-  _ => '已取消',
-};
 
 String _actionLabel(String action) => switch (action) {
   'delete' => '帖子删除申诉',

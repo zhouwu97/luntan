@@ -95,7 +95,8 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('移出首页推荐？'),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('移出首页推荐？', style: TextStyle(fontWeight: FontWeight.w800)),
             content: Text('“${item.title}”将不再出现在人工推荐流中。'),
             actions: [
               TextButton(
@@ -103,8 +104,9 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                 child: const Text('取消'),
               ),
               FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.pink),
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('移出推荐'),
+                 child: const Text('移出推荐'),
               ),
             ],
           ),
@@ -129,8 +131,14 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: AppTheme.background,
     appBar: AppBar(
-      title: const Text('首页推荐'),
+      title: const Text(
+        '首页推荐',
+        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19),
+      ),
+      backgroundColor: AppTheme.background,
+      elevation: 0,
       actions: [
         if (saving)
           const Padding(
@@ -150,24 +158,69 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
 
   Widget _body() {
     if (loading && items.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return ListView.separated(
+        padding: const EdgeInsets.all(14),
+        itemCount: 3,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (_, _) => Container(
+          height: 80,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.border),
+          ),
+        ),
+      );
     }
     if (error != null && items.isEmpty) {
       return Center(
-        child: TextButton(onPressed: _load, child: const Text('加载失败，重试')),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+            const SizedBox(height: 10),
+            const Text('加载推荐列表失败', style: TextStyle(color: AppTheme.pink, fontSize: 13)),
+            const SizedBox(height: 12),
+            FilledButton.tonal(onPressed: _load, child: const Text('重新加载')),
+          ],
+        ),
       );
     }
     if (items.isEmpty) {
       return RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          children: const [
-            SizedBox(height: 180),
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 100),
             Center(
-              child: Text(
-                '暂无首页推荐\n可在帖子菜单中加入推荐',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textSecondary, height: 1.6),
+              child: Column(
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F1FA),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.push_pin_outlined, size: 28, color: Color(0xFF6B8299)),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    '暂无首页推荐',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF304A65),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '管理员可在帖子详情菜单中将优质内容加入精选',
+                    style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                  ),
+                ],
               ),
             ),
           ],
@@ -177,51 +230,83 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ReorderableListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
         itemCount: items.length,
         // 3.41.8 无 onReorderItem，待 SDK 统一后迁移
         // ignore: deprecated_member_use
         onReorder: _reorder,
         itemBuilder: (context, index) {
           final item = items[index];
-          return Card(
+          return Container(
             key: ValueKey(item.postId),
             margin: const EdgeInsets.only(bottom: 10),
-            child: ListTile(
-              leading: ReorderableDragStartListener(
-                index: index,
-                child: const Icon(Icons.drag_handle, color: AppTheme.primary),
-              ),
-              title: Text(
-                '${index + 1}. ${item.title}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: Text(
-                  [
-                    if (item.communityName.isNotEmpty) item.communityName,
-                    if (item.authorName.isNotEmpty) item.authorName,
-                    _dateLabel(item.recommendedAt),
-                    if (item.expiresAt != null)
-                      '有效期至 ${_dateLabel(item.expiresAt!)}',
-                  ].join(' · '),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppTheme.textSecondary),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.border),
+              boxShadow: const [AppTheme.cardShadow],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: widget.onOpenPostId == null
+                    ? null
+                    : () => widget.onOpenPostId!(item.postId),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      ReorderableDragStartListener(
+                        index: index,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: AppTheme.softViolet,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.drag_indicator_rounded, color: AppTheme.purple, size: 18),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${index + 1}. ${item.title}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: AppTheme.textPrimary),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              [
+                                if (item.communityName.isNotEmpty) item.communityName,
+                                if (item.authorName.isNotEmpty) item.authorName,
+                                _dateLabel(item.recommendedAt),
+                                if (item.expiresAt != null)
+                                  '至 ${_dateLabel(item.expiresAt!)}',
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '移出推荐',
+                        onPressed: saving ? null : () => _remove(item),
+                        icon: const Icon(Icons.remove_circle_outline_rounded, color: Color(0xFF8FA3B8), size: 20),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              isThreeLine: true,
-              trailing: IconButton(
-                tooltip: '移出推荐',
-                onPressed: saving ? null : () => _remove(item),
-                icon: const Icon(Icons.remove_circle_outline),
-              ),
-              onTap: widget.onOpenPostId == null
-                  ? null
-                  : () => widget.onOpenPostId!(item.postId),
             ),
           );
         },

@@ -23,39 +23,61 @@ class NotificationTargetRouter {
     ValueChanged<String>? onOpenUser,
     ValueChanged<String>? onOpenCommunity,
     VoidCallback? onOpenSystem,
+    ValueChanged<String>? onFeedback,
   }) {
     final targetData = notification.targetData;
-    switch (notification.targetType) {
-      case 'post':
-        onOpenPost(
-          notification.targetId,
-          _stringValue(targetData['comment_id']),
-        );
-      case 'comment':
-        final postId = targetData['post_id'];
-        if (postId is String && postId.isNotEmpty) {
-          onOpenPost(postId, notification.targetId);
-        } else {
+    try {
+      switch (notification.targetType) {
+        case 'post':
+          if (notification.targetId.isNotEmpty) {
+            onOpenPost(
+              notification.targetId,
+              _stringValue(targetData['comment_id']),
+            );
+          } else {
+            onFeedback?.call('关联的帖子已不存在');
+          }
+        case 'comment':
+          final postId = targetData['post_id'];
+          if (postId is String && postId.isNotEmpty) {
+            onOpenPost(postId, notification.targetId);
+          } else {
+            onOpenSystem?.call();
+          }
+        case 'user':
+          if (notification.targetId.isNotEmpty) {
+            onOpenUser?.call(notification.targetId);
+          }
+        case 'community':
+          if (notification.targetId.isNotEmpty) {
+            onOpenCommunity?.call(notification.targetId);
+          }
+        case 'system':
           onOpenSystem?.call();
-        }
-      case 'user':
-        onOpenUser?.call(notification.targetId);
-      case 'community':
-        onOpenCommunity?.call(notification.targetId);
-      case 'system':
-        onOpenSystem?.call();
-      default:
-        final postId = targetData['post_id'];
-        if (postId is String && postId.isNotEmpty) {
-          onOpenPost(postId, _stringValue(targetData['comment_id']));
-        } else {
-          onOpenSystem?.call();
-        }
+        default:
+          final postId = targetData['post_id'];
+          if (postId is String && postId.isNotEmpty) {
+            onOpenPost(postId, _stringValue(targetData['comment_id']));
+          } else {
+            onOpenSystem?.call();
+          }
+      }
+    } catch (_) {
+      onFeedback?.call('目标内容已被移除或无权限查看');
     }
   }
 
   static String? _stringValue(dynamic value) =>
       value is String && value.isNotEmpty ? value : null;
+}
+
+class _TabState {
+  final List<ForumNotification> items = [];
+  String? nextCursor;
+  bool hasMore = true;
+  bool loaded = false;
+  bool loading = false;
+  String? errorMessage;
 }
 
 class NotificationsScreen extends StatefulWidget {
@@ -87,22 +109,27 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
-  final List<ForumNotification> items = [];
   final ScrollController scrollController = ScrollController();
-  String? nextCursor;
-  bool hasMore = true;
-  bool loading = false;
-  bool loadingMore = false;
-  String? errorMessage;
-  String? loadMoreError;
   NotificationCategory filter = NotificationCategory.all;
+  bool loadingMore = false;
+  String? loadMoreError;
   int _generation = 0;
+
+  final Map<NotificationCategory, _TabState> _tabStates = {
+    NotificationCategory.all: _TabState(),
+    NotificationCategory.interaction: _TabState(),
+    NotificationCategory.community: _TabState(),
+    NotificationCategory.moderation: _TabState(),
+  };
+
+  _TabState get _currentState => _tabStates[filter] ?? _tabStates[NotificationCategory.all]!;
+  List<ForumNotification> get items => _currentState.items;
 
   @override
   void initState() {
     super.initState();
     scrollController.addListener(_maybeLoadMore);
-    load();
+    _loadTab(filter);
   }
 
   @override
@@ -117,69 +144,81 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (scrollController.position.extentAfter < 220) loadMore();
   }
 
-  Future<void> load() async {
+  Future<void> _loadTab(NotificationCategory category, {bool forceRefresh = false}) async {
+    final tabState = _tabStates[category] ?? _tabStates[NotificationCategory.all]!;
+    if (tabState.loading) return;
+    if (tabState.loaded && !forceRefresh) {
+      if (mounted) setState(() {});
+      return;
+    }
+
     final generation = ++_generation;
-    final requestedFilter = filter;
     setState(() {
-      loading = true;
-      errorMessage = null;
+      tabState.loading = true;
+      tabState.errorMessage = null;
       loadMoreError = null;
-      items.clear();
-      nextCursor = null;
-      hasMore = true;
-    });
-    try {
-      final page = await widget.repository.listNotifications(
-        category: requestedFilter,
-      );
-      if (!mounted || generation != _generation || filter != requestedFilter) {
-        return;
+      if (forceRefresh) {
+        tabState.items.clear();
+        tabState.nextCursor = null;
+        tabState.hasMore = true;
       }
+    });
+
+    try {
+      final page = await widget.repository.listNotifications(category: category);
+      if (!mounted || generation != _generation) return;
       setState(() {
-        items
+        tabState.items
           ..clear()
           ..addAll(page.items);
-        nextCursor = page.nextCursor;
-        hasMore = page.hasMore;
+        tabState.nextCursor = page.nextCursor;
+        tabState.hasMore = page.hasMore;
+        tabState.loaded = true;
+        tabState.loading = false;
       });
     } catch (_) {
       if (mounted && generation == _generation) {
-        setState(() => errorMessage = '通知加载失败，请重试');
-      }
-    } finally {
-      if (mounted && generation == _generation) {
-        setState(() => loading = false);
+        setState(() {
+          tabState.errorMessage = '通知加载失败，请重试';
+          tabState.loading = false;
+        });
       }
     }
   }
 
+  Future<void> load() => _loadTab(filter, forceRefresh: true);
+
   Future<void> loadMore() async {
-    if (loading || loadingMore || !hasMore || nextCursor == null) return;
+    final tabState = _currentState;
+    if (tabState.loading || loadingMore || !tabState.hasMore || tabState.nextCursor == null) {
+      return;
+    }
     final generation = _generation;
-    final requestedFilter = filter;
-    final requestedCursor = nextCursor;
+    final requestedCategory = filter;
+    final requestedCursor = tabState.nextCursor;
+
     setState(() => loadingMore = true);
     try {
       final page = await widget.repository.listNotifications(
         cursor: requestedCursor,
-        category: requestedFilter,
+        category: requestedCategory,
       );
-      if (!mounted || generation != _generation || filter != requestedFilter) {
+      if (!mounted || generation != _generation || filter != requestedCategory) {
         return;
       }
       setState(() {
-        items.addAll(page.items);
-        nextCursor = page.nextCursor;
-        hasMore = page.hasMore;
+        tabState.items.addAll(page.items);
+        tabState.nextCursor = page.nextCursor;
+        tabState.hasMore = page.hasMore;
         loadMoreError = null;
+        loadingMore = false;
       });
     } catch (_) {
       if (mounted && generation == _generation) {
-        setState(() => loadMoreError = '加载更多失败，点击重试');
-      }
-    } finally {
-      if (mounted && generation == _generation) {
-        setState(() => loadingMore = false);
+        setState(() {
+          loadMoreError = '加载更多失败，点击重试';
+          loadingMore = false;
+        });
       }
     }
   }
@@ -187,7 +226,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void _selectFilter(NotificationCategory value) {
     if (value == filter) return;
     setState(() => filter = value);
-    load();
+    _loadTab(value);
     if (scrollController.hasClients) {
       scrollController.animateTo(
         0,
@@ -202,8 +241,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await widget.repository.markAllNotificationsRead();
       if (!mounted) return;
       setState(() {
-        for (final item in items) {
-          item.isRead = true;
+        for (final state in _tabStates.values) {
+          for (final item in state.items) {
+            item.isRead = true;
+          }
         }
       });
       ScaffoldMessenger.of(
@@ -258,6 +299,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       onOpenUser: widget.onOpenUserId,
       onOpenCommunity: widget.onOpenCommunityId,
       onOpenSystem: widget.onOpenSystem,
+      onFeedback: (msg) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        }
+      },
     );
   }
 
@@ -276,12 +322,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         titleSpacing: 0,
+        backgroundColor: AppTheme.background,
+        elevation: 0,
         title: const Padding(
           padding: EdgeInsets.only(left: 4),
           child: Text(
             '通知',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: 19,
               fontWeight: FontWeight.w800,
               color: AppTheme.textPrimary,
             ),
@@ -309,17 +357,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             padding: const EdgeInsets.fromLTRB(14, 2, 14, 10),
             child: _NoticeKindTabs(selected: filter, onChanged: _selectFilter),
           ),
-          Expanded(child: _buildBody()),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: load,
+              child: _buildBody(),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildBody() {
-    if (loading && items.isEmpty) {
+    final state = _currentState;
+    if (state.loading && state.items.isEmpty) {
       return const NotificationSkeleton(itemCount: 4);
     }
-    if (errorMessage != null && items.isEmpty) {
+    if (state.errorMessage != null && state.items.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -331,7 +385,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              errorMessage!,
+              state.errorMessage!,
               style: const TextStyle(
                 fontSize: 13.5,
                 color: AppTheme.textSecondary,
@@ -348,7 +402,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       );
     }
-    if (items.isEmpty) {
+    if (state.items.isEmpty) {
       return NotificationEmptyState(
         categoryName: _categoryLabel(filter),
         onResetCategory: () => _selectFilter(NotificationCategory.all),
@@ -360,7 +414,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final todayItems = <ForumNotification>[];
     final earlierItems = <ForumNotification>[];
 
-    for (final item in items) {
+    for (final item in state.items) {
       final isToday =
           item.createdAt.year == today.year &&
           item.createdAt.month == today.month &&
@@ -450,9 +504,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppTheme.border),
+          boxShadow: const [AppTheme.cardShadow],
         ),
+        clipBehavior: Clip.antiAlias,
         child: ListView.separated(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -494,7 +550,7 @@ class _NoticeKindTabs extends StatelessWidget {
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: const Color(0xFFEAF1F7),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(13),
       ),
       child: Row(
         children: values.map((value) {
@@ -514,7 +570,7 @@ class _NoticeKindTabs extends StatelessWidget {
                 curve: AppMotion.standard,
                 decoration: BoxDecoration(
                   color: isSelected ? Colors.white : Colors.transparent,
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(10),
                   boxShadow: isSelected
                       ? const [
                           BoxShadow(
@@ -529,11 +585,11 @@ class _NoticeKindTabs extends StatelessWidget {
                 child: Text(
                   label,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 12.5,
                     fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                     color: isSelected
-                        ? const Color(0xFF2E5F96)
-                        : const Color(0xFF6C8093),
+                        ? const Color(0xFF356FC4)
+                        : const Color(0xFF71869B),
                   ),
                 ),
               ),
@@ -569,32 +625,45 @@ class NotificationDetailScreen extends StatelessWidget {
         _text(data, 'description') ??
         '暂无详细内容';
     return Scaffold(
-      appBar: AppBar(title: const Text('通知详情')),
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: const Text('通知详情', style: TextStyle(fontWeight: FontWeight.w800)),
+        backgroundColor: AppTheme.background,
+        elevation: 0,
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(AppTheme.pagePadding),
+        padding: const EdgeInsets.all(16),
         children: [
           Text(
             title,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppTheme.textPrimary),
           ),
           const SizedBox(height: 8),
           Text(
             '${notification.createdAt.year}-${notification.createdAt.month.toString().padLeft(2, '0')}-${notification.createdAt.day.toString().padLeft(2, '0')} ${notification.createdAt.hour.toString().padLeft(2, '0')}:${notification.createdAt.minute.toString().padLeft(2, '0')}',
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
-          const SizedBox(height: 20),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Text(body, style: const TextStyle(height: 1.6)),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.border),
+              boxShadow: const [AppTheme.cardShadow],
             ),
+            padding: const EdgeInsets.all(18),
+            child: Text(body, style: const TextStyle(height: 1.65, fontSize: 13.5, color: AppTheme.textPrimary)),
           ),
           if (onOpenTarget != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: onOpenTarget,
-              icon: const Icon(Icons.open_in_new),
+              icon: const Icon(Icons.open_in_new, size: 18),
               label: const Text('查看相关内容'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
             ),
           ],
         ],

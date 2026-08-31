@@ -80,7 +80,7 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.Type == "activity" {
-		if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+		if !s.canModerate(r, user) {
 			writeAuthError(w, r, ErrPermissionDenied)
 			return
 		}

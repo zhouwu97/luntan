@@ -1,7 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import '../data/api/platform_repository.dart';
 import '../domain/models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 
 /// 管理员图片打码处理页面。
 /// 仅处理图片类型媒体，支持多区域框选、马赛克/模糊效果切换、撤销、清除打码与服务端同步保存。
@@ -31,6 +34,9 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
   Offset? _dragStart;
   Offset? _dragCurrent;
   bool _isSaving = false;
+  Uint8List? _sourceBytes;
+  String? _sourceMediaId;
+  String? _sourceLoadError;
 
   List<MediaAsset> get _images => widget.post.images;
 
@@ -42,6 +48,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       _images.isEmpty ? 0 : _images.length - 1,
     );
     _loadCurrentMediaRegions();
+    _loadCurrentMediaSource();
   }
 
   void _loadCurrentMediaRegions() {
@@ -54,6 +61,35 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     _undoHistory.clear();
     _dragStart = null;
     _dragCurrent = null;
+  }
+
+  Future<void> _loadCurrentMediaSource() async {
+    _sourceBytes = null;
+    _sourceMediaId = null;
+    _sourceLoadError = null;
+    if (_images.isEmpty || widget.platformRepository == null) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final media = _images[_selectedImageIndex];
+    if (!media.isCensored) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final mediaID = media.id;
+    try {
+      final bytes = await widget.platformRepository!.getAdminMediaSource(
+        mediaId: mediaID,
+      );
+      if (!mounted || _images[_selectedImageIndex].id != mediaID) return;
+      setState(() {
+        _sourceBytes = Uint8List.fromList(bytes);
+        _sourceMediaId = mediaID;
+      });
+    } catch (error) {
+      if (!mounted || _images[_selectedImageIndex].id != mediaID) return;
+      setState(() => _sourceLoadError = '原图加载失败，请重试');
+    }
   }
 
   void _pushHistory() {
@@ -81,7 +117,9 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
     setState(() => _isSaving = true);
     try {
-      final status = (resetToNormal || _currentRegions.isEmpty) ? 'normal' : 'censored';
+      final status = (resetToNormal || _currentRegions.isEmpty)
+          ? 'normal'
+          : 'censored';
       final regions = resetToNormal ? <MaskRegion>[] : _currentRegions;
 
       if (widget.platformRepository != null) {
@@ -97,7 +135,9 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(status == 'censored' ? '打码处理已保存，服务端已生成打码图变体' : '已恢复原图正常展示'),
+          content: Text(
+            status == 'censored' ? '打码处理已保存，服务端已生成打码图变体' : '已恢复原图正常展示',
+          ),
           backgroundColor: AppTheme.primary,
         ),
       );
@@ -106,14 +146,42 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('保存出错: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
+        SnackBar(content: Text('保存出错: $e'), backgroundColor: Colors.redAccent),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Widget _buildSourceImage(MediaAsset currentMedia, String imageUrl) {
+    if (currentMedia.isCensored && widget.platformRepository != null) {
+      if (_sourceMediaId == currentMedia.id && _sourceBytes != null) {
+        return Image.memory(
+          _sourceBytes!,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => _sourceError('原图无法显示'),
+        );
+      }
+      if (_sourceLoadError != null) return _sourceError(_sourceLoadError!);
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primary),
+      );
+    }
+
+    return AppNetworkImage(
+      url: imageUrl,
+      fit: BoxFit.contain,
+      errorBuilder: (_) => _sourceError('图片加载中或无法访问'),
+    );
+  }
+
+  Widget _sourceError(String message) {
+    return Container(
+      color: Colors.black26,
+      child: Center(
+        child: Text(message, style: const TextStyle(color: Colors.white70)),
+      ),
+    );
   }
 
   @override
@@ -132,7 +200,11 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     }
 
     final currentMedia = _images[_selectedImageIndex];
-    final imageUrl = currentMedia.originalUrl ?? currentMedia.detailUrl ?? currentMedia.url ?? '';
+    final imageUrl =
+        currentMedia.originalUrl ??
+        currentMedia.detailUrl ??
+        currentMedia.url ??
+        '';
 
     return Scaffold(
       backgroundColor: const Color(0xFF181A20),
@@ -141,17 +213,29 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         elevation: 0,
         title: Text(
           '图片处理 (${_selectedImageIndex + 1}/${_images.length})',
-          style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
           IconButton(
             tooltip: '撤销上一步',
-            icon: Icon(Icons.undo, color: _undoHistory.isNotEmpty ? Colors.white : Colors.white38),
+            icon: Icon(
+              Icons.undo,
+              color: _undoHistory.isNotEmpty ? Colors.white : Colors.white38,
+            ),
             onPressed: _undoHistory.isNotEmpty ? _undo : null,
           ),
           IconButton(
             tooltip: '清空打码',
-            icon: Icon(Icons.delete_outline, color: _currentRegions.isNotEmpty ? Colors.redAccent : Colors.white38),
+            icon: Icon(
+              Icons.delete_outline,
+              color: _currentRegions.isNotEmpty
+                  ? Colors.redAccent
+                  : Colors.white38,
+            ),
             onPressed: _currentRegions.isNotEmpty ? _clearAll : null,
           ),
           TextButton(
@@ -160,9 +244,18 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
-                : const Text('保存打码', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+                : const Text(
+                    '保存打码',
+                    style: TextStyle(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
           ),
           const SizedBox(width: 8),
         ],
@@ -187,6 +280,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                           _selectedImageIndex = index;
                           _loadCurrentMediaRegions();
                         });
+                        _loadCurrentMediaSource();
                       }
                     },
                     child: Container(
@@ -195,15 +289,17 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: isSelected ? AppTheme.primary : Colors.transparent,
+                          color: isSelected
+                              ? AppTheme.primary
+                              : Colors.transparent,
                           width: 2,
                         ),
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: Image.network(
-                        m.thumbUrl ?? m.url ?? '',
+                      child: AppNetworkImage(
+                        url: m.thumbUrl ?? m.url,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Container(
+                        errorBuilder: (_) => Container(
                           color: Colors.grey[800],
                           child: const Icon(Icons.image, color: Colors.white54),
                         ),
@@ -231,16 +327,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                         return Stack(
                           fit: StackFit.expand,
                           children: [
-                            Image.network(
-                              imageUrl,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, _, _) => Container(
-                                color: Colors.black26,
-                                child: const Center(
-                                  child: Text('图片加载中或无法访问', style: TextStyle(color: Colors.white70)),
-                                ),
-                              ),
-                            ),
+                            _buildSourceImage(currentMedia, imageUrl),
                             GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onPanStart: (details) {
@@ -255,11 +342,30 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                                 });
                               },
                               onPanEnd: (details) {
-                                if (_dragStart != null && _dragCurrent != null && canvasW > 0 && canvasH > 0) {
-                                  final left = (_dragStart!.dx < _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx).clamp(0.0, canvasW);
-                                  final top = (_dragStart!.dy < _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy).clamp(0.0, canvasH);
-                                  final right = (_dragStart!.dx > _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx).clamp(0.0, canvasW);
-                                  final bottom = (_dragStart!.dy > _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy).clamp(0.0, canvasH);
+                                if (_dragStart != null &&
+                                    _dragCurrent != null &&
+                                    canvasW > 0 &&
+                                    canvasH > 0) {
+                                  final left =
+                                      (_dragStart!.dx < _dragCurrent!.dx
+                                              ? _dragStart!.dx
+                                              : _dragCurrent!.dx)
+                                          .clamp(0.0, canvasW);
+                                  final top =
+                                      (_dragStart!.dy < _dragCurrent!.dy
+                                              ? _dragStart!.dy
+                                              : _dragCurrent!.dy)
+                                          .clamp(0.0, canvasH);
+                                  final right =
+                                      (_dragStart!.dx > _dragCurrent!.dx
+                                              ? _dragStart!.dx
+                                              : _dragCurrent!.dx)
+                                          .clamp(0.0, canvasW);
+                                  final bottom =
+                                      (_dragStart!.dy > _dragCurrent!.dy
+                                              ? _dragStart!.dy
+                                              : _dragCurrent!.dy)
+                                          .clamp(0.0, canvasH);
 
                                   final boxW = right - left;
                                   final boxH = bottom - top;
@@ -271,7 +377,10 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                                         x: (left / canvasW).clamp(0.0, 1.0),
                                         y: (top / canvasH).clamp(0.0, 1.0),
                                         width: (boxW / canvasW).clamp(0.0, 1.0),
-                                        height: (boxH / canvasH).clamp(0.0, 1.0),
+                                        height: (boxH / canvasH).clamp(
+                                          0.0,
+                                          1.0,
+                                        ),
                                         type: _currentType,
                                       ),
                                     );
@@ -304,12 +413,17 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: const BoxDecoration(
               color: Color(0xFF23262F),
-              border: Border(top: BorderSide(color: Color(0xFF353945), width: 1)),
+              border: Border(
+                top: BorderSide(color: Color(0xFF353945), width: 1),
+              ),
             ),
             child: SafeArea(
               child: Row(
                 children: [
-                  const Text('遮挡样式：', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  const Text(
+                    '遮挡样式：',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
                   const SizedBox(width: 8),
                   ChoiceChip(
                     label: const Text('马赛克'),
@@ -331,8 +445,15 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                   const Spacer(),
                   if (currentMedia.isCensored)
                     TextButton.icon(
-                      icon: const Icon(Icons.refresh, color: Colors.orangeAccent, size: 18),
-                      label: const Text('恢复原图', style: TextStyle(color: Colors.orangeAccent)),
+                      icon: const Icon(
+                        Icons.refresh,
+                        color: Colors.orangeAccent,
+                        size: 18,
+                      ),
+                      label: const Text(
+                        '恢复原图',
+                        style: TextStyle(color: Colors.orangeAccent),
+                      ),
                       onPressed: () => _saveModeration(resetToNormal: true),
                     ),
                 ],
@@ -392,10 +513,18 @@ class _MaskCanvasPainter extends CustomPainter {
       if (r.type == 'mosaic') {
         const double step = 12.0;
         for (double x = rect.left; x < rect.right; x += step) {
-          canvas.drawLine(Offset(x, rect.top), Offset(x, rect.bottom), gridPaint);
+          canvas.drawLine(
+            Offset(x, rect.top),
+            Offset(x, rect.bottom),
+            gridPaint,
+          );
         }
         for (double y = rect.top; y < rect.bottom; y += step) {
-          canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), gridPaint);
+          canvas.drawLine(
+            Offset(rect.left, y),
+            Offset(rect.right, y),
+            gridPaint,
+          );
         }
       }
 
@@ -403,10 +532,18 @@ class _MaskCanvasPainter extends CustomPainter {
     }
 
     if (dragStart != null && dragCurrent != null) {
-      final left = (dragStart!.dx < dragCurrent!.dx ? dragStart!.dx : dragCurrent!.dx).clamp(0.0, size.width);
-      final top = (dragStart!.dy < dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy).clamp(0.0, size.height);
-      final right = (dragStart!.dx > dragCurrent!.dx ? dragStart!.dx : dragCurrent!.dx).clamp(0.0, size.width);
-      final bottom = (dragStart!.dy > dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy).clamp(0.0, size.height);
+      final left =
+          (dragStart!.dx < dragCurrent!.dx ? dragStart!.dx : dragCurrent!.dx)
+              .clamp(0.0, size.width);
+      final top =
+          (dragStart!.dy < dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy)
+              .clamp(0.0, size.height);
+      final right =
+          (dragStart!.dx > dragCurrent!.dx ? dragStart!.dx : dragCurrent!.dx)
+              .clamp(0.0, size.width);
+      final bottom =
+          (dragStart!.dy > dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy)
+              .clamp(0.0, size.height);
 
       final rect = Rect.fromLTRB(left, top, right, bottom);
       canvas.drawRect(rect, currentType == 'blur' ? blurPaint : mosaicPaint);

@@ -100,6 +100,12 @@ func applyPermissionCapability(caps map[string]bool, role, permission string) {
 	}
 }
 
+// canModerate 是所有平台审核能力的唯一授权入口。
+// 客户端 capability 只用于控制界面展示，不能代替数据库中的全局权限判断。
+func (s *Server) canModerate(r *http.Request, user auth.User) bool {
+	return s != nil && s.db != nil && s.hasGlobalPermission(r, user.ID, "moderation.action")
+}
+
 func (s *Server) requireRegisteredUser(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
 	user, ok := s.authenticatedUser(w, r)
 	if !ok {

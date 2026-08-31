@@ -888,6 +888,15 @@ class PlatformRepository {
     );
   }
 
+  /// 管理员重新审核已打码图片时读取真实源图；服务端只返回二进制，
+  /// 不生成可缓存的公开 URL。
+  Future<List<int>> getAdminMediaSource({required String mediaId}) {
+    return _client.getBytes(
+      '/api/v1/admin/media/$mediaId/source',
+      headers: const {'Accept': 'image/*'},
+    );
+  }
+
   Future<List<RankingToySubmission>> listRankingSubmissions({
     String status = 'pending',
   }) async {
@@ -935,10 +944,7 @@ class PlatformRepository {
   }) async {
     await _client.postJson(
       '/api/v1/admin/ranking/submissions/$id/review',
-      body: {
-        'action': approve ? 'approve' : 'reject',
-        'note': ?note,
-      },
+      body: {'action': approve ? 'approve' : 'reject', 'note': ?note},
     );
   }
 
@@ -1200,33 +1206,36 @@ class PlatformRepository {
     final rawRoles = value['roles'];
     final List<String> parsedRoles;
     if (rawRoles is List) {
-      parsedRoles = rawRoles.map((item) {
-        if (item is Map) {
-          final name = _string(item['name']);
-          final communityId = _string(item['community_id']);
-          return communityId.isNotEmpty ? '$name:$communityId' : name;
-        }
-        final str = '$item'.trim();
-        if (str.startsWith('{') && str.endsWith('}')) {
-          final clean = str.substring(1, str.length - 1);
-          final parts = clean.split(',');
-          String n = '';
-          String c = '';
-          for (final part in parts) {
-            final kv = part.split(':');
-            if (kv.length >= 2) {
-              final k = kv[0].trim();
-              final v = kv.sublist(1).join(':').trim();
-              if (k == 'name') n = v;
-              if (k == 'community_id') c = v;
+      parsedRoles = rawRoles
+          .map((item) {
+            if (item is Map) {
+              final name = _string(item['name']);
+              final communityId = _string(item['community_id']);
+              return communityId.isNotEmpty ? '$name:$communityId' : name;
             }
-          }
-          if (n.isNotEmpty) {
-            return c.isNotEmpty ? '$n:$c' : n;
-          }
-        }
-        return str;
-      }).where((s) => s.isNotEmpty).toList();
+            final str = '$item'.trim();
+            if (str.startsWith('{') && str.endsWith('}')) {
+              final clean = str.substring(1, str.length - 1);
+              final parts = clean.split(',');
+              String n = '';
+              String c = '';
+              for (final part in parts) {
+                final kv = part.split(':');
+                if (kv.length >= 2) {
+                  final k = kv[0].trim();
+                  final v = kv.sublist(1).join(':').trim();
+                  if (k == 'name') n = v;
+                  if (k == 'community_id') c = v;
+                }
+              }
+              if (n.isNotEmpty) {
+                return c.isNotEmpty ? '$n:$c' : n;
+              }
+            }
+            return str;
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
     } else {
       parsedRoles = const <String>[];
     }
@@ -1415,9 +1424,12 @@ class PlatformRepository {
     final response = await _client.getJson('/api/v1/admin/activities$query');
     final items = response['items'] is List
         ? (response['items'] as List)
-            .whereType<Map>()
-            .map((item) => ActivityItem.fromJson(Map<String, dynamic>.from(item)))
-            .toList()
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    ActivityItem.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .toList()
         : <ActivityItem>[];
     return items;
   }
@@ -1437,7 +1449,8 @@ class PlatformRepository {
       body: {
         'title': title,
         'description': description,
-        if (coverMediaId != null && coverMediaId.isNotEmpty) 'cover_media_id': coverMediaId,
+        if (coverMediaId != null && coverMediaId.isNotEmpty)
+          'cover_media_id': coverMediaId,
         if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
         if (startAt != null) 'start_at': startAt.toUtc().toIso8601String(),
         if (endAt != null) 'end_at': endAt.toUtc().toIso8601String(),
@@ -1463,7 +1476,8 @@ class PlatformRepository {
       body: {
         'title': title,
         'description': description,
-        if (coverMediaId != null && coverMediaId.isNotEmpty) 'cover_media_id': coverMediaId,
+        if (coverMediaId != null && coverMediaId.isNotEmpty)
+          'cover_media_id': coverMediaId,
         if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
         if (startAt != null) 'start_at': startAt.toUtc().toIso8601String(),
         if (endAt != null) 'end_at': endAt.toUtc().toIso8601String(),
@@ -1474,11 +1488,17 @@ class PlatformRepository {
   }
 
   Future<void> publishAdminActivity(String id) async {
-    await _client.postJson('/api/v1/admin/activities/$id/publish', body: const <String, dynamic>{});
+    await _client.postJson(
+      '/api/v1/admin/activities/$id/publish',
+      body: const <String, dynamic>{},
+    );
   }
 
   Future<void> offlineAdminActivity(String id) async {
-    await _client.postJson('/api/v1/admin/activities/$id/offline', body: const <String, dynamic>{});
+    await _client.postJson(
+      '/api/v1/admin/activities/$id/offline',
+      body: const <String, dynamic>{},
+    );
   }
 
   Future<void> deleteAdminActivity(String id) async {
@@ -1489,9 +1509,12 @@ class PlatformRepository {
     final response = await _client.getJson('/api/v1/activities');
     final items = response['items'] is List
         ? (response['items'] as List)
-            .whereType<Map>()
-            .map((item) => ActivityItem.fromJson(Map<String, dynamic>.from(item)))
-            .toList()
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    ActivityItem.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .toList()
         : <ActivityItem>[];
     return items;
   }
@@ -1577,18 +1600,31 @@ class ActivityItem {
       description: json['description'] as String? ?? '',
       coverMediaId: json['cover_media_id'] as String?,
       coverUrl: json['cover_url'] as String?,
-      startAt: json['start_at'] != null ? DateTime.tryParse(json['start_at'].toString()) : null,
-      endAt: json['end_at'] != null ? DateTime.tryParse(json['end_at'].toString()) : null,
+      startAt: json['start_at'] != null
+          ? DateTime.tryParse(json['start_at'].toString())
+          : null,
+      endAt: json['end_at'] != null
+          ? DateTime.tryParse(json['end_at'].toString())
+          : null,
       location: json['location'] as String? ?? '',
       status: json['status'] as String? ?? 'draft',
-      publicationStatus: json['publication_status'] as String? ??
-          ((json['status'] == 'draft' || json['status'] == 'offline') ? json['status'] as String : 'published'),
+      publicationStatus:
+          json['publication_status'] as String? ??
+          ((json['status'] == 'draft' || json['status'] == 'offline')
+              ? json['status'] as String
+              : 'published'),
       phase: json['phase'] as String?,
       createdBy: json['created_by'] as String? ?? '',
       authorName: json['author_name'] as String? ?? '',
-      publishedAt: json['published_at'] != null ? DateTime.tryParse(json['published_at'].toString()) : null,
-      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
-      updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now() : DateTime.now(),
+      publishedAt: json['published_at'] != null
+          ? DateTime.tryParse(json['published_at'].toString())
+          : null,
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
     );
   }
 }

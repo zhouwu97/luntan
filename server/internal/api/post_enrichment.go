@@ -79,8 +79,13 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		} else {
 			it.item.Type = "image"
 		}
-		it.item.URL = publicMediaURL(it.objectKey)
 		it.item.ModerationStatus = it.moderationStatus
+		// censored 媒体的源 object key 永远不进入公开响应；后面的逻辑只会
+		// 选择 censored_* 变体。这样即使对象存储配置了公开前缀，Feed
+		// 也不会继续给出原图直链。
+		if it.moderationStatus != "censored" {
+			it.item.URL = publicMediaURL(it.objectKey)
+		}
 		if it.rawMaskRegions != "" && it.rawMaskRegions != "[]" {
 			var regions []media.MaskRegion
 			if jsonErr := json.Unmarshal([]byte(it.rawMaskRegions), &regions); jsonErr == nil {
@@ -176,6 +181,15 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 						MimeType: item.MimeType,
 					}
 				}
+				if item.URL == "" {
+					if item.Detail != nil {
+						item.URL = item.Detail.URL
+					} else if item.Thumb != nil {
+						item.URL = item.Thumb.URL
+					} else if item.Original != nil {
+						item.URL = item.Original.URL
+					}
+				}
 			}
 			response.Media = append(response.Media, item)
 		}
@@ -186,7 +200,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	var hotSuppressedAt sql.NullTime
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(hot_suppressed, false), COALESCE(hot_suppressed_reason, ''), hot_suppressed_at, COALESCE(hot_suppressed_by, '') FROM posts WHERE id = $1`, response.ID).Scan(&hotSuppressed, &hotSuppressedReason, &hotSuppressedAt, &hotSuppressedBy); err == nil {
 		viewer, hasViewer := s.optionalAuthenticatedUser(ctx, r)
-		isAdmin := hasViewer && capabilitiesForUser(viewer)[capModerate]
+		isAdmin := hasViewer && s.canModerate(r, viewer)
 
 		if isAdmin {
 			response.HotSuppressed = hotSuppressed
@@ -260,8 +274,11 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 }
 
 func (s *Server) optionalAuthenticatedUser(ctx context.Context, r *http.Request) (user auth.User, ok bool) {
+	if user, ok := r.Context().Value(authenticatedUserContextKey{}).(auth.User); ok {
+		return user, true
+	}
 	token, hasToken := bearerToken(r.Header.Get("Authorization"))
-	if !hasToken {
+	if !hasToken || s == nil || s.authService == nil {
 		return auth.User{}, false
 	}
 	user, err := s.authService.Me(ctx, token)
@@ -283,6 +300,12 @@ func publicMediaURL(objectKey string) string {
 		return objectKey
 	}
 	key := strings.TrimLeft(objectKey, "/")
+	// 用户上传媒体的源图和派生图统一走应用媒体路由。对象存储公开前缀
+	// 只适用于 ranking/imported 等已明确公开的资源，不能成为 media/ 下
+	// 原图的第二条绕过审核鉴权的路径。
+	if strings.HasPrefix(key, "media/") {
+		return "/api/v1/media-file/" + key
+	}
 	if base != "" {
 		return base + "/" + key
 	}

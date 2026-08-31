@@ -177,8 +177,8 @@ func TestCreatePostResponseReflectsModerationTrigger(t *testing.T) {
 		t.Fatalf("spam post should be pending, got post_status=%v moderation_status=%v", spamResp["post_status"], spamResp["moderation_status"])
 	}
 
-	// 验证作者查看自己的个人中心 (/api/v1/profile/posts)，应包含 pending 的帖子，且携带 moderation_status: "pending"
-	myPostsReq := httptest.NewRequest(http.MethodGet, "/api/v1/profile/posts", nil)
+	// 验证作者查看自己的个人中心 (/api/v1/me/posts)，应包含 pending 的帖子，且携带 moderation_status: "pending"
+	myPostsReq := httptest.NewRequest(http.MethodGet, "/api/v1/me/posts", nil)
 	myPostsReq.Header.Set("Authorization", "Bearer "+oldToken)
 	myPostsRec := httptest.NewRecorder()
 	handler.ServeHTTP(myPostsRec, myPostsReq)

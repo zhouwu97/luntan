@@ -65,7 +65,8 @@ func TestEnrichPostResponsePopulatesAuthorAvatar(t *testing.T) {
 	if post.Author.AvatarMediaID != "m-avatar-1" {
 		t.Errorf("expected Author.AvatarMediaID=m-avatar-1, got %q", post.Author.AvatarMediaID)
 	}
-	if post.Author.AvatarURL != "/api/v1/media-file/media/users/u-author/avatar.webp" {
-		t.Errorf("expected Author.AvatarURL=/api/v1/media-file/media/users/u-author/avatar.webp, got %q", post.Author.AvatarURL)
+	// 有 avatar_media_id 时头像必须走 {mediaID}/{variant} 受控网关形态。
+	if post.Author.AvatarURL != "/api/v1/media-file/m-avatar-1/thumb" {
+		t.Errorf("expected Author.AvatarURL=/api/v1/media-file/m-avatar-1/thumb, got %q", post.Author.AvatarURL)
 	}
 }

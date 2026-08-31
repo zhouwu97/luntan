@@ -87,7 +87,7 @@ const floorNumberExpr = `ROW_NUMBER() OVER (ORDER BY c.created_at ASC, c.id ASC)
 // commentFloorColumns 是楼层/回复共用的 SELECT 列集，
 // 与 (*Server).collectCommentFloorRows 的 Scan 顺序一一对应。
 const commentFloorColumns = `t.id, t.post_id, t.author_id, u.username, COALESCE(up.nickname, u.username),
-		       COALESCE(up.level, 1), COALESCE(ma.object_key, ''), t.content,
+		       COALESCE(up.level, 1), COALESCE(ma.id, ''), COALESCE(ma.object_key, ''), t.content,
 		       t.like_count, t.dislike_count, t.reply_count, t.created_at, t.updated_at,
 		       t.floor_no, COALESCE(t.root_id, t.id), COALESCE(t.parent_id, ''),
 		       COALESCE(t.reply_to_user_id, ''), COALESCE(t.sticker_id, ''), t.publication_status`
@@ -294,12 +294,12 @@ func (s *Server) collectCommentFloorRows(ctx context.Context, rows *sql.Rows, ha
 	items := make([]commentResponse, 0, 16)
 	for rows.Next() {
 		var item commentResponse
-		var postID, authorID, rootID, parentID, replyTo, stickerID, avatarKey string
+		var postID, authorID, rootID, parentID, replyTo, stickerID, avatarMediaID, avatarKey string
 		var floorNo sql.NullInt64
 		var hasLiked, hasDisliked bool
 		if err := rows.Scan(
 			&item.ID, &postID, &authorID, &item.Author.Username, &item.Author.Nickname,
-			&item.Author.Level, &avatarKey, &item.Content,
+			&item.Author.Level, &avatarMediaID, &avatarKey, &item.Content,
 			&item.LikeCount, &item.DislikeCount, &item.ReplyCount,
 			&item.CreatedAt, &item.UpdatedAt, &floorNo,
 			&rootID, &parentID, &replyTo, &stickerID, &item.Publication,
@@ -310,7 +310,7 @@ func (s *Server) collectCommentFloorRows(ctx context.Context, rows *sql.Rows, ha
 		item.PostID = postID
 		item.Author.ID = authorID
 		if avatarKey != "" {
-			item.Author.AvatarURL = publicMediaURL(avatarKey)
+			item.Author.AvatarURL = mediaVariantURL(avatarMediaID, avatarKey, "thumb")
 		}
 		item.RootID, item.ParentID, item.ReplyToUserID = optionalString(rootID), optionalString(parentID), optionalString(replyTo)
 		item.StickerID = optionalString(stickerID)
@@ -694,11 +694,11 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 
 func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID string) (commentResponse, error) {
 	var response commentResponse
-	var authorID, rootID, parentID, replyTo, stickerID string
+	var authorID, rootID, parentID, replyTo, stickerID, avatarMediaID string
 	var floorNo sql.NullInt64
 	err := tx.QueryRowContext(ctx, `
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
-		       COALESCE(up.level, 1), COALESCE(ma.object_key, ''),
+		       COALESCE(up.level, 1), COALESCE(ma.id, ''), COALESCE(ma.object_key, ''),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
 		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.dislike_count, c.reply_count,
 		       c.publication_status, c.moderation_status,
@@ -716,7 +716,7 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID 
 		LEFT JOIN media_assets ma ON ma.id = up.avatar_media_id
 		WHERE c.id = $1`, commentID).Scan(
 		&response.ID, &response.PostID, &authorID, &response.Author.Username, &response.Author.Nickname,
-		&response.Author.Level, &response.Author.AvatarURL,
+		&response.Author.Level, &avatarMediaID, &response.Author.AvatarURL,
 		&rootID, &parentID, &replyTo, &response.Content, &stickerID, &response.LikeCount, &response.DislikeCount,
 		&response.ReplyCount, &response.Publication, &response.Moderation, &response.CreatedAt, &response.UpdatedAt,
 		&floorNo,
@@ -730,7 +730,7 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID 
 	}
 	response.Author.ID = authorID
 	if response.Author.AvatarURL != "" {
-		response.Author.AvatarURL = publicMediaURL(response.Author.AvatarURL)
+		response.Author.AvatarURL = mediaVariantURL(avatarMediaID, response.Author.AvatarURL, "thumb")
 	}
 	response.RootID = optionalString(rootID)
 	response.ParentID = optionalString(parentID)
@@ -857,7 +857,7 @@ func enrichCommentsMedia(ctx context.Context, db databaseQueryer, items []commen
 						variantsMap[mid] = make(map[string]*mediaVariantResponse)
 					}
 					variantsMap[mid][variant] = &mediaVariantResponse{
-						URL:       publicMediaURL(objKey),
+						URL:       gatewayMediaURL(mid, variant),
 						Width:     width,
 						Height:    height,
 						SizeBytes: sizeBytes,
@@ -876,9 +876,26 @@ func enrichCommentsMedia(ctx context.Context, db databaseQueryer, items []commen
 		}
 		m := mk.media
 		if vmap, ok := variantsMap[m.ID]; ok {
-			m.Thumb = vmap["thumb"]
-			m.Detail = vmap["detail"]
-			m.Original = vmap["original"]
+			// 与 Feed 相同的 fail-closed 语义：存在打码变体就绝不回退未打码
+			// 源图/普通变体；URL 统一改指变体，backfill 后旧源地址会被拒绝。
+			m.Thumb = vmap["censored_thumb"]
+			m.Detail = vmap["censored_detail"]
+			m.Original = vmap["censored_original"]
+			if m.Thumb == nil && m.Detail == nil && m.Original == nil {
+				m.Thumb = vmap["thumb"]
+				m.Detail = vmap["detail"]
+				m.Original = vmap["original"]
+			}
+			switch {
+			case m.Detail != nil:
+				m.URL = m.Detail.URL
+			case m.Thumb != nil:
+				m.URL = m.Thumb.URL
+			case m.Original != nil:
+				m.URL = m.Original.URL
+			case vmap["censored_thumb"] != nil || vmap["censored_detail"] != nil || vmap["censored_original"] != nil:
+				m.URL = ""
+			}
 		}
 		if m.Thumb == nil && m.URL != "" {
 			m.Thumb = &mediaVariantResponse{
@@ -952,7 +969,7 @@ func loadUserSummary(ctx context.Context, queryer userSummaryQueryer, userID str
 		return nil, err
 	}
 	if objectKey != "" {
-		summary.AvatarURL = publicMediaURL(objectKey)
+		summary.AvatarURL = mediaVariantURL(summary.AvatarMediaID, objectKey, "thumb")
 	}
 	return &summary, nil
 }

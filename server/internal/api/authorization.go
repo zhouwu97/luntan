@@ -159,7 +159,7 @@ func (s *Server) populateUserCapabilities(ctx context.Context, user *auth.User) 
 			user.AvatarMediaID = avatarMediaID.String
 		}
 		if objectKey.Valid && objectKey.String != "" {
-			user.AvatarURL = publicMediaURL(objectKey.String)
+			user.AvatarURL = mediaVariantURL(avatarMediaID.String, objectKey.String, "thumb")
 		}
 		user.Experience = exp
 		user.Level = level

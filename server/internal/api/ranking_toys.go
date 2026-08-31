@@ -37,6 +37,8 @@ type rankingToyRecord struct {
 	RatingCount      int64
 	Category         string
 	Segments         []string
+	CoverMediaID     string
+	HeroMediaID      string
 	CoverObjectKey   string
 	HeroObjectKey    string
 	CouponURL        string
@@ -82,11 +84,12 @@ type rankingToyCommentMedia struct {
 }
 
 type rankingToyCommentMediaPayload struct {
-	ID        string `json:"id"`
-	ObjectKey string `json:"object_key"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	MimeType  string `json:"mime_type"`
+	ID          string `json:"id"`
+	ObjectKey   string `json:"object_key"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	MimeType    string `json:"mime_type"`
+	HasVariants bool   `json:"has_variants"`
 }
 
 func parseRankingToyCommentMedia(raw []byte) ([]rankingToyCommentMedia, error) {
@@ -99,8 +102,14 @@ func parseRankingToyCommentMedia(raw []byte) ([]rankingToyCommentMedia, error) {
 	}
 	items := make([]rankingToyCommentMedia, 0, len(payload))
 	for _, item := range payload {
+		// has_variants 为假（backfill 未覆盖）时保留 objectKey 形态兜底；
+		// 一旦派生变体就绪，URL 必须改走受控网关形态。
+		url := publicMediaURL(item.ObjectKey)
+		if item.HasVariants {
+			url = gatewayMediaURL(item.ID, "detail")
+		}
 		items = append(items, rankingToyCommentMedia{
-			ID: item.ID, URL: publicMediaURL(item.ObjectKey), Width: item.Width,
+			ID: item.ID, URL: url, Width: item.Width,
 			Height: item.Height, MimeType: item.MimeType,
 		})
 	}
@@ -110,19 +119,24 @@ func parseRankingToyCommentMedia(raw []byte) ([]rankingToyCommentMedia, error) {
 const rankingToyCommentMediaSelect = `COALESCE((
 	SELECT json_agg(json_build_object(
 		'id', media.id, 'object_key', media.object_key, 'width', media.width,
-		'height', media.height, 'mime_type', media.mime_type
+		'height', media.height, 'mime_type', media.mime_type,
+		'has_variants', EXISTS (
+			SELECT 1 FROM media_variants mv
+			WHERE mv.media_id = media.id AND mv.status = 'ready'
+			  AND mv.variant IN ('original', 'detail', 'thumb')
+		)
 	) ORDER BY links.sort_order ASC, media.id ASC)
 	FROM ranking_toy_comment_media links
 	JOIN media_assets media ON media.id = links.media_id
 	WHERE links.comment_id = c.id AND media.status = 'ready' AND media.deleted_at IS NULL
 ), '[]'::json)`
 
-// rankingToyCommentAvatarSelect 取评论作者头像的对象键；与作者资料一起
-// JOIN，空键表示该作者未设置头像。
-const rankingToyCommentAvatarSelect = `COALESCE(am.object_key, '')`
+// rankingToyCommentAvatarSelect 取评论作者头像的媒体 ID 与对象键；与作者
+// 资料一起 JOIN，空键表示该作者未设置头像。
+const rankingToyCommentAvatarSelect = `COALESCE(am.id, ''), COALESCE(am.object_key, '')`
 
-func scanRankingToyCommentAvatar(item *rankingToyComment, avatarKey string) {
-	item.AvatarURL = mediaURLOrEmpty(avatarKey)
+func scanRankingToyCommentAvatar(item *rankingToyComment, avatarMediaID, avatarKey string) {
+	item.AvatarURL = mediaVariantURL(avatarMediaID, avatarKey, "thumb")
 }
 
 func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +314,8 @@ func rankingToyColumns(rankExpression string) string {
 		array_to_json(t.tags), t.asset_key, t.want_count,
 		t.rating_total_centi, t.rating_count,
 		t.category, array_to_json(t.segments),
-		COALESCE(cover.object_key, ''), COALESCE(hero.object_key, ''),
+		COALESCE(cover.id, ''), COALESCE(cover.object_key, ''),
+		COALESCE(hero.id, ''), COALESCE(hero.object_key, ''),
 		t.coupon_url, t.source_url, t.source_provider,
 		COALESCE(us.wanted, false), COALESCE(us.owned, false), us.rating`
 }
@@ -323,7 +338,9 @@ func scanRankingToy(scanner rankingToyScanner) (rankingToyRecord, error) {
 		&item.RatingCount,
 		&item.Category,
 		&segmentsRaw,
+		&item.CoverMediaID,
 		&item.CoverObjectKey,
+		&item.HeroMediaID,
 		&item.HeroObjectKey,
 		&item.CouponURL,
 		&item.SourceURL,
@@ -363,8 +380,8 @@ func (item rankingToyRecord) response() map[string]any {
 		"description":  item.Description,
 		"tags":         item.Tags,
 		"asset_key":    item.AssetKey,
-		"cover_url":    mediaURLOrEmpty(item.CoverObjectKey),
-		"hero_url":     mediaURLOrEmpty(item.HeroObjectKey),
+		"cover_url":    mediaVariantURL(item.CoverMediaID, item.CoverObjectKey, "detail"),
+		"hero_url":     mediaVariantURL(item.HeroMediaID, item.HeroObjectKey, "detail"),
 		"coupon_url":   item.CouponURL,
 		"source_url":   item.SourceURL,
 		"source":       item.SourceProvider,
@@ -506,7 +523,7 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	for rows.Next() {
 		var item rankingToyComment
 		var mediaRaw []byte
-		var avatarKey string
+		var avatarMediaID, avatarKey string
 		if err := rows.Scan(
 			&item.ID,
 			&item.AuthorID,
@@ -523,11 +540,12 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 			&item.ReplyCount,
 			&item.AuthorRating,
 			&mediaRaw,
+			&avatarMediaID,
 			&avatarKey,
 		); err != nil {
 			return rankingToyCommentPage{}, err
 		}
-		scanRankingToyCommentAvatar(&item, avatarKey)
+		scanRankingToyCommentAvatar(&item, avatarMediaID, avatarKey)
 		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 		if err != nil {
 			return rankingToyCommentPage{}, err
@@ -640,18 +658,19 @@ func (s *Server) listRankingToyRepliesPage(ctx context.Context, toyID, rootID, v
 	for rows.Next() {
 		var item rankingToyComment
 		var mediaRaw []byte
-		var avatarKey string
+		var avatarMediaID, avatarKey string
 		if err := rows.Scan(
 			&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 			&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 			&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
 			&item.AuthorRating,
 			&mediaRaw,
+			&avatarMediaID,
 			&avatarKey,
 		); err != nil {
 			return rankingToyCommentPage{}, err
 		}
-		scanRankingToyCommentAvatar(&item, avatarKey)
+		scanRankingToyCommentAvatar(&item, avatarMediaID, avatarKey)
 		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 		if err != nil {
 			return rankingToyCommentPage{}, err
@@ -1012,7 +1031,7 @@ func (s *Server) createRankingToyComment(w http.ResponseWriter, r *http.Request,
 func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID string) (rankingToyComment, error) {
 	var item rankingToyComment
 	var mediaRaw []byte
-	var avatarKey string
+	var avatarMediaID, avatarKey string
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), c.content, c.like_count,
@@ -1028,12 +1047,12 @@ func (s *Server) loadRankingToyComment(r *http.Request, commentID, viewerID stri
 		&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
 		&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
 		&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
-		&item.AuthorRating, &mediaRaw, &avatarKey,
+		&item.AuthorRating, &mediaRaw, &avatarMediaID, &avatarKey,
 	)
 	if err != nil {
 		return item, err
 	}
-	scanRankingToyCommentAvatar(&item, avatarKey)
+	scanRankingToyCommentAvatar(&item, avatarMediaID, avatarKey)
 	item.Media, err = parseRankingToyCommentMedia(mediaRaw)
 	if err != nil {
 		return item, err

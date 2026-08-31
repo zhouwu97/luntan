@@ -178,7 +178,7 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 			item.CoverMediaID = coverMediaID
 		}
 		if coverKey != "" {
-			item.CoverURL = publicMediaURL(coverKey)
+			item.CoverURL = mediaVariantURL(coverMediaID, coverKey, "detail")
 		}
 		if startAt.Valid {
 			item.StartAt = &startAt.Time
@@ -521,7 +521,7 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 			item.CoverMediaID = coverMediaID
 		}
 		if coverKey != "" {
-			item.CoverURL = publicMediaURL(coverKey)
+			item.CoverURL = mediaVariantURL(coverMediaID, coverKey, "detail")
 		}
 		if startAt.Valid {
 			item.StartAt = &startAt.Time

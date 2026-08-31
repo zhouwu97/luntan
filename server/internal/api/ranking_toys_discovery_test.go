@@ -22,11 +22,11 @@ func TestSearchReturnsToysInAllAndToysMode(t *testing.T) {
 		"id", "rank", "name", "merchant", "release_year", "description",
 		"tags", "asset_key", "want_count", "rating_total_centi", "rating_count",
 		"category", "segments",
-		"cover_object_key", "hero_object_key", "coupon_url", "source_url", "source_provider",
+		"cover_media_id", "cover_object_key", "hero_media_id", "hero_object_key", "coupon_url", "source_url", "source_provider",
 		"search_rank",
 	}
 	toyRows := sqlmock.NewRows(toyCols).
-		AddRow("toy-butter-2", 1, "黄油小姐 二代", "COC", 2025, "奶香软糯", `["奶香材质","软糯包裹"]`, "thumb_01.webp", 401, 1479, 17, "cup", `["beginner"]`, "", "", "", "", "", 100.0)
+		AddRow("toy-butter-2", 1, "黄油小姐 二代", "COC", 2025, "奶香软糯", `["奶香材质","软糯包裹"]`, "thumb_01.webp", 401, 1479, 17, "cup", `["beginner"]`, "", "", "", "", "", "", "", 100.0)
 
 	postCols := []string{"id", "author_id", "username", "author_name", "author_level", "title", "content_preview", "community_id", "community_name", "created_at", "comment_count", "like_count", "view_count", "rank"}
 	postRows := sqlmock.NewRows(postCols).
@@ -97,11 +97,11 @@ func TestGetRankingToyReturnsRatingDistribution(t *testing.T) {
 	toyCols := []string{
 		"id", "rank", "name", "merchant", "release_year", "description",
 		"tags", "asset_key", "want_count", "rating_total_centi", "rating_count",
-		"category", "segments", "cover_object_key", "hero_object_key", "coupon_url", "source_url", "source_provider",
+		"category", "segments", "cover_media_id", "cover_object_key", "hero_media_id", "hero_object_key", "coupon_url", "source_url", "source_provider",
 		"wanted", "owned", "rating",
 	}
 	toyRows := sqlmock.NewRows(toyCols).
-		AddRow("toy-butter-2", 1, "黄油小姐 二代", "COC", 2025, "简介", `["标签"]`, "hero.webp", 401, 870, 10, "cup", `["beginner"]`, "", "", "", "", "", false, false, nil)
+		AddRow("toy-butter-2", 1, "黄油小姐 二代", "COC", 2025, "简介", `["标签"]`, "hero.webp", 401, 870, 10, "cup", `["beginner"]`, "", "", "", "", "", "", "", false, false, nil)
 
 	mock.ExpectQuery(`(?s)SELECT t.id, t.rank.*FROM ranking_toys t.*WHERE t.id = \$1`).
 		WithArgs("toy-butter-2", "").
@@ -110,10 +110,10 @@ func TestGetRankingToyReturnsRatingDistribution(t *testing.T) {
 	commentCols := []string{
 		"id", "author_id", "username", "nickname", "level", "content",
 		"like_count", "has_liked", "created_at", "root_id", "parent_id", "reply_to_user_id", "reply_count", "author_rating", "media",
-		"avatar_object_key",
+		"avatar_media_id", "avatar_object_key",
 	}
 	commentRows := sqlmock.NewRows(commentCols).
-		AddRow("c-1", "u-1", "tester", "评测君", 3, "手感很好", 5, false, time.Now().UTC(), nil, nil, nil, 0, 9, nil, "")
+		AddRow("c-1", "u-1", "tester", "评测君", 3, "手感很好", 5, false, time.Now().UTC(), nil, nil, nil, 0, 9, nil, "", "")
 
 	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*FROM ranking_toy_comments c.*WHERE c.toy_id = \$1`).
 		WithArgs("toy-butter-2", "", 21).
@@ -177,10 +177,10 @@ func TestListRankingToyCommentsPaginatesRootsOnly(t *testing.T) {
 	commentRows := sqlmock.NewRows([]string{
 		"id", "author_id", "username", "nickname", "level", "content",
 		"like_count", "has_liked", "created_at", "root_id", "parent_id", "reply_to_user_id", "reply_count", "author_rating", "media",
-		"avatar_object_key",
+		"avatar_media_id", "avatar_object_key",
 	}).
-		AddRow("root-1", "u-1", "u1", "用户1", 2, "root one", 8, false, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC), "root-1", nil, nil, 2, 9, nil, "").
-		AddRow("root-2", "u-2", "u2", "用户2", 2, "root two", 3, false, time.Date(2026, 8, 27, 9, 0, 0, 0, time.UTC), "root-2", nil, nil, 0, 8, nil, "")
+		AddRow("root-1", "u-1", "u1", "用户1", 2, "root one", 8, false, time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC), "root-1", nil, nil, 2, 9, nil, "", "").
+		AddRow("root-2", "u-2", "u2", "用户2", 2, "root two", 3, false, time.Date(2026, 8, 27, 9, 0, 0, 0, time.UTC), "root-2", nil, nil, 0, 8, nil, "", "")
 	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*c.parent_id IS NULL.*LIMIT \$3`).
 		WithArgs("toy-1", "", 2).
 		WillReturnRows(commentRows)
@@ -220,10 +220,10 @@ func TestListRankingToyRepliesReturnsNestedRepliesFlatAndPaginated(t *testing.T)
 	replyRows := sqlmock.NewRows([]string{
 		"id", "author_id", "username", "nickname", "level", "content",
 		"like_count", "has_liked", "created_at", "root_id", "parent_id", "reply_to_user_id", "reply_count", "author_rating", "media",
-		"avatar_object_key",
+		"avatar_media_id", "avatar_object_key",
 	}).
-		AddRow("reply-1", "u-2", "u2", "用户2", 3, "回复二级", 2, false, time.Date(2026, 8, 27, 10, 1, 0, 0, time.UTC), "root-1", "reply-0", "u-3", 1, 7, nil, "").
-		AddRow("reply-2", "u-3", "u3", "用户3", 1, "回复三级", 1, false, time.Date(2026, 8, 27, 10, 2, 0, 0, time.UTC), "root-1", "reply-1", "u-2", 0, 6, nil, "")
+		AddRow("reply-1", "u-2", "u2", "用户2", 3, "回复二级", 2, false, time.Date(2026, 8, 27, 10, 1, 0, 0, time.UTC), "root-1", "reply-0", "u-3", 1, 7, nil, "", "").
+		AddRow("reply-2", "u-3", "u3", "用户3", 1, "回复三级", 1, false, time.Date(2026, 8, 27, 10, 2, 0, 0, time.UTC), "root-1", "reply-1", "u-2", 0, 6, nil, "", "")
 	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*COALESCE\(c.root_id, c.id\) = \$2.*LIMIT \$4`).
 		WithArgs("toy-1", "root-1", "", 2).
 		WillReturnRows(replyRows)

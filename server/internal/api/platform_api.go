@@ -398,7 +398,8 @@ func (s *Server) searchToys(r *http.Request, query string, limit int, rawCursor 
 		       array_to_json(t.tags), t.asset_key, t.want_count,
 		       t.rating_total_centi, t.rating_count,
 		       t.category, array_to_json(t.segments),
-		       COALESCE(cover.object_key, ''), COALESCE(hero.object_key, ''),
+		       COALESCE(cover.id, ''), COALESCE(cover.object_key, ''),
+		       COALESCE(hero.id, ''), COALESCE(hero.object_key, ''),
 		       t.coupon_url, t.source_url, t.source_provider,
 		       `+rankExpression+` AS search_rank
 		FROM ranking_toys t
@@ -430,7 +431,9 @@ func (s *Server) searchToys(r *http.Request, query string, limit int, rawCursor 
 			&item.RatingCount,
 			&item.Category,
 			&segmentsRaw,
+			&item.CoverMediaID,
 			&item.CoverObjectKey,
+			&item.HeroMediaID,
 			&item.HeroObjectKey,
 			&item.CouponURL,
 			&item.SourceURL,

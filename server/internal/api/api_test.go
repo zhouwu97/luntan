@@ -269,12 +269,12 @@ func TestListCommentsReturnsStableFloors(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)\s*FROM \(.*WHERE 1 = 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{
-		"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+		"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",
 		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
 		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
-	}).AddRow("cm1", "p1", "u1", "user", "User", 1, "", "第一条", 0, 0, 0, created, created, 1, "cm1", "", "", "", "published", false, false))
+	}).AddRow("cm1", "p1", "u1", "user", "User", 1, "", "", "第一条", 0, 0, 0, created, created, 1, "cm1", "", "", "", "published", false, false))
 	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER \(PARTITION BY c\.root_id.*ORDER BY t\.root_id ASC, t\.rn ASC$`).WithArgs("cm1").WillReturnRows(sqlmock.NewRows([]string{
-		"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+		"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",
 		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
 		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
 	}))
@@ -801,17 +801,17 @@ func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 10$`).
 		WithArgs("p1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+			"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",
 			"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
 			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
 		}).
-			AddRow("cm_img", "p1", "u1", "user1", "用户1", 1, "", "", 0, 0, 0, created, created, 1, "cm_img", "", "", "", "published", false, false).
-			AddRow("cm_stk", "p1", "u2", "user2", "用户2", 1, "", "", 0, 0, 0, created.Add(time.Minute), created.Add(time.Minute), 2, "cm_stk", "", "", "mf_01", "published", false, false))
+			AddRow("cm_img", "p1", "u1", "user1", "用户1", 1, "", "", "", 0, 0, 0, created, created, 1, "cm_img", "", "", "", "published", false, false).
+			AddRow("cm_stk", "p1", "u2", "user2", "用户2", 1, "", "", "", 0, 0, 0, created.Add(time.Minute), created.Add(time.Minute), 2, "cm_stk", "", "", "mf_01", "published", false, false))
 
 	mock.ExpectQuery(`(?s)ROW_NUMBER\(\) OVER \(PARTITION BY c\.root_id.*ORDER BY t\.root_id ASC, t\.rn ASC$`).
 		WithArgs("cm_img", "cm_stk").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "post_id", "author_id", "username", "nickname", "level", "object_key", "content",
+			"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",
 			"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
 			"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
 		}))

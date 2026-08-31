@@ -83,10 +83,10 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		item.CreatedAt = createdAt.Time.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
 	}
 	if avatarObjectKey != "" {
-		item.AvatarURL = publicMediaURL(avatarObjectKey)
+		item.AvatarURL = mediaVariantURL(item.AvatarMediaID, avatarObjectKey, "thumb")
 	}
 	if backgroundObjectKey != "" {
-		item.BackgroundURL = publicMediaURL(backgroundObjectKey)
+		item.BackgroundURL = mediaVariantURL(item.BackgroundMediaID, backgroundObjectKey, "detail")
 	}
 	item.ViewerState = map[string]any{
 		"is_following": false,

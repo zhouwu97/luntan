@@ -182,10 +182,10 @@ func (s *Server) profile(w http.ResponseWriter, r *http.Request) {
 		"follower_count": followers, "following_count": following,
 	}
 	if avatarObjectKey != "" {
-		response["avatar_url"] = publicMediaURL(avatarObjectKey)
+		response["avatar_url"] = mediaVariantURL(avatarMediaID.String, avatarObjectKey, "thumb")
 	}
 	if backgroundObjectKey != "" {
-		response["background_url"] = publicMediaURL(backgroundObjectKey)
+		response["background_url"] = mediaVariantURL(backgroundMediaID.String, backgroundObjectKey, "detail")
 	}
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }

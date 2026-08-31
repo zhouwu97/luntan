@@ -116,7 +116,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 						variantsMap[mid] = make(map[string]*mediaVariantResponse)
 					}
 					variantsMap[mid][variant] = &mediaVariantResponse{
-						URL:       publicMediaURL(objKey),
+						URL:       gatewayMediaURL(mid, variant),
 						Width:     width,
 						Height:    height,
 						SizeBytes: sizeBytes,
@@ -156,6 +156,15 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 					item.Thumb = vmap["thumb"]
 					item.Detail = vmap["detail"]
 					item.Original = vmap["original"]
+					// 有受控变体时 URL 指向变体而非源图；backfill 完成后旧
+					// objectKey 源地址会被网关拒绝，这里必须同步切换。
+					if item.Detail != nil {
+						item.URL = item.Detail.URL
+					} else if item.Thumb != nil {
+						item.URL = item.Thumb.URL
+					} else if item.Original != nil {
+						item.URL = item.Original.URL
+					}
 				}
 				if item.Thumb == nil && item.URL != "" {
 					item.Thumb = &mediaVariantResponse{
@@ -237,7 +246,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		response.Author.AvatarMediaID = avatarMediaID.String
 	}
 	if objectKey.Valid && objectKey.String != "" {
-		response.Author.AvatarURL = publicMediaURL(objectKey.String)
+		response.Author.AvatarURL = mediaVariantURL(avatarMediaID.String, objectKey.String, "thumb")
 	}
 	if !includeViewer {
 		return nil
@@ -312,6 +321,23 @@ func publicMediaURL(objectKey string) string {
 	// 未配置对象存储公开域名时退回 API 自带的媒体下载兜底路由；根相对
 	// 地址由客户端按 API base 补全，浏览器同源访问时也能直接命中。
 	return "/api/v1/media-file/" + key
+}
+
+// gatewayMediaURL 受控网关形态地址；客户端不接触内部 objectKey。
+func gatewayMediaURL(mediaID, variant string) string {
+	return "/api/v1/media-file/" + mediaID + "/" + variant
+}
+
+// mediaVariantURL 优先下发 {mediaID}/{variant} 网关地址；媒体 ID 缺失时
+// 回退历史 objectKey 形态，作为 media-backfill 完成前的过渡兜底。
+func mediaVariantURL(mediaID, objectKey, variant string) string {
+	if mediaID != "" {
+		return gatewayMediaURL(mediaID, variant)
+	}
+	if objectKey == "" {
+		return ""
+	}
+	return publicMediaURL(objectKey)
 }
 
 func normalizeAbsoluteMediaURL(mediaURL *url.URL, publicBase string) string {

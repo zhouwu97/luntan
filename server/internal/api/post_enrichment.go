@@ -124,54 +124,58 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		for _, it := range items {
 			item := it.item
 			isCensored := it.moderationStatus == "censored"
-			if vmap, ok := variantsMap[item.ID]; ok {
-				if isCensored && vmap["censored_thumb"] != nil {
+			vmap := variantsMap[item.ID]
+
+			if isCensored {
+				// 严格 fail-closed：打码图片若缺少打码变体，绝对禁止回退未打码原图/普通变体
+				if vmap != nil {
 					item.Thumb = vmap["censored_thumb"]
-				} else {
-					item.Thumb = vmap["thumb"]
-				}
-
-				if isCensored && vmap["censored_detail"] != nil {
 					item.Detail = vmap["censored_detail"]
-				} else {
-					item.Detail = vmap["detail"]
-				}
-
-				if isCensored && vmap["censored_original"] != nil {
 					item.Original = vmap["censored_original"]
 				} else {
+					item.Thumb = nil
+					item.Detail = nil
+					item.Original = nil
+				}
+				if item.Detail != nil {
+					item.URL = item.Detail.URL
+				} else if item.Thumb != nil {
+					item.URL = item.Thumb.URL
+				} else if item.Original != nil {
+					item.URL = item.Original.URL
+				} else {
+					item.URL = "" // 无有效打码变体时不输出任何可能泄漏原图的 URL
+				}
+			} else {
+				if vmap != nil {
+					item.Thumb = vmap["thumb"]
+					item.Detail = vmap["detail"]
 					item.Original = vmap["original"]
 				}
-			}
-			if item.Thumb == nil && item.URL != "" {
-				item.Thumb = &mediaVariantResponse{
-					URL:      item.URL,
-					Width:    item.Width,
-					Height:   item.Height,
-					MimeType: item.MimeType,
+				if item.Thumb == nil && item.URL != "" {
+					item.Thumb = &mediaVariantResponse{
+						URL:      item.URL,
+						Width:    item.Width,
+						Height:   item.Height,
+						MimeType: item.MimeType,
+					}
 				}
-			}
-			if item.Detail == nil && item.URL != "" {
-				item.Detail = &mediaVariantResponse{
-					URL:      item.URL,
-					Width:    item.Width,
-					Height:   item.Height,
-					MimeType: item.MimeType,
+				if item.Detail == nil && item.URL != "" {
+					item.Detail = &mediaVariantResponse{
+						URL:      item.URL,
+						Width:    item.Width,
+						Height:   item.Height,
+						MimeType: item.MimeType,
+					}
 				}
-			}
-			if item.Original == nil && item.URL != "" {
-				item.Original = &mediaVariantResponse{
-					URL:      item.URL,
-					Width:    item.Width,
-					Height:   item.Height,
-					MimeType: item.MimeType,
+				if item.Original == nil && item.URL != "" {
+					item.Original = &mediaVariantResponse{
+						URL:      item.URL,
+						Width:    item.Width,
+						Height:   item.Height,
+						MimeType: item.MimeType,
+					}
 				}
-			}
-			// 若已打码，主 URL 默认指向打码缩略图/详情图，防止客户端直读原图
-			if isCensored && item.Detail != nil {
-				item.URL = item.Detail.URL
-			} else if isCensored && item.Thumb != nil {
-				item.URL = item.Thumb.URL
 			}
 			response.Media = append(response.Media, item)
 		}
@@ -181,15 +185,25 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	var hotSuppressedReason, hotSuppressedBy sql.NullString
 	var hotSuppressedAt sql.NullTime
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(hot_suppressed, false), COALESCE(hot_suppressed_reason, ''), hot_suppressed_at, COALESCE(hot_suppressed_by, '') FROM posts WHERE id = $1`, response.ID).Scan(&hotSuppressed, &hotSuppressedReason, &hotSuppressedAt, &hotSuppressedBy); err == nil {
-		response.HotSuppressed = hotSuppressed
-		if hotSuppressedReason.Valid {
-			response.HotSuppressedReason = hotSuppressedReason.String
-		}
-		if hotSuppressedAt.Valid {
-			response.HotSuppressedAt = &hotSuppressedAt.Time
-		}
-		if hotSuppressedBy.Valid {
-			response.HotSuppressedBy = hotSuppressedBy.String
+		viewer, hasViewer := s.optionalAuthenticatedUser(ctx, r)
+		isAdmin := hasViewer && capabilitiesForUser(viewer)[capModerate]
+
+		if isAdmin {
+			response.HotSuppressed = hotSuppressed
+			if hotSuppressedReason.Valid {
+				response.HotSuppressedReason = hotSuppressedReason.String
+			}
+			if hotSuppressedAt.Valid {
+				response.HotSuppressedAt = &hotSuppressedAt.Time
+			}
+			if hotSuppressedBy.Valid {
+				response.HotSuppressedBy = hotSuppressedBy.String
+			}
+		} else {
+			response.HotSuppressed = false
+			response.HotSuppressedReason = ""
+			response.HotSuppressedAt = nil
+			response.HotSuppressedBy = ""
 		}
 	}
 

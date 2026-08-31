@@ -4,7 +4,7 @@ import '../domain/models.dart';
 import '../theme/app_theme.dart';
 
 /// 管理员图片打码处理页面。
-/// 支持多区域框选、马赛克/模糊效果切换、撤销、清除打码与服务端同步保存。
+/// 仅处理图片类型媒体，支持多区域框选、马赛克/模糊效果切换、撤销、清除打码与服务端同步保存。
 class ImageModerationScreen extends StatefulWidget {
   const ImageModerationScreen({
     super.key,
@@ -24,31 +24,34 @@ class ImageModerationScreen extends StatefulWidget {
 }
 
 class _ImageModerationScreenState extends State<ImageModerationScreen> {
-  late int _selectedMediaIndex;
+  late int _selectedImageIndex;
   late List<MaskRegion> _currentRegions;
   final List<List<MaskRegion>> _undoHistory = [];
   String _currentType = 'mosaic'; // 'mosaic' or 'blur'
-  int? _selectedRegionIndex;
   Offset? _dragStart;
   Offset? _dragCurrent;
   bool _isSaving = false;
 
+  List<MediaAsset> get _images => widget.post.images;
+
   @override
   void initState() {
     super.initState();
-    _selectedMediaIndex = widget.initialMediaIndex.clamp(0, widget.post.media.isEmpty ? 0 : widget.post.media.length - 1);
+    _selectedImageIndex = widget.initialMediaIndex.clamp(
+      0,
+      _images.isEmpty ? 0 : _images.length - 1,
+    );
     _loadCurrentMediaRegions();
   }
 
   void _loadCurrentMediaRegions() {
-    if (widget.post.media.isNotEmpty) {
-      final media = widget.post.media[_selectedMediaIndex];
+    if (_images.isNotEmpty) {
+      final media = _images[_selectedImageIndex];
       _currentRegions = List<MaskRegion>.from(media.maskRegions);
     } else {
       _currentRegions = [];
     }
     _undoHistory.clear();
-    _selectedRegionIndex = null;
     _dragStart = null;
     _dragCurrent = null;
   }
@@ -61,7 +64,6 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     if (_undoHistory.isNotEmpty) {
       setState(() {
         _currentRegions = _undoHistory.removeLast();
-        _selectedRegionIndex = null;
       });
     }
   }
@@ -70,13 +72,12 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     _pushHistory();
     setState(() {
       _currentRegions.clear();
-      _selectedRegionIndex = null;
     });
   }
 
   Future<void> _saveModeration({bool resetToNormal = false}) async {
-    if (widget.post.media.isEmpty) return;
-    final media = widget.post.media[_selectedMediaIndex];
+    if (_images.isEmpty) return;
+    final media = _images[_selectedImageIndex];
 
     setState(() => _isSaving = true);
     try {
@@ -117,14 +118,20 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.post.media.isEmpty) {
+    if (_images.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: const Text('图片处理')),
-        body: const Center(child: Text('该帖子没有图片')),
+        backgroundColor: const Color(0xFF181A20),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF23262F),
+          title: const Text('图片处理', style: TextStyle(color: Colors.white)),
+        ),
+        body: const Center(
+          child: Text('该帖子没有图片可处理', style: TextStyle(color: Colors.white70)),
+        ),
       );
     }
 
-    final currentMedia = widget.post.media[_selectedMediaIndex];
+    final currentMedia = _images[_selectedImageIndex];
     final imageUrl = currentMedia.originalUrl ?? currentMedia.detailUrl ?? currentMedia.url ?? '';
 
     return Scaffold(
@@ -133,7 +140,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         backgroundColor: const Color(0xFF23262F),
         elevation: 0,
         title: Text(
-          '图片处理 (${_selectedMediaIndex + 1}/${widget.post.media.length})',
+          '图片处理 (${_selectedImageIndex + 1}/${_images.length})',
           style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
         ),
         actions: [
@@ -162,23 +169,22 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       ),
       body: Column(
         children: [
-          // 顶部图片选择栏（如果多张图）
-          if (widget.post.media.length > 1)
+          if (_images.length > 1)
             Container(
               height: 72,
               color: const Color(0xFF23262F),
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                itemCount: widget.post.media.length,
+                itemCount: _images.length,
                 itemBuilder: (context, index) {
-                  final m = widget.post.media[index];
-                  final isSelected = index == _selectedMediaIndex;
+                  final m = _images[index];
+                  final isSelected = index == _selectedImageIndex;
                   return GestureDetector(
                     onTap: () {
-                      if (index != _selectedMediaIndex) {
+                      if (index != _selectedImageIndex) {
                         setState(() {
-                          _selectedMediaIndex = index;
+                          _selectedImageIndex = index;
                           _loadCurrentMediaRegions();
                         });
                       }
@@ -197,7 +203,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                       child: Image.network(
                         m.thumbUrl ?? m.url ?? '',
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        errorBuilder: (_, _, _) => Container(
                           color: Colors.grey[800],
                           child: const Icon(Icons.image, color: Colors.white54),
                         ),
@@ -207,8 +213,6 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                 },
               ),
             ),
-
-          // 打码画布区域
           Expanded(
             child: Center(
               child: LayoutBuilder(
@@ -219,87 +223,83 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
                   return AspectRatio(
                     aspectRatio: aspect,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // 底层图片
-                        Image.network(
-                          imageUrl,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: Colors.black26,
-                            child: const Center(
-                              child: Text('图片加载中或无法访问', style: TextStyle(color: Colors.white70)),
+                    child: LayoutBuilder(
+                      builder: (canvasCtx, canvasConstraints) {
+                        final canvasW = canvasConstraints.maxWidth;
+                        final canvasH = canvasConstraints.maxHeight;
+
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.network(
+                              imageUrl,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, _, _) => Container(
+                                color: Colors.black26,
+                                child: const Center(
+                                  child: Text('图片加载中或无法访问', style: TextStyle(color: Colors.white70)),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (details) {
+                                setState(() {
+                                  _dragStart = details.localPosition;
+                                  _dragCurrent = details.localPosition;
+                                });
+                              },
+                              onPanUpdate: (details) {
+                                setState(() {
+                                  _dragCurrent = details.localPosition;
+                                });
+                              },
+                              onPanEnd: (details) {
+                                if (_dragStart != null && _dragCurrent != null && canvasW > 0 && canvasH > 0) {
+                                  final left = (_dragStart!.dx < _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx).clamp(0.0, canvasW);
+                                  final top = (_dragStart!.dy < _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy).clamp(0.0, canvasH);
+                                  final right = (_dragStart!.dx > _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx).clamp(0.0, canvasW);
+                                  final bottom = (_dragStart!.dy > _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy).clamp(0.0, canvasH);
 
-                        // 手势框选层
-                        GestureDetector(
-                          onPanStart: (details) {
-                            setState(() {
-                              _dragStart = details.localPosition;
-                              _dragCurrent = details.localPosition;
-                              _selectedRegionIndex = null;
-                            });
-                          },
-                          onPanUpdate: (details) {
-                            setState(() {
-                              _dragCurrent = details.localPosition;
-                            });
-                          },
-                          onPanEnd: (details) {
-                            if (_dragStart != null && _dragCurrent != null) {
-                              final renderBox = context.findRenderObject() as RenderBox?;
-                              if (renderBox != null) {
-                                final size = renderBox.size;
-                                final left = (_dragStart!.dx < _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx).clamp(0.0, size.width);
-                                final top = (_dragStart!.dy < _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy).clamp(0.0, size.height);
-                                final right = (_dragStart!.dx > _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx).clamp(0.0, size.width);
-                                final bottom = (_dragStart!.dy > _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy).clamp(0.0, size.height);
+                                  final boxW = right - left;
+                                  final boxH = bottom - top;
 
-                                final boxW = right - left;
-                                final boxH = bottom - top;
-
-                                // 最小阈值过滤误触
-                                if (boxW > 10 && boxH > 10 && size.width > 0 && size.height > 0) {
-                                  _pushHistory();
-                                  _currentRegions.add(
-                                    MaskRegion(
-                                      x: (left / size.width).clamp(0.0, 1.0),
-                                      y: (top / size.height).clamp(0.0, 1.0),
-                                      width: (boxW / size.width).clamp(0.0, 1.0),
-                                      height: (boxH / size.height).clamp(0.0, 1.0),
-                                      type: _currentType,
-                                    ),
-                                  );
+                                  if (boxW > 8 && boxH > 8) {
+                                    _pushHistory();
+                                    _currentRegions.add(
+                                      MaskRegion(
+                                        x: (left / canvasW).clamp(0.0, 1.0),
+                                        y: (top / canvasH).clamp(0.0, 1.0),
+                                        width: (boxW / canvasW).clamp(0.0, 1.0),
+                                        height: (boxH / canvasH).clamp(0.0, 1.0),
+                                        type: _currentType,
+                                      ),
+                                    );
+                                  }
                                 }
-                              }
-                            }
-                            setState(() {
-                              _dragStart = null;
-                              _dragCurrent = null;
-                            });
-                          },
-                          child: CustomPaint(
-                            painter: _MaskCanvasPainter(
-                              regions: _currentRegions,
-                              dragStart: _dragStart,
-                              dragCurrent: _dragCurrent,
-                              currentType: _currentType,
-                              selectedIndex: _selectedRegionIndex,
+                                setState(() {
+                                  _dragStart = null;
+                                  _dragCurrent = null;
+                                });
+                              },
+                              child: CustomPaint(
+                                painter: _MaskCanvasPainter(
+                                  regions: _currentRegions,
+                                  dragStart: _dragStart,
+                                  dragCurrent: _dragCurrent,
+                                  currentType: _currentType,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      ],
+                          ],
+                        );
+                      },
                     ),
                   );
                 },
               ),
             ),
           ),
-
-          // 底部控制面板
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: const BoxDecoration(
@@ -351,14 +351,12 @@ class _MaskCanvasPainter extends CustomPainter {
     this.dragStart,
     this.dragCurrent,
     required this.currentType,
-    this.selectedIndex,
   });
 
   final List<MaskRegion> regions;
   final Offset? dragStart;
   final Offset? dragCurrent;
   final String currentType;
-  final int? selectedIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -380,7 +378,6 @@ class _MaskCanvasPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
-    // 绘制已保存/已添加的区域
     for (int i = 0; i < regions.length; i++) {
       final r = regions[i];
       final rect = Rect.fromLTWH(
@@ -390,10 +387,8 @@ class _MaskCanvasPainter extends CustomPainter {
         r.height * size.height,
       );
 
-      // 遮罩底色
       canvas.drawRect(rect, r.type == 'blur' ? blurPaint : mosaicPaint);
 
-      // 绘制马赛克方格示意网格
       if (r.type == 'mosaic') {
         const double step = 12.0;
         for (double x = rect.left; x < rect.right; x += step) {
@@ -404,39 +399,24 @@ class _MaskCanvasPainter extends CustomPainter {
         }
       }
 
-      // 边框
       canvas.drawRect(rect, borderPaint);
-
-      // 标签文字
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: r.type == 'blur' ? '模糊 #${i + 1}' : '马赛克 #${i + 1}',
-          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      textPainter.paint(canvas, Offset(rect.left + 4, rect.top + 4));
     }
 
-    // 绘制当前拖拽中的新选框
     if (dragStart != null && dragCurrent != null) {
       final left = (dragStart!.dx < dragCurrent!.dx ? dragStart!.dx : dragCurrent!.dx).clamp(0.0, size.width);
       final top = (dragStart!.dy < dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy).clamp(0.0, size.height);
       final right = (dragStart!.dx > dragCurrent!.dx ? dragStart!.dx : dragCurrent!.dx).clamp(0.0, size.width);
       final bottom = (dragStart!.dy > dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy).clamp(0.0, size.height);
-      final dragRect = Rect.fromLTRB(left, top, right, bottom);
 
-      final dragFill = Paint()
-        ..color = currentType == 'blur' ? const Color(0x77FFFFFF) : const Color(0x77000000)
-        ..style = PaintingStyle.fill;
+      final rect = Rect.fromLTRB(left, top, right, bottom);
+      canvas.drawRect(rect, currentType == 'blur' ? blurPaint : mosaicPaint);
 
-      final dragBorder = Paint()
-        ..color = Colors.amberAccent
+      final activeBorderPaint = Paint()
+        ..color = Colors.yellowAccent
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0;
 
-      canvas.drawRect(dragRect, dragFill);
-      canvas.drawRect(dragRect, dragBorder);
+      canvas.drawRect(rect, activeBorderPaint);
     }
   }
 

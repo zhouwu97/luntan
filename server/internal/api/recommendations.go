@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -324,9 +325,16 @@ func (s *Server) setPostHotSuppression(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
 	if input.Suppressed {
-		now := time.Now().UTC()
-		_, err := s.db.ExecContext(r.Context(), `
+		_, err := tx.ExecContext(r.Context(), `
 			UPDATE posts
 			SET hot_suppressed = true,
 			    hot_suppressed_by = $1,
@@ -339,7 +347,7 @@ func (s *Server) setPostHotSuppression(w http.ResponseWriter, r *http.Request, p
 			return
 		}
 	} else {
-		_, err := s.db.ExecContext(r.Context(), `
+		_, err := tx.ExecContext(r.Context(), `
 			UPDATE posts
 			SET hot_suppressed = false,
 			    hot_suppressed_by = NULL,
@@ -353,10 +361,18 @@ func (s *Server) setPostHotSuppression(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 
-	_ = appendAdminLog(r.Context(), s.db, user.ID, "post.hot_suppression", "post", postID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+	if err := appendAdminLogTx(r.Context(), tx, user.ID, "post.hot_suppression", "post", postID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
 		"suppressed": input.Suppressed,
 		"reason":     input.Reason,
-	}, time.Now().UTC())
+	}, now); err != nil {
+		writeInternalError(w, r, fmt.Errorf("failed to append admin log: %w", err))
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"success":        true,

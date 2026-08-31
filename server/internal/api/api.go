@@ -223,6 +223,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/moderation")
 		s.moderateMedia(w, r, mediaID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/media/") && strings.HasSuffix(path, "/source"):
+		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/source")
+		s.getAdminMediaSource(w, r, mediaID)
+		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admin/recommendations/"):
 		postID := strings.TrimPrefix(path, "/api/v1/admin/recommendations/")
 		s.setHomeRecommendation(w, r, postID)

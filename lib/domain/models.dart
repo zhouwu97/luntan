@@ -478,7 +478,8 @@ class Post {
   int get level =>
       author?.level ??
       (authorId.startsWith('guest') || authorId.isEmpty ? 0 : 1);
-  List<MediaAsset> get images => media;
+  List<MediaAsset> get images =>
+      media.where((e) => e.type == MediaType.image).toList();
   String get tag => tags.isEmpty ? community?.name ?? '' : tags.first;
   String get time => relativeTimeLabel(createdAt);
   String get views => compactCountLabel(viewCount);

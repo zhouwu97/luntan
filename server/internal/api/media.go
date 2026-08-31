@@ -3,10 +3,12 @@ package api
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -367,6 +369,29 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 		writeAuthError(w, r, ErrStorageUnavailable)
 		return
 	}
+
+	// 安全保护：若请求的对象键属于已被打码的媒体资产之原图/未打码变体，禁止公开访问，只允许管理员查看
+	if s.db != nil {
+		var isCensoredRaw bool
+		_ = s.db.QueryRowContext(r.Context(), `
+			SELECT EXISTS (
+				SELECT 1 FROM media_assets
+				WHERE object_key = $1 AND moderation_status = 'censored' AND deleted_at IS NULL
+			) OR EXISTS (
+				SELECT 1 FROM media_variants mv
+				JOIN media_assets ma ON ma.id = mv.media_id
+				WHERE mv.object_key = $1 AND ma.moderation_status = 'censored' AND mv.variant NOT LIKE 'censored_%'
+			)`, objectKey).Scan(&isCensoredRaw)
+
+		if isCensoredRaw {
+			viewer, ok := s.optionalAuthenticatedUser(r.Context(), r)
+			if !ok || (!s.hasGlobalPermission(r, viewer.ID, "moderation.action") && !capabilitiesForUser(viewer)[capModerate]) {
+				writeAuthError(w, r, ErrPermissionDenied)
+				return
+			}
+		}
+	}
+
 	rc, size, contentType, err := backend.Get(r.Context(), objectKey)
 	if err != nil {
 		switch {
@@ -383,6 +408,59 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, objectKe
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
+	}
+	if rs, ok := rc.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = io.Copy(w, rc)
+}
+
+func (s *Server) getAdminMediaSource(w http.ResponseWriter, r *http.Request, mediaID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.hasGlobalPermission(r, user.ID, "moderation.action") && !capabilitiesForUser(user)[capModerate] {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+
+	var objectKey, mimeType string
+	err := s.db.QueryRowContext(r.Context(), `SELECT object_key, mime_type FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mediaID).Scan(&objectKey, &mimeType)
+	if errors.Is(err, sql.ErrNoRows) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "MEDIA_NOT_FOUND", Message: "媒体不存在或已删除"})
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	backend := s.mediaStorage
+	if backend == nil {
+		writeAuthError(w, r, ErrStorageUnavailable)
+		return
+	}
+	rc, size, contentType, err := backend.Get(r.Context(), objectKey)
+	if err != nil {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	} else if mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
 	}
 	if rs, ok := rc.(io.ReadSeeker); ok {
 		http.ServeContent(w, r, "", time.Time{}, rs)
@@ -439,54 +517,100 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		return
 	}
 
+	// 只有图片类型支持打码处理，视频类型拒绝
+	if !strings.HasPrefix(mimeType, "image/") {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusBadRequest,
+			Code:    "MEDIA_NOT_IMAGE",
+			Message: "只有图片支持打码处理",
+		})
+		return
+	}
+
 	now := time.Now().UTC()
 	regionsJSON, _ := json.Marshal(input.MaskRegions)
 
 	if input.ModerationStatus == "censored" && len(input.MaskRegions) > 0 {
-		// 生成 censored 衍生图变体
-		if s.mediaStorage != nil {
-			rc, _, _, err := s.mediaStorage.Get(r.Context(), objectKey)
-			if err == nil && rc != nil {
-				data, readErr := io.ReadAll(rc)
-				_ = rc.Close()
-				if readErr == nil && len(data) > 0 {
-					procRes, procErr := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
-					if procErr == nil && procRes != nil {
-						origKey := objectKey + "_censored_original.jpg"
-						detailKey := objectKey + "_censored_detail.jpg"
-						thumbKey := objectKey + "_censored_thumb.jpg"
-						_ = s.mediaStorage.Put(r.Context(), origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes)
-						_ = s.mediaStorage.Put(r.Context(), detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes)
-						_ = s.mediaStorage.Put(r.Context(), thumbKey, procRes.Thumb.MimeType, bytes.NewReader(procRes.Thumb.Data), procRes.Thumb.SizeBytes)
+		if s.mediaStorage == nil {
+			writeInternalError(w, r, errors.New("media storage unavailable"))
+			return
+		}
 
-						// 写入/更新 media_variants
-						for _, v := range []struct {
-							variant string
-							key     string
-							p       media.ProcessedVariant
-						}{
-							{"censored_original", origKey, procRes.Original},
-							{"censored_detail", detailKey, procRes.Detail},
-							{"censored_thumb", thumbKey, procRes.Thumb},
-						} {
-							_, _ = s.db.ExecContext(r.Context(), `
-								INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
-								VALUES ($1, $2, $3, 'image/jpeg', $4, $5, $6, $7, 'ready', $8, $8)
-								ON CONFLICT (media_id, variant) DO UPDATE SET
-									object_key = EXCLUDED.object_key,
-									width = EXCLUDED.width,
-									height = EXCLUDED.height,
-									size_bytes = EXCLUDED.size_bytes,
-									sha256 = EXCLUDED.sha256,
-									status = 'ready',
-									updated_at = EXCLUDED.updated_at`,
-								mediaID, v.variant, v.key, v.p.Width, v.p.Height, v.p.SizeBytes, v.p.SHA256, now)
-						}
-					}
-				}
+		rc, _, _, err := s.mediaStorage.Get(r.Context(), objectKey)
+		if err != nil || rc == nil {
+			writeInternalError(w, r, fmt.Errorf("failed to retrieve source image: %w", err))
+			return
+		}
+		data, readErr := io.ReadAll(rc)
+		_ = rc.Close()
+		if readErr != nil || len(data) == 0 {
+			writeInternalError(w, r, fmt.Errorf("failed to read source image: %w", readErr))
+			return
+		}
+
+		procRes, procErr := media.ProcessCensoredImage(bytes.NewReader(data), input.MaskRegions)
+		if procErr != nil || procRes == nil {
+			writeInternalError(w, r, fmt.Errorf("failed to generate censored variants: %w", procErr))
+			return
+		}
+
+		// 基于遮罩区域内容 Hash 生成内容寻址 URL，彻底避免覆盖具有 1 年 immutable 缓存的旧打码图
+		maskSum := sha256.Sum256(regionsJSON)
+		maskHash := hex.EncodeToString(maskSum[:])[:8]
+		origKey := fmt.Sprintf("%s_censored_%s_original.jpg", objectKey, maskHash)
+		detailKey := fmt.Sprintf("%s_censored_%s_detail.jpg", objectKey, maskHash)
+		thumbKey := fmt.Sprintf("%s_censored_%s_thumb.jpg", objectKey, maskHash)
+
+		// 严格校验每一个变体的上传结果（Fail Closed）
+		if err := s.mediaStorage.Put(r.Context(), origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to store censored_original: %w", err))
+			return
+		}
+		if err := s.mediaStorage.Put(r.Context(), detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to store censored_detail: %w", err))
+			return
+		}
+		if err := s.mediaStorage.Put(r.Context(), thumbKey, procRes.Thumb.MimeType, bytes.NewReader(procRes.Thumb.Data), procRes.Thumb.SizeBytes); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to store censored_thumb: %w", err))
+			return
+		}
+
+		// 数据库更新与审计日志全部包裹在同一个事务内
+		tx, err := s.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		defer tx.Rollback()
+
+		for _, v := range []struct {
+			variant string
+			key     string
+			p       media.ProcessedVariant
+		}{
+			{"censored_original", origKey, procRes.Original},
+			{"censored_detail", detailKey, procRes.Detail},
+			{"censored_thumb", thumbKey, procRes.Thumb},
+		} {
+			_, err = tx.ExecContext(r.Context(), `
+				INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
+				VALUES ($1, $2, $3, 'image/jpeg', $4, $5, $6, $7, 'ready', $8, $8)
+				ON CONFLICT (media_id, variant) DO UPDATE SET
+					object_key = EXCLUDED.object_key,
+					width = EXCLUDED.width,
+					height = EXCLUDED.height,
+					size_bytes = EXCLUDED.size_bytes,
+					sha256 = EXCLUDED.sha256,
+					status = 'ready',
+					updated_at = EXCLUDED.updated_at`,
+				mediaID, v.variant, v.key, v.p.Width, v.p.Height, v.p.SizeBytes, v.p.SHA256, now)
+			if err != nil {
+				writeInternalError(w, r, fmt.Errorf("failed to write media_variant %s: %w", v.variant, err))
+				return
 			}
 		}
-		_, err = s.db.ExecContext(r.Context(), `
+
+		_, err = tx.ExecContext(r.Context(), `
 			UPDATE media_assets
 			SET moderation_status = 'censored',
 			    mask_regions = $1::jsonb,
@@ -499,9 +623,30 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			writeInternalError(w, r, err)
 			return
 		}
+
+		if err := appendAdminLogTx(r.Context(), tx, user.ID, "media.moderation", "media", mediaID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+			"status":  "censored",
+			"regions": input.MaskRegions,
+			"reason":  input.Reason,
+		}, now); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to append admin log: %w", err))
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	} else {
-		// 恢复正常
-		_, err = s.db.ExecContext(r.Context(), `
+		// 恢复正常展示
+		tx, err := s.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		defer tx.Rollback()
+
+		_, err = tx.ExecContext(r.Context(), `
 			UPDATE media_assets
 			SET moderation_status = 'normal',
 			    mask_regions = '[]'::jsonb,
@@ -514,13 +659,21 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			writeInternalError(w, r, err)
 			return
 		}
-	}
 
-	_ = appendAdminLog(r.Context(), s.db, user.ID, "media.moderation", "media", mediaID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
-		"status":  input.ModerationStatus,
-		"regions": input.MaskRegions,
-		"reason":  input.Reason,
-	}, now)
+		if err := appendAdminLogTx(r.Context(), tx, user.ID, "media.moderation", "media", mediaID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+			"status":  "normal",
+			"regions": []any{},
+			"reason":  input.Reason,
+		}, now); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to append admin log: %w", err))
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"success":           true,

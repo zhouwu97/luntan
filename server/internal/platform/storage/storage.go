@@ -43,7 +43,7 @@ type MediaAsset struct {
 }
 
 type ObjectStorage interface {
-	SignUpload(ctx context.Context, assetID, objectKey, mimeType string, expiresAt time.Time) (string, error)
+	SignUpload(ctx context.Context, assetID, objectKey, mimeType string, size int64, sha256 string, expiresAt time.Time) (string, error)
 	VerifyUploaded(ctx context.Context, asset *MediaAsset) error
 	Get(ctx context.Context, objectKey string) (io.ReadCloser, int64, string, error)
 	Put(ctx context.Context, objectKey string, mimeType string, reader io.Reader, size int64) error
@@ -67,8 +67,8 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
-func (m *MemoryStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, expiresAt time.Time) (string, error) {
-	return fmt.Sprintf("memory://upload/%s?asset_id=%s&mime_type=%s&expires=%d", objectKey, assetID, mimeType, expiresAt.Unix()), nil
+func (m *MemoryStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, size int64, sha256 string, expiresAt time.Time) (string, error) {
+	return fmt.Sprintf("memory://upload/%s?asset_id=%s&mime_type=%s&size=%d&sha256=%s&expires=%d", objectKey, assetID, mimeType, size, sha256, expiresAt.Unix()), nil
 }
 
 func (m *MemoryStorage) VerifyUploaded(_ context.Context, asset *MediaAsset) error {
@@ -205,7 +205,7 @@ func normalizeHTTPObjectKey(objectKey string) string {
 
 type UnavailableMediaStorage struct{}
 
-func (UnavailableMediaStorage) SignUpload(context.Context, string, string, string, time.Time) (string, error) {
+func (UnavailableMediaStorage) SignUpload(context.Context, string, string, string, int64, string, time.Time) (string, error) {
 	return "", ErrStorageUnavailable
 }
 
@@ -233,13 +233,13 @@ func (UnavailableMediaStorage) HealthCheck(context.Context) error {
 	return ErrStorageUnavailable
 }
 
-func (s *HTTPMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, expiresAt time.Time) (string, error) {
+func (s *HTTPMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, size int64, checksum string, expiresAt time.Time) (string, error) {
 	if s.uploadBaseURL == "" || len(s.secret) == 0 {
 		return "", ErrStorageUnavailable
 	}
 	objectKey = normalizeHTTPObjectKey(objectKey)
 	expires := strconv.FormatInt(expiresAt.Unix(), 10)
-	message := assetID + "|" + objectKey + "|" + expires
+	message := uploadSignatureMessage(assetID, objectKey, mimeType, size, checksum, expires)
 	hash := hmac.New(sha256.New, s.secret)
 	_, _ = hash.Write([]byte(message))
 	signature := hex.EncodeToString(hash.Sum(nil))
@@ -247,6 +247,8 @@ func (s *HTTPMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mim
 		"asset_id":   {assetID},
 		"object_key": {objectKey},
 		"mime_type":  {mimeType},
+		"size":       {strconv.FormatInt(size, 10)},
+		"sha256":     {checksum},
 		"expires":    {expires},
 		"signature":  {signature},
 	}.Encode(), nil
@@ -264,6 +266,8 @@ func (s *HTTPMediaStorage) VerifyUploaded(ctx context.Context, asset *MediaAsset
 		asset.ID,
 		asset.ObjectKey,
 		asset.MimeType,
+		asset.Size,
+		asset.SHA256,
 		time.Now().UTC().Add(5*time.Minute),
 	)
 	if err != nil {
@@ -340,7 +344,7 @@ func (s *HTTPMediaStorage) Get(ctx context.Context, objectKey string) (io.ReadCl
 	if s.internalBaseURL != "" {
 		getURL = s.internalBaseURL + "/" + strings.TrimLeft(objectKey, "/")
 	} else {
-		signed, err := s.SignUpload(ctx, "internal_get", objectKey, "application/octet-stream", time.Now().UTC().Add(10*time.Minute))
+		signed, err := s.SignUpload(ctx, "internal_get", objectKey, "application/octet-stream", 0, "", time.Now().UTC().Add(10*time.Minute))
 		if err != nil {
 			return nil, 0, "", err
 		}
@@ -372,7 +376,7 @@ func (s *HTTPMediaStorage) Put(ctx context.Context, objectKey string, mimeType s
 	if s.internalBaseURL != "" {
 		putURL = s.internalBaseURL + "/" + strings.TrimLeft(objectKey, "/")
 	} else {
-		signed, err := s.SignUpload(ctx, "internal_put", objectKey, mimeType, time.Now().UTC().Add(10*time.Minute))
+		signed, err := s.SignUpload(ctx, "internal_put", objectKey, mimeType, size, "", time.Now().UTC().Add(10*time.Minute))
 		if err != nil {
 			return err
 		}
@@ -453,7 +457,7 @@ func (s *HTTPMediaStorage) HealthCheck(ctx context.Context) error {
 		if len(s.secret) == 0 {
 			return ErrStorageUnavailable
 		}
-		signed, err := s.SignUpload(ctx, "readiness", probeKey, "application/octet-stream", time.Now().UTC().Add(time.Minute))
+		signed, err := s.SignUpload(ctx, "readiness", probeKey, "application/octet-stream", 0, "", time.Now().UTC().Add(time.Minute))
 		if err != nil {
 			return err
 		}
@@ -496,7 +500,7 @@ func NewLocalMediaStorage(rootDir, secret string) *LocalMediaStorage {
 	}
 }
 
-func (s *LocalMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, expiresAt time.Time) (string, error) {
+func (s *LocalMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mimeType string, size int64, checksum string, expiresAt time.Time) (string, error) {
 	if s == nil || strings.TrimSpace(s.root) == "" || len(s.secret) == 0 {
 		return "", ErrStorageUnavailable
 	}
@@ -508,14 +512,16 @@ func (s *LocalMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mi
 		"asset_id":   {assetID},
 		"object_key": {objectKey},
 		"mime_type":  {mimeType},
+		"size":       {strconv.FormatInt(size, 10)},
+		"sha256":     {checksum},
 		"expires":    {expires},
-		"signature":  {s.uploadSignature(assetID, objectKey, expires)},
+		"signature":  {s.uploadSignature(assetID, objectKey, mimeType, size, checksum, expires)},
 	}.Encode(), nil
 }
 
 // ServeSignedUpload 校验上传凭证后将请求体原子写入本地媒体目录。
-// 该接口不依赖登录态，安全性来自短时效 HMAC 签名；签名不包含文件内容，
-// 完整性和 MIME/尺寸校验继续由 completeMedia 的 VerifyUploaded 执行。
+// 该接口不依赖登录态，安全性来自短时效 HMAC 签名。签名绑定 MIME、大小和
+// SHA-256，存储层因此不会接受超出 API 发放额度的任意请求体。
 func (s *LocalMediaStorage) ServeSignedUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		w.Header().Set("Allow", http.MethodPut)
@@ -530,9 +536,11 @@ func (s *LocalMediaStorage) ServeSignedUpload(w http.ResponseWriter, r *http.Req
 	assetID := strings.TrimSpace(query.Get("asset_id"))
 	objectKey := query.Get("object_key")
 	mimeType := strings.TrimSpace(query.Get("mime_type"))
+	sizeText := strings.TrimSpace(query.Get("size"))
+	checksum := strings.ToLower(strings.TrimSpace(query.Get("sha256")))
 	expiresText := strings.TrimSpace(query.Get("expires"))
 	signature := strings.TrimSpace(query.Get("signature"))
-	if assetID == "" || mimeType == "" || expiresText == "" || signature == "" {
+	if assetID == "" || mimeType == "" || sizeText == "" || len(checksum) != 64 || !isHex(checksum) || expiresText == "" || signature == "" {
 		http.Error(w, "invalid upload signature", http.StatusForbidden)
 		return
 	}
@@ -541,7 +549,12 @@ func (s *LocalMediaStorage) ServeSignedUpload(w http.ResponseWriter, r *http.Req
 		http.Error(w, "upload signature expired", http.StatusForbidden)
 		return
 	}
-	expected := s.uploadSignature(assetID, objectKey, expiresText)
+	expectedSize, err := strconv.ParseInt(sizeText, 10, 64)
+	if err != nil || expectedSize < 0 || expectedSize > maxLocalUploadBytes {
+		http.Error(w, "invalid upload signature", http.StatusForbidden)
+		return
+	}
+	expected := s.uploadSignature(assetID, objectKey, mimeType, expectedSize, checksum, expiresText)
 	if len(signature) != len(expected) || subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) != 1 {
 		http.Error(w, "invalid upload signature", http.StatusForbidden)
 		return
@@ -557,8 +570,12 @@ func (s *LocalMediaStorage) ServeSignedUpload(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	if r.ContentLength > maxLocalUploadBytes {
-		http.Error(w, "uploaded media is too large", http.StatusRequestEntityTooLarge)
+	if r.ContentLength < 0 {
+		http.Error(w, "content length is required", http.StatusLengthRequired)
+		return
+	}
+	if r.ContentLength != expectedSize {
+		http.Error(w, "content length does not match upload signature", http.StatusBadRequest)
 		return
 	}
 	if err := s.writeObject(objectKey, r.Body, r.ContentLength); err != nil {
@@ -693,9 +710,13 @@ func (s *LocalMediaStorage) HealthCheck(_ context.Context) error {
 	return nil
 }
 
-func (s *LocalMediaStorage) uploadSignature(assetID, objectKey, expires string) string {
+func uploadSignatureMessage(assetID, objectKey, mimeType string, size int64, checksum, expires string) string {
+	return assetID + "|" + objectKey + "|" + mimeType + "|" + strconv.FormatInt(size, 10) + "|" + strings.ToLower(checksum) + "|" + expires
+}
+
+func (s *LocalMediaStorage) uploadSignature(assetID, objectKey, mimeType string, size int64, checksum, expires string) string {
 	hash := hmac.New(sha256.New, s.secret)
-	_, _ = hash.Write([]byte(assetID + "|" + objectKey + "|" + expires))
+	_, _ = hash.Write([]byte(uploadSignatureMessage(assetID, objectKey, mimeType, size, checksum, expires)))
 	return hex.EncodeToString(hash.Sum(nil))
 }
 

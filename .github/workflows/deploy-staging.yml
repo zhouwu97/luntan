@@ -25,6 +25,15 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - run: >-
+          flutter build web --release --base-href=/forum/
+          --dart-define=APP_ENV=production
+          --dart-define=API_BASE_URL=https://shengbeijiang.com
+          --dart-define=WEB_BASE_URL=https://shengbeijiang.com
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-release-${{ github.sha }}
+          path: build/web
       - run: docker build --tag ghcr.io/${{ github.repository }}/luntan-api:${{ github.sha }} server
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin

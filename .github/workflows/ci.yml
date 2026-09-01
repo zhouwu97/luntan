@@ -40,7 +40,7 @@ jobs:
       # Release 构建必须按生产规则注入配置：客户端在 release 且未显式声明
       # APP_ENV 时按 production 校验，缺少 API_BASE_URL 会直接进入启动错误页。
       - run: >-
-          flutter build web --release
+          flutter build web --release --base-href=/forum/
           --dart-define=APP_ENV=production
           --dart-define=API_BASE_URL=https://shengbeijiang.com
           --dart-define=WEB_BASE_URL=https://shengbeijiang.com

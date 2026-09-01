@@ -138,18 +138,11 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         _sourceBytes = null;
       } else {
         // 编辑遮罩使用归一化坐标，不需要解码原始大图。
-        // 优先使用 detail variant，如果不存在则直接获取原始编码字节进行有界解码。
+        // 使用媒体网关 detail variant 获取编码字节进行有界解码。
         // 绝不使用 NetworkImage 进行解码，避免大图 OOM。
-        final detailUrl = media.detail?.url;
-        final url = detailUrl ?? media.url ?? '';
-        if (url.isEmpty) {
-          if (mounted) setState(() => _sourceLoadError = '图片地址为空');
-          return;
-        }
-
         final bytes = widget.platformRepository != null
-            ? await widget.platformRepository!.getMediaPreviewBytes(url)
-            : await _fetchRawImageBytes(url);
+            ? await widget.platformRepository!.getMediaPreviewBytesById(mediaId)
+            : await _fetchRawImageBytes(media.detail?.url ?? media.url ?? '');
         if (!mounted || _images[_selectedImageIndex].id != mediaId) return;
         decoded = await _decodePreviewImage(Uint8List.fromList(bytes));
       }

@@ -112,9 +112,9 @@ func TestModerateMediaRejectsVideo(t *testing.T) {
 		WithArgs("admin_1", "moderation.action").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
-	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
+	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status, moderation_revision FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs("media_video_1").
-		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status"}).AddRow("media/u1/video.mp4", "video/mp4", "ready"))
+		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status", "moderation_revision"}).AddRow("media/u1/video.mp4", "video/mp4", "ready", 0))
 
 	payload := `{"moderation_status":"censored","mask_regions":[{"x":0.2,"y":0.3,"width":0.4,"height":0.3,"type":"mosaic"}],"reason":"视频打码测试"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/media/media_video_1/moderation", bytes.NewReader([]byte(payload)))
@@ -148,16 +148,16 @@ func TestModerateMediaNormalReset(t *testing.T) {
 		WithArgs("admin_1", "super_admin").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
-	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
+	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status, moderation_revision FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs("media_101").
-		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status"}).AddRow("media/u1/media_101", "image/jpeg", "ready"))
+		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status", "moderation_revision"}).AddRow("media/u1/media_101", "image/jpeg", "ready", 0))
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)INSERT INTO media_moderation_versions.*ON CONFLICT \(media_id, version_no\) DO NOTHING`).
 		WithArgs(sqlmock.AnyArg(), "media_101").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`(?s)UPDATE media_assets.*SET moderation_status = 'normal'.*WHERE id = \$4`).
-		WithArgs("admin_1", sqlmock.AnyArg(), "恢复原图展示", "media_101").
+		WithArgs("admin_1", sqlmock.AnyArg(), "恢复原图展示", "media_101", int64(0)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(`(?s)SELECT COALESCE\(MAX\(version_no\), 0\) \+ 1.*FROM media_moderation_versions.*WHERE media_id = \$1`).
 		WithArgs("media_101").

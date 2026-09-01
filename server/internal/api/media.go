@@ -110,7 +110,7 @@ func (s *Server) createMediaUploadToken(w http.ResponseWriter, r *http.Request) 
 	if storageBackend == nil {
 		storageBackend = unavailableMediaStorage{}
 	}
-	uploadURL, err := storageBackend.SignUpload(r.Context(), mediaID, objectKey, input.MimeType, expiresAt)
+	uploadURL, err := storageBackend.SignUpload(r.Context(), mediaID, objectKey, input.MimeType, input.Size, strings.ToLower(input.SHA256), expiresAt)
 	if err != nil {
 		writeAuthError(w, r, err)
 		return
@@ -953,7 +953,8 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 
 	var objectKey, mimeType string
 	var status string
-	err := s.db.QueryRowContext(r.Context(), `SELECT object_key, mime_type, status FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mediaID).Scan(&objectKey, &mimeType, &status)
+	var moderationRevision int64
+	err := s.db.QueryRowContext(r.Context(), `SELECT object_key, mime_type, status, moderation_revision FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mediaID).Scan(&objectKey, &mimeType, &status, &moderationRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "MEDIA_NOT_FOUND", Message: "媒体不存在或已删除"})
 		return
@@ -1144,17 +1145,22 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			}
 		}
 
-		_, err = tx.ExecContext(r.Context(), `
+		result, err := tx.ExecContext(r.Context(), `
 			UPDATE media_assets
 			SET moderation_status = 'censored',
 			    mask_regions = $1::jsonb,
 			    moderated_by = $2,
 			    moderated_at = $3,
 			    moderation_reason = $4,
+			    moderation_revision = moderation_revision + 1,
 			    updated_at = $3
-			WHERE id = $5`, string(regionsJSON), user.ID, now, input.Reason, mediaID)
+			WHERE id = $5 AND moderation_revision = $6`, string(regionsJSON), user.ID, now, input.Reason, mediaID, moderationRevision)
 		if err != nil {
 			writeInternalError(w, r, err)
+			return
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusConflict, Code: "STALE_MEDIA_MODERATION", Message: "媒体审核状态已被其他操作更新，请刷新后重试"})
 			return
 		}
 		if _, err := appendMediaModerationVersionTx(r.Context(), tx, mediaID, "censored", regionsJSON, mediaModerationVersionKeys{
@@ -1193,17 +1199,22 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			return
 		}
 
-		_, err = tx.ExecContext(r.Context(), `
+		result, err := tx.ExecContext(r.Context(), `
 			UPDATE media_assets
 			SET moderation_status = 'normal',
 			    mask_regions = '[]'::jsonb,
 			    moderated_by = $1,
 			    moderated_at = $2,
 			    moderation_reason = $3,
+			    moderation_revision = moderation_revision + 1,
 			    updated_at = $2
-			WHERE id = $4`, user.ID, now, input.Reason, mediaID)
+			WHERE id = $4 AND moderation_revision = $5`, user.ID, now, input.Reason, mediaID, moderationRevision)
 		if err != nil {
 			writeInternalError(w, r, err)
+			return
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusConflict, Code: "STALE_MEDIA_MODERATION", Message: "媒体审核状态已被其他操作更新，请刷新后重试"})
 			return
 		}
 		if _, err := appendMediaModerationVersionTx(r.Context(), tx, mediaID, "normal", []byte(`[]`), mediaModerationVersionKeys{

@@ -1095,10 +1095,10 @@ class PlatformRepository {
   }
 
   /// 获取媒体预览原始编码字节，用于有界解码，防止大图 OOM。
-  /// 直接获取网络图片的编码字节，不经过 NetworkImage 的完整解码。
-  Future<List<int>> getMediaPreviewBytes(String url) {
+  /// 使用媒体网关 detail variant，限定在 API 域内，绝不接受任意外部 URL。
+  Future<List<int>> getMediaPreviewBytesById(String mediaId) {
     return _client.getBytes(
-      url,
+      '/api/v1/media-file/$mediaId/detail',
       headers: const {'Accept': 'image/*'},
     );
   }

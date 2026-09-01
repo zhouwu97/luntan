@@ -343,7 +343,13 @@ class ApiClient {
     if (includeAuthToken) {
       final accessToken = await _tokenStore?.readAccessToken();
       if (accessToken != null && accessToken.isNotEmpty) {
-        requestHeaders['Authorization'] = 'Bearer $accessToken';
+        // 同源门禁：跨 origin 默认绝不能带 token，防止凭证泄漏到外部 URL。
+        final sameOrigin = uri.scheme == _baseUri.scheme &&
+            uri.host == _baseUri.host &&
+            uri.port == _baseUri.port;
+        if (sameOrigin) {
+          requestHeaders['Authorization'] = 'Bearer $accessToken';
+        }
       }
     }
     final encodedBody = rawBody ?? (body == null ? null : jsonEncode(body));

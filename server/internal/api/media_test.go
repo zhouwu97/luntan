@@ -207,7 +207,8 @@ func TestMediaInputLimits(t *testing.T) {
 func TestLocalMediaUploadRouteAcceptsSignedPut(t *testing.T) {
 	store := storage.NewLocalMediaStorage(t.TempDir(), "local-test-secret")
 	data := []byte("not-an-image")
-	uploadURL, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "application/octet-stream", time.Now().Add(5*time.Minute))
+	digest := sha256.Sum256(data)
+	uploadURL, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "application/octet-stream", int64(len(data)), hex.EncodeToString(digest[:]), time.Now().Add(5*time.Minute))
 	if err != nil {
 		t.Fatalf("SignUpload failed: %v", err)
 	}

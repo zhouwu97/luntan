@@ -212,7 +212,7 @@ func TestHTTPMediaStorageReadsLegacyAbsoluteObjectKey(t *testing.T) {
 
 func TestMemoryStorageSignUpload(t *testing.T) {
 	store := NewMemoryStorage()
-	url, err := store.SignUpload(context.Background(), "asset1", "obj1", "image/png", time.Now().Add(5*time.Minute))
+	url, err := store.SignUpload(context.Background(), "asset1", "obj1", "image/png", 1, strings.Repeat("a", 64), time.Now().Add(5*time.Minute))
 	if err != nil || url == "" {
 		t.Fatalf("SignUpload failed: url=%s, err=%v", url, err)
 	}
@@ -224,7 +224,7 @@ func TestObjectStorageFromEnvUsesLocalDiskForConfiguredQAStorage(t *testing.T) {
 	t.Setenv("MEDIA_STORAGE_DIR", t.TempDir())
 
 	store := NewObjectStorageFromEnv()
-	if _, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "image/png", time.Now().Add(5*time.Minute)); err != nil {
+	if _, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "image/png", 1, strings.Repeat("a", 64), time.Now().Add(5*time.Minute)); err != nil {
 		t.Fatalf("configured local media storage should issue an upload URL, got: %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestLocalMediaStorageSignedUploadAndVerify(t *testing.T) {
 	digest := sha256.Sum256(data)
 	digestHex := hex.EncodeToString(digest[:])
 	expiresAt := time.Now().Add(5 * time.Minute)
-	uploadURL, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "image/jpeg", expiresAt)
+	uploadURL, err := store.SignUpload(context.Background(), "asset1", "media/u1/asset1", "image/jpeg", int64(len(data)), digestHex, expiresAt)
 	if err != nil {
 		t.Fatalf("SignUpload failed: %v", err)
 	}

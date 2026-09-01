@@ -59,10 +59,10 @@ func expectModerationPermission(mock sqlmock.Sqlmock) {
 }
 
 func expectModerationMedia(mock sqlmock.Sqlmock, objectKey, mimeType string) {
-	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
+	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status, moderation_revision FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs("media-1").
-		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status"}).
-			AddRow(objectKey, mimeType, "ready"))
+		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status", "moderation_revision"}).
+			AddRow(objectKey, mimeType, "ready", 0))
 }
 
 func TestModerateMediaRejectsCensoredWithoutMaskRegions(t *testing.T) {

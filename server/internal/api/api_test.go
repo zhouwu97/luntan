@@ -214,7 +214,7 @@ type testMediaStorage struct {
 	storage.UnavailableMediaStorage
 }
 
-func (testMediaStorage) SignUpload(_ context.Context, assetID, _ string, _ string, _ time.Time) (string, error) {
+func (testMediaStorage) SignUpload(_ context.Context, assetID, _ string, _ string, _ int64, _ string, _ time.Time) (string, error) {
 	return "https://upload.example/" + assetID, nil
 }
 

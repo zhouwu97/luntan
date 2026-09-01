@@ -319,11 +319,23 @@ func (s *Server) deletePost(w http.ResponseWriter, r *http.Request, postID strin
 		writeInternalError(w, r, err)
 		return
 	}
+	adminDelete := false
 	if authorID != user.ID {
-		writeAuthError(w, r, ErrForbidden)
-		return
+		// 参考 xynewui 的帖子治理行为：拥有全局内容处置权限的管理员
+		// 可以删除他人帖子；社区范围权限不能借用这个全局入口越权。
+		adminDelete = s.canModerate(r, user)
+		if !adminDelete {
+			writeAuthError(w, r, ErrForbidden)
+			return
+		}
 	}
-	if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET deleted_at = COALESCE(deleted_at, now()), publication_status = 'deleted', updated_at = now() WHERE id = $1`, postID); err != nil {
+	deletedBy := ""
+	deleteReason := ""
+	if adminDelete {
+		deletedBy = user.ID
+		deleteReason = "管理员手动删除帖子"
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE posts SET post_status = 'deleted', deleted_at = COALESCE(deleted_at, now()), publication_status = 'deleted', deleted_by = NULLIF($2, ''), delete_reason = $3, updated_at = now() WHERE id = $1`, postID, deletedBy, deleteReason); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

@@ -935,7 +935,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final canEdit =
         post.viewerState.canEdit ||
         (widget.currentUserId != null && post.authorId == widget.currentUserId);
-    final canDelete = post.viewerState.canDelete || canEdit;
+    // 管理员的全局内容处置权限不依赖帖子作者关系；服务端仍会做最终校验。
+    final canDelete =
+        post.viewerState.canDelete || canEdit || widget.canModerate;
 
     showModalBottomSheet<void>(
       context: context,

@@ -207,11 +207,14 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	var hotSuppressed bool
 	var hotSuppressedReason, hotSuppressedBy sql.NullString
 	var hotSuppressedAt sql.NullTime
+	var viewer auth.User
+	var hasViewer bool
+	var viewerCanModerate bool
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(hot_suppressed, false), COALESCE(hot_suppressed_reason, ''), hot_suppressed_at, COALESCE(hot_suppressed_by, '') FROM posts WHERE id = $1`, response.ID).Scan(&hotSuppressed, &hotSuppressedReason, &hotSuppressedAt, &hotSuppressedBy); err == nil {
-		viewer, hasViewer := s.optionalAuthenticatedUser(ctx, r)
-		isAdmin := hasViewer && s.canModerate(r, viewer)
+		viewer, hasViewer = s.optionalAuthenticatedUser(ctx, r)
+		viewerCanModerate = hasViewer && s.canModerate(r, viewer)
 
-		if isAdmin {
+		if viewerCanModerate {
 			response.HotSuppressed = hotSuppressed
 			if hotSuppressedReason.Valid {
 				response.HotSuppressedReason = hotSuppressedReason.String
@@ -253,8 +256,11 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	}
 	// 公开 Feed 允许无 token 访问；无效 token 不阻断内容读取，只是不返回
 	// viewer_state。
-	viewer, ok := s.optionalAuthenticatedUser(ctx, r)
-	if !ok {
+	if !hasViewer {
+		viewer, hasViewer = s.optionalAuthenticatedUser(ctx, r)
+		viewerCanModerate = hasViewer && s.canModerate(r, viewer)
+	}
+	if !hasViewer {
 		return nil
 	}
 	var state viewerPostState
@@ -276,7 +282,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		return err
 	}
 	state.CanEdit = viewer.ID == response.Author.ID
-	state.CanDelete = state.CanEdit
+	state.CanDelete = state.CanEdit || viewerCanModerate
 	state.CanReport = capabilitiesForUser(viewer)[capReport] && viewer.ID != response.Author.ID
 	response.ViewerState = &state
 	return nil

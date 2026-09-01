@@ -136,12 +136,17 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         decoded = await _decodePreviewImage(_sourceBytes!);
         _sourceBytes = null;
       } else {
-        final url = media.originalUrl ?? media.detailUrl ?? media.url ?? '';
+        // 编辑遮罩使用归一化坐标，不需要解码原始大图；优先服务端
+        // detail 变体可避免普通未打码图片绕过本地预览尺寸上限。
+        // 永远不要使用 originalUrl 进行编辑预览，防止大图 OOM。
+        final url = media.detailUrl ?? media.url ?? '';
         if (url.isEmpty) {
           if (mounted) setState(() => _sourceLoadError = '图片地址为空');
           return;
         }
-        decoded = await _resolveNetworkImage(url);
+        final bytes = await _fetchNetworkImageBytes(url);
+        if (!mounted || _images[_selectedImageIndex].id != mediaId) return;
+        decoded = await _decodePreviewImage(bytes);
       }
 
       if (!mounted || _images[_selectedImageIndex].id != mediaId) {
@@ -195,15 +200,27 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     }
   }
 
-  /// Uses Flutter's image cache to resolve a network URL into a [ui.Image].
-  Future<ui.Image> _resolveNetworkImage(String url) {
-    final completer = Completer<ui.Image>();
+  /// Fetches network image bytes for bounded decoding.
+  Future<Uint8List> _fetchNetworkImageBytes(String url) async {
+    final completer = Completer<Uint8List>();
     final stream = NetworkImage(url).resolve(const ImageConfiguration());
     late ImageStreamListener listener;
     listener = ImageStreamListener(
-      (ImageInfo info, bool _) {
-        completer.complete(info.image.clone());
-        stream.removeListener(listener);
+      (ImageInfo info, bool _) async {
+        try {
+          final byteData = await info.image.toByteData(
+            format: ui.ImageByteFormat.png,
+          );
+          if (byteData != null) {
+            completer.complete(byteData.buffer.asUint8List());
+          } else {
+            completer.completeError('Failed to convert image to bytes');
+          }
+        } catch (e) {
+          completer.completeError(e);
+        } finally {
+          stream.removeListener(listener);
+        }
       },
       onError: (Object error, StackTrace? _) {
         if (!completer.isCompleted) completer.completeError(error);

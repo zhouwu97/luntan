@@ -32,6 +32,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   bool _loadingMore = false;
   bool _hasMore = false;
   String _selectedStatus = 'pending_review';
+  int _requestGeneration = 0;
 
   static const _statusFilters = <({String value, String label})>[
     (value: 'pending_review', label: '待审核'),
@@ -47,6 +48,9 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   }
 
   Future<void> _loadFirstPage() async {
+    final generation = ++_requestGeneration;
+    final requestStatus = _selectedStatus;
+
     setState(() {
       _loading = true;
       _error = null;
@@ -57,9 +61,13 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     });
     try {
       final page = await widget.repository.listStoreOrderPage(
-        status: _selectedStatus,
+        status: requestStatus,
       );
-      if (!mounted) return;
+      if (!mounted ||
+          generation != _requestGeneration ||
+          requestStatus != _selectedStatus) {
+        return;
+      }
       setState(() {
         _items.addAll(page.items);
         _nextCursor = page.nextCursor;
@@ -67,7 +75,11 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          generation != _requestGeneration ||
+          requestStatus != _selectedStatus) {
+        return;
+      }
       setState(() {
         _loading = false;
         _error = '$error';
@@ -77,6 +89,9 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
 
   Future<void> _loadMore() async {
     final cursor = _nextCursor;
+    final generation = _requestGeneration;
+    final requestStatus = _selectedStatus;
+
     if (_loadingMore || !_hasMore || cursor == null || cursor.isEmpty) return;
     setState(() {
       _loadingMore = true;
@@ -84,10 +99,15 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     });
     try {
       final page = await widget.repository.listStoreOrderPage(
-        status: _selectedStatus,
+        status: requestStatus,
         cursor: cursor,
       );
-      if (!mounted) return;
+      if (!mounted ||
+          generation != _requestGeneration ||
+          requestStatus != _selectedStatus ||
+          cursor != _nextCursor) {
+        return;
+      }
       setState(() {
         _items.addAll(page.items);
         _nextCursor = page.nextCursor;
@@ -95,7 +115,11 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
         _loadingMore = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          generation != _requestGeneration ||
+          requestStatus != _selectedStatus) {
+        return;
+      }
       setState(() {
         _loadingMore = false;
         _loadMoreError = '$error';

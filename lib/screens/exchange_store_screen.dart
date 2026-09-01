@@ -156,6 +156,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
 
   final Set<String> _redeeming = <String>{};
   bool _ordersLoading = true;
+  bool _ordersLoadFailed = false;
   bool _hasPendingReview = false;
   int _reservedPoints = 0;
   // 兑换幂等键按商品持久到请求成功为止，弱网重试时复用同一个键，
@@ -176,6 +177,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       if (mounted) {
         setState(() {
           _ordersLoading = false;
+          _ordersLoadFailed = false;
           _hasPendingReview = orders.any(
             (order) => order.status == 'pending_review',
           );
@@ -186,7 +188,12 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       }
       return orders;
     } catch (_) {
-      if (mounted) setState(() => _ordersLoading = false);
+      if (mounted) {
+        setState(() {
+          _ordersLoading = false;
+          _ordersLoadFailed = true;
+        });
+      }
       rethrow;
     }
   }
@@ -239,7 +246,59 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              if (_hasPendingReview)
+              if (_ordersLoadFailed)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.softRose,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 17,
+                        color: AppTheme.pink,
+                      ),
+                      const SizedBox(width: 7),
+                      const Expanded(
+                        child: Text(
+                          '兑换记录加载失败，无法确认是否存在待审核申请',
+                          style: TextStyle(
+                            color: AppTheme.pink,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            ordersFuture = _loadOrders();
+                          });
+                        },
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          '重试',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (_hasPendingReview)
                 Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   padding: const EdgeInsets.symmetric(
@@ -285,7 +344,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                   product: items[index],
                   onRedeem: () => _redeem(items[index]),
                   busy: _redeeming.contains(items[index].id),
-                  blocked: _ordersLoading || _hasPendingReview,
+                  blocked: _ordersLoading || _ordersLoadFailed || _hasPendingReview,
                 ),
               ),
               const SizedBox(height: 24),
@@ -303,6 +362,27 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                 builder: (context, snapshot) {
                   if (snapshot.connectionState != ConnectionState.done) {
                     return const LinearProgressIndicator();
+                  }
+                  if (snapshot.hasError) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '兑换记录加载失败',
+                          style: TextStyle(color: AppTheme.pink),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              ordersFuture = _loadOrders();
+                            });
+                          },
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('重新加载'),
+                        ),
+                      ],
+                    );
                   }
                   final orders = snapshot.data ?? const <StoreOrder>[];
                   if (orders.isEmpty) {
@@ -356,6 +436,12 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   }
 
   Future<void> _redeem(ApiStoreProduct product) async {
+    if (_ordersLoadFailed) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('兑换记录加载失败，请先重新加载确认状态')));
+      return;
+    }
     if (_ordersLoading || _hasPendingReview) {
       ScaffoldMessenger.of(
         context,

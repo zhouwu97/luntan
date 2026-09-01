@@ -6,6 +6,7 @@ import '../../theme/app_theme.dart';
 import '../app_network_image.dart';
 import '../link_text.dart';
 import 'comment_reply_preview.dart';
+import 'comment_more_button.dart';
 import 'emoji/sticker_catalog.dart';
 
 class CommentItem extends StatefulWidget {
@@ -21,6 +22,7 @@ class CommentItem extends StatefulWidget {
     this.onLike,
     this.onDislike,
     this.onMore,
+    this.onReplyMore,
     this.onViewAllReplies,
     this.onAuthorTap,
     this.onLongPress,
@@ -36,6 +38,7 @@ class CommentItem extends StatefulWidget {
   final VoidCallback? onLike;
   final VoidCallback? onDislike;
   final VoidCallback? onMore;
+  final ValueChanged<Comment>? onReplyMore;
   final VoidCallback? onViewAllReplies;
   final ValueChanged<String>? onAuthorTap;
   final VoidCallback? onLongPress;
@@ -415,20 +418,7 @@ class _CommentItemState extends State<CommentItem>
                   ),
                   const Spacer(),
                   if (widget.onMore != null)
-                    GestureDetector(
-                      onTap: widget.onMore,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 2,
-                        ),
-                        child: Icon(
-                          Icons.more_horiz_rounded,
-                          size: 16,
-                          color: Color(0xFF9AAABD),
-                        ),
-                      ),
-                    ),
+                    CommentMoreButton(onPressed: widget.onMore!),
                 ],
               ),
             ),
@@ -472,6 +462,7 @@ class _CommentItemState extends State<CommentItem>
               onOpenThread: widget.onViewAllReplies ?? () {},
               onReplyTo: widget.onReplyTo,
               onAuthorTap: widget.onAuthorTap,
+              onMore: widget.onReplyMore,
             ),
         ],
       ),

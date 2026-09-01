@@ -1936,7 +1936,8 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   Future<void> _openRankingThread(RankingToyComment root) async {
     final repository = widget.repository;
     if (repository == null) return;
-    final changed = await showModalBottomSheet<bool>(
+    var changed = false;
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1955,9 +1956,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         ),
         onToggleLike: (comment, active) =>
             repository.setCommentLike(commentId: comment.id, active: active),
+        onChanged: () => changed = true,
       ),
     );
-    if (changed == true && mounted) {
+    if (changed && mounted) {
       await _loadRemoteDetail();
     }
   }

@@ -12,6 +12,7 @@ import '../widgets/app_network_image.dart';
 import '../widgets/comments/comment_composer_controller.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
+import '../widgets/comments/comment_more_button.dart';
 import '../widgets/comments/emoji/sticker_catalog.dart';
 import '../widgets/link_text.dart';
 
@@ -35,6 +36,7 @@ class CommentThreadScreen extends StatefulWidget {
     this.onToggleLike,
     this.onToggleDislike,
     this.onAuthorTap,
+    this.onMore,
   });
 
   final Comment rootComment;
@@ -51,6 +53,7 @@ class CommentThreadScreen extends StatefulWidget {
   final Future<void> Function(Comment comment)? onToggleLike;
   final Future<void> Function(Comment comment)? onToggleDislike;
   final ValueChanged<String>? onAuthorTap;
+  final ValueChanged<Comment>? onMore;
 
   @override
   State<CommentThreadScreen> createState() => _CommentThreadScreenState();
@@ -867,6 +870,11 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                     ],
                                   ],
                                 ),
+                              ),
+                            const Spacer(),
+                            if (widget.onMore != null)
+                              CommentMoreButton(
+                                onPressed: () => widget.onMore!(reply),
                               ),
                           ],
                         ),

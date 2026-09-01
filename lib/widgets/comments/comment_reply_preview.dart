@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
 import '../link_text.dart';
+import 'comment_more_button.dart';
 
 class CommentReplyPreview extends StatelessWidget {
   const CommentReplyPreview({
@@ -13,6 +14,7 @@ class CommentReplyPreview extends StatelessWidget {
     required this.onOpenThread,
     this.onReplyTo,
     this.onAuthorTap,
+    this.onMore,
   });
 
   final List<Comment> replies;
@@ -20,6 +22,7 @@ class CommentReplyPreview extends StatelessWidget {
   final VoidCallback onOpenThread;
   final ValueChanged<Comment>? onReplyTo;
   final ValueChanged<String>? onAuthorTap;
+  final ValueChanged<Comment>? onMore;
 
   @override
   Widget build(BuildContext context) {
@@ -57,6 +60,7 @@ class CommentReplyPreview extends StatelessWidget {
                         onOpenThread: onOpenThread,
                         onReplyTo: onReplyTo,
                         onAuthorTap: onAuthorTap,
+                        onMore: onMore,
                       ),
                     )
                     .toList(),
@@ -91,12 +95,14 @@ class _ReplyPreviewLine extends StatefulWidget {
     required this.onOpenThread,
     this.onReplyTo,
     this.onAuthorTap,
+    this.onMore,
   });
 
   final Comment reply;
   final VoidCallback onOpenThread;
   final ValueChanged<Comment>? onReplyTo;
   final ValueChanged<String>? onAuthorTap;
+  final ValueChanged<Comment>? onMore;
 
   @override
   State<_ReplyPreviewLine> createState() => _ReplyPreviewLineState();
@@ -137,9 +143,9 @@ class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
   void _openLink(Uri uri) async {
     final opened = await openExternalLink(context, uri);
     if (!mounted || opened) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      const SnackBar(content: Text('无法打开该网址')),
-    );
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(const SnackBar(content: Text('无法打开该网址')));
   }
 
   void _rebuildSpans() {
@@ -173,89 +179,97 @@ class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
     final author = reply.author?.nickname ?? '用户';
     final replyTo = reply.replyToUserId == null
         ? null
-        : (reply.replyToUser?.nickname ??
-              reply.replyToUser?.username ??
-              '用户');
+        : (reply.replyToUser?.nickname ?? reply.replyToUser?.username ?? '用户');
 
-    final canTapAuthor = widget.onAuthorTap != null &&
+    final canTapAuthor =
+        widget.onAuthorTap != null &&
         reply.authorId.isNotEmpty &&
         !reply.authorId.startsWith('guest');
 
-    final canTapReplyTo = widget.onAuthorTap != null &&
+    final canTapReplyTo =
+        widget.onAuthorTap != null &&
         reply.replyToUserId != null &&
         reply.replyToUserId!.isNotEmpty &&
         !reply.replyToUserId!.startsWith('guest');
 
-    return InkWell(
-      onTap: () {
-        if (widget.onReplyTo != null) {
-          widget.onReplyTo!(reply);
-        } else {
-          widget.onOpenThread();
-        }
-      },
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2.5),
-        child: Text.rich(
-          TextSpan(
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: Color(0xFF5F7488),
-              height: 1.5,
-            ),
-            children: [
-              WidgetSpan(
-                alignment: PlaceholderAlignment.baseline,
-                baseline: TextBaseline.alphabetic,
-                child: GestureDetector(
-                  onTap: canTapAuthor
-                      ? () => widget.onAuthorTap!(reply.authorId)
-                      : null,
-                  child: Text(
-                    author,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF385A79),
-                    ),
+    return Row(
+      children: [
+        Expanded(
+          child: InkWell(
+            onTap: () {
+              if (widget.onReplyTo != null) {
+                widget.onReplyTo!(reply);
+              } else {
+                widget.onOpenThread();
+              }
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2.5),
+              child: Text.rich(
+                TextSpan(
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: Color(0xFF5F7488),
+                    height: 1.5,
                   ),
-                ),
-              ),
-              if (replyTo != null) ...[
-                const TextSpan(text: ' 回复 '),
-                WidgetSpan(
-                  alignment: PlaceholderAlignment.baseline,
-                  baseline: TextBaseline.alphabetic,
-                  child: GestureDetector(
-                    onTap: canTapReplyTo
-                        ? () => widget.onAuthorTap!(reply.replyToUserId!)
-                        : null,
-                    child: Text(
-                      '@$replyTo',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.primary,
+                  children: [
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.baseline,
+                      baseline: TextBaseline.alphabetic,
+                      child: GestureDetector(
+                        onTap: canTapAuthor
+                            ? () => widget.onAuthorTap!(reply.authorId)
+                            : null,
+                        child: Text(
+                          author,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF385A79),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    if (replyTo != null) ...[
+                      const TextSpan(text: ' 回复 '),
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.baseline,
+                        baseline: TextBaseline.alphabetic,
+                        child: GestureDetector(
+                          onTap: canTapReplyTo
+                              ? () => widget.onAuthorTap!(reply.replyToUserId!)
+                              : null,
+                          child: Text(
+                            '@$replyTo',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const TextSpan(
+                      text: '：',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF385A79),
+                      ),
+                    ),
+                    ..._spans,
+                  ],
                 ),
-              ],
-              const TextSpan(
-                text: '：',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF385A79),
-                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-              ..._spans,
-            ],
+            ),
           ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
         ),
-      ),
+        if (widget.onMore != null)
+          CommentMoreButton(onPressed: () => widget.onMore!(reply)),
+      ],
     );
   }
 }

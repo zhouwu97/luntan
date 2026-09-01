@@ -873,7 +873,7 @@ const storeProducts = [
     name: '200元杯子盲盒（可许愿）',
     description: '社区周边',
     emoji: '🥤',
-    points: 600,
+    points: 1000,
     color: 0xFFFFD3A5,
   ),
 ];

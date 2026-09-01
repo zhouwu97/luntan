@@ -1213,7 +1213,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             post: post,
             authorNickname: authorName,
             authorLevel: isLocked ? 0 : level,
-            onTap: () => widget.onOpenPostId(post.id),
+            onTap: () {
+              debugPrint('📍 User post card tapped: ${post.id}');
+              widget.onOpenPostId(post.id);
+            },
           );
         },
       );
@@ -1409,14 +1412,18 @@ class _UserPostCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(12),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      splashColor: AppTheme.primary.withValues(alpha: 0.08),
+      highlightColor: AppTheme.primary.withValues(alpha: 0.04),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           // 作者信息栏只展示已有的账号等级，不凭空推算信任指标。
           Row(
             children: [
@@ -1535,7 +1542,8 @@ class _UserPostCard extends StatelessWidget {
         ],
       ),
     ),
-  );
+  ),
+);
 }
 
 class _UserCommentCard extends StatelessWidget {
@@ -1552,14 +1560,18 @@ class _UserCommentCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(12),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      splashColor: AppTheme.primary.withValues(alpha: 0.08),
+      highlightColor: AppTheme.primary.withValues(alpha: 0.04),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           Row(
             children: [
               CircleAvatar(
@@ -1650,7 +1662,8 @@ class _UserCommentCard extends StatelessWidget {
         ],
       ),
     ),
-  );
+  ),
+);
 }
 
 class _CommentedPostCard extends StatelessWidget {

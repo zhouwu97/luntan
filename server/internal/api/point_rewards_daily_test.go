@@ -120,6 +120,66 @@ func TestRecommendationBonusIsIdempotentPerPost(t *testing.T) {
 	}
 }
 
+// TestRecommendationBonusDoesNotConsumeDailyActivityQuota 验证推荐 +20 不会
+// 抢占发帖/点赞共享的每日 +1 额度，且推荐后发帖仍可获得活动积分。
+func TestRecommendationBonusDoesNotConsumeDailyActivityQuota(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// 推荐奖励不受每日额度限制。
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
+		WithArgs("author1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(100))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
+		WithArgs("author1", "post:recommend:p999").WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
+		WithArgs(int64(120), "author1").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7)`)).
+		WithArgs(sqlmock.AnyArg(), "author1", "recommend", int64(20), int64(120), "帖子被推荐", "post:recommend:p999").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := awardPointsTx(context.Background(), tx, "author1", "recommend", "帖子被推荐", "post:recommend:p999", 20, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 推荐后当天发帖，活动额度仍为 0/1，应发放 +1。
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
+		WithArgs("author1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(120))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
+		WithArgs("author1", "post:create:p999").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+		WithArgs("author1").WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(0))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
+		WithArgs(int64(121), "author1").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7)`)).
+		WithArgs(sqlmock.AnyArg(), "author1", "post", int64(1), int64(121), "发布帖子", "post:create:p999").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	tx, err = db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := awardPointsTx(context.Background(), tx, "author1", "post", "发布帖子", "post:create:p999", 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestDailyPointReset 验证第二天可以重新获得 +1
 func TestDailyPointReset(t *testing.T) {
 	db, mock, err := sqlmock.New()

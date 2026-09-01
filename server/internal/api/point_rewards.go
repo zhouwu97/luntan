@@ -55,7 +55,9 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 		var earnedToday int64
 		// 自然日按北京时间计算，与用户感知的”一天”一致；
 		// 双重 AT TIME ZONE 把上海零点正确还原成 timestamptz，不受会话时区影响。
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID).Scan(&earnedToday); err != nil {
+		// 每日额度只统计发帖/点赞这组活动奖励；推荐、兑换及管理员补偿等
+		// 其他正向流水不应消耗活动额度。
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID).Scan(&earnedToday); err != nil {
 			return err
 		}
 		if earnedToday >= dailyEarnLimit {

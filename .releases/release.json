@@ -1,0 +1,10 @@
+{
+  "version_name": "0.0.1",
+  "version_code": 1,
+  "minimum_supported_version_code": 1,
+  "title": "酱紫社区 v0.0.1 首个公开版本",
+  "changelog": "首个公开发布版本，包含完整的论坛、商城、成长系统功能。",
+  "apk_file": "releases/1/luntan-0.0.1-1.apk",
+  "sha256": "554fb8648bef7924f4e7692b9b8a63cf5da574cad40684a16642f240754e1949",
+  "published_at": "2026-09-01T13:09:13Z"
+}

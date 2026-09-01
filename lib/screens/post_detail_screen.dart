@@ -19,6 +19,7 @@ import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/comments/comment_composer_controller.dart';
 import '../widgets/comments/comment_item.dart';
+import '../widgets/comments/comment_action_menu.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import 'comment_thread_screen.dart';
@@ -375,6 +376,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ),
         onToggleLike: (reply) => _likeComment(reply),
         onToggleDislike: (reply) => _dislikeComment(reply),
+        onMore: (reply) => _showCommentMenu(reply),
       ),
     );
   }
@@ -773,6 +775,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 onLike: () => _likeComment(comment),
                                 onDislike: () => _dislikeComment(comment),
                                 onMore: () => _showCommentMenu(comment),
+                                onReplyMore: (reply) => _showCommentMenu(reply),
                                 onLongPress: () => _showCommentMenu(comment),
                                 onViewAllReplies: () =>
                                     _openReplyThread(comment),
@@ -950,9 +953,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       useSafeArea: true,
       builder: (sheetContext) => Padding(
         // 底部必须自己处理
-        padding: EdgeInsets.only(
-          bottom: bottomInset + 8,
-        ),
+        padding: EdgeInsets.only(bottom: bottomInset + 8),
         child: Wrap(
           children: [
             ListTile(
@@ -1181,67 +1182,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   void _showCommentMenu(Comment comment) {
-    final canEdit =
-        widget.currentUserId != null &&
-        comment.authorId == widget.currentUserId;
-    final canDelete = canEdit || widget.canModerate;
-
-    // 在 BottomSheet Route 创建前取得真实系统导航栏高度
-    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      backgroundColor: Colors.white,
-      useSafeArea: true,
-      builder: (sheetContext) => Padding(
-        // 底部必须自己处理
-        padding: EdgeInsets.only(
-          bottom: bottomInset + 8,
-        ),
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy_outlined),
-              title: const Text('复制内容'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _copyCommentContent(comment);
-              },
-            ),
-            if (widget.onReport != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.flag_outlined,
-                  color: AppTheme.orange,
-                ),
-                title: const Text('举报评论'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _report('comment', comment.id);
-                },
-              ),
-            if (canEdit)
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('编辑评论'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _editComment(comment);
-                },
-              ),
-            if (canDelete)
-              ListTile(
-                leading: const Icon(Icons.delete_outline),
-                title: const Text('删除评论'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _deleteComment(comment);
-                },
-              ),
-          ],
-        ),
-      ),
+    showCommentActionMenu(
+      context,
+      comment: comment,
+      currentUserId: widget.currentUserId,
+      canModerate: widget.canModerate,
+      onCopy: () => _copyCommentContent(comment),
+      onReport: widget.onReport == null
+          ? null
+          : () => _report('comment', comment.id),
+      onEdit: () => _editComment(comment),
+      onDelete: () => _deleteComment(comment),
     );
   }
 

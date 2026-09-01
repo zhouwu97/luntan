@@ -34,6 +34,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
     this.onRequireAuth,
     this.blockedMessage = '当前身份暂不能评论，请登录邮箱账号后重试',
     this.onAuthorTap,
+    this.onChanged,
   });
 
   final RankingToyComment rootComment;
@@ -51,6 +52,8 @@ class RankingCommentThreadSheet extends StatefulWidget {
   final VoidCallback? onRequireAuth;
   final String blockedMessage;
   final ValueChanged<String>? onAuthorTap;
+  // 写操作成功后立即通知父页面；弹层可通过任意系统路径关闭。
+  final VoidCallback? onChanged;
 
   @override
   State<RankingCommentThreadSheet> createState() =>
@@ -68,7 +71,6 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   bool loading = false;
   bool loadingMore = false;
   bool sending = false;
-  bool changed = false;
   bool hasMore = true;
   _ReplyLoadState loadState = _ReplyLoadState.loading;
 
@@ -180,8 +182,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         if (!replies.any((item) => item.id == comment.id)) {
           replies.add(comment);
         }
-        widget.rootComment.replyCount += 1;
-        changed = true;
+        widget.onChanged?.call();
         loadState = _ReplyLoadState.loaded;
         sending = false;
       });
@@ -293,7 +294,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                         const Spacer(),
                         IconButton(
                           tooltip: '关闭',
-                          onPressed: () => Navigator.of(context).pop(changed),
+                          onPressed: () => Navigator.of(context).pop(),
                           icon: const Icon(Icons.close_rounded, size: 20),
                         ),
                       ],

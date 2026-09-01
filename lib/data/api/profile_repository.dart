@@ -49,6 +49,7 @@ class ProfilePostItem {
     required this.communityName,
     required this.title,
     required this.contentPreview,
+    required this.postContentPreview,
     required this.communityId,
     required this.commentCount,
     required this.likeCount,
@@ -79,6 +80,7 @@ class ProfilePostItem {
   final String communityName;
   final String title;
   final String contentPreview;
+  final String postContentPreview;
   final String communityId;
   final int commentCount;
   final int likeCount;
@@ -266,6 +268,7 @@ ProfilePostItem profilePostItemFromJson(Map<String, dynamic> value) {
     id: _string(value['id']),
     title: _string(value['title']),
     contentPreview: _string(value['content'] ?? value['content_preview']),
+    postContentPreview: _string(value['post_content_preview']),
     communityId: _string(value['community_id'] ?? community['id']),
     communityName: _string(value['community_name'] ?? community['name']),
     commentCount: _int(value['comment_count']),

@@ -292,7 +292,7 @@ func TestListCommentsReturnsStableFloors(t *testing.T) {
 }
 
 func TestProfileCommentsReturnsAuthoredComments(t *testing.T) {
-	query, _, err := profileCommentListQuery("u1", "", 1)
+	query, _, err := profileCommentListQuery("u1", "", 1, true)
 	if err != nil || !strings.Contains(query, "c.author_id = $1") {
 		t.Fatalf("profile comments query must query user authored comments: %s", query)
 	}
@@ -307,9 +307,9 @@ func TestProfileCommentsReturnsAuthoredComments(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "has_password"}).AddRow("u1", "user", "active", "用户", 1, 0, "email", "", false, nil, false))
 	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
 		WithArgs("u1", 2).
-		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
-			AddRow("c1", "post-1", "帖子一", "我写的评论一", "c1", "大型拆箱", int64(3), int64(2), int64(1), created.Add(-time.Hour), created).
-			AddRow("c2", "post-2", "帖子二", "我写的评论二", "c1", "大型拆箱", int64(1), int64(0), int64(0), created.Add(-2*time.Hour), created.Add(-time.Minute)))
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "comment_content", "post_content", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "view_count", "published_at", "activity_at"}).
+			AddRow("c1", "post-1", "帖子一", "我写的评论一", "帖子正文一", "c1", "大型拆箱", int64(3), int64(2), int64(1), int64(100), created.Add(-time.Hour), created).
+			AddRow("c2", "post-2", "帖子二", "我写的评论二", "帖子正文二", "c1", "大型拆箱", int64(1), int64(0), int64(0), int64(50), created.Add(-2*time.Hour), created.Add(-time.Minute)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/comments?limit=1", nil)
 	req.Header.Set("Authorization", "Bearer access-token")
@@ -354,26 +354,79 @@ func TestPublicUserPostsExposeRealPostCounts(t *testing.T) {
 	}
 }
 
-func TestPublicUserCommentsListReturnsAuthoredComments(t *testing.T) {
+func TestPublicUserCommentsDoesNotExposeCommentContent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db.Close()
 	created := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
+	// 公开接口只返回帖子信息，不返回评论内容
 	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*c\.author_id = \$1.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
 		WithArgs("u2", 2).
-		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
-			AddRow("c9", "post-1", "帖子标题", "他人主页可见的评论", "c1", "评测区", int64(4), int64(2), int64(0), created.Add(-time.Hour), created))
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "post_content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "view_count", "published_at", "activity_at"}).
+			AddRow("c9", "post-1", "帖子标题", "这是帖子正文摘要", "c1", "评测区", int64(4), int64(2), int64(0), int64(123), created.Add(-time.Hour), created))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u2/comments?limit=1", nil)
 	res := httptest.NewRecorder()
 	NewHandler(db).ServeHTTP(res, req)
 
-	if res.Code != http.StatusOK ||
-		!strings.Contains(res.Body.String(), `"comment_id":"c9"`) ||
-		!strings.Contains(res.Body.String(), `"id":"post-1"`) ||
-		!strings.Contains(res.Body.String(), `"has_more":false`) {
-		t.Fatalf("public user comments response: status=%d body=%s", res.Code, res.Body.String())
+	body := res.Body.String()
+	if res.Code != http.StatusOK {
+		t.Fatalf("public user comments response: status=%d body=%s", res.Code, body)
+	}
+	// 验证返回了帖子信息
+	if !strings.Contains(body, `"comment_id":"c9"`) ||
+		!strings.Contains(body, `"id":"post-1"`) ||
+		!strings.Contains(body, `"title":"帖子标题"`) ||
+		!strings.Contains(body, `"post_content_preview":"这是帖子正文摘要"`) {
+		t.Fatalf("public user comments missing post info: body=%s", body)
+	}
+	// 验证没有暴露 content_preview（评论正文）
+	if strings.Contains(body, `"content_preview"`) {
+		t.Fatalf("public user comments leaked comment content: body=%s", body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProfileCommentsIncludesCommentContent(t *testing.T) {
+	query, _, err := profileCommentListQuery("u1", "", 1, true)
+	if err != nil || !strings.Contains(query, "LEFT(c.content, 200)") {
+		t.Fatalf("profile comments query with includeCommentContent must select comment content: %s", query)
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	created := time.Date(2026, 8, 24, 23, 20, 0, 0, time.UTC)
+	mock.ExpectQuery(`(?s)SELECT u\.id, u\.username.*FROM sessions s`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "status", "nickname", "level", "experience", "account_type", "email", "email_verified", "email_verified_at", "has_password"}).AddRow("u1", "user", "active", "用户", 1, 0, "email", "", false, nil, false))
+	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
+		WithArgs("u1", 2).
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "comment_content", "post_content", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "view_count", "published_at", "activity_at"}).
+			AddRow("c1", "post-1", "帖子一", "我写的评论一", "帖子正文摘要", "c1", "大型拆箱", int64(3), int64(2), int64(1), int64(99), created.Add(-time.Hour), created).
+			AddRow("c2", "post-2", "帖子二", "我写的评论二", "另一个帖子", "c1", "大型拆箱", int64(1), int64(0), int64(0), int64(50), created.Add(-2*time.Hour), created.Add(-time.Minute)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/comments?limit=1", nil)
+	req.Header.Set("Authorization", "Bearer access-token")
+	res := httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+
+	body := res.Body.String()
+	if res.Code != http.StatusOK {
+		t.Fatalf("profile comments response: status=%d body=%s", res.Code, body)
+	}
+	// 验证本人查看时包含评论正文
+	if !strings.Contains(body, `"content_preview":"我写的评论一"`) {
+		t.Fatalf("profile comments missing comment content: body=%s", body)
+	}
+	// 同时验证也包含帖子信息
+	if !strings.Contains(body, `"post_content_preview":"帖子正文摘要"`) {
+		t.Fatalf("profile comments missing post content: body=%s", body)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

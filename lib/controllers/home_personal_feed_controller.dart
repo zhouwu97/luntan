@@ -257,6 +257,7 @@ class HomePersonalFeedController extends ChangeNotifier {
               communityName: post.community?.name ?? post.tag,
               title: post.title,
               contentPreview: post.content,
+              postContentPreview: post.content,
               communityId: post.communityId,
               commentCount: post.commentCount,
               likeCount: post.likeCount,

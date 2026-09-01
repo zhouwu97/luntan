@@ -276,5 +276,6 @@ func (s *Server) listUserComments(w http.ResponseWriter, r *http.Request, userID
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 无效"})
 		return
 	}
-	s.profileCommentList(w, r, userID, limit)
+	// 公开接口不返回评论正文，只返回评论过的帖子信息
+	s.profileCommentList(w, r, userID, limit, false)
 }

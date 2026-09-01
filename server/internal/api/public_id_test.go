@@ -60,8 +60,8 @@ func TestListUserCommentsAllowedForOtherUsers(t *testing.T) {
 	created := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`(?s)SELECT c\.id, p\.id, p\.title.*FROM comments c.*c\.author_id = \$1.*ORDER BY c\.created_at DESC, c\.id DESC LIMIT \$2`).
 		WithArgs("u1", 21).
-		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "content_preview", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "published_at", "activity_at"}).
-			AddRow("c1", "p1", "帖子标题", "公开评论内容", "cm1", "社区", int64(1), int64(0), int64(0), created, created))
+		WillReturnRows(sqlmock.NewRows([]string{"comment_id", "id", "title", "post_content", "community_id", "community_name", "comment_count", "like_count", "bookmark_count", "view_count", "published_at", "activity_at"}).
+			AddRow("c1", "p1", "帖子标题", "帖子正文预览", "cm1", "社区", int64(1), int64(0), int64(0), int64(10), created, created))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1/comments", nil)
 	res := httptest.NewRecorder()

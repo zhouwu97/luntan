@@ -76,6 +76,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             communityName: post.community?.name ?? post.section.label,
             title: post.title,
             contentPreview: post.content,
+            postContentPreview: post.content,
             communityId: post.communityId.isNotEmpty
                 ? post.communityId
                 : post.section.communityId,

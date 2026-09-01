@@ -157,7 +157,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<ProfileListPage?> _loadInitialComments() async {
     try {
-      final page = await widget.repository.listComments(widget.userId);
+      final page = await _requestComments();
       if (!mounted) return page;
       setState(() {
         _comments
@@ -170,6 +170,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<ProfileListPage> _requestComments({String? cursor}) {
+    final selfRepository = widget.profileRepository;
+
+    // 自己看自己：使用 /api/v1/me/comments
+    if (widget.isSelf && selfRepository != null) {
+      return selfRepository.list(
+        'comments',
+        cursor: cursor,
+      );
+    }
+
+    // 看别人：使用公开用户评论接口
+    return widget.repository.listComments(
+      widget.userId,
+      cursor: cursor,
+    );
   }
 
   void _loadMorePostsWhenNeeded() {
@@ -219,10 +237,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
     setState(() => _loadingMoreComments = true);
     try {
-      final page = await widget.repository.listComments(
-        widget.userId,
-        cursor: _nextCommentsCursor,
-      );
+      final page = await _requestComments(cursor: _nextCommentsCursor);
       if (!mounted) return;
       setState(() {
         final ids = _comments.map((c) => c.commentId ?? c.id).toSet();
@@ -387,10 +402,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     ImageSource? source;
     if (kind == ProfileImageKind.avatar) {
+      // 在 BottomSheet Route 创建前取得真实系统导航栏高度
+      final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+
       source = await showModalBottomSheet<ImageSource>(
         context: context,
         showDragHandle: true,
-        builder: (sheetContext) => SafeArea(
+        useSafeArea: true,
+        builder: (sheetContext) => Padding(
+          padding: EdgeInsets.only(
+            bottom: bottomInset + 8,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1253,10 +1275,33 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             );
           }
           final comment = comments[index];
-          return _UserCommentCard(
+
+          // 自己看自己：显示具体评论内容
+          if (widget.isSelf) {
+            return _UserCommentCard(
+              item: comment,
+              authorNickname: authorName,
+              authorLevel: isLocked ? 0 : level,
+              onTap: () {
+                final openById = widget.onOpenPostById;
+                final commentId = comment.commentId;
+
+                if (openById != null && commentId != null) {
+                  openById(
+                    comment.id,
+                    focusCommentId: commentId,
+                  );
+                  return;
+                }
+
+                widget.onOpenPostId(comment.id);
+              },
+            );
+          }
+
+          // 看别人：只显示评论过的帖子
+          return _CommentedPostCard(
             item: comment,
-            authorNickname: authorName,
-            authorLevel: isLocked ? 0 : level,
             onTap: () => widget.onOpenPostId(comment.id),
           );
         },
@@ -1601,6 +1646,81 @@ class _UserCommentCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11, color: Color(0xFF708294)),
             ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _CommentedPostCard extends StatelessWidget {
+  const _CommentedPostCard({
+    required this.item,
+    required this.onTap,
+  });
+
+  final ProfilePostItem item;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '💬 评论于 ${item.communityName} · ${relativeTimeLabel(item.activityAt ?? item.publishedAt)}',
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            item.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+              height: 1.35,
+            ),
+          ),
+          if (item.postContentPreview.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              item.postContentPreview,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF45505A),
+                height: 1.55,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _MetricItem(
+                icon: Icons.visibility_outlined,
+                label: '${item.viewCount}',
+              ),
+              const SizedBox(width: 17),
+              _MetricItem(
+                icon: Icons.favorite_border_rounded,
+                label: '${item.likeCount}',
+              ),
+              const SizedBox(width: 17),
+              _MetricItem(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: '${item.commentCount}',
+              ),
+            ],
           ),
         ],
       ),

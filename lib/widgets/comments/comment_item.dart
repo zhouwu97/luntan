@@ -23,6 +23,7 @@ class CommentItem extends StatefulWidget {
     this.onMore,
     this.onViewAllReplies,
     this.onAuthorTap,
+    this.onLongPress,
   });
 
   final Comment comment;
@@ -37,6 +38,7 @@ class CommentItem extends StatefulWidget {
   final VoidCallback? onMore;
   final VoidCallback? onViewAllReplies;
   final ValueChanged<String>? onAuthorTap;
+  final VoidCallback? onLongPress;
 
   @override
   State<CommentItem> createState() => _CommentItemState();
@@ -142,13 +144,16 @@ class _CommentItemState extends State<CommentItem>
     return AnimatedBuilder(
       animation: _highlightAnimation,
       builder: (context, child) {
-        return Container(
-          decoration: BoxDecoration(
-            color: _highlightAnimation.value ?? Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+        return GestureDetector(
+          onLongPress: widget.onLongPress,
+          child: Container(
+            decoration: BoxDecoration(
+              color: _highlightAnimation.value ?? Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            child: child,
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          child: child,
         );
       },
       child: Column(

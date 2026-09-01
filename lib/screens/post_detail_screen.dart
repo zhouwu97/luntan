@@ -773,6 +773,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 onLike: () => _likeComment(comment),
                                 onDislike: () => _dislikeComment(comment),
                                 onMore: () => _showCommentMenu(comment),
+                                onLongPress: () => _showCommentMenu(comment),
                                 onViewAllReplies: () =>
                                     _openReplyThread(comment),
                               ),
@@ -939,11 +940,19 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final canDelete =
         post.viewerState.canDelete || canEdit || widget.canModerate;
 
+    // 在 BottomSheet Route 创建前取得真实系统导航栏高度
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       backgroundColor: Colors.white,
-      builder: (sheetContext) => SafeArea(
+      useSafeArea: true,
+      builder: (sheetContext) => Padding(
+        // 底部必须自己处理
+        padding: EdgeInsets.only(
+          bottom: bottomInset + 8,
+        ),
         child: Wrap(
           children: [
             ListTile(
@@ -1175,13 +1184,31 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final canEdit =
         widget.currentUserId != null &&
         comment.authorId == widget.currentUserId;
+    final canDelete = canEdit || widget.canModerate;
+
+    // 在 BottomSheet Route 创建前取得真实系统导航栏高度
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       backgroundColor: Colors.white,
-      builder: (sheetContext) => SafeArea(
+      useSafeArea: true,
+      builder: (sheetContext) => Padding(
+        // 底部必须自己处理
+        padding: EdgeInsets.only(
+          bottom: bottomInset + 8,
+        ),
         child: Wrap(
           children: [
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('复制内容'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _copyCommentContent(comment);
+              },
+            ),
             if (widget.onReport != null)
               ListTile(
                 leading: const Icon(
@@ -1203,7 +1230,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   _editComment(comment);
                 },
               ),
-            if (canEdit)
+            if (canDelete)
               ListTile(
                 leading: const Icon(Icons.delete_outline),
                 title: const Text('删除评论'),
@@ -1237,6 +1264,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         widget.onFeedback(userFacingApiMessage(error, fallback: '举报失败，请稍后重试'));
       }
     }
+  }
+
+  void _copyCommentContent(Comment comment) {
+    if (comment.content.isEmpty) {
+      widget.onFeedback('评论内容为空');
+      return;
+    }
+    Clipboard.setData(ClipboardData(text: comment.content));
+    widget.onFeedback('已复制到剪贴板');
   }
 
   Future<void> _editComment(Comment comment) async {

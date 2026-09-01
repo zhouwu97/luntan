@@ -215,7 +215,7 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 		return
 	}
 	if kind == "comments" {
-		s.profileCommentList(w, r, user.ID, limit)
+		s.profileCommentList(w, r, user.ID, limit, true)
 		return
 	}
 	// 帖子类个人列表按发布时间；history 使用 viewed_at。
@@ -268,8 +268,9 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 }
 
 // profileCommentList 返回当前认证用户发表的评论列表，一条评论对应一条列表项。
-func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, userID string, limit int) {
-	query, args, err := profileCommentListQuery(userID, r.URL.Query().Get("cursor"), limit)
+// includeCommentContent 为 true 时返回评论正文（本人查看），为 false 时只返回帖子信息（公开接口）。
+func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, userID string, limit int, includeCommentContent bool) {
+	query, args, err := profileCommentListQuery(userID, r.URL.Query().Get("cursor"), limit, includeCommentContent)
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 		return
@@ -282,20 +283,34 @@ func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, user
 	defer rows.Close()
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
-		var commentID, postID, title, content, communityID, communityName string
+		var commentID, postID, title, postContent, communityID, communityName string
 		var publishedAt, activityAt time.Time
-		var commentCount, likeCount, bookmarkCount int64
-		if err := rows.Scan(&commentID, &postID, &title, &content, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &publishedAt, &activityAt); err != nil {
-			writeInternalError(w, r, err)
-			return
+		var commentCount, likeCount, bookmarkCount, viewCount int64
+		var commentContent *string
+		if includeCommentContent {
+			if err := rows.Scan(&commentID, &postID, &title, &commentContent, &postContent, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &publishedAt, &activityAt); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		} else {
+			if err := rows.Scan(&commentID, &postID, &title, &postContent, &communityID, &communityName, &commentCount, &likeCount, &bookmarkCount, &viewCount, &publishedAt, &activityAt); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
-		items = append(items, map[string]any{
-			"id": postID, "comment_id": commentID, "title": title, "content_preview": content,
-			"community_id": communityID, "community_name": communityName,
+		item := map[string]any{
+			"id": postID, "comment_id": commentID, "title": title,
+			"post_content_preview": postContent,
+			"community_id":         communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
-			"bookmark_count": bookmarkCount, "published_at": publishedAt,
-			"activity_at": activityAt,
-		})
+			"bookmark_count": bookmarkCount, "view_count": viewCount,
+			"published_at": publishedAt, "activity_at": activityAt,
+		}
+		// 只有本人查看时才返回评论正文
+		if includeCommentContent && commentContent != nil {
+			item["content_preview"] = *commentContent
+		}
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)
@@ -313,7 +328,7 @@ func (s *Server) profileCommentList(w http.ResponseWriter, r *http.Request, user
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
-func profileCommentListQuery(userID, rawCursor string, limit int) (string, []any, error) {
+func profileCommentListQuery(userID, rawCursor string, limit int, includeCommentContent bool) (string, []any, error) {
 	args := []any{userID}
 	where := `c.author_id = $1 AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND c.deleted_at IS NULL
 		AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.type <> 'market'`
@@ -326,16 +341,23 @@ func profileCommentListQuery(userID, rawCursor string, limit int) (string, []any
 		args = append(args, createdAt, id)
 	}
 	args = append(args, limit+1)
+
+	// 根据是否包含评论内容选择不同的 SELECT 字段
+	var selectFields string
+	if includeCommentContent {
+		selectFields = "c.id, p.id, p.title, LEFT(c.content, 200), LEFT(p.content, 200), p.community_id, cm.name, p.comment_count, p.like_count, p.bookmark_count, p.view_count, COALESCE(p.published_at, p.created_at), c.created_at"
+	} else {
+		selectFields = "c.id, p.id, p.title, LEFT(p.content, 200), p.community_id, cm.name, p.comment_count, p.like_count, p.bookmark_count, p.view_count, COALESCE(p.published_at, p.created_at), c.created_at"
+	}
+
 	return fmt.Sprintf(`
-		SELECT c.id, p.id, p.title, LEFT(c.content, 200), p.community_id, cm.name,
-		       p.comment_count, p.like_count, p.bookmark_count,
-		       COALESCE(p.published_at, p.created_at), c.created_at
+		SELECT %s
 		FROM comments c
 		JOIN posts p ON p.id = c.post_id
 		JOIN communities cm ON cm.id = p.community_id
 		WHERE %s
 		ORDER BY c.created_at DESC, c.id DESC
-		LIMIT $%d`, where, len(args)), args, nil
+		LIMIT $%d`, selectFields, where, len(args)), args, nil
 }
 
 func profileListQuery(kind, userID, rawCursor string, limit int) (string, []any, error) {
@@ -450,7 +472,7 @@ func (s *Server) profileDetailedList(w http.ResponseWriter, r *http.Request, use
 }
 
 func (s *Server) profileDetailedCommentList(w http.ResponseWriter, r *http.Request, userID string, limit int) {
-	query, args, err := profileDetailedCommentListQuery(userID, r.URL.Query().Get("cursor"), limit)
+	query, args, err := profileDetailedCommentListQuery(userID, r.URL.Query().Get("cursor"), limit, true)
 	if err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 		return
@@ -467,12 +489,14 @@ func (s *Server) profileDetailedCommentList(w http.ResponseWriter, r *http.Reque
 	for rows.Next() {
 		var row postResponse
 		var publishedAt, activityAt time.Time
+		var commentContent string
+		var commentID string
 		if err := rows.Scan(
 			&row.ID, &row.Author.ID, &row.Author.Username, &row.Author.Nickname, &row.Author.Level,
 			&row.Community.ID, &row.Community.Slug, &row.Community.Name,
 			&row.Type, &row.Title, &row.Content, &row.CommentCount, &row.LikeCount,
 			&row.BookmarkCount, &row.ShareCount, &row.ViewCount, &row.CreatedAt,
-			&row.UpdatedAt, &publishedAt, &activityAt,
+			&row.UpdatedAt, &publishedAt, &activityAt, &commentID, &commentContent,
 		); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -484,7 +508,11 @@ func (s *Server) profileDetailedCommentList(w http.ResponseWriter, r *http.Reque
 			writeInternalError(w, r, err)
 			return
 		}
-		items = append(items, profilePostItemMap(row, &activityAt))
+		item := profilePostItemMap(row, &activityAt)
+		item["comment_id"] = commentID
+		item["content_preview"] = commentContent
+		item["post_content_preview"] = row.Content
+		items = append(items, item)
 		activityTimes = append(activityTimes, activityAt)
 	}
 	if err := rows.Err(); err != nil {
@@ -549,12 +577,12 @@ func profileDetailedListQuery(kind, userID, rawCursor string, limit int, include
 		WHERE %s ORDER BY %s DESC, p.id DESC LIMIT $%d`, timestampColumn, join, where, timestampColumn, limitPosition), args, nil
 }
 
-func profileDetailedCommentListQuery(userID, rawCursor string, limit int) (string, []any, error) {
+func profileDetailedCommentListQuery(userID, rawCursor string, limit int, includeCommentContent bool) (string, []any, error) {
 	args := []any{userID}
-	where := `p.author_id = $1 AND p.publication_status = 'published' AND p.moderation_status = 'normal'
-		AND p.deleted_at IS NULL AND p.type <> 'market'
-		AND c.publication_status = 'published' AND c.moderation_status = 'normal'
-		AND c.deleted_at IS NULL AND c.author_id <> p.author_id`
+	where := `c.author_id = $1 AND c.publication_status = 'published' AND c.moderation_status = 'normal'
+		AND c.deleted_at IS NULL
+		AND p.publication_status = 'published' AND p.moderation_status = 'normal'
+		AND p.deleted_at IS NULL AND p.type <> 'market'`
 	having := ""
 	if rawCursor != "" {
 		createdAt, id, err := decodeProfileCursor(rawCursor)
@@ -565,15 +593,23 @@ func profileDetailedCommentListQuery(userID, rawCursor string, limit int) (strin
 		args = append(args, createdAt, id)
 	}
 	args = append(args, limit+1)
+
+	selectFields := `p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
+	       p.community_id, cm.slug, cm.name, p.type, p.title, p.content,
+	       p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
+	       p.created_at, p.updated_at, COALESCE(p.published_at, p.created_at), MAX(c.created_at) AS latest_comment_at`
+
+	if includeCommentContent {
+		selectFields += `, (SELECT c2.id FROM comments c2 WHERE c2.post_id = p.id AND c2.author_id = $1 AND c2.deleted_at IS NULL ORDER BY c2.created_at DESC LIMIT 1) AS comment_id,
+		(SELECT LEFT(c2.content, 200) FROM comments c2 WHERE c2.post_id = p.id AND c2.author_id = $1 AND c2.deleted_at IS NULL ORDER BY c2.created_at DESC LIMIT 1) AS comment_content`
+	}
+
 	return fmt.Sprintf(`
-		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), COALESCE(up.level, 1),
-		       p.community_id, cm.slug, cm.name, p.type, p.title, p.content,
-		       p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
-		       p.created_at, p.updated_at, COALESCE(p.published_at, p.created_at), MAX(c.created_at) AS latest_comment_at
-		FROM posts p
+		SELECT %s
+		FROM comments c
+		JOIN posts p ON p.id = c.post_id
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
-		JOIN comments c ON c.post_id = p.id
 		JOIN communities cm ON cm.id = p.community_id
 		WHERE %s
 		GROUP BY p.id, p.author_id, u.username, up.nickname, up.level, p.community_id,
@@ -582,7 +618,7 @@ func profileDetailedCommentListQuery(userID, rawCursor string, limit int) (strin
 		         p.created_at, p.updated_at, p.published_at
 		%s
 		ORDER BY latest_comment_at DESC, p.id DESC
-		LIMIT $%d`, where, having, len(args)), args, nil
+		LIMIT $%d`, selectFields, where, having, len(args)), args, nil
 }
 
 func profilePostItemMap(row postResponse, activityAt *time.Time) map[string]any {

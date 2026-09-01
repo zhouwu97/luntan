@@ -31,6 +31,9 @@
    QA 使用本地磁盘时，`MEDIA_STORAGE_DIR` 通常指向 `.../imported-media/user-media`。
    历史 `object_key` 若是 `http(s)://旧域名/imported-media/...`，服务会仅按固定
    `imported-media/` 前缀映射到其父目录；该父目录必须允许 Worker 用户写入生成的变体。
+   这类历史键不走指向 `user-media` 的 `X-Accel-Redirect`，而由存储适配器读取，
+   避免把完整旧 URL 拼入内部路径；网关同时兼容早期 `media-...` 与当前
+   `media_...` 两种媒体 ID。
 3. `STORAGE_INTERNAL_BASE_URL` 只解析到服务端可访问的内网源站，不向浏览器、客户端或公网 DNS 暴露。
 4. 若设置 `MEDIA_INTERNAL_ACCEL_PREFIX`，Nginx 的对应 location 必须带 `internal`；公网只能进入 `/api/v1/media-file/`，不能直接进入该前缀。
 5. 修改 ACL 后清理 CDN 与浏览器缓存，并用匿名请求分别验证源图、旧 object key、普通变体和 `censored_*` 变体。

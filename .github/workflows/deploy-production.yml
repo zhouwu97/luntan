@@ -1,0 +1,84 @@
+name: deploy-production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact audited commit SHA to deploy
+        required: true
+        type: string
+      confirm_production:
+        description: Confirm this is an approved production deployment
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  validate:
+    name: Validate release artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact release SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Validate release SHA and confirmation
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          PRODUCTION_CONFIRMED: ${{ inputs.confirm_production }}
+        run: |
+          set -eu
+          test "$PRODUCTION_CONFIRMED" = "true"
+          printf '%s\n' "$RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Verify immutable release image exists
+        env:
+          IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
+        run: |
+          set -eu
+          case "$IMAGE_TAG" in
+            *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
+          esac
+          docker manifest inspect "$IMAGE_TAG" > /dev/null
+
+  deploy:
+    name: Deploy production
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout exact release SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 1
+
+      - name: Run approved production rollout
+        env:
+          PRODUCTION_DEPLOY_COMMAND: ${{ secrets.PRODUCTION_DEPLOY_COMMAND }}
+          IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -eu
+          test -n "$PRODUCTION_DEPLOY_COMMAND"
+          test -n "$IMAGE_TAG"
+          test -n "$RELEASE_SHA"
+          case "$IMAGE_TAG" in
+            *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
+          esac
+          export IMAGE_TAG RELEASE_SHA
+          sh -c "$PRODUCTION_DEPLOY_COMMAND"

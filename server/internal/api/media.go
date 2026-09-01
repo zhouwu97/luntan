@@ -14,6 +14,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -420,15 +421,16 @@ const mediaPublicVisibilityExpr = `EXISTS (
 		)`
 
 // parseGatewayMediaPath 解析 /api/v1/media-file/{mediaID}/{variant} 受控网关
-// 形态。客户端永远不需要知道内部 object key；首段必须是 media_ 前缀的媒体
-// ID，避免与 media/{userID}/{mediaID} 形态的历史 objectKey 混淆。
+// 形态。客户端永远不需要知道内部 object key；首段必须是受控的 media_ 或
+// media- 前缀媒体 ID，避免与 media/{userID}/{mediaID} 形态的历史 objectKey
+// 混淆，同时兼容早期导入数据使用的连字符 ID。
 func parseGatewayMediaPath(rest string) (mediaID, variant string, ok bool) {
 	segments := strings.Split(rest, "/")
 	if len(segments) != 2 {
 		return "", "", false
 	}
 	id, name := segments[0], segments[1]
-	if !strings.HasPrefix(id, "media_") || len(id) <= len("media_") {
+	if !isGatewayMediaID(id) {
 		return "", "", false
 	}
 	if !knownGatewayVariants[name] {
@@ -445,7 +447,12 @@ func isGatewayShapedPath(rest string) bool {
 		return false
 	}
 	id := segments[0]
-	return strings.HasPrefix(id, "media_") && len(id) > len("media_")
+	return isGatewayMediaID(id)
+}
+
+func isGatewayMediaID(id string) bool {
+	return (strings.HasPrefix(id, "media_") && len(id) > len("media_")) ||
+		(strings.HasPrefix(id, "media-") && len(id) > len("media-"))
 }
 
 // publicVariantAllowed 实现公开变体白名单：censored 媒体只放行 censored_*
@@ -719,10 +726,16 @@ func (s *Server) serveMediaFileDirect(w http.ResponseWriter, r *http.Request, ba
 // 由 http.ServeContent 额外提供 Range 与条件请求支持。
 func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey, cacheControl string) {
 	if s.mediaDeliveryMode == "gateway" && s.mediaAccelPrefix != "" {
-		w.Header().Set("Cache-Control", cacheControl)
-		w.Header().Set("X-Accel-Redirect", s.mediaAccelPrefix+"/"+objectKey)
-		w.WriteHeader(http.StatusOK)
-		return
+		// 历史导入媒体的 object_key 可能是完整的 imported-media URL；
+		// 当前内部 Nginx location 指向 user-media，不能把该 URL 原样
+		// 拼进 X-Accel-Redirect，否则会得到不存在的嵌套路径。此类键
+		// 回退到存储适配器，由其按受控规则归一化路径后读取。
+		if accelKey, ok := mediaAccelObjectKey(objectKey); ok {
+			w.Header().Set("Cache-Control", cacheControl)
+			w.Header().Set("X-Accel-Redirect", s.mediaAccelPrefix+"/"+accelKey)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 	}
 	rc, size, contentType, err := backend.Get(r.Context(), objectKey)
 	if err != nil {
@@ -750,6 +763,20 @@ func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	_, _ = io.Copy(w, rc)
+}
+
+// mediaAccelObjectKey 只允许内部加速 location 接收 media/ 相对键。
+// imported-media 历史键的文件位于 user-media 父目录，交给存储适配器
+// 处理；未知绝对 URL 也不能进入 Nginx 内部重定向。
+func mediaAccelObjectKey(objectKey string) (string, bool) {
+	key := strings.TrimLeft(strings.TrimSpace(objectKey), "/")
+	if parsed, err := url.Parse(key); err == nil && parsed.IsAbs() && parsed.Host != "" {
+		key = strings.TrimLeft(parsed.Path, "/")
+	}
+	if !strings.HasPrefix(key, "media/") || strings.Contains(key, "\\") || strings.Contains(key, "..") {
+		return "", false
+	}
+	return key, true
 }
 
 func (s *Server) getAdminMediaSource(w http.ResponseWriter, r *http.Request, mediaID string) {

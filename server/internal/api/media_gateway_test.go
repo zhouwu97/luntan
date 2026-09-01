@@ -342,6 +342,30 @@ func TestGatewayAccelRedirectSkipsStorage(t *testing.T) {
 	}
 }
 
+func TestGatewayAccelRedirectFallsBackForHistoricalImportedURL(t *testing.T) {
+	s, mock, store := newGatewayTestServer(t, "gateway")
+	s.mediaAccelPrefix = "/_protected_media"
+	key := "http://43.161.249.91/imported-media/legacy_thumb.jpg"
+	if err := store.Put(context.Background(), key, "image/jpeg", bytes.NewReader([]byte("legacy")), 6); err != nil {
+		t.Fatal(err)
+	}
+	expectGatewayVariantRow(mock, "media-import-7715-0", "thumb", "image/jpeg", "normal", key)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media-import-7715-0/thumb", nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, "media-import-7715-0/thumb")
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "legacy" {
+		t.Fatalf("legacy preview response: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Accel-Redirect"); got != "" {
+		t.Fatalf("legacy imported URL must not use X-Accel-Redirect, got %q", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMediaFileRangeRequest(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -453,6 +477,7 @@ func TestParseGatewayMediaPath(t *testing.T) {
 	}{
 		{"media_abc123/detail", "media_abc123", "detail", true},
 		{"media_abc123/censored_thumb", "media_abc123", "censored_thumb", true},
+		{"media-import-7715-0/thumb", "media-import-7715-0", "thumb", true},
 		{"media_abc123/evil", "", "", false},
 		{"media/user-1/media-1", "", "", false},
 		{"imported-media/post.webp", "", "", false},

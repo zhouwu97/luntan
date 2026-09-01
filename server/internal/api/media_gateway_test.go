@@ -71,8 +71,8 @@ func TestGatewayMediaVariantServesPublicVariantOfPublishedPost(t *testing.T) {
 	if !bytes.Equal(rec.Body.Bytes(), payload) {
 		t.Fatalf("body mismatch: %q", rec.Body.String())
 	}
-	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
-		t.Fatalf("Cache-Control = %q, want private, no-store for normal variants", got)
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=0, must-revalidate" {
+		t.Fatalf("Cache-Control = %q, want revalidation policy for normal variants", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet SQL expectations: %v", err)
@@ -529,7 +529,7 @@ func TestMediaCacheControlPolicy(t *testing.T) {
 	if got := mediaCacheControl("censored", "censored_thumb"); got != "public, max-age=31536000, immutable" {
 		t.Fatalf("censored variant cache = %q", got)
 	}
-	if got := mediaCacheControl("normal", "thumb"); got != "private, no-store" {
+	if got := mediaCacheControl("normal", "thumb"); got != "private, max-age=0, must-revalidate" {
 		t.Fatalf("normal variant cache = %q", got)
 	}
 	if !strings.HasPrefix(mediaCacheControl("normal", "source"), "private") {

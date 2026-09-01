@@ -419,9 +419,9 @@ class MediaAsset {
 
   bool get isCensored => moderationStatus == 'censored';
 
-  /// Feed/正文预览图地址：优先 detail (<=1440px)，退回 original 或裸 url，最后才是 thumb。
-  /// 避免 Feed 中大图或单图直接拉伸低清 thumb 导致模糊。
-  String? get previewUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;
+  /// Feed/正文预览图地址：优先缩略图，缺失时退回 detail/original。
+  /// 历史媒体可能没有 thumb，因此保留受控的大图回退。
+  String? get previewUrl => thumb?.url ?? detail?.url ?? original?.url ?? url;
 
   /// 详情大图地址：优先 detail，退回 original 或裸 url，最后才是 thumb。
   String? get detailUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;

@@ -237,6 +237,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unreadCount.dispose();
     authController?.dispose();
     interactionController.dispose();
     publishController.dispose();

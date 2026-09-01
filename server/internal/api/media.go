@@ -514,7 +514,14 @@ func mediaCacheControl(moderationStatus, variant string) string {
 	if moderationStatus == "censored" && strings.HasPrefix(variant, "censored_") {
 		return "public, max-age=31536000, immutable"
 	}
-	return "private, no-store"
+	// 普通媒体可能在审核后变为 censored，不能长期缓存未打码内容；
+	// 但允许浏览器带 ETag 重新验证，避免返回页面时重复传输图片正文。
+	return "private, max-age=0, must-revalidate"
+}
+
+func mediaETag(objectKey string, size int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", objectKey, size)))
+	return `"` + hex.EncodeToString(sum[:]) + `"`
 }
 
 // serveMediaFile 处理 GET/HEAD /api/v1/media-file/... 的媒体下载。
@@ -768,6 +775,7 @@ func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Reque
 		// 回退到存储适配器，由其按受控规则归一化路径后读取。
 		if accelKey, ok := mediaAccelObjectKey(objectKey); ok {
 			w.Header().Set("Cache-Control", cacheControl)
+			w.Header().Set("ETag", mediaETag(objectKey, 0))
 			w.Header().Set("X-Accel-Redirect", s.mediaAccelPrefix+"/"+accelKey)
 			w.WriteHeader(http.StatusOK)
 			return
@@ -787,6 +795,12 @@ func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Reque
 	}
 	defer rc.Close()
 	w.Header().Set("Cache-Control", cacheControl)
+	etag := mediaETag(objectKey, size)
+	w.Header().Set("ETag", etag)
+	if strings.Contains(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}

@@ -17,17 +17,10 @@ Future<void> showCommentActionMenu(
   final isAuthor = currentUserId != null && comment.authorId == currentUserId;
   final canEdit = isAuthor && onEdit != null;
   final canDelete = (isAuthor || canModerate) && onDelete != null;
-  final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
 
-  return showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    backgroundColor: Colors.white,
-    useSafeArea: true,
-    builder: (sheetContext) => Padding(
-      padding: EdgeInsets.only(bottom: bottomInset + 8),
-      child: Wrap(
-        children: [
+  return _showCommentActionSheet(
+    context,
+    (sheetContext) => [
           ListTile(
             leading: const Icon(Icons.copy_outlined),
             title: const Text('复制内容'),
@@ -63,8 +56,43 @@ Future<void> showCommentActionMenu(
                 onDelete();
               },
             ),
-        ],
+    ],
+  );
+}
+
+/// 榜单评价目前只有复制操作，但必须和普通评论共用同一套安全区处理。
+Future<void> showCommentCopyMenu(
+  BuildContext context, {
+  required VoidCallback onCopied,
+}) {
+  return _showCommentActionSheet(
+    context,
+    (sheetContext) => [
+      ListTile(
+        leading: const Icon(Icons.copy_outlined),
+        title: const Text('复制内容'),
+        onTap: () {
+          Navigator.pop(sheetContext);
+          onCopied();
+        },
       ),
+    ],
+  );
+}
+
+Future<void> _showCommentActionSheet(
+  BuildContext context,
+  List<Widget> Function(BuildContext sheetContext) builder,
+) {
+  final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+  return showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    backgroundColor: Colors.white,
+    useSafeArea: true,
+    builder: (sheetContext) => Padding(
+      padding: EdgeInsets.only(bottom: bottomInset + 8),
+      child: Wrap(children: builder(sheetContext)),
     ),
   );
 }

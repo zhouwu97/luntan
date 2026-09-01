@@ -17,7 +17,8 @@ class CommentPage {
   final int total;
 }
 
-/// 评论楼层排序；服务端默认 asc（按楼层正序）。
+/// 评论楼层排序：desc 为新发布楼层优先，asc 为早发布楼层优先。
+/// 详情页的“顺序/倒序”按钮会分别映射到 desc/asc。
 enum CommentSort { hot, asc, desc }
 
 abstract interface class CommentRepository {

@@ -1,9 +1,7 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$VersionName,
 
-    [Parameter(Mandatory = $true)]
-    [long]$VersionCode,
+    [long]$VersionCode = 0,
 
     # 传入 -Publish 时以下四项必填，转发给 prepare_app_release.ps1。
     [string]$OutputDirectory,
@@ -20,17 +18,6 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-
-if ($Publish) {
-    if ([string]::IsNullOrWhiteSpace($OutputDirectory) -or
-        [string]::IsNullOrWhiteSpace($Title) -or
-        [string]::IsNullOrWhiteSpace($Changelog)) {
-        throw '-Publish 需要 -OutputDirectory、-Title、-Changelog、-MinimumSupportedVersionCode'
-    }
-    if ($MinimumSupportedVersionCode -le 0 -or $MinimumSupportedVersionCode -gt $VersionCode) {
-        throw 'MinimumSupportedVersionCode 必须为正整数且不能大于 VersionCode'
-    }
-}
 
 $normalizedAppEnvironment = $AppEnvironment.Trim().ToLowerInvariant()
 if ($normalizedAppEnvironment -notin @('production', 'qa', 'staging')) {
@@ -66,6 +53,39 @@ Assert-HttpUrl -Value $ApiBaseUrl -Name 'ApiBaseUrl' -RequireHttps:($normalizedA
 Assert-HttpUrl -Value $WebBaseUrl -Name 'WebBaseUrl'
 
 Set-Location -LiteralPath (Join-Path $PSScriptRoot '..')
+
+# 版本以 pubspec.yaml 为唯一来源；命令行参数仅作为兼容入口，并且必须匹配，
+# 避免 APK、PackageInfo 与 release.json 生成出三套版本事实。
+$pubspecPath = Join-Path (Get-Location) 'pubspec.yaml'
+$pubspecVersionLine = Get-Content -LiteralPath $pubspecPath |
+    Where-Object { $_ -match '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$' } |
+    Select-Object -First 1
+if ($null -eq $pubspecVersionLine -or $pubspecVersionLine -notmatch '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$') {
+    throw 'pubspec.yaml 必须包含合法的 version: name+code'
+}
+$pubspecVersionName = $Matches['name']
+$pubspecVersionCode = [long]$Matches['code']
+if ([string]::IsNullOrWhiteSpace($VersionName)) {
+    $VersionName = $pubspecVersionName
+} elseif ($VersionName.Trim() -ne $pubspecVersionName) {
+    throw "VersionName 必须与 pubspec.yaml ($pubspecVersionName) 一致"
+}
+if ($VersionCode -eq 0) {
+    $VersionCode = $pubspecVersionCode
+} elseif ($VersionCode -ne $pubspecVersionCode) {
+    throw "VersionCode 必须与 pubspec.yaml ($pubspecVersionCode) 一致"
+}
+
+if ($Publish) {
+    if ([string]::IsNullOrWhiteSpace($OutputDirectory) -or
+        [string]::IsNullOrWhiteSpace($Title) -or
+        [string]::IsNullOrWhiteSpace($Changelog)) {
+        throw '-Publish 需要 -OutputDirectory、-Title、-Changelog、-MinimumSupportedVersionCode'
+    }
+    if ($MinimumSupportedVersionCode -le 0 -or $MinimumSupportedVersionCode -gt $VersionCode) {
+        throw 'MinimumSupportedVersionCode 必须为正整数且不能大于 VersionCode'
+    }
+}
 
 if (-not (Get-Command 'flutter' -ErrorAction SilentlyContinue)) {
     throw '未找到命令：flutter'

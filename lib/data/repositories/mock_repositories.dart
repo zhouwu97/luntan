@@ -644,7 +644,7 @@ class MockCommentRepository
         ),
       );
     }
-    switch (sort ?? CommentSort.asc) {
+    switch (sort ?? CommentSort.desc) {
       case CommentSort.hot:
         floors.sort((a, b) {
           final byLikes = b.likeCount.compareTo(a.likeCount);

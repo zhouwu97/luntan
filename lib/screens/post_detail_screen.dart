@@ -275,6 +275,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
       hasFocusedComments = true;
       final rootCommentId = target.rootId ?? target.parentId ?? target.id;
+      final targetIndex = allComments.indexWhere(
+        (comment) => comment.id == rootCommentId,
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final context = GlobalObjectKey(
           'comment:$rootCommentId',
@@ -285,6 +288,25 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             duration: AppMotion.normal,
             alignment: 0.1,
           );
+        } else if (mounted &&
+            targetIndex >= 0 &&
+            commentsScrollController.hasClients) {
+          // 倒序时较早的评论可能尚未被 SliverList 构建，先滚到估算位置，
+          // 再由下一帧的 GlobalObjectKey 完成精确定位。
+          final position = commentsScrollController.position;
+          final estimatedOffset = (targetIndex * 180.0).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          );
+          commentsScrollController
+              .animateTo(
+                estimatedOffset,
+                duration: AppMotion.normal,
+                curve: AppMotion.standard,
+              )
+              .then((_) {
+                _ensureFocusedCommentVisible(rootCommentId);
+              });
         }
         if (isNested) {
           _threadOpenTimer?.cancel();
@@ -314,6 +336,19 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         }
       });
     }
+  }
+
+  void _ensureFocusedCommentVisible(String commentId) {
+    if (!mounted) return;
+    final targetContext = GlobalObjectKey(
+      'comment:$commentId',
+    ).currentContext;
+    if (targetContext == null) return;
+    Scrollable.ensureVisible(
+      targetContext,
+      duration: AppMotion.normal,
+      alignment: 0.1,
+    );
   }
 
   void _openReplyThread(Comment comment, {String? focusReplyId}) {
@@ -639,9 +674,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         label: '顺序',
                                         selected:
                                             commentsController.sort ==
-                                            CommentSort.asc,
+                                            CommentSort.desc,
                                         onTap: () => commentsController.setSort(
-                                          CommentSort.asc,
+                                          CommentSort.desc,
                                         ),
                                       ),
                                       const SizedBox(width: 6),
@@ -649,9 +684,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         label: '倒序',
                                         selected:
                                             commentsController.sort ==
-                                            CommentSort.desc,
+                                            CommentSort.asc,
                                         onTap: () => commentsController.setSort(
-                                          CommentSort.desc,
+                                          CommentSort.asc,
                                         ),
                                       ),
                                       const Spacer(),

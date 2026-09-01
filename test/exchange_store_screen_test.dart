@@ -29,7 +29,7 @@ void main() {
     expect(find.text('200元杯子盲盒（可许愿）'), findsOneWidget);
     expect(find.text('60 积分'), findsOneWidget);
     expect(find.text('300 积分'), findsOneWidget);
-    expect(find.text('600 积分'), findsOneWidget);
+    expect(find.text('1000 积分'), findsOneWidget);
     // 规则行是 Text.rich（金色加成数字），按纯文本整体匹配。
     expect(
       find.byWidgetPredicate(

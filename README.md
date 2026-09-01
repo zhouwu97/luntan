@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-正式客户端默认连接自己的 Go API（默认地址为 `https://shengbeijiang.com`），首页默认请求最新帖子并按发帖时间排序；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建推荐显式设置 `APP_ENV=production` 和 HTTPS API 地址；即使构建入口漏传，release 客户端也只会回退到该官方 HTTPS 地址，不会退回 Mock。服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
+正式客户端默认连接自己的 Go API（默认地址为 `https://shengbeijiang.com`），首页默认请求最新帖子并按最近回复时间倒序展示；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建推荐显式设置 `APP_ENV=production` 和 HTTPS API 地址；即使构建入口漏传，release 客户端也只会回退到该官方 HTTPS 地址，不会退回 Mock。服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
 
 已覆盖的主要功能：
 
@@ -244,14 +244,10 @@ flutter build web --release --base-href=/forum/ \
 推荐使用仓库脚本构建。脚本默认按 production 构建，并自动注入正式 API、Web 地址以及 Android 自适应图标；构建 QA 包时显式覆盖环境和地址：
 
 ```powershell
-.\scripts\build_android_release.ps1 `
-  -VersionName 0.01 `
-  -VersionCode 1
+.\scripts\build_android_release.ps1
 
 # QA 示例
 .\scripts\build_android_release.ps1 `
-  -VersionName 0.01 `
-  -VersionCode 1 `
   -AppEnvironment qa `
   -ApiBaseUrl https://shengbeijiang.com `
   -WebBaseUrl https://shengbeijiang.com
@@ -261,18 +257,11 @@ flutter build web --release --base-href=/forum/ \
 应用虽会回退到官方 HTTPS API，但不会执行脚本提供的版本、ARM64 和发布前检查。
 
 ```powershell
-flutter build apk --release --build-name 0.01 --build-number 1 `
-  --dart-define=APP_ENV=production `
-  --dart-define=API_BASE_URL=https://shengbeijiang.com `
-  --dart-define=WEB_BASE_URL=https://shengbeijiang.com
-
 .\scripts\prepare_app_release.ps1 `
   -ApkPath .\build\app\outputs\flutter-apk\app-release.apk `
   -OutputDirectory .\artifacts\app-release `
-  -VersionName 0.01 `
-  -VersionCode 1 `
   -MinimumSupportedVersionCode 1 `
-  -Title '圣杯酱 0.01' `
+  -Title '圣杯酱 功能更新' `
   -Changelog '优化检查更新与安装体验。'
 ```
 

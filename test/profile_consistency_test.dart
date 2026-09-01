@@ -512,8 +512,8 @@ void main() {
       // 点击他人主页评论 Tab 可查看评论 Feed
       await tester.tap(find.text('评论 2'));
       await tester.pumpAndSettle();
-      expect(find.text('这条评论的正文预览'), findsOneWidget);
-      expect(find.text('回复帖子：真实开箱体验分享'), findsOneWidget);
+      expect(find.text('这条评论的正文预览'), findsNothing);
+      expect(find.text('真实开箱体验分享'), findsOneWidget);
 
       // 本人主页同样保留双 Tab
       await tester.pumpWidget(

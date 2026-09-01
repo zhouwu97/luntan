@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -21,6 +21,21 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - name: Read application version from pubspec
+        id: app_version
+        shell: bash
+        run: |
+          set -eu
+          version="$(sed -nE 's/^version:[[:space:]]*([^[:space:]]+)$/\1/p' pubspec.yaml | head -n 1)"
+          case "$version" in
+            +*|*+|*+*+*|'') echo "pubspec.yaml version must be name+code" >&2; exit 1 ;;
+          esac
+          version_name="${version%%+*}"
+          version_code="${version##*+}"
+          printf '%s\n' "$version_name" | grep -Eq '^[0-9A-Za-z._-]+$'
+          printf '%s\n' "$version_code" | grep -Eq '^[1-9][0-9]*$'
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
       # CI 只生成临时签名用于验证 release 构建，不得把该密钥用于正式发行。
       - name: Generate CI-only Android signing key
         env:
@@ -45,7 +60,9 @@ jobs:
           --dart-define=API_BASE_URL=https://shengbeijiang.com
           --dart-define=WEB_BASE_URL=https://shengbeijiang.com
       - run: >-
-          flutter build apk --release --build-name 0.01 --build-number 1
+          flutter build apk --release
+          --build-name "${{ steps.app_version.outputs.version_name }}"
+          --build-number "${{ steps.app_version.outputs.version_code }}"
           --dart-define=APP_ENV=production
           --dart-define=API_BASE_URL=https://shengbeijiang.com
           --dart-define=WEB_BASE_URL=https://shengbeijiang.com
@@ -108,3 +125,4 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

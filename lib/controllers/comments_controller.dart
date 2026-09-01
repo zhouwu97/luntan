@@ -17,7 +17,8 @@ class CommentsController extends ChangeNotifier {
   /// 暴露给楼中楼视图做独立的分页拉取。
   CommentRepository get repository => _repository;
   final List<Comment> items = [];
-  CommentSort sort = CommentSort.asc;
+  // 评论默认按发布时间倒序，新发布的楼层优先展示。
+  CommentSort sort = CommentSort.desc;
 
   /// 只看楼主：作者 user id，null 表示查看全部楼层。
   String? authorFilter;

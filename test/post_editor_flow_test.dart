@@ -12,7 +12,7 @@ import 'package:luntan/widgets/composer_sheet.dart';
 void main() {
   testWidgets('底部 + 直接进入发布帖子页，不再出现发布方式选择', (tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byIcon(Icons.add_rounded));
@@ -57,7 +57,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final store = ForumStore.seeded();
     await tester.pumpWidget(
-      LuntanApp(repositories: ForumRepositories.mock(store: store)),
+      LuntanApp(
+        repositories: ForumRepositories.mock(store: store),
+        showBrandSplash: false,
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -79,7 +82,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final store = ForumStore.seeded();
     await tester.pumpWidget(
-      LuntanApp(repositories: ForumRepositories.mock(store: store)),
+      LuntanApp(
+        repositories: ForumRepositories.mock(store: store),
+        showBrandSplash: false,
+      ),
     );
     await tester.pumpAndSettle();
 

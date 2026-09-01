@@ -164,7 +164,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Community> communities = const [];
   String? selectedCommunityId;
   late FeedSort selectedSort;
-  LatestOrder latestOrder = LatestOrder.post;
+  // 首页进入“最新”时默认按最近回复排序。
+  LatestOrder latestOrder = LatestOrder.comment;
   final feedToolbarKey = GlobalKey();
   bool _autoFillingViewport = false;
   int _viewportFillAttempts = 0;
@@ -179,7 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // 首页默认展示酱紫社区，作为中间主 Tab；发布默认板块也与首页保持一致。
     selectedCommunityId = 'community-campus';
     selectedSort = isApiMode ? FeedSort.latest : widget.store.selectedSort;
-    latestOrder = isApiMode ? LatestOrder.post : LatestOrder.comment;
+    latestOrder = LatestOrder.comment;
     communities = widget.communityRepository == null
         ? selectHomeCommunities(widget.store.communities)
         : const [];

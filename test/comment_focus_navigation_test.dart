@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/controllers/comments_controller.dart';
 import 'package:luntan/controllers/interaction_controller.dart';
 import 'package:luntan/controllers/post_detail_controller.dart';
+import 'package:luntan/data/api/comment_repository.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/screens/comment_thread_screen.dart';
 import 'package:luntan/screens/post_detail_screen.dart';
@@ -22,6 +23,8 @@ void main() {
       repository: commentRepo,
       postId: 'u4',
     );
+    // 本用例验证定位逻辑本身，不绑定首页当前默认的倒序展示策略。
+    commentsController.sort = CommentSort.asc;
     final interactionController = InteractionController(
       repository: interactionRepo,
     );

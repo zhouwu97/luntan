@@ -127,7 +127,8 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	sortKey := strings.TrimSpace(r.URL.Query().Get("sort"))
 	switch sortKey {
 	case "":
-		sortKey = "asc"
+		// 默认展示最新发布的评论；显式 asc 仍保留给需要时间正序的调用方。
+		sortKey = "desc"
 	case "asc", "desc", "hot":
 	default:
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SORT", Message: "sort 仅支持 asc、desc、hot"})

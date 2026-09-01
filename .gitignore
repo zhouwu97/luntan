@@ -72,6 +72,7 @@ android/app/ci-release.keystore
 
 # Local runtime data, test scripts & credentials
 .data/
+.omo/
 
 
 # 源站内容导入产物：CSV 导入包与帖子配图体积大且可由脚本重新生成，

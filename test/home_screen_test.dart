@@ -230,7 +230,7 @@ void main() {
     expect(find.bySemanticsLabel('酱紫社区'), findsOneWidget);
     semantics.dispose();
     expect(repository.calls.first.sort, 'latest');
-    expect(repository.calls.first.latestOrder, LatestOrder.post);
+    expect(repository.calls.first.latestOrder, LatestOrder.comment);
     expect(repository.calls, hasLength(5));
     expect(
       repository.calls.every((call) => call.communityId == 'community-campus'),
@@ -288,24 +288,24 @@ void main() {
     await tester.pumpWidget(_homeFor(controller, repository));
     await tester.pumpAndSettle();
 
-    // 首页默认就是最新，并默认按发帖时间排序。
+    // 首页默认就是最新，并默认按最近回复时间排序。
     expect(find.text('按回复'), findsOneWidget);
     expect(find.text('按发帖'), findsOneWidget);
-    expect(find.textContaining('最近回复'), findsNothing);
-
-    // 切换到按回复后，服务端查询条件也随之变化。
-    await tester.tap(find.text('按回复'));
-    await tester.pumpAndSettle();
-    expect(repository.calls.last.sort, 'latest');
-    expect(repository.calls.last.latestOrder, LatestOrder.comment);
     expect(find.textContaining('最近回复'), findsOneWidget);
 
-    // 再切回按发帖。
+    // 切换到按发帖后，服务端查询条件也随之变化。
     await tester.tap(find.text('按发帖'));
+    await tester.pumpAndSettle();
+    expect(repository.calls.last.sort, 'latest');
+    expect(repository.calls.last.latestOrder, LatestOrder.post);
+    expect(find.textContaining('最近回复'), findsNothing);
+
+    // 再切回按回复。
+    await tester.tap(find.text('按回复'));
     await tester.pumpAndSettle();
 
     expect(repository.calls.last.sort, 'latest');
-    expect(repository.calls.last.latestOrder, LatestOrder.post);
+    expect(repository.calls.last.latestOrder, LatestOrder.comment);
   });
 
   testWidgets('管理员可以从帖子菜单加入或移出首页推荐', (tester) async {

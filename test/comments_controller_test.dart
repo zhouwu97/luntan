@@ -98,7 +98,7 @@ void main() {
     final repository = _FakeCommentRepository();
     final controller = CommentsController(repository: repository, postId: 'p1');
     await controller.load();
-    expect(repository.lastSort, CommentSort.asc);
+    expect(repository.lastSort, CommentSort.desc);
     expect(repository.lastAuthorId, isNull);
     expect(repository.lastOffset, 0);
 
@@ -145,8 +145,8 @@ void main() {
     await controller.addComment('inserted');
 
     expect(controller.items.map((item) => item.id).toList(), [
-      'c1',
       'c3',
+      'c1',
       'c2',
     ]);
   });

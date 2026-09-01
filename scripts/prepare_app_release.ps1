@@ -5,11 +5,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
 
-    [Parameter(Mandatory = $true)]
     [string]$VersionName,
 
-    [Parameter(Mandatory = $true)]
-    [long]$VersionCode,
+    [long]$VersionCode = 0,
 
     [Parameter(Mandatory = $true)]
     [long]$MinimumSupportedVersionCode,
@@ -22,6 +20,29 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# 发布清单的版本必须和应用源码一致；允许省略参数以直接读取 pubspec.yaml，
+# 仍兼容旧调用方式，但拒绝传入不一致的版本，避免生成不可升级的清单。
+$projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$pubspecPath = Join-Path $projectRoot 'pubspec.yaml'
+$pubspecVersionLine = Get-Content -LiteralPath $pubspecPath |
+    Where-Object { $_ -match '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$' } |
+    Select-Object -First 1
+if ($null -eq $pubspecVersionLine -or $pubspecVersionLine -notmatch '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$') {
+    throw 'pubspec.yaml 必须包含合法的 version: name+code'
+}
+$pubspecVersionName = $Matches['name']
+$pubspecVersionCode = [long]$Matches['code']
+if ([string]::IsNullOrWhiteSpace($VersionName)) {
+    $VersionName = $pubspecVersionName
+} elseif ($VersionName.Trim() -ne $pubspecVersionName) {
+    throw "VersionName 必须与 pubspec.yaml ($pubspecVersionName) 一致"
+}
+if ($VersionCode -eq 0) {
+    $VersionCode = $pubspecVersionCode
+} elseif ($VersionCode -ne $pubspecVersionCode) {
+    throw "VersionCode 必须与 pubspec.yaml ($pubspecVersionCode) 一致"
+}
 
 $resolvedApk = (Resolve-Path -LiteralPath $ApkPath).Path
 if ([System.IO.Path]::GetExtension($resolvedApk) -ne '.apk') {

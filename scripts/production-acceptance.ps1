@@ -43,6 +43,17 @@ $script:FailedChecks = @()
 $script:PassedChecks = @()
 $script:WarningChecks = @()
 
+# 验收请求使用源码中的当前客户端版本，避免验收脚本长期固定在旧版本。
+$projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$pubspecVersion = Get-Content -LiteralPath (Join-Path $projectRoot 'pubspec.yaml') |
+    Where-Object { $_ -match '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$' } |
+    Select-Object -First 1
+if ($null -eq $pubspecVersion -or $pubspecVersion -notmatch '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$') {
+    throw 'pubspec.yaml 必须包含合法的 version: name+code'
+}
+$clientVersionName = $Matches['name']
+$clientVersionCode = $Matches['code']
+
 function Write-Header {
     param([string]$Message)
     Write-Host "`n========================================" -ForegroundColor Cyan
@@ -333,7 +344,7 @@ Write-Header "4. APK 更新链路验证"
 # 4.1 检查与服务端实际路由一致的发布接口
 Write-Host "检查 APK 发布清单和更新 API..." -ForegroundColor Gray
 $latestReleaseCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/releases/latest"
-$updateApiCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/update?platform=android&channel=stable&version_name=0.0.1&version_code=1"
+$updateApiCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/update?platform=android&channel=stable&version_name=$clientVersionName&version_code=$clientVersionCode"
 if ($latestReleaseCheck.Success -and $updateApiCheck.Success) {
     Write-CheckResult "APK 更新 API" "Pass" "发布清单与更新接口均可访问"
 

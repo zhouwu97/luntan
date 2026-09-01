@@ -13,6 +13,7 @@ import '../widgets/app_network_image.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
 import '../widgets/comments/comment_more_button.dart';
 import '../widgets/comments/comment_image_viewer.dart';
+import '../widgets/comments/comment_action_menu.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import 'ranking_reorder_screen.dart';
 import 'ranking_toy_submission_screen.dart';
@@ -1870,24 +1871,14 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   void _showRankingCommentMenu(RankingToyComment comment) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => Wrap(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.copy_outlined),
-            title: const Text('复制内容'),
-            onTap: () {
-              Navigator.pop(sheetContext);
-              Clipboard.setData(ClipboardData(text: comment.content));
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
-            },
-          ),
-        ],
-      ),
+    showCommentCopyMenu(
+      context,
+      onCopied: () {
+        Clipboard.setData(ClipboardData(text: comment.content));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+      },
     );
   }
 

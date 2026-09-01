@@ -1,0 +1,12 @@
+title = "Luntan repository secret rules"
+
+[extend]
+useDefault = true
+
+# 默认规则对“运维脚本中的 host/user/password”这类组合不一定敏感；该规则
+# 专门覆盖 Python Paramiko 直接连接时把 SSH 密码写进源码的事故模式。
+[[rules]]
+id = "hardcoded-paramiko-ssh-password"
+description = "Detect hardcoded passwords passed to Paramiko SSH connections"
+regex = '''(?i)(?:paramiko\.)?[^\r\n]{0,160}(?:client\.)?connect\([^\r\n)]*\bpassword\s*=\s*['"][^'"]+['"]'''
+keywords = ["paramiko", "connect", "password"]

@@ -419,9 +419,11 @@ class MediaAsset {
 
   bool get isCensored => moderationStatus == 'censored';
 
-  /// Feed/正文预览图地址：优先缩略图，缺失时退回 detail/original。
-  /// 历史媒体可能没有 thumb，因此保留受控的大图回退。
-  String? get previewUrl => thumb?.url ?? detail?.url ?? original?.url ?? url;
+  /// Feed/正文预览图地址：优先 detail，避免单图卡片把 640px thumb 放大后变糊。
+  ///
+  /// 历史媒体可能没有 detail，因此按 original、裸 url、thumb 的顺序降级；
+  /// 需要明确使用小图的头像、九宫格等场景应调用 [thumbUrl]。
+  String? get previewUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;
 
   /// 详情大图地址：优先 detail，退回 original 或裸 url，最后才是 thumb。
   String? get detailUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;
@@ -522,7 +524,9 @@ class Post {
   List<MediaAsset> get images =>
       media.where((e) => e.type == MediaType.image).toList();
   String get tag => tags.isEmpty ? community?.name ?? '' : tags.first;
-  String get time => relativeTimeLabel(createdAt);
+
+  /// 帖子展示时间使用正式发布时间，而不是草稿/审核记录的创建时间。
+  String get time => relativeTimeLabel(publishedAt ?? createdAt);
   String get views => compactCountLabel(viewCount);
 }
 
@@ -616,13 +620,20 @@ class PostDetail {
 }
 
 String relativeTimeLabel(DateTime value, {DateTime? now}) {
-  final delta = (now ?? DateTime.now()).difference(value);
+  // 服务端时间统一表示同一个时间点；显示口径固定为北京时间，
+  // 避免设备时区设置影响“昨天/几天前”等帖子时间文案。
+  final delta = _beijingTime(now ?? DateTime.now()).difference(
+    _beijingTime(value),
+  );
   if (delta.inMinutes < 1) return '刚刚';
   if (delta.inHours < 1) return '${delta.inMinutes}分钟前';
   if (delta.inHours < 24) return '${delta.inHours}小时前';
   if (delta.inDays == 1) return '昨天';
   return '${delta.inDays}天前';
 }
+
+DateTime _beijingTime(DateTime value) =>
+    value.toUtc().add(const Duration(hours: 8));
 
 String compactCountLabel(int count) {
   if (count >= 10000) {

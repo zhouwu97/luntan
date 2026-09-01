@@ -88,10 +88,11 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 | `cursor` | string | 上一页 `next_cursor` |
 | `community_id` | string | 按板块过滤 |
 | `sort` | string | `latest`(默认) / `recommended` / `featured` / `hot` |
+| `latest_by` | string | `comment`(默认，按最近回复) / `post`(按发布时间) |
 
 排序语义：
 
-- `latest`：`published_at DESC`。
+- `latest`：默认按最近回复时间倒序；指定 `latest_by=post` 时按 `published_at DESC`。
 - `recommended`：加权互动（like/comment/bookmark/share/view）+ 平缓时间衰减，
   与 `latest` 不同源。
 - `hot`：更快衰减的热度排序，倾向近期热点。
@@ -195,7 +196,7 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 
 | 方法 | 路径 | 登录 | 说明 |
 |---|---|---|---|
-| GET | `/posts/{id}/comments?cursor=&limit=` | 是 | 按帖分页 |
+| GET | `/posts/{id}/comments?sort=&cursor=&limit=` | 是 | 按帖分页；`sort=desc` 默认新发布楼层优先，`asc` 为早发布楼层优先，`hot` 为热度排序 |
 | POST | `/posts/{id}/comments` | 是 | 发布评论（支持 `parent_id` 楼中楼，需幂等键） |
 | POST | `/comments/{id}/replies` | 是 | 回复评论（需幂等键） |
 | PATCH | `/comments/{id}` | 是 | 编辑 |

@@ -1,10 +1,10 @@
 {
-  "version_name": "0.0.1",
-  "version_code": 1,
+  "version_name": "0.0.2",
+  "version_code": 2,
   "minimum_supported_version_code": 1,
-  "title": "酱紫社区 v0.0.1 首个公开版本",
-  "changelog": "首个公开发布版本，包含完整的论坛、商城、成长系统功能。",
-  "apk_file": "releases/1/luntan-0.0.1-1.apk",
-  "sha256": "554fb8648bef7924f4e7692b9b8a63cf5da574cad40684a16642f240754e1949",
-  "published_at": "2026-09-01T13:09:13Z"
+  "title": "酱紫社区 v0.0.2 功能更新",
+  "changelog": "优化媒体预览与缓存体验，修复榜单评论图片预览问题，改进启动画面、评论导航及积分规则。",
+  "apk_file": "releases/2/luntan-0.0.2-2.apk",
+  "sha256": "5c2a90cb9a5ea55f05b1b23266a9d43e8dbe6c8913f64f2f3fe1d27e6292f484",
+  "published_at": "2026-09-01T16:08:19Z"
 }

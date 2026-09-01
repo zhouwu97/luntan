@@ -42,7 +42,8 @@ void main() {
 
     // 检查帖子标题与一级评论
     expect(find.text('开箱记录：第一次买大尺寸倒模'), findsOneWidget);
-    expect(find.textContaining('包装比我想象中扎实'), findsOneWidget);
+    // 默认按发布时间倒序，首屏优先展示最新一级评论。
+    expect(find.textContaining('这类开箱记录很适合新手参考'), findsOneWidget);
 
     // 在底部输入栏输入新评论并发送
     await tester.tap(find.text('友善地回复一句…'));

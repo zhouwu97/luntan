@@ -268,7 +268,7 @@ func TestListCommentsReturnsStableFloors(t *testing.T) {
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 	mock.ExpectQuery(`(?s)SELECT author_id, community_id, publication_status, moderation_status\s+FROM posts\s+WHERE id = \$1 AND deleted_at IS NULL`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"author_id", "community_id", "publication_status", "moderation_status"}).AddRow("u1", "c1", "published", "normal"))
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)\s*FROM \(.*WHERE 1 = 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
-	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no DESC, t\.id DESC OFFSET 0 LIMIT 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{
 		"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",
 		"like_count", "dislike_count", "reply_count", "created_at", "updated_at", "floor_no",
 		"root_id", "parent_id", "reply_to_user_id", "sticker_id", "publication_status", "has_liked", "has_disliked",
@@ -841,7 +841,7 @@ func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
 		WithArgs("p1").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 
-	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 10$`).
+	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no DESC, t\.id DESC OFFSET 0 LIMIT 10$`).
 		WithArgs("p1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",

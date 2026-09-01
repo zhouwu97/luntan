@@ -81,7 +81,7 @@ void main() {
   WidgetController.hitTestWarningShouldBeFatal = true;
 
   testWidgets('首页展示论坛骨架并可以切换我的页面', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     expect(find.text('大型拆箱'), findsWidgets);
     expect(find.text('推荐'), findsWidgets);
 
@@ -92,7 +92,7 @@ void main() {
   });
 
   testWidgets('首页帖子标题点击通过 ID 路由打开详情', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('大型拆箱').first);
@@ -104,7 +104,7 @@ void main() {
   });
 
   testWidgets('开箱帖子详情显示评论并保留楼中楼入口', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('大型拆箱').first);
@@ -117,7 +117,7 @@ void main() {
   });
 
   testWidgets('首页最新排序下显示按回复与按发帖胶囊并支持切换', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('最新'));
@@ -520,7 +520,7 @@ void main() {
   });
 
   testWidgets('搜索结果点击打开帖子详情', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('搜索帖子、用户、板块、榜单').first);
@@ -535,7 +535,7 @@ void main() {
   });
 
   testWidgets('我的发布列表点击打开帖子详情', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('我的').last);
@@ -549,7 +549,7 @@ void main() {
   });
 
   testWidgets('我的评论按收到回复的帖子打开详情', (tester) async {
-    await tester.pumpWidget(const LuntanApp());
+    await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('我的').last);

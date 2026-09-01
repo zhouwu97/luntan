@@ -277,7 +277,7 @@ void main() {
   });
 
   group('MediaAsset URL 变体降级链路', () {
-    test('previewUrl 优先使用 thumb，避免 Feed 直接拉取 detail', () {
+    test('previewUrl 优先使用 detail，避免 Feed 拉大 thumb 糊图', () {
       const asset = MediaAsset(
         id: 'full_variants',
         type: MediaType.image,
@@ -299,14 +299,14 @@ void main() {
         ),
       );
 
-      // Feed 正文预览必须优先 thumb 变体，详情页再使用 detail 变体。
-      expect(asset.previewUrl, 'https://example.com/thumb.jpg');
+      // Feed 正文预览必须优先 detail 变体，避免在高 DPR 设备上放大 thumb。
+      expect(asset.previewUrl, 'https://example.com/detail.jpg');
       expect(asset.detailUrl, 'https://example.com/detail.jpg');
       expect(asset.originalUrl, 'https://example.com/original.jpg');
       expect(asset.thumbUrl, 'https://example.com/thumb.jpg');
     });
 
-    test('缺少 detail 变体时仍使用 thumb，缺少 thumb 时回退到 detail', () {
+    test('缺少 detail 变体时安全回退到 original 或裸 url', () {
       const noDetail = MediaAsset(
         id: 'no_detail',
         type: MediaType.image,
@@ -322,24 +322,7 @@ void main() {
           height: 1800,
         ),
       );
-      expect(noDetail.previewUrl, 'https://example.com/thumb.jpg');
-
-      const noThumb = MediaAsset(
-        id: 'no_thumb',
-        type: MediaType.image,
-        url: 'https://example.com/source-no-thumb.jpg',
-        detail: MediaVariant(
-          url: 'https://example.com/detail-no-thumb.jpg',
-          width: 1440,
-          height: 1080,
-        ),
-        original: MediaVariant(
-          url: 'https://example.com/original-no-thumb.jpg',
-          width: 2400,
-          height: 1800,
-        ),
-      );
-      expect(noThumb.previewUrl, 'https://example.com/detail-no-thumb.jpg');
+      expect(noDetail.previewUrl, 'https://example.com/original.jpg');
 
       const onlyUrl = MediaAsset(
         id: 'only_url',

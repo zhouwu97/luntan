@@ -68,16 +68,16 @@ void main() {
       expect(
         styles,
         contains(
-          'android:windowSplashScreenAnimatedIcon">@drawable/splash_icon',
+          'android:windowSplashScreenAnimatedIcon">@drawable/splash_transparent',
         ),
-        reason: '$path 必须使用完整的品牌插画作为启动图标',
+        reason: '$path 必须使用透明占位，品牌插画由 Flutter 层展示',
       );
     }
 
     expect(
-      File('android/app/src/main/res/drawable/splash_icon.png').existsSync(),
+      File('android/app/src/main/res/drawable/splash_transparent.xml').existsSync(),
       isTrue,
-      reason: '必须有完整的启动画面图标',
+      reason: '必须有 Android 12+ 启动图透明占位资源',
     );
   });
 }

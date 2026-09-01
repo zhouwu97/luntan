@@ -51,6 +51,7 @@ class LuntanApp extends StatefulWidget {
     this.tokenStore,
     this.repositories,
     this.rulesGate,
+    this.showBrandSplash = true,
   });
 
   final TokenStore? tokenStore;
@@ -59,6 +60,12 @@ class LuntanApp extends StatefulWidget {
   /// 版规公告栏弹窗控制器；生产入口注入 withPreferences 实例，直接构造
   /// LuntanApp 的测试默认不展示弹窗，避免遮挡页面交互。
   final ForumRulesGateController? rulesGate;
+
+  /// 是否展示 Flutter 层品牌启动画面。
+  ///
+  /// 正式入口保持开启；测试和需要立即进入业务页面的嵌入式入口可以关闭，
+  /// 避免把固定时长的视觉过渡变成业务交互的隐式前置条件。
+  final bool showBrandSplash;
 
   @override
   State<LuntanApp> createState() => _LuntanAppState();
@@ -166,6 +173,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
     updateCoordinator = AppUpdateCoordinator();
     unawaited(_checkStartupRequiredUpdate());
+
+    _showBrandSplash = widget.showBrandSplash;
+    if (!widget.showBrandSplash) return;
 
     // 品牌启动画面延迟消失
     WidgetsBinding.instance.addPostFrameCallback((_) async {

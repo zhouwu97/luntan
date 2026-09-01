@@ -106,6 +106,10 @@ String _formatRiskEventType(String eventType) => switch (eventType) {
   'abnormal_ip' => '异常 IP 访问',
   'auto_restriction' => '系统自动限制',
   'rate_limit' => '请求超频',
+  'content_auto_review' => '内容自动审核',
+  'email_code_requested' => '请求邮箱验证码',
+  'email_login_verified' => '邮箱登录验证',
+  'email_register_verified' => '邮箱注册验证',
   _ => eventType,
 };
 
@@ -182,8 +186,9 @@ class _GovernanceCenterScreenState extends State<GovernanceCenterScreen> {
         final appeals = await widget.appealRepository!.listModerationAppeals(
           status: 'pending',
         );
-        if (mounted)
+        if (mounted) {
           setState(() => _pendingAppealsCount = appeals.items.length);
+        }
       } catch (_) {}
     }
   }
@@ -3167,6 +3172,16 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
                 ...data.events.map((event) {
                   final isHigh = event.severity == 'high';
                   final isMed = event.severity == 'medium';
+                  final targetTitle = event.targetTitle.trim();
+                  final displayTitle = targetTitle.isNotEmpty
+                      ? '${event.targetType == 'post' ? '帖子' : '关联帖子'}：$targetTitle'
+                      : _formatRiskEventType(event.eventType);
+                  final identity = [
+                    if (event.accountName.trim().isNotEmpty)
+                      '账号：${event.accountName.trim()}',
+                    if (event.email.trim().isNotEmpty)
+                      '邮箱：${event.email.trim()}',
+                  ].join(' · ');
                   final iconBg = isHigh
                       ? AppTheme.softRose
                       : (isMed ? AppTheme.softAmber : AppTheme.softMint);
@@ -3183,6 +3198,7 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
                     ),
                     padding: const EdgeInsets.all(14),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           width: 36,
@@ -3206,18 +3222,44 @@ class _RiskCenterScreenState extends State<RiskCenterScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                _formatRiskEventType(event.eventType),
+                                displayTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13.5,
                                   color: AppTheme.textPrimary,
                                 ),
                               ),
+                              if (identity.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  identity,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
+                              if (event.contentPreview.trim().isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  '内容：${event.contentPreview.trim()}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 3),
                               Text(
                                 '${event.ipAddress.isEmpty ? '未知 IP' : event.ipAddress} · ${_formatRiskSeverity(event.severity)}',
                                 style: const TextStyle(
-                                  fontSize: 11.5,
+                                  fontSize: 11,
                                   color: AppTheme.textSecondary,
                                 ),
                               ),

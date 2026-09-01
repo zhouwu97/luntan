@@ -395,3 +395,29 @@ func TestProcessCensoredImageAcceptsNormalImage(t *testing.T) {
 		t.Fatal("censored variants must carry encoded image data")
 	}
 }
+
+func TestApplyMaskRegionsUsesBrushStrokeShape(t *testing.T) {
+	source := image.NewRGBA(image.Rect(0, 0, 100, 100))
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			source.SetRGBA(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 80, A: 255})
+		}
+	}
+
+	result := ApplyMaskRegions(source, []MaskRegion{{
+		X: 0.1, Y: 0.1, Width: 0.8, Height: 0.8,
+		Type:      "mosaic",
+		BrushSize: 0.08,
+		Points: []MaskPoint{
+			{X: 0.15, Y: 0.5},
+			{X: 0.85, Y: 0.5},
+		},
+	}})
+
+	if got, want := result.At(50, 50), source.At(50, 50); got == want {
+		t.Fatalf("brush stroke did not change a pixel on the stroke: got=%v", got)
+	}
+	if got, want := result.At(50, 20), source.At(50, 20); got != want {
+		t.Fatalf("brush stroke changed a pixel outside the stroke: got=%v want=%v", got, want)
+	}
+}

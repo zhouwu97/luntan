@@ -64,12 +64,16 @@ class GrowthState {
 
   final int level;
   final int experience;
+
   /// 达到当前等级所需的累计经验阈值。
   final int levelStartExperience;
+
   /// 达到下一级所需的累计经验阈值。
   final int? nextLevelExperience;
+
   /// 当前等级起点之后获得的经验，仅用于计算本级进度条。
   final int experienceInLevel;
+
   /// 当前等级区间的经验跨度，仅用于计算本级进度条。
   final int? experienceRequiredInLevel;
   final double? progress;
@@ -278,6 +282,22 @@ class ViewerPostState {
 
 enum MediaType { image, video }
 
+class MaskPoint {
+  const MaskPoint({required this.x, required this.y});
+
+  final double x;
+  final double y;
+
+  factory MaskPoint.fromJson(Map<String, dynamic> json) {
+    return MaskPoint(
+      x: (json['x'] as num?)?.toDouble() ?? 0.0,
+      y: (json['y'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'x': x, 'y': y};
+}
+
 class MaskRegion {
   const MaskRegion({
     required this.x,
@@ -285,6 +305,8 @@ class MaskRegion {
     required this.width,
     required this.height,
     this.type = 'mosaic',
+    this.points = const [],
+    this.brushSize = 0.04,
   });
 
   final double x; // 0.0 ~ 1.0 归一化比例
@@ -292,14 +314,26 @@ class MaskRegion {
   final double width; // 0.0 ~ 1.0
   final double height; // 0.0 ~ 1.0
   final String type; // 'mosaic' 或 'blur'
+  final List<MaskPoint> points; // 非空时为涂抹轨迹
+  final double brushSize; // 相对于图片短边的笔刷直径
 
   factory MaskRegion.fromJson(Map<String, dynamic> json) {
+    final rawPoints = json['points'];
     return MaskRegion(
       x: (json['x'] as num?)?.toDouble() ?? 0.0,
       y: (json['y'] as num?)?.toDouble() ?? 0.0,
       width: (json['width'] as num?)?.toDouble() ?? 0.0,
       height: (json['height'] as num?)?.toDouble() ?? 0.0,
       type: (json['type'] as String?) ?? 'mosaic',
+      points: rawPoints is List
+          ? rawPoints
+                .whereType<Map>()
+                .map(
+                  (item) => MaskPoint.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .toList()
+          : const [],
+      brushSize: (json['brush_size'] as num?)?.toDouble() ?? 0.04,
     );
   }
 
@@ -310,6 +344,9 @@ class MaskRegion {
       'width': width,
       'height': height,
       'type': type,
+      if (points.isNotEmpty)
+        'points': points.map((point) => point.toJson()).toList(),
+      if (points.isNotEmpty) 'brush_size': brushSize,
     };
   }
 
@@ -319,6 +356,8 @@ class MaskRegion {
     double? width,
     double? height,
     String? type,
+    List<MaskPoint>? points,
+    double? brushSize,
   }) {
     return MaskRegion(
       x: x ?? this.x,
@@ -326,6 +365,8 @@ class MaskRegion {
       width: width ?? this.width,
       height: height ?? this.height,
       type: type ?? this.type,
+      points: points ?? this.points,
+      brushSize: brushSize ?? this.brushSize,
     );
   }
 }

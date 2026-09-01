@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -60,6 +62,35 @@ void main() {
     expect(openedLogs, isTrue);
   });
 
+  testWidgets('风控事件展示帖子、账号内容和脱敏邮箱', (tester) async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient((request) async {
+        return http.Response.bytes(
+          utf8.encode(
+            '{"code_requests":1,"abnormal_ips":0,"automatic_restrictions":1,"events":[{"id":"r1","event_type":"content_auto_review","severity":"medium","ip_address":"203.0.113.8","target_type":"post","target_id":"p1","target_title":"帖子标题","content_preview":"帖子正文","account_name":"账号昵称","email":"a***@example.com","created_at":"2026-09-01T01:02:03Z"}]}',
+          ),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RiskCenterScreen(repository: PlatformRepository(client)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('帖子：帖子标题'), findsOneWidget);
+    expect(find.text('账号：账号昵称 · 邮箱：a***@example.com'), findsOneWidget);
+    expect(find.text('内容：帖子正文'), findsOneWidget);
+    expect(find.text('content_auto_review'), findsOneWidget);
+
+    client.close();
+  });
+
   testWidgets('ManagedUserListScreen 支持分页、状态筛选和角色中文显示', (tester) async {
     final client = ApiClient(
       baseUri: Uri.parse('https://example.com'),
@@ -70,14 +101,18 @@ void main() {
             return http.Response(
               '{"items":[{"id":"u2","username":"user_two","nickname":"测试用户2","email":"u2@test.com","status":"suspended","account_type":"email","created_at":"2026-08-20T00:00:00Z","roles":["community_moderator:community-campus"],"banned":false,"muted":true}],"has_more":false,"next_cursor":null}',
               200,
-              headers: const {'content-type': 'application/json; charset=utf-8'},
+              headers: const {
+                'content-type': 'application/json; charset=utf-8',
+              },
             );
           }
           if (query['cursor'] == 'cursor_page_2') {
             return http.Response(
               '{"items":[{"id":"u2","username":"user_two","nickname":"测试用户2","email":"u2@test.com","status":"suspended","account_type":"email","created_at":"2026-08-20T00:00:00Z","roles":["community_moderator:community-campus"],"banned":false,"muted":true}],"has_more":false,"next_cursor":null}',
               200,
-              headers: const {'content-type': 'application/json; charset=utf-8'},
+              headers: const {
+                'content-type': 'application/json; charset=utf-8',
+              },
             );
           }
           final page1Items = List.generate(
@@ -101,15 +136,17 @@ void main() {
             headers: const {'content-type': 'application/json; charset=utf-8'},
           );
         }
-        return http.Response('{}', 200, headers: const {'content-type': 'application/json; charset=utf-8'});
+        return http.Response(
+          '{}',
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
       }),
     );
     final repo = PlatformRepository(client);
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: ManagedUserListScreen(repository: repo),
-      ),
+      MaterialApp(home: ManagedUserListScreen(repository: repo)),
     );
     await tester.pumpAndSettle();
 
@@ -146,7 +183,11 @@ void main() {
             headers: const {'content-type': 'application/json; charset=utf-8'},
           );
         }
-        return http.Response('{}', 200, headers: const {'content-type': 'application/json; charset=utf-8'});
+        return http.Response(
+          '{}',
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
       }),
     );
     final repo = PlatformRepository(client);
@@ -181,9 +222,17 @@ void main() {
         if (request.method == 'PUT' &&
             request.url.path == '/api/v1/admins/a1/roles') {
           capturedReason = '违反平台保密协议';
-          return http.Response('{"success":true}', 200, headers: const {'content-type': 'application/json; charset=utf-8'});
+          return http.Response(
+            '{"success":true}',
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
         }
-        return http.Response('{}', 200, headers: const {'content-type': 'application/json; charset=utf-8'});
+        return http.Response(
+          '{}',
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
       }),
     );
     final repo = PlatformRepository(client);
@@ -212,10 +261,7 @@ void main() {
     expect(capturedReason, isNull);
 
     // 填写理由后确认
-    await tester.enterText(
-      find.widgetWithText(TextField, '').last,
-      '违反平台保密协议',
-    );
+    await tester.enterText(find.widgetWithText(TextField, '').last, '违反平台保密协议');
     await tester.tap(find.widgetWithText(FilledButton, '确认撤销'));
     await tester.pumpAndSettle();
 

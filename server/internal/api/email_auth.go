@@ -74,12 +74,37 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 场景语义检查仍然保留，但对外统一返回“已受理”，避免通过响应码
-	// 和错误文案探测邮箱是否存在。只有符合场景的请求才真正写入验证码。
-	registered, err := s.authService.IsEmailRegistered(r.Context(), email)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
+	// 密码修改验证码只服务于当前已登录账号，并且必须绑定该账号已验证的
+	// 邮箱。这样即使请求体被篡改，也不能借验证码替其他邮箱改密或制造
+	// 未登录的重置邮件骚扰。
+	registered := false
+	if purpose == "password_reset" {
+		user, ok := s.authenticatedUser(w, r)
+		if !ok {
+			return
+		}
+		if user.AccountType == "guest" {
+			writeAuthError(w, r, ErrRegisteredAccountRequired)
+			return
+		}
+		if !user.EmailVerified || strings.TrimSpace(user.Email) == "" {
+			writeAuthError(w, r, auth.ErrEmailNotVerified)
+			return
+		}
+		if !strings.EqualFold(email, strings.TrimSpace(user.Email)) {
+			writeAuthError(w, r, auth.ErrInvalidInput)
+			return
+		}
+		registered = true
+	} else {
+		// 其他场景仍统一返回“已受理”，避免通过响应码和错误文案探测
+		// 邮箱是否存在。只有符合场景的请求才真正写入验证码。
+		var err error
+		registered, err = s.authService.IsEmailRegistered(r.Context(), email)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	if purpose == "login" && !registered {
 		writeEmailCodeAccepted(w)
@@ -194,6 +219,8 @@ func (s *Server) devAuthCodeAllowed() bool {
 
 // verifyAndConsumeEmailCodeTx 校验并在事务内消耗特定 purpose 的验证码。
 func (s *Server) verifyAndConsumeEmailCodeTx(ctx context.Context, tx *sql.Tx, email, code, purpose string) error {
+	email = normalizeEmailAddress(email)
+	code = strings.TrimSpace(code)
 	var id, codeHash string
 	var expiresAt time.Time
 	var attempts int
@@ -231,7 +258,7 @@ func (s *Server) loginWithEmailCode(w http.ResponseWriter, r *http.Request) {
 	}
 	email := normalizeEmailAddress(input.Email)
 	code := strings.TrimSpace(input.Code)
-	if !validEmailAddress(email) || len(code) != 6 {
+	if !validEmailAddress(email) || !validEmailCode(code) {
 		writeAuthError(w, r, ErrInvalidEmailCode)
 		return
 	}
@@ -284,6 +311,18 @@ func newEmailCode() (string, error) {
 	}
 	number := (uint32(raw[0])<<24 | uint32(raw[1])<<16 | uint32(raw[2])<<8 | uint32(raw[3])) % 1000000
 	return fmt.Sprintf("%06d", number), nil
+}
+
+func validEmailCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for i := 0; i < len(code); i++ {
+		if code[i] < '0' || code[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) emailCodeHash(code string) string {

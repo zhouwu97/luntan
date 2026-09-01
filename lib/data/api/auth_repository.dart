@@ -287,10 +287,15 @@ class AuthRepository {
   Future<void> setPassword({
     required String password,
     String? currentPassword,
+    String? emailCode,
   }) async {
     await _client.postJson(
       '/api/v1/me/password',
-      body: {'password': password, 'current_password': ?currentPassword},
+      body: {
+        'password': password,
+        'current_password': ?currentPassword,
+        'email_code': ?emailCode,
+      },
     );
   }
 

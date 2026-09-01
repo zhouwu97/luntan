@@ -273,10 +273,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         userId: profile.id,
         active: !profile.isFollowing,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _future = _load();
         });
+      }
     } catch (error) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '关注操作失败'));
@@ -1966,10 +1967,11 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
       } else {
         await mutation.setFollow(communityId: community.id, active: active);
       }
-      if (mounted)
+      if (mounted) {
         setState(() {
           _future = _load();
         });
+      }
     } catch (error) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(error, fallback: '操作失败'));

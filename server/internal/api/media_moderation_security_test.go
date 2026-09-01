@@ -105,6 +105,49 @@ func TestModerateMediaRejectsInvalidMaskRegion(t *testing.T) {
 	}
 }
 
+func TestModerateMediaRejectsInvalidBrushPoint(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	expectModerationPermission(mock)
+
+	server := &Server{db: db, mediaStorage: storage.NewMemoryStorage()}
+	rec := httptest.NewRecorder()
+	server.moderateMedia(rec, moderationRequest(`{"moderation_status":"censored","mask_regions":[{"x":0.1,"y":0.1,"width":0.8,"height":0.8,"type":"mosaic","brush_size":0.04,"points":[{"x":0.2,"y":1.2}]}]}`), "media-1")
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"INVALID_MASK_REGION"`) {
+		t.Fatalf("expected invalid brush point error, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database access after validation: %v", err)
+	}
+}
+
+func TestModerateMediaNormalResetRequiresSuperAdmin(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	expectModerationPermission(mock)
+	mock.ExpectQuery(`(?s)SELECT EXISTS \(.*FROM user_roles ur.*rl\.name = \$2.*community_id IS NULL.*\)`).
+		WithArgs("admin-1", "super_admin").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	server := &Server{db: db, mediaStorage: storage.NewMemoryStorage()}
+	rec := httptest.NewRecorder()
+	server.moderateMedia(rec, moderationRequest(`{"moderation_status":"normal","reason":"恢复原图"}`), "media-1")
+
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"code":"SUPER_ADMIN_REQUIRED"`) {
+		t.Fatalf("expected super admin restriction, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("media should not be queried before super admin check: %v", err)
+	}
+}
+
 func TestModerateMediaStorageFailureLeavesDatabaseUntouched(t *testing.T) {
 	const objectKey = "media/user-1/media-1"
 	source := moderationTestJPEG()

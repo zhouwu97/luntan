@@ -202,4 +202,46 @@ void main() {
       client.close();
     },
   );
+
+  test(
+    'PlatformRepository parses safe risk context and media moderation history',
+    () async {
+      final client = ApiClient(
+        baseUri: Uri.parse('https://example.com'),
+        client: MockClient((request) async {
+          if (request.url.path == '/api/v1/admin/risk') {
+            return http.Response.bytes(
+              utf8.encode(
+                '{"code_requests":1,"abnormal_ips":0,"automatic_restrictions":2,"events":[{"id":"r1","event_type":"content_auto_review","severity":"medium","ip_address":"203.0.113.8","target_type":"post","target_id":"p1","target_title":"帖子标题","content_preview":"帖子正文","account_name":"账号昵称","email":"a***@example.com","created_at":"2026-09-01T01:02:03Z"}]}',
+              ),
+              200,
+              headers: const {
+                'content-type': 'application/json; charset=utf-8',
+              },
+            );
+          }
+          return http.Response.bytes(
+            utf8.encode(
+              '{"items":[{"id":"v1","media_id":"m1","version_no":1,"moderation_status":"normal","mask_regions":[],"reason":"初始发布状态","is_initial":true,"created_at":"2026-09-01T01:02:03Z"},{"id":"v2","media_id":"m1","version_no":2,"moderation_status":"censored","mask_regions":[{"x":0.1,"y":0.2,"width":0.5,"height":0.1,"type":"mosaic","brush_size":0.04,"points":[{"x":0.1,"y":0.25},{"x":0.6,"y":0.25}]}],"reason":"敏感信息","operator_id":"admin-1","is_initial":false,"created_at":"2026-09-01T02:02:03Z"}]}',
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+      final repository = ApiPlatformRepository(client);
+
+      final risk = await repository.getRiskOverview();
+      final history = await repository.getMediaModerationHistory(mediaId: 'm1');
+
+      expect(risk.events.single.targetTitle, '帖子标题');
+      expect(risk.events.single.contentPreview, '帖子正文');
+      expect(risk.events.single.email, 'a***@example.com');
+      expect(history.length, 2);
+      expect(history.first.isInitial, isTrue);
+      expect(history.last.maskRegions.single.points.length, 2);
+      expect(history.last.operatorId, 'admin-1');
+      client.close();
+    },
+  );
 }

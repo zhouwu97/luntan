@@ -529,6 +529,12 @@ class RiskEventSummary {
     required this.severity,
     required this.ipAddress,
     required this.createdAt,
+    this.targetType = '',
+    this.targetId = '',
+    this.targetTitle = '',
+    this.contentPreview = '',
+    this.accountName = '',
+    this.email = '',
   });
 
   final String id;
@@ -536,6 +542,36 @@ class RiskEventSummary {
   final String severity;
   final String ipAddress;
   final DateTime createdAt;
+  final String targetType;
+  final String targetId;
+  final String targetTitle;
+  final String contentPreview;
+  final String accountName;
+  final String email;
+}
+
+class MediaModerationVersion {
+  const MediaModerationVersion({
+    required this.id,
+    required this.mediaId,
+    required this.versionNo,
+    required this.moderationStatus,
+    required this.maskRegions,
+    required this.reason,
+    required this.createdAt,
+    required this.isInitial,
+    this.operatorId,
+  });
+
+  final String id;
+  final String mediaId;
+  final int versionNo;
+  final String moderationStatus;
+  final List<MaskRegion> maskRegions;
+  final String reason;
+  final DateTime createdAt;
+  final bool isInitial;
+  final String? operatorId;
 }
 
 class RiskOverview {
@@ -648,6 +684,8 @@ class AdminStoreOrder {
     required this.status,
     required this.createdAt,
     required this.userPoints,
+    this.balanceAtSubmit = 0,
+    this.hasBalanceAtSubmit = true,
     this.reviewedBy = '',
     this.reviewedAt,
     this.reviewReason = '',
@@ -663,6 +701,8 @@ class AdminStoreOrder {
   final String status;
   final DateTime createdAt;
   final int userPoints;
+  final int balanceAtSubmit;
+  final bool hasBalanceAtSubmit;
   final String reviewedBy;
   final DateTime? reviewedAt;
   final String reviewReason;
@@ -680,17 +720,23 @@ class AdminStoreOrderDetail extends AdminStoreOrder {
     required super.status,
     required super.createdAt,
     required super.userPoints,
+    super.balanceAtSubmit,
+    super.hasBalanceAtSubmit,
     super.reviewedBy,
     super.reviewedAt,
     super.reviewReason,
     required this.reservedPoints,
     required this.availablePoints,
     required this.pointSources,
+    this.historicalInvalidatedPoints = 0,
+    this.eligiblePointsAtSubmit = 0,
   });
 
   final int reservedPoints;
   final int availablePoints;
   final List<StorePointSource> pointSources;
+  final int historicalInvalidatedPoints;
+  final int eligiblePointsAtSubmit;
 }
 
 class StorePointSource {
@@ -698,11 +744,15 @@ class StorePointSource {
     required this.source,
     required this.points,
     required this.count,
+    this.invalidPoints = 0,
   });
 
   final String source;
   final int points;
   final int count;
+  final int invalidPoints;
+
+  int get eligiblePoints => points - invalidPoints;
 }
 
 class AdminStoreOrderPage {
@@ -733,6 +783,8 @@ class AdminStoreRewardContent {
     required this.currentStatus,
     required this.editedSinceReward,
     required this.snapshotAvailable,
+    this.invalidated = false,
+    this.invalidationReason = '',
   });
 
   final String id;
@@ -749,6 +801,20 @@ class AdminStoreRewardContent {
   final String currentStatus;
   final bool editedSinceReward;
   final bool snapshotAvailable;
+  final bool invalidated;
+  final String invalidationReason;
+}
+
+class AdminStoreRewardContentPage {
+  const AdminStoreRewardContentPage({
+    required this.items,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  final List<AdminStoreRewardContent> items;
+  final String? nextCursor;
+  final bool hasMore;
 }
 
 class PlatformRepository {
@@ -1019,6 +1085,40 @@ class PlatformRepository {
     );
   }
 
+  Future<List<MediaModerationVersion>> getMediaModerationHistory({
+    required String mediaId,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/admin/media/$mediaId/moderation-history',
+    );
+    final raw = payload['items'];
+    if (raw is! List) return const <MediaModerationVersion>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      final rawRegions = value['mask_regions'];
+      final regions = rawRegions is List
+          ? rawRegions
+                .whereType<Map>()
+                .map(
+                  (region) =>
+                      MaskRegion.fromJson(Map<String, dynamic>.from(region)),
+                )
+                .toList()
+          : const <MaskRegion>[];
+      return MediaModerationVersion(
+        id: _string(value['id']),
+        mediaId: _string(value['media_id']),
+        versionNo: _int(value['version_no']),
+        moderationStatus: _string(value['moderation_status']),
+        maskRegions: regions,
+        reason: _string(value['reason']),
+        createdAt: _date(value['created_at']),
+        isInitial: value['is_initial'] == true,
+        operatorId: _nullableString(value['operator_id']),
+      );
+    }).toList();
+  }
+
   Future<List<RankingToySubmission>> listRankingSubmissions({
     String status = 'pending',
   }) async {
@@ -1109,6 +1209,7 @@ class PlatformRepository {
               source: _string(value['source']),
               points: _int(value['points']),
               count: _int(value['count']),
+              invalidPoints: _int(value['invalid_points']),
             );
           }).toList()
         : const <StorePointSource>[];
@@ -1124,12 +1225,18 @@ class PlatformRepository {
       status: base.status,
       createdAt: base.createdAt,
       userPoints: base.userPoints,
+      balanceAtSubmit: base.balanceAtSubmit,
+      hasBalanceAtSubmit: base.hasBalanceAtSubmit,
       reviewedBy: base.reviewedBy,
       reviewedAt: base.reviewedAt,
       reviewReason: base.reviewReason,
       reservedPoints: _int(payload['reserved_points']),
       availablePoints: _int(payload['available_points']),
       pointSources: sources,
+      historicalInvalidatedPoints: _int(
+        payload['historical_invalidated_points'],
+      ),
+      eligiblePointsAtSubmit: _int(payload['eligible_points_at_submit']),
     );
   }
 
@@ -1137,40 +1244,72 @@ class PlatformRepository {
     required String id,
     required String decision,
     String reason = '',
+    List<String> invalidTransactionIds = const <String>[],
   }) async {
     await _client.postJson(
       '/api/v1/admin/store/orders/$id/review',
-      body: {'decision': decision, 'reason': reason},
+      body: {
+        'decision': decision,
+        'reason': reason,
+        'invalid_transaction_ids': invalidTransactionIds,
+      },
     );
   }
 
   Future<List<AdminStoreRewardContent>> getStoreOrderRewardContent(
     String id,
-  ) async {
+  ) async => (await getStoreOrderRewardContentPage(id)).items;
+
+  Future<AdminStoreRewardContentPage> getStoreOrderRewardContentPage(
+    String id, {
+    String? cursor,
+    int limit = 50,
+    String source = '',
+    String status = '',
+  }) async {
+    final query = <String, String>{
+      'limit': '$limit',
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      if (source.isNotEmpty) 'source': source,
+      if (status.isNotEmpty) 'status': status,
+    };
     final payload = await _client.getJson(
       '/api/v1/admin/store/orders/$id/reward-content',
+      queryParameters: query,
     );
     final raw = payload['items'];
-    if (raw is! List) return const <AdminStoreRewardContent>[];
-    return raw.whereType<Map>().map((item) {
-      final value = Map<String, dynamic>.from(item);
-      return AdminStoreRewardContent(
-        id: _string(value['id']),
-        source: _string(value['source']),
-        targetType: _string(value['target_type']),
-        targetId: _string(value['target_id']),
-        points: _int(value['points']),
-        reason: _string(value['reason']),
-        earnedAt: _date(value['earned_at']),
-        titleAtReward: _string(value['title_at_reward']),
-        contentAtReward: _string(value['content_at_reward']),
-        currentTitle: _string(value['current_title']),
-        currentContent: _string(value['current_content']),
-        currentStatus: _string(value['current_status']),
-        editedSinceReward: value['edited_since_reward'] == true,
-        snapshotAvailable: value['snapshot_available'] == true,
-      );
-    }).toList();
+    final items = raw is List
+        ? raw.whereType<Map>().map(_adminStoreRewardContentFromJson).toList()
+        : const <AdminStoreRewardContent>[];
+    return AdminStoreRewardContentPage(
+      items: items,
+      nextCursor: _nullableString(payload['next_cursor']),
+      hasMore: payload['has_more'] == true,
+    );
+  }
+
+  AdminStoreRewardContent _adminStoreRewardContentFromJson(dynamic raw) {
+    final value = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : const <String, dynamic>{};
+    return AdminStoreRewardContent(
+      id: _string(value['id']),
+      source: _string(value['source']),
+      targetType: _string(value['target_type']),
+      targetId: _string(value['target_id']),
+      points: _int(value['points']),
+      reason: _string(value['reason']),
+      earnedAt: _date(value['earned_at']),
+      titleAtReward: _string(value['title_at_reward']),
+      contentAtReward: _string(value['content_at_reward']),
+      currentTitle: _string(value['current_title']),
+      currentContent: _string(value['current_content']),
+      currentStatus: _string(value['current_status']),
+      editedSinceReward: value['edited_since_reward'] == true,
+      snapshotAvailable: value['snapshot_available'] == true,
+      invalidated: value['invalidated'] == true,
+      invalidationReason: _string(value['invalidation_reason']),
+    );
   }
 
   AdminStoreOrder _adminStoreOrderFromJson(dynamic raw) {
@@ -1191,6 +1330,8 @@ class PlatformRepository {
       status: _string(value['status'], fallback: 'pending_review'),
       createdAt: _date(value['created_at']),
       userPoints: _int(value['user_points']),
+      balanceAtSubmit: _int(value['balance_at_submit']),
+      hasBalanceAtSubmit: value.containsKey('balance_at_submit'),
       reviewedBy: _string(value['reviewed_by']),
       reviewedAt: _nullableDate(value['reviewed_at']),
       reviewReason: _string(value['review_reason']),
@@ -1575,6 +1716,12 @@ class PlatformRepository {
               severity: _string(item['severity']),
               ipAddress: _string(item['ip_address']),
               createdAt: _date(item['created_at']),
+              targetType: _string(item['target_type']),
+              targetId: _string(item['target_id']),
+              targetTitle: _string(item['target_title']),
+              contentPreview: _string(item['content_preview']),
+              accountName: _string(item['account_name']),
+              email: _string(item['email']),
             );
           }).toList()
         : <RiskEventSummary>[];

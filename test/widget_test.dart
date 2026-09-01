@@ -484,6 +484,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('已登录设置展示修改密码入口并触发安全流程', (tester) async {
+    var opened = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsCenterScreen(
+          isGuest: false,
+          accountSubtitle: 'user@example.com',
+          onOpenMessages: () {},
+          onFeedback: (_) {},
+          onChangePassword: () => opened = true,
+        ),
+      ),
+    );
+
+    expect(find.text('账号与安全'), findsOneWidget);
+    expect(find.text('修改密码'), findsOneWidget);
+    await tester.tap(find.text('修改密码'));
+    expect(opened, isTrue);
+  });
+
   testWidgets('治理中心只展示当前 capability 对应的入口', (tester) async {
     var opened = false;
     await tester.pumpWidget(

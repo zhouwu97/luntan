@@ -25,6 +25,14 @@ type MaskRegion struct {
 	Width  float64 `json:"width"`  // 0.0 ~ 1.0
 	Height float64 `json:"height"` // 0.0 ~ 1.0
 	Type   string  `json:"type"`   // "mosaic" (默认) 或 "blur"
+	// Points 非空时表示涂抹轨迹；X/Y/Width/Height 仍保留用于兼容旧版矩形打码。
+	Points    []MaskPoint `json:"points,omitempty"`
+	BrushSize float64     `json:"brush_size,omitempty"` // 相对于短边的笔刷直径
+}
+
+type MaskPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 type ProcessedVariant struct {
@@ -298,6 +306,202 @@ func ApplyMaskRegions(src image.Image, regions []MaskRegion) image.Image {
 	return result
 }
 
+func brushRadiusPixels(region MaskRegion, width, height int) float64 {
+	size := region.BrushSize
+	if size <= 0 {
+		// 兼容没有 brush_size 的旧客户端，仍按可见且可处理的默认笔刷宽度执行。
+		size = 0.04
+	}
+	return math.Max(2, size*float64(minInt(width, height))/2)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func brushBounds(region MaskRegion, width, height int) (int, int, int, int, float64, bool) {
+	if len(region.Points) == 0 || width <= 0 || height <= 0 {
+		return 0, 0, 0, 0, 0, false
+	}
+	radius := brushRadiusPixels(region, width, height)
+	minX, minY := float64(width), float64(height)
+	maxX, maxY := 0.0, 0.0
+	for _, point := range region.Points {
+		if point.X < minX {
+			minX = point.X
+		}
+		if point.Y < minY {
+			minY = point.Y
+		}
+		if point.X > maxX {
+			maxX = point.X
+		}
+		if point.Y > maxY {
+			maxY = point.Y
+		}
+	}
+	minX = minX*float64(width) - radius
+	minY = minY*float64(height) - radius
+	maxX = maxX*float64(width) + radius
+	maxY = maxY*float64(height) + radius
+	left := int(math.Floor(math.Max(0, minX)))
+	top := int(math.Floor(math.Max(0, minY)))
+	right := int(math.Ceil(math.Min(float64(width), maxX)))
+	bottom := int(math.Ceil(math.Min(float64(height), maxY)))
+	if left >= right || top >= bottom {
+		return 0, 0, 0, 0, radius, false
+	}
+	return left, top, right, bottom, radius, true
+}
+
+func pointDistanceSquared(px, py, ax, ay, bx, by float64) float64 {
+	dx, dy := bx-ax, by-ay
+	if dx == 0 && dy == 0 {
+		dx, dy = px-ax, py-ay
+		return dx*dx + dy*dy
+	}
+	t := ((px-ax)*dx + (py-ay)*dy) / (dx*dx + dy*dy)
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	x, y := ax+t*dx, ay+t*dy
+	dx, dy = px-x, py-y
+	return dx*dx + dy*dy
+}
+
+func pointInBrush(region MaskRegion, x, y, width, height int, radius float64) bool {
+	px, py := float64(x)+0.5, float64(y)+0.5
+	for i, point := range region.Points {
+		ax, ay := point.X*float64(width), point.Y*float64(height)
+		if i == 0 {
+			if pointDistanceSquared(px, py, ax, ay, ax, ay) <= radius*radius {
+				return true
+			}
+			continue
+		}
+		previous := region.Points[i-1]
+		bx, by := previous.X*float64(width), previous.Y*float64(height)
+		if pointDistanceSquared(px, py, ax, ay, bx, by) <= radius*radius {
+			return true
+		}
+	}
+	return false
+}
+
+func applyBrushRegion(dst *image.RGBA, region MaskRegion, width, height int) bool {
+	minX, minY, maxX, maxY, radius, ok := brushBounds(region, width, height)
+	if !ok {
+		return false
+	}
+	if region.Type == "blur" {
+		return applyBlurRegion(dst, region, minX, minY, maxX, maxY, radius)
+	}
+	return applyMosaicBrushRegion(dst, region, minX, minY, maxX, maxY, radius)
+}
+
+func applyMosaicBrushRegion(dst *image.RGBA, region MaskRegion, minX, minY, maxX, maxY int, radius float64) bool {
+	width, height := dst.Bounds().Dx(), dst.Bounds().Dy()
+	blockSize := int(math.Max(8, float64(width+height)/100.0))
+	applied := false
+	for by := minY; by < maxY; by += blockSize {
+		for bx := minX; bx < maxX; bx += blockSize {
+			bMaxX := minInt(bx+blockSize, maxX)
+			bMaxY := minInt(by+blockSize, maxY)
+			var rSum, gSum, bSum, aSum, count uint32
+			for py := by; py < bMaxY; py++ {
+				for px := bx; px < bMaxX; px++ {
+					r, g, b, a := dst.RGBAAt(px, py).RGBA()
+					rSum += r >> 8
+					gSum += g >> 8
+					bSum += b >> 8
+					aSum += a >> 8
+					count++
+				}
+			}
+			if count == 0 {
+				continue
+			}
+			avgColor := color.RGBA{
+				R: uint8(rSum / count), G: uint8(gSum / count),
+				B: uint8(bSum / count), A: uint8(aSum / count),
+			}
+			for py := by; py < bMaxY; py++ {
+				for px := bx; px < bMaxX; px++ {
+					if pointInBrush(region, px, py, width, height, radius) {
+						dst.SetRGBA(px, py, avgColor)
+						applied = true
+					}
+				}
+			}
+		}
+	}
+	return applied
+}
+
+func applyBlurRegion(dst *image.RGBA, region MaskRegion, minX, minY, maxX, maxY int, radius float64) bool {
+	width, height := dst.Bounds().Dx(), dst.Bounds().Dy()
+	kernel := int(math.Max(4, radius))
+	temp := image.NewRGBA(image.Rect(minX, minY, maxX, maxY))
+	for y := minY; y < maxY; y++ {
+		for x := minX; x < maxX; x++ {
+			var rSum, gSum, bSum, aSum, count uint32
+			for kx := x - kernel; kx <= x+kernel; kx++ {
+				sampleX := kx
+				if sampleX < 0 {
+					sampleX = 0
+				} else if sampleX >= width {
+					sampleX = width - 1
+				}
+				r, g, b, a := dst.RGBAAt(sampleX, y).RGBA()
+				rSum += r >> 8
+				gSum += g >> 8
+				bSum += b >> 8
+				aSum += a >> 8
+				count++
+			}
+			temp.SetRGBA(x, y, color.RGBA{R: uint8(rSum / count), G: uint8(gSum / count), B: uint8(bSum / count), A: uint8(aSum / count)})
+		}
+	}
+	applied := false
+	for y := minY; y < maxY; y++ {
+		for x := minX; x < maxX; x++ {
+			if !pointInBrush(region, x, y, width, height, radius) {
+				continue
+			}
+			var rSum, gSum, bSum, aSum, count uint32
+			for ky := y - kernel; ky <= y+kernel; ky++ {
+				sampleY := ky
+				if sampleY < 0 {
+					sampleY = 0
+				} else if sampleY >= height {
+					sampleY = height - 1
+				}
+				var r, g, b, a uint32
+				if sampleY >= minY && sampleY < maxY {
+					c := temp.RGBAAt(x, sampleY)
+					r, g, b, a = uint32(c.R), uint32(c.G), uint32(c.B), uint32(c.A)
+				} else {
+					c := dst.RGBAAt(x, sampleY)
+					r, g, b, a = uint32(c.R), uint32(c.G), uint32(c.B), uint32(c.A)
+				}
+				rSum += r
+				gSum += g
+				bSum += b
+				aSum += a
+				count++
+			}
+			dst.SetRGBA(x, y, color.RGBA{R: uint8(rSum / count), G: uint8(gSum / count), B: uint8(bSum / count), A: uint8(aSum / count)})
+			applied = true
+		}
+	}
+	return applied
+}
+
 // applyMaskRegionsWithCount 同时返回真正落到像素上的区域数量。
 // 坐标合法并不代表在极小图片上一定能形成一个像素宽高的区域，因此审核
 // 流程不能只依赖请求中的 regions 数量判断“已经打码”。
@@ -317,6 +521,12 @@ func applyMaskRegionsWithCount(src image.Image, regions []MaskRegion) (image.Ima
 	draw.Draw(dst, dst.Bounds(), src, bounds.Min, draw.Src)
 
 	for _, region := range regions {
+		if len(region.Points) > 0 {
+			if applyBrushRegion(dst, region, w, h) {
+				appliedRegions++
+			}
+			continue
+		}
 		// 校验并限制归一化坐标范围 [0.0, 1.0]
 		rx := math.Max(0.0, math.Min(1.0, region.X))
 		ry := math.Max(0.0, math.Min(1.0, region.Y))

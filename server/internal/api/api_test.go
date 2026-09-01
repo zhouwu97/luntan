@@ -266,7 +266,7 @@ func TestListCommentsReturnsStableFloors(t *testing.T) {
 	}
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
+	mock.ExpectQuery(`(?s)SELECT author_id, community_id, publication_status, moderation_status\s+FROM posts\s+WHERE id = \$1 AND deleted_at IS NULL`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"author_id", "community_id", "publication_status", "moderation_status"}).AddRow("u1", "c1", "published", "normal"))
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)\s*FROM \(.*WHERE 1 = 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectQuery(`(?s)SELECT t\.id, t\.post_id.*ORDER BY t\.floor_no ASC, t\.id ASC OFFSET 0 LIMIT 1$`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{
 		"id", "post_id", "author_id", "username", "nickname", "level", "media_id", "object_key", "content",
@@ -782,9 +782,7 @@ func TestListCommentsReturnsImageAndStickerAttachments(t *testing.T) {
 	defer db.Close()
 
 	created := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`)).
-		WithArgs("p1").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("p1"))
+	mock.ExpectQuery(`(?s)SELECT author_id, community_id, publication_status, moderation_status\s+FROM posts\s+WHERE id = \$1 AND deleted_at IS NULL`).WithArgs("p1").WillReturnRows(sqlmock.NewRows([]string{"author_id", "community_id", "publication_status", "moderation_status"}).AddRow("u1", "c1", "published", "normal"))
 
 	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\)\s*FROM \(.*WHERE 1 = 1$`).
 		WithArgs("p1").

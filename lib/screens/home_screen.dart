@@ -100,6 +100,7 @@ class HomeScreen extends StatefulWidget {
     this.canLike = true,
     this.canVote = true,
     this.canModerate = false,
+    this.canRestoreCensored = false,
     this.onOpenUserId,
     this.onOpenCommunityId,
     this.platform,
@@ -132,6 +133,7 @@ class HomeScreen extends StatefulWidget {
   final bool canLike;
   final bool canVote;
   final bool canModerate;
+  final bool canRestoreCensored;
   final ValueChanged<String>? onOpenUserId;
   final ValueChanged<String>? onOpenCommunityId;
   final PlatformRepository? platform;
@@ -746,6 +748,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         builder: (_) => ImageModerationScreen(
                           post: post,
                           platformRepository: widget.platform,
+                          canRestoreCensored: widget.canRestoreCensored,
                           onSaved: () => widget.feedController.refresh(),
                         ),
                       ),

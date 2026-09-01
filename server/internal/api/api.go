@@ -281,6 +281,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/moderation")
 		s.moderateMedia(w, r, mediaID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/media/") && strings.HasSuffix(path, "/moderation-history"):
+		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/moderation-history")
+		s.listMediaModerationHistory(w, r, mediaID)
+		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/media/") && strings.HasSuffix(path, "/source"):
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/source")
 		s.getAdminMediaSource(w, r, mediaID)
@@ -977,13 +981,45 @@ func (s *Server) setPassword(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Password        string `json:"password"`
 		CurrentPassword string `json:"current_password"`
+		EmailCode       string `json:"email_code"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, auth.ErrInvalidInput)
 		return
 	}
 	accessToken, _ := bearerToken(r.Header.Get("Authorization"))
-	if err := s.authService.SetPassword(r.Context(), user.ID, input.Password, input.CurrentPassword, accessToken); err != nil {
+	currentPassword := input.CurrentPassword
+	emailCode := strings.TrimSpace(input.EmailCode)
+	if strings.TrimSpace(currentPassword) != "" && emailCode != "" {
+		writeAuthError(w, r, auth.ErrInvalidInput)
+		return
+	}
+
+	var err error
+	if emailCode != "" {
+		if !user.EmailVerified || strings.TrimSpace(user.Email) == "" {
+			writeAuthError(w, r, auth.ErrEmailNotVerified)
+			return
+		}
+		if !validEmailCode(emailCode) {
+			writeAuthError(w, r, ErrInvalidEmailCode)
+			return
+		}
+		err = s.authService.SetPasswordWithEmailCode(
+			r.Context(),
+			user.ID,
+			input.Password,
+			user.Email,
+			emailCode,
+			accessToken,
+			func(ctx context.Context, tx *sql.Tx, email, code string) error {
+				return s.verifyAndConsumeEmailCodeTx(ctx, tx, email, code, "password_reset")
+			},
+		)
+	} else {
+		err = s.authService.SetPassword(r.Context(), user.ID, input.Password, currentPassword, accessToken)
+	}
+	if err != nil {
 		writeAuthError(w, r, err)
 		return
 	}
@@ -1049,6 +1085,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusUnauthorized, Code: "INVALID_CREDENTIALS", Message: "用户名或密码错误"}
 	case errors.Is(err, auth.ErrInvalidEmail):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_EMAIL", Message: "邮箱地址不合法"}
+	case errors.Is(err, auth.ErrEmailNotVerified):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "EMAIL_NOT_VERIFIED", Message: "请先完成邮箱验证后再使用邮箱验证码修改密码"}
 	case errors.Is(err, auth.ErrEmailAlreadyRegistered):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "EMAIL_ALREADY_REGISTERED", Message: "该邮箱已注册，请直接登录"}
 	case errors.Is(err, auth.ErrEmailNotRegistered):
@@ -1107,6 +1145,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "INSUFFICIENT_POINTS", Message: "积分不足"}
 	case errors.Is(err, ErrInvalidStoreOrderReview):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STORE_ORDER_REVIEW", Message: "审核决定或审核说明不合法"}
+	case errors.Is(err, ErrInvalidStoreReward):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STORE_REWARD", Message: "选择的积分流水不属于本次可核验范围"}
 	case errors.Is(err, ErrStoreOrderNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "STORE_ORDER_NOT_FOUND", Message: "兑换订单不存在"}
 	case errors.Is(err, ErrStoreOrderAlreadyReview):
@@ -1163,6 +1203,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "ALREADY_VOTED", Message: "你已经参与过该投票，不能修改选项"}
 	case errors.Is(err, ErrPermissionDenied):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "PERMISSION_DENIED", Message: "没有执行该操作的权限"}
+	case errors.Is(err, ErrSuperAdminRequired):
+		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "SUPER_ADMIN_REQUIRED", Message: "只有超级管理员可以恢复未打码原图"}
 	case errors.Is(err, ErrTargetRoleProtected):
 		appErr = httpserver.AppError{Status: http.StatusForbidden, Code: "TARGET_ROLE_PROTECTED", Message: "目标账号角色级别不低于操作者，不能执行该处罚"}
 	case errors.Is(err, ErrInvalidModerationAction):

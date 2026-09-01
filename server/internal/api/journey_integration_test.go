@@ -187,8 +187,8 @@ func TestPublishToNotificationJourneyAgainstPostgres(t *testing.T) {
 	}
 	var notifList struct {
 		Items []struct {
-			Type     string `json:"type"`
-			Actor    struct {
+			Type  string `json:"type"`
+			Actor struct {
 				ID string `json:"id"`
 			} `json:"actor"`
 			TargetID string `json:"target_id"`

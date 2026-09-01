@@ -16,6 +16,7 @@ import (
 
 var (
 	ErrPermissionDenied        = errors.New("permission denied")
+	ErrSuperAdminRequired      = errors.New("super admin required")
 	ErrInvalidModerationAction = errors.New("invalid moderation action")
 	ErrModerationCaseNotFound  = errors.New("moderation case not found")
 	ErrTargetRoleProtected     = errors.New("moderation target role is protected")
@@ -211,6 +212,23 @@ func (s *Server) hasGlobalPermission(r *http.Request, userID, permission string)
 			JOIN permissions p ON p.id = rp.permission_id
 			WHERE ur.user_id = $1 AND p.name = $2 AND ur.community_id IS NULL
 		)`, userID, permission).Scan(&allowed)
+	return err == nil && allowed
+}
+
+// hasGlobalRole 只认未绑定社区的角色，供“恢复未打码原图”等不可逆风险更高的
+// 平台级操作使用。前端 capability 仅用于隐藏按钮，最终权限仍由这里查询数据库。
+func (s *Server) hasGlobalRole(r *http.Request, userID, role string) bool {
+	return hasGlobalRoleQuery(r.Context(), s.db, userID, role)
+}
+
+func hasGlobalRoleQuery(ctx context.Context, queryer queryRowContext, userID, role string) bool {
+	var allowed bool
+	err := queryer.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_roles ur
+			JOIN roles rl ON rl.id = ur.role_id
+			WHERE ur.user_id = $1 AND rl.name = $2 AND ur.community_id IS NULL
+		)`, userID, role).Scan(&allowed)
 	return err == nil && allowed
 }
 

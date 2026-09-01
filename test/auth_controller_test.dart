@@ -260,4 +260,30 @@ void main() {
     expect(await store.readAccessToken(), isNull);
     expect(await store.readRefreshToken(), isNull);
   });
+
+  test('setPassword 可提交邮箱验证码验证方式', () async {
+    final store = MemoryTokenStore(
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+    );
+    final controller = _controller(
+      store: store,
+      client: MockClient((request) async {
+        if (request.url.path == '/api/v1/me/password') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['password'], '新密码123456');
+          expect(body['current_password'], isNull);
+          expect(body['email_code'], '123456');
+          return http.Response('', 204);
+        }
+        if (request.url.path == '/api/v1/me') {
+          return http.Response(_userJson, 200);
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    await controller.setPassword(password: '新密码123456', emailCode: '123456');
+    expect(controller.error, isNull);
+  });
 }

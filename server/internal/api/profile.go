@@ -245,10 +245,10 @@ func (s *Server) profileList(w http.ResponseWriter, r *http.Request, kind string
 			"community_id": communityID, "community_name": communityName,
 			"comment_count": commentCount, "like_count": likeCount,
 			"bookmark_count": bookmarkCount, "created_at": createdAt,
-			"view_count":   viewCount,
-			"published_at": createdAt,
+			"view_count":         viewCount,
+			"published_at":       createdAt,
 			"publication_status": publicationStatus,
-			"moderation_status": moderationStatus,
+			"moderation_status":  moderationStatus,
 		})
 	}
 	if err := rows.Err(); err != nil {

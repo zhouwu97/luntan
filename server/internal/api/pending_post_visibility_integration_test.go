@@ -44,6 +44,20 @@ func TestPendingPostVisibleToAuthor(t *testing.T) {
 		}
 	})
 
+	t.Run("作者本人可查看评论", func(t *testing.T) {
+		code, body := callBusinessAPI(handler, http.MethodGet, "/api/v1/posts/"+postID+"/comments?limit=20&offset=0&sort=asc", token, nil, nil)
+		if code != http.StatusOK {
+			t.Fatalf("作者应能查看自己待审核帖子的评论，实际 %d：%s", code, body)
+		}
+	})
+
+	t.Run("其他访客不可查看待审核帖子评论", func(t *testing.T) {
+		code, _ := callBusinessAPI(handler, http.MethodGet, "/api/v1/posts/"+postID+"/comments?limit=20&offset=0&sort=asc", "", nil, nil)
+		if code != http.StatusNotFound {
+			t.Fatalf("待审核帖子的评论不应对访客公开，实际 %d", code)
+		}
+	})
+
 	t.Run("其他访客不可见", func(t *testing.T) {
 		code, _ := callBusinessAPI(handler, http.MethodGet, "/api/v1/posts/"+postID, "", nil, nil)
 		if code != http.StatusNotFound {

@@ -107,6 +107,35 @@ func TestMemoryStorageDeleteMulti(t *testing.T) {
 	}
 }
 
+func TestHTTPMediaStorageReadsLegacyAbsoluteObjectKey(t *testing.T) {
+	data := []byte("legacy-imported-image")
+	storageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		if r.URL.Path != "/imported-media/post-1.webp" {
+			t.Fatalf("normalized path = %q, want /imported-media/post-1.webp", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/webp")
+		w.Header().Set("Content-Length", "21")
+		_, _ = w.Write(data)
+	}))
+	defer storageServer.Close()
+
+	store := NewHTTPMediaStorage("", storageServer.URL, "test-secret", "")
+	rc, size, mimeType, err := store.Get(
+		context.Background(),
+		"http://43.161.249.91/imported-media/post-1.webp",
+	)
+	if err != nil {
+		t.Fatalf("Get legacy absolute object key failed: %v", err)
+	}
+	defer rc.Close()
+	if size != int64(len(data)) || mimeType != "image/webp" {
+		t.Fatalf("unexpected response metadata: size=%d mime=%q", size, mimeType)
+	}
+}
+
 func TestMemoryStorageSignUpload(t *testing.T) {
 	store := NewMemoryStorage()
 	url, err := store.SignUpload(context.Background(), "asset1", "obj1", "image/png", time.Now().Add(5*time.Minute))

@@ -78,6 +78,7 @@ class ProfileScreen extends StatelessWidget {
     this.onOpenPostById,
     this.onLogout,
     this.onDeleteAccount,
+    this.onChangePassword,
     this.onRequireAuth,
     this.onOpenModeration,
     this.onOpenRecommendations,
@@ -109,6 +110,7 @@ class ProfileScreen extends StatelessWidget {
   final OpenPostById? onOpenPostById;
   final Future<void> Function()? onLogout;
   final Future<void> Function()? onDeleteAccount;
+  final VoidCallback? onChangePassword;
   final VoidCallback? onRequireAuth;
   final VoidCallback? onOpenModeration;
   final VoidCallback? onOpenRecommendations;
@@ -209,6 +211,7 @@ class ProfileScreen extends StatelessWidget {
         onFeedback: onFeedback,
         onLogout: onLogout,
         onDeleteAccount: onDeleteAccount,
+        onChangePassword: onChangePassword,
         storeRepository: storeRepository,
         bookmarkRepository: bookmarkRepository,
         publishRepository: publishRepository,
@@ -256,7 +259,12 @@ class ProfileScreen extends StatelessWidget {
                   final email = currentUser?.email?.trim();
                   final accountLabel = (email != null && email.isNotEmpty)
                       ? email
-                      : (isGuest ? '未登录游客' : _safePublicAccountLabel(null, currentUser?.username ?? ''));
+                      : (isGuest
+                            ? '未登录游客'
+                            : _safePublicAccountLabel(
+                                null,
+                                currentUser?.username ?? '',
+                              ));
                   return _ProfileCard(
                     nickname: currentUser?.nickname.isNotEmpty == true
                         ? currentUser!.nickname
@@ -386,6 +394,7 @@ class ProfileScreen extends StatelessWidget {
           onOpenGovernance: onOpenGovernance,
           onOpenAppeals: onOpenAppeals,
           onOpenAccountStatus: onOpenAccountStatus,
+          onChangePassword: onChangePassword,
           onClearHistory: () async => store.clearHistory(),
           onLogout: onLogout,
           onDeleteAccount: onDeleteAccount,
@@ -590,6 +599,7 @@ class _ApiProfileScreen extends StatefulWidget {
     this.onOpenPostById,
     this.onLogout,
     this.onDeleteAccount,
+    this.onChangePassword,
     this.onOpenModeration,
     this.onOpenRecommendations,
     this.onOpenAppeals,
@@ -616,6 +626,7 @@ class _ApiProfileScreen extends StatefulWidget {
   final ValueChanged<String> onFeedback;
   final Future<void> Function()? onLogout;
   final Future<void> Function()? onDeleteAccount;
+  final VoidCallback? onChangePassword;
   final VoidCallback? onOpenModeration;
   final VoidCallback? onOpenRecommendations;
   final VoidCallback? onOpenAppeals;
@@ -788,92 +799,95 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
                 onRequireAuth: widget.onRequireAuth,
                 onTapEntry: () => _openHomepage(profile),
                 onTapStat: (label) {
-                if (label == '粉丝') {
-                  if (widget.onOpenRelations != null) {
-                    widget.onOpenRelations!(profile.id, true);
+                  if (label == '粉丝') {
+                    if (widget.onOpenRelations != null) {
+                      widget.onOpenRelations!(profile.id, true);
+                    }
+                  } else if (label == '关注') {
+                    if (widget.onOpenRelations != null) {
+                      widget.onOpenRelations!(profile.id, false);
+                    }
+                  } else {
+                    _showList(label);
                   }
-                } else if (label == '关注') {
-                  if (widget.onOpenRelations != null) {
-                    widget.onOpenRelations!(profile.id, false);
-                  }
-                } else {
-                  _showList(label);
-                }
-              },
-            ),
-            if (widget.storeRepository != null) ...[
-              const SizedBox(height: 12),
-              FutureBuilder<PointsOverview>(
-                future: pointsFuture,
-                builder: (context, snapshot) => _PointsBalanceCard(
-                  balance: snapshot.data?.balance,
-                  onOpenPoints: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => PointsCenterScreen(
-                        apiRepository: widget.storeRepository!,
+                },
+              ),
+              if (widget.storeRepository != null) ...[
+                const SizedBox(height: 12),
+                FutureBuilder<PointsOverview>(
+                  future: pointsFuture,
+                  builder: (context, snapshot) => _PointsBalanceCard(
+                    balance: snapshot.data?.balance,
+                    onOpenPoints: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => PointsCenterScreen(
+                          apiRepository: widget.storeRepository!,
+                        ),
                       ),
                     ),
-                  ),
-                  onOpenStore: () => Navigator.of(context)
-                      .push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => ExchangeStoreScreen(
-                            apiRepository: widget.storeRepository!,
+                    onOpenStore: () => Navigator.of(context)
+                        .push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => ExchangeStoreScreen(
+                              apiRepository: widget.storeRepository!,
+                            ),
                           ),
-                        ),
-                      )
-                      .then((_) {
-                        if (mounted) {
-                          setState(
-                            () => pointsFuture = widget.storeRepository!
-                                .overview(),
-                          );
-                        }
-                      }),
+                        )
+                        .then((_) {
+                          if (mounted) {
+                            setState(
+                              () => pointsFuture = widget.storeRepository!
+                                  .overview(),
+                            );
+                          }
+                        }),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              const _SectionHeader(title: '常用功能'),
+              const SizedBox(height: 10),
+              _ToolsGrid(
+                onBookmarks: () => _openBookmarks(),
+                onLikes: () => _openLikes(),
+                onHistory: () => _openHistory(),
+                onAppeals:
+                    widget.onOpenAppeals ??
+                    () => widget.onFeedback('当前模式暂不支持申诉'),
+              ),
+              const SizedBox(height: 20),
+              _SectionHeader(
+                title: '最近发布',
+                actionText: profile.postCount > 0 ? '查看全部' : null,
+                onAction: profile.postCount > 0
+                    ? () => _showList('我的发布')
+                    : null,
+              ),
+              const SizedBox(height: 10),
+              _RecentPostsApi(
+                recentPostsFuture: recentPostsFuture,
+                isGuest: widget.isGuest,
+                onOpenPostById: widget.onOpenPostById,
+                onOpenPost: widget.onOpenPost,
+                onOpenHome: widget.onOpenHome,
+                onOpenComposer: widget.onOpenComposer,
+                onRequireAuth: widget.onRequireAuth,
+              ),
+              const SizedBox(height: 22),
+              Text(
+                '圣杯酱 · 把真实的玩具体验留在这里',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textSecondary.withValues(alpha: .65),
+                  fontSize: 10.5,
                 ),
               ),
             ],
-            const SizedBox(height: 20),
-            const _SectionHeader(title: '常用功能'),
-            const SizedBox(height: 10),
-            _ToolsGrid(
-              onBookmarks: () => _openBookmarks(),
-              onLikes: () => _openLikes(),
-              onHistory: () => _openHistory(),
-              onAppeals:
-                  widget.onOpenAppeals ?? () => widget.onFeedback('当前模式暂不支持申诉'),
-            ),
-            const SizedBox(height: 20),
-            _SectionHeader(
-              title: '最近发布',
-              actionText: profile.postCount > 0 ? '查看全部' : null,
-              onAction: profile.postCount > 0 ? () => _showList('我的发布') : null,
-            ),
-            const SizedBox(height: 10),
-            _RecentPostsApi(
-              recentPostsFuture: recentPostsFuture,
-              isGuest: widget.isGuest,
-              onOpenPostById: widget.onOpenPostById,
-              onOpenPost: widget.onOpenPost,
-              onOpenHome: widget.onOpenHome,
-              onOpenComposer: widget.onOpenComposer,
-              onRequireAuth: widget.onRequireAuth,
-            ),
-            const SizedBox(height: 22),
-            Text(
-              '圣杯酱 · 把真实的玩具体验留在这里',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppTheme.textSecondary.withValues(alpha: .65),
-                fontSize: 10.5,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   void _openHistory() {
     Navigator.of(context).push(
@@ -969,6 +983,7 @@ class _ApiProfileScreenState extends State<_ApiProfileScreen> {
           onOpenGovernance: widget.onOpenGovernance,
           onOpenAppeals: widget.onOpenAppeals,
           onOpenAccountStatus: widget.onOpenAccountStatus,
+          onChangePassword: widget.onChangePassword,
           onClearHistory: () => widget.repository.clearHistory(),
           onLogout: widget.onLogout,
           onDeleteAccount: widget.onDeleteAccount,
@@ -1584,7 +1599,9 @@ String _safePublicAccountLabel(String? publicId, String username) {
     return 'ID: $pid';
   }
   final trimmed = username.trim();
-  if (trimmed.startsWith('email_') || trimmed.startsWith('usr_') || trimmed.startsWith('acct_')) {
+  if (trimmed.startsWith('email_') ||
+      trimmed.startsWith('usr_') ||
+      trimmed.startsWith('acct_')) {
     final idx = trimmed.indexOf('_');
     return 'ID: ${trimmed.substring(idx + 1)}';
   }
@@ -2033,10 +2050,7 @@ class _PointsBalanceCard extends StatelessWidget {
                   const Spacer(),
                   const Text(
                     '查看积分明细',
-                    style: TextStyle(
-                      color: Color(0xFF8598AA),
-                      fontSize: 10.5,
-                    ),
+                    style: TextStyle(color: Color(0xFF8598AA), fontSize: 10.5),
                   ),
                   const SizedBox(width: 2),
                   const Icon(

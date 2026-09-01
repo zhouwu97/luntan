@@ -144,14 +144,26 @@ func TestModerateMediaNormalReset(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT EXISTS \(.*FROM user_roles ur.*JOIN role_permissions rp.*`).
 		WithArgs("admin_1", "moderation.action").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`(?s)SELECT EXISTS \(.*FROM user_roles ur.*JOIN roles rl.*rl\.name = \$2.*community_id IS NULL.*\)`).
+		WithArgs("admin_1", "super_admin").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
 	mock.ExpectQuery(`(?s)SELECT object_key, mime_type, status FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs("media_101").
 		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "status"}).AddRow("media/u1/media_101", "image/jpeg", "ready"))
 
 	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)INSERT INTO media_moderation_versions.*ON CONFLICT \(media_id, version_no\) DO NOTHING`).
+		WithArgs(sqlmock.AnyArg(), "media_101").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`(?s)UPDATE media_assets.*SET moderation_status = 'normal'.*WHERE id = \$4`).
 		WithArgs("admin_1", sqlmock.AnyArg(), "恢复原图展示", "media_101").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(MAX\(version_no\), 0\) \+ 1.*FROM media_moderation_versions.*WHERE media_id = \$1`).
+		WithArgs("media_101").
+		WillReturnRows(sqlmock.NewRows([]string{"version_no"}).AddRow(2))
+	mock.ExpectExec(`(?s)INSERT INTO media_moderation_versions.*VALUES \(\$1, \$2, \$3, \$4, \$5::jsonb`).
+		WithArgs(sqlmock.AnyArg(), "media_101", 2, "normal", "[]", "media/u1/media_101", "", "", "admin_1", "恢复原图展示", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Admin log

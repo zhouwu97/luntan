@@ -55,6 +55,7 @@ class PostDetailScreen extends StatefulWidget {
     this.publishRepository,
     this.platformRepository,
     this.canModerate = false,
+    this.canRestoreCensored = false,
     this.onOpenUserId,
   });
 
@@ -85,6 +86,7 @@ class PostDetailScreen extends StatefulWidget {
   final PublishRepository? publishRepository;
   final PlatformRepository? platformRepository;
   final bool canModerate;
+  final bool canRestoreCensored;
   final ValueChanged<String>? onOpenUserId;
 
   @override
@@ -588,7 +590,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           color: AppTheme.background,
                           border: Border(
                             top: BorderSide(color: Color(0xFFEDF2F6), width: 1),
-                            bottom: BorderSide(color: Color(0xFFEDF2F6), width: 1),
+                            bottom: BorderSide(
+                              color: Color(0xFFEDF2F6),
+                              width: 1,
+                            ),
                           ),
                         ),
                       ),
@@ -623,8 +628,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         selected:
                                             commentsController.sort ==
                                             CommentSort.hot,
-                                        onTap: () => commentsController
-                                            .setSort(CommentSort.hot),
+                                        onTap: () => commentsController.setSort(
+                                          CommentSort.hot,
+                                        ),
                                       ),
                                       const SizedBox(width: 6),
                                       _CommentSortChip(
@@ -632,8 +638,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         selected:
                                             commentsController.sort ==
                                             CommentSort.asc,
-                                        onTap: () => commentsController
-                                            .setSort(CommentSort.asc),
+                                        onTap: () => commentsController.setSort(
+                                          CommentSort.asc,
+                                        ),
                                       ),
                                       const SizedBox(width: 6),
                                       _CommentSortChip(
@@ -641,8 +648,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         selected:
                                             commentsController.sort ==
                                             CommentSort.desc,
-                                        onTap: () => commentsController
-                                            .setSort(CommentSort.desc),
+                                        onTap: () => commentsController.setSort(
+                                          CommentSort.desc,
+                                        ),
                                       ),
                                       const Spacer(),
                                       if (post.authorId.isNotEmpty)
@@ -744,8 +752,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 floor: index + 2,
                                 replies: comment.replyPreview,
                                 isHighlighted: isHighlighted,
-                                isPostAuthor:
-                                    post.authorId == comment.authorId,
+                                isPostAuthor: post.authorId == comment.authorId,
                                 onAuthorTap: widget.onOpenUserId,
                                 onReply: () {
                                   setState(() => replyTarget = comment);
@@ -992,7 +999,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   Navigator.pop(sheetContext);
                   try {
                     if (post.isRecommended) {
-                      await widget.platformRepository!.removeHomeRecommendation(post.id);
+                      await widget.platformRepository!.removeHomeRecommendation(
+                        post.id,
+                      );
                     } else {
                       await widget.platformRepository!.setHomeRecommendation(
                         postId: post.id,
@@ -1027,6 +1036,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       builder: (_) => ImageModerationScreen(
                         post: post,
                         platformRepository: widget.platformRepository,
+                        canRestoreCensored: widget.canRestoreCensored,
                       ),
                     ),
                   );

@@ -22,6 +22,7 @@ class SettingsCenterScreen extends StatelessWidget {
     this.onOpenGovernance,
     this.onOpenAppeals,
     this.onOpenAccountStatus,
+    this.onChangePassword,
     this.onClearHistory,
     this.onLogout,
     this.onDeleteAccount,
@@ -38,6 +39,7 @@ class SettingsCenterScreen extends StatelessWidget {
   final VoidCallback? onOpenGovernance;
   final VoidCallback? onOpenAppeals;
   final VoidCallback? onOpenAccountStatus;
+  final VoidCallback? onChangePassword;
   final Future<void> Function()? onClearHistory;
   final Future<void> Function()? onLogout;
   final Future<void> Function()? onDeleteAccount;
@@ -46,7 +48,8 @@ class SettingsCenterScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final email = accountSubtitle ?? (isGuest ? '未绑定邮箱 · 游客体验' : '已登录账号');
-    final isEmailVerified = !isGuest && accountSubtitle != null && accountSubtitle!.contains('@');
+    final isEmailVerified =
+        !isGuest && accountSubtitle != null && accountSubtitle!.contains('@');
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -77,7 +80,25 @@ class SettingsCenterScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // 2. 内容与隐私
+          // 2. 账号与安全
+          if (!isGuest && onChangePassword != null) ...[
+            const _SectionHeader(title: '账号与安全'),
+            _SettingsSection(
+              children: [
+                _SettingsRow(
+                  icon: Icons.lock_reset_rounded,
+                  iconBg: AppTheme.softBlue,
+                  iconColor: AppTheme.primary,
+                  title: '修改密码',
+                  subtitle: '使用当前密码或邮箱验证码验证身份',
+                  onTap: onChangePassword,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // 3. 内容与隐私
           const _SectionHeader(title: '内容与隐私'),
           _SettingsSection(
             children: [
@@ -109,7 +130,7 @@ class SettingsCenterScreen extends StatelessWidget {
             ],
           ),
 
-          // 3. 社区管理 (权限动态展示)
+          // 4. 社区管理 (权限动态展示)
           if (onOpenGovernance != null ||
               onOpenAppeals != null ||
               onOpenAccountStatus != null) ...[
@@ -148,7 +169,7 @@ class SettingsCenterScreen extends StatelessWidget {
             ),
           ],
 
-          // 4. 关于
+          // 5. 关于
           const SizedBox(height: 16),
           const _SectionHeader(title: '关于'),
           _SettingsSection(
@@ -168,7 +189,7 @@ class SettingsCenterScreen extends StatelessWidget {
             ],
           ),
 
-          // 5. 账号操作
+          // 6. 账号操作
           if (onLogout != null || onDeleteAccount != null) ...[
             const SizedBox(height: 16),
             const _SectionHeader(title: '账号操作'),
@@ -194,31 +215,47 @@ class SettingsCenterScreen extends StatelessWidget {
   }
 
   Future<void> _confirmClearHistory(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('清空浏览历史', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-        content: const Text(
-          '将删除当前账号保存的浏览记录，此操作不可撤销。',
-          style: TextStyle(fontSize: 13, height: 1.6, color: AppTheme.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.pink,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-            child: const Text('确认清空'),
+            title: const Text(
+              '清空浏览历史',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+            ),
+            content: const Text(
+              '将删除当前账号保存的浏览记录，此操作不可撤销。',
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.pink,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('确认清空'),
+              ),
+            ],
           ),
-        ],
-      ),
-    ) ?? false;
+        ) ??
+        false;
 
     if (!confirmed || !context.mounted) return;
 
@@ -231,31 +268,47 @@ class SettingsCenterScreen extends StatelessWidget {
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('退出登录', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-        content: const Text(
-          '退出后需要重新验证账号才能访问个人数据。',
-          style: TextStyle(fontSize: 13, height: 1.6, color: AppTheme.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.pink,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-            child: const Text('确认退出'),
+            title: const Text(
+              '退出登录',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+            ),
+            content: const Text(
+              '退出后需要重新验证账号才能访问个人数据。',
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.pink,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('确认退出'),
+              ),
+            ],
           ),
-        ],
-      ),
-    ) ?? false;
+        ) ??
+        false;
 
     if (!confirmed || !context.mounted) return;
     Navigator.of(context).pop();
@@ -267,22 +320,36 @@ class SettingsCenterScreen extends StatelessWidget {
         await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('确认注销账号？', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              '确认注销账号？',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+            ),
             content: const Text(
               '账号、认证信息、互动和通知将被清理，且无法恢复。请确认你已备份需要保留的内容。',
-              style: TextStyle(fontSize: 13, height: 1.6, color: AppTheme.textSecondary),
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: AppTheme.textSecondary,
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.pink,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
                 child: const Text('继续注销'),
               ),
@@ -304,15 +371,28 @@ class SettingsCenterScreen extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Text('隐私与安全', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        title: const Text(
+          '隐私与安全',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+        ),
         content: const Text(
           '公开帖子和评论会展示给社区成员。登录凭证保存在设备安全存储中；浏览历史用于账号体验。只有在你主动提交资料、评论或举报时，相关内容才会发送到服务器。',
-          style: TextStyle(fontSize: 13, height: 1.65, color: AppTheme.textSecondary),
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.65,
+            color: AppTheme.textSecondary,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('知道了', style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary)),
+            child: const Text(
+              '知道了',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.primary,
+              ),
+            ),
           ),
         ],
       ),
@@ -334,20 +414,40 @@ class SettingsCenterScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               alignment: Alignment.center,
-              child: const Text('圣', style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w900, fontSize: 16)),
+              child: const Text(
+                '圣',
+                style: TextStyle(
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
             ),
             const SizedBox(width: 10),
-            const Text('关于圣杯酱', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+            const Text(
+              '关于圣杯酱',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+            ),
           ],
         ),
         content: const Text(
           '圣杯酱 · 玩具交流轻社区\n\n遵循友好、诚实与克制的社区原则。保持轻量设计，无打扰通知与无意义冗余。感谢每一位热爱分享的同好！',
-          style: TextStyle(fontSize: 13, height: 1.65, color: AppTheme.textSecondary),
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.65,
+            color: AppTheme.textSecondary,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('确定', style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary)),
+            child: const Text(
+              '确定',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.primary,
+              ),
+            ),
           ),
         ],
       ),
@@ -396,7 +496,9 @@ class _AccountHeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final fallbackChar = isGuest
         ? '游'
-        : (displayName.trim().isNotEmpty ? displayName.trim().characters.first : '圣');
+        : (displayName.trim().isNotEmpty
+              ? displayName.trim().characters.first
+              : '圣');
 
     return Container(
       decoration: BoxDecoration(
@@ -474,17 +576,24 @@ class _AccountHeaderCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 5),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: isVerified ? const Color(0xFFE4F7F1) : const Color(0xFFF1F5F9),
+                          color: isVerified
+                              ? const Color(0xFFE4F7F1)
+                              : const Color(0xFFF1F5F9),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                           isVerified ? '已验证' : (isGuest ? '登录 / 绑定邮箱' : '正常状态'),
+                          isVerified ? '已验证' : (isGuest ? '登录 / 绑定邮箱' : '正常状态'),
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: isVerified ? const Color(0xFF2E8A76) : AppTheme.textSecondary,
+                            color: isVerified
+                                ? const Color(0xFF2E8A76)
+                                : AppTheme.textSecondary,
                           ),
                         ),
                       ),
@@ -524,7 +633,12 @@ class _SettingsSection extends StatelessWidget {
           for (var i = 0; i < children.length; i++) ...[
             children[i],
             if (i < children.length - 1)
-              const Divider(height: 1, indent: 58, endIndent: 14, color: Color(0xFFEDF2F7)),
+              const Divider(
+                height: 1,
+                indent: 58,
+                endIndent: 14,
+                color: Color(0xFFEDF2F7),
+              ),
           ],
         ],
       ),
@@ -653,7 +767,8 @@ class _UpdateRowState extends State<_UpdateRow> {
       iconColor: AppTheme.primary,
       title: '检查更新',
       subtitle: _versionLabel,
-      onTap: () => showAppUpdateSheet(context, coordinator: widget.updateCoordinator),
+      onTap: () =>
+          showAppUpdateSheet(context, coordinator: widget.updateCoordinator),
     );
   }
 }
@@ -698,7 +813,9 @@ class _ActionCardButton extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: isDanger ? const Color(0xFFCB6374) : AppTheme.textPrimary,
+                    color: isDanger
+                        ? const Color(0xFFCB6374)
+                        : AppTheme.textPrimary,
                   ),
                 ),
                 if (subtitle != null) ...[

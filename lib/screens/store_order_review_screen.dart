@@ -277,17 +277,22 @@ class StoreOrderReviewDetailScreen extends StatefulWidget {
 class _StoreOrderReviewDetailScreenState
     extends State<StoreOrderReviewDetailScreen> {
   late Future<AdminStoreOrderDetail> _future;
-  late Future<List<AdminStoreRewardContent>> _rewardContentFuture;
+  final List<AdminStoreRewardContent> _rewardItems =
+      <AdminStoreRewardContent>[];
+  final Set<String> _invalidTransactionIds = <String>{};
   final TextEditingController _reasonController = TextEditingController();
+  String? _rewardNextCursor;
+  String? _rewardError;
+  bool _rewardLoading = true;
+  bool _rewardLoadingMore = false;
+  bool _rewardHasMore = false;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     _future = widget.repository.getStoreOrder(widget.orderId);
-    _rewardContentFuture = widget.repository.getStoreOrderRewardContent(
-      widget.orderId,
-    );
+    _loadRewardFirstPage();
   }
 
   @override
@@ -295,6 +300,83 @@ class _StoreOrderReviewDetailScreenState
     _reasonController.dispose();
     super.dispose();
   }
+
+  Future<void> _loadRewardFirstPage() async {
+    setState(() {
+      _rewardLoading = true;
+      _rewardLoadingMore = false;
+      _rewardError = null;
+      _rewardItems.clear();
+      _invalidTransactionIds.clear();
+      _rewardNextCursor = null;
+      _rewardHasMore = false;
+    });
+    try {
+      final page = await widget.repository.getStoreOrderRewardContentPage(
+        widget.orderId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _rewardItems.addAll(page.items);
+        _rewardNextCursor = page.nextCursor;
+        _rewardHasMore = page.hasMore;
+        _rewardLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _rewardLoading = false;
+        _rewardError = '$error';
+      });
+    }
+  }
+
+  Future<void> _loadMoreRewards() async {
+    final cursor = _rewardNextCursor;
+    if (_rewardLoadingMore ||
+        !_rewardHasMore ||
+        cursor == null ||
+        cursor.isEmpty) {
+      return;
+    }
+    setState(() => _rewardLoadingMore = true);
+    try {
+      final page = await widget.repository.getStoreOrderRewardContentPage(
+        widget.orderId,
+        cursor: cursor,
+      );
+      if (!mounted) return;
+      setState(() {
+        _rewardItems.addAll(page.items);
+        _rewardNextCursor = page.nextCursor;
+        _rewardHasMore = page.hasMore;
+        _rewardLoadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _rewardLoadingMore = false;
+        _rewardError = '$error';
+      });
+    }
+  }
+
+  int _baseEligiblePoints(AdminStoreOrderDetail order) {
+    // 兼容尚未返回资格字段的旧服务端；正式接口始终使用申请时快照计算。
+    if (!order.hasBalanceAtSubmit) {
+      return order.userPoints;
+    }
+    return order.eligiblePointsAtSubmit;
+  }
+
+  int get _newInvalidatedPoints => _rewardItems
+      .where(
+        (item) => !item.invalidated && _invalidTransactionIds.contains(item.id),
+      )
+      .fold(0, (sum, item) => sum + item.points);
+
+  int _effectivePoints(AdminStoreOrderDetail order) =>
+      _baseEligiblePoints(order) - _newInvalidatedPoints;
 
   Future<void> _review(AdminStoreOrderDetail order, String decision) async {
     final reason = _reasonController.text.trim();
@@ -311,6 +393,7 @@ class _StoreOrderReviewDetailScreenState
         id: order.id,
         decision: decision,
         reason: reason,
+        invalidTransactionIds: _invalidTransactionIds.toList(),
       );
       widget.onFeedback?.call(decision == 'approve' ? '兑换申请已通过' : '兑换申请已拒绝');
       if (mounted) Navigator.of(context).pop(true);
@@ -379,17 +462,29 @@ class _StoreOrderReviewDetailScreenState
                 _detailRow('申请人', _displayName(order)),
                 _detailRow('商品', order.productName),
                 _detailRow('需要积分', '${order.points}'),
+                _detailRow(
+                  '申请时积分',
+                  '${order.hasBalanceAtSubmit ? order.balanceAtSubmit : order.userPoints}',
+                ),
                 _detailRow('当前积分', '${order.userPoints}'),
-                _detailRow('审核中冻结', '${order.reservedPoints}'),
-                _detailRow('可用积分', '${order.availablePoints}'),
-                _detailRow('申请时间', relativeTimeLabel(order.createdAt)),
+                _detailRow('历史无效积分', '${order.historicalInvalidatedPoints}'),
+                _detailRow('申请时有效积分', '${_baseEligiblePoints(order)}'),
+                _detailRow(
+                  '冻结 / 可用',
+                  '${order.reservedPoints} / ${order.availablePoints}',
+                ),
+                _detailRow(
+                  '申请 / 截止',
+                  '${relativeTimeLabel(order.createdAt)} / ${_formatDateTime(order.createdAt)}',
+                ),
                 _detailRow('订单状态', _statusLabel(order.status)),
               ]),
               const SizedBox(height: 12),
-              _activityCard(order),
-              const SizedBox(height: 12),
               if (order.pointSources.isNotEmpty) ...[
-                _pointSourceCard(order.pointSources),
+                _pointSourceCard(order.pointSources, order),
+                const SizedBox(height: 12),
+              ] else ...[
+                _activityCard(order),
                 const SizedBox(height: 12),
               ],
               _rewardContentSection(),
@@ -402,130 +497,160 @@ class _StoreOrderReviewDetailScreenState
           );
         },
       ),
+      bottomNavigationBar: FutureBuilder<AdminStoreOrderDetail>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done ||
+              snapshot.data?.status != 'pending_review') {
+            return const SizedBox.shrink();
+          }
+          return _reviewActionBar(snapshot.data!);
+        },
+      ),
     );
   }
 
   Widget _activityCard(AdminStoreOrderDetail order) {
-    return _detailCard([
-      const Text('查看申请人的内容', style: TextStyle(fontWeight: FontWeight.w800)),
-      const SizedBox(height: 5),
-      const Text(
-        '请结合他的发帖和评论，判断本次兑换是否符合积分规则。不要给单条内容增加水贴标签。',
-        style: TextStyle(
-          color: AppTheme.textSecondary,
-          fontSize: 12,
-          height: 1.45,
-        ),
-      ),
-      const SizedBox(height: 10),
-      Row(
-        children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: widget.onOpenUserActivity == null
-                  ? null
-                  : () => widget.onOpenUserActivity!(order.userId, 0),
-              icon: const Icon(Icons.article_outlined, size: 17),
-              label: const Text('查看他的发帖'),
-            ),
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: widget.onOpenUserActivity == null
-                  ? null
-                  : () => widget.onOpenUserActivity!(order.userId, 1),
-              icon: const Icon(Icons.chat_bubble_outline, size: 17),
-              label: const Text('查看他的评论'),
-            ),
-          ),
-        ],
-      ),
-    ]);
+    return _detailCard([_activityActions(order)]);
   }
 
-  Widget _pointSourceCard(List<StorePointSource> sources) {
+  Widget _pointSourceCard(
+    List<StorePointSource> sources,
+    AdminStoreOrderDetail order,
+  ) {
     return _detailCard([
-      const Text('积分来源参考', style: TextStyle(fontWeight: FontWeight.w800)),
+      const Text('兑换积分构成', style: TextStyle(fontWeight: FontWeight.w800)),
       const SizedBox(height: 7),
+      _activityActions(order),
+      const SizedBox(height: 12),
       for (final source in sources)
         Padding(
           padding: const EdgeInsets.only(bottom: 5),
           child: Row(
             children: [
               Expanded(child: Text(_sourceLabel(source.source))),
-              Text('${source.points} 分 · ${source.count} 笔'),
+              Text(
+                '${source.eligiblePoints} 分 / ${source.points} 分 · ${source.count} 笔',
+                style: TextStyle(
+                  color: source.invalidPoints > 0
+                      ? AppTheme.orange
+                      : AppTheme.textPrimary,
+                  fontSize: 12,
+                ),
+              ),
             ],
           ),
         ),
+      const SizedBox(height: 3),
+      const Text(
+        '发帖和评论需要人工核验；点赞及其他正常积分不需要逐笔核验。',
+        style: TextStyle(
+          color: AppTheme.textSecondary,
+          fontSize: 11,
+          height: 1.4,
+        ),
+      ),
     ]);
   }
 
-  Widget _rewardContentSection() {
-    return FutureBuilder<List<AdminStoreRewardContent>>(
-      future: _rewardContentFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return _detailCard([
-            const Text(
-              '获得积分的内容记录',
-              style: TextStyle(fontWeight: FontWeight.w800),
+  Widget _activityActions(AdminStoreOrderDetail order) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('查看申请人的内容', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 7),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: widget.onOpenUserActivity == null
+                    ? null
+                    : () => widget.onOpenUserActivity!(order.userId, 0),
+                icon: const Icon(Icons.article_outlined, size: 17),
+                label: const Text('查看他的发帖'),
+              ),
             ),
-            const SizedBox(height: 8),
-            const LinearProgressIndicator(),
-          ]);
-        }
-        if (snapshot.hasError) {
-          return _detailCard([
-            const Text(
-              '获得积分的内容记录',
-              style: TextStyle(fontWeight: FontWeight.w800),
+            const SizedBox(width: 9),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: widget.onOpenUserActivity == null
+                    ? null
+                    : () => widget.onOpenUserActivity!(order.userId, 1),
+                icon: const Icon(Icons.chat_bubble_outline, size: 17),
+                label: const Text('查看他的评论'),
+              ),
             ),
-            const SizedBox(height: 6),
-            const Text(
-              '积分内容记录加载失败，请稍后重试。',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-          ]);
-        }
-        final items = snapshot.data ?? const <AdminStoreRewardContent>[];
-        if (items.isEmpty) {
-          return _detailCard([
-            const Text(
-              '获得积分的内容记录',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              '暂时没有可追溯的发帖或评论奖励流水。',
-              style: TextStyle(color: AppTheme.textSecondary),
-            ),
-          ]);
-        }
-        return _detailCard([
-          const Text(
-            '获得积分的内容记录',
-            style: TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            '以下内容按实际积分流水关联，积分可能因每日上限而低于固定奖励值。',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 12,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 6),
-          for (final item in items) _rewardContentTile(item),
-        ]);
-      },
+          ],
+        ),
+      ],
     );
+  }
+
+  Widget _rewardContentSection() {
+    if (_rewardLoading) {
+      return _detailCard([
+        const Text('获得积分的内容记录', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        const LinearProgressIndicator(),
+      ]);
+    }
+    if (_rewardError != null) {
+      return _detailCard([
+        const Text('获得积分的内容记录', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        const Text(
+          '积分内容记录加载失败，请稍后重试。',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _loadRewardFirstPage,
+          child: const Text('重新加载'),
+        ),
+      ]);
+    }
+    if (_rewardItems.isEmpty) {
+      return _detailCard([
+        const Text('获得积分的内容记录', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        const Text(
+          '暂时没有可追溯的发帖或评论奖励流水。',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+      ]);
+    }
+    return _detailCard([
+      const Text('获得积分的内容记录', style: TextStyle(fontWeight: FontWeight.w800)),
+      const SizedBox(height: 4),
+      const Text(
+        '以下内容按申请提交时的实际积分流水关联；删除、编辑内容会优先显示。勾选后，该笔奖励不会计入兑换资格。',
+        style: TextStyle(
+          color: AppTheme.textSecondary,
+          fontSize: 12,
+          height: 1.4,
+        ),
+      ),
+      const SizedBox(height: 6),
+      for (final item in _rewardItems) _rewardContentTile(item),
+      if (_rewardHasMore) ...[
+        const SizedBox(height: 4),
+        Center(
+          child: _rewardLoadingMore
+              ? const CircularProgressIndicator(strokeWidth: 2)
+              : OutlinedButton(
+                  onPressed: _loadMoreRewards,
+                  child: const Text('加载更多奖励'),
+                ),
+        ),
+      ],
+    ]);
   }
 
   Widget _rewardContentTile(AdminStoreRewardContent item) {
     final status = _rewardStatusLabel(item.currentStatus);
     final edited = item.editedSinceReward ? ' · 已编辑' : '';
+    final excluded =
+        item.invalidated || _invalidTransactionIds.contains(item.id);
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: 8),
@@ -541,11 +666,11 @@ class _StoreOrderReviewDetailScreenState
           const SizedBox(width: 8),
           Expanded(child: Text(_sourceLabel(item.source))),
           Text(
-            '$status$edited',
+            '${item.invalidated ? '已判定不可兑换' : status}$edited',
             style: TextStyle(
-              color: item.currentStatus == 'normal'
-                  ? AppTheme.mint
-                  : AppTheme.orange,
+              color: item.invalidated || item.currentStatus != 'normal'
+                  ? AppTheme.orange
+                  : AppTheme.mint,
               fontSize: 11,
               fontWeight: FontWeight.w700,
             ),
@@ -559,6 +684,35 @@ class _StoreOrderReviewDetailScreenState
         style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
       ),
       children: [
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: excluded,
+          onChanged: item.invalidated
+              ? null
+              : (value) {
+                  setState(() {
+                    if (value == true) {
+                      _invalidTransactionIds.add(item.id);
+                    } else {
+                      _invalidTransactionIds.remove(item.id);
+                    }
+                  });
+                },
+          title: Text(
+            item.invalidated ? '已判定不计入兑换' : '不计入兑换',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+          subtitle: item.invalidated && item.invalidationReason.isNotEmpty
+              ? Text(
+                  '判定说明：${item.invalidationReason}',
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                  ),
+                )
+              : null,
+        ),
         if (!item.snapshotAvailable)
           const Align(
             alignment: Alignment.centerLeft,
@@ -573,9 +727,99 @@ class _StoreOrderReviewDetailScreenState
             item.titleAtReward,
           ),
         _contentText('获得积分时内容', item.contentAtReward),
+        if (item.targetType == 'post' &&
+            item.editedSinceReward &&
+            item.currentTitle.isNotEmpty)
+          _contentText('当前标题', item.currentTitle),
         if (item.editedSinceReward && item.currentContent.isNotEmpty)
           _contentText('当前内容', item.currentContent),
       ],
+    );
+  }
+
+  Widget _reviewCard(AdminStoreOrderDetail order) {
+    final effectivePoints = _effectivePoints(order);
+    final enoughPoints = effectivePoints >= order.points;
+    return _detailCard([
+      const Text('核验结果', style: TextStyle(fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      _detailRow('账户当前积分', '${order.userPoints}'),
+      _detailRow(
+        '申请时积分',
+        '${order.hasBalanceAtSubmit ? order.balanceAtSubmit : order.userPoints}',
+      ),
+      _detailRow('历史无效积分', '${order.historicalInvalidatedPoints}'),
+      _detailRow('本次新判定无效', '$_newInvalidatedPoints'),
+      _detailRow('有效可兑换积分', '$effectivePoints'),
+      _detailRow('兑换需要', '${order.points}'),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: enoughPoints ? AppTheme.softMint : AppTheme.softRose,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          enoughPoints
+              ? '✓ 有效积分满足兑换条件'
+              : '✕ 有效积分不足 ${order.points - effectivePoints} 分',
+          style: TextStyle(
+            color: enoughPoints ? AppTheme.mint : AppTheme.pink,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      const SizedBox(height: 14),
+      const Text('管理员判断', style: TextStyle(fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      TextField(
+        controller: _reasonController,
+        maxLines: 4,
+        maxLength: 1000,
+        decoration: const InputDecoration(
+          hintText: '审核说明；拒绝时必填，例如：存在较多无实质内容的刷屏回复',
+          alignLabelWithHint: true,
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 70),
+    ]);
+  }
+
+  Widget _reviewActionBar(AdminStoreOrderDetail order) {
+    final enoughPoints = _effectivePoints(order) >= order.points;
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 9, 14, 9),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: AppTheme.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _busy ? null : () => _review(order, 'reject'),
+                child: const Text('审核不通过'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton(
+                onPressed:
+                    _busy ||
+                        _rewardLoading ||
+                        _rewardError != null ||
+                        !enoughPoints
+                    ? null
+                    : () => _review(order, 'approve'),
+                child: Text(_busy ? '提交中…' : '审核通过'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -600,44 +844,9 @@ class _StoreOrderReviewDetailScreenState
     );
   }
 
-  Widget _reviewCard(AdminStoreOrderDetail order) {
-    return _detailCard([
-      const Text('管理员判断', style: TextStyle(fontWeight: FontWeight.w800)),
-      const SizedBox(height: 8),
-      TextField(
-        controller: _reasonController,
-        maxLines: 4,
-        maxLength: 1000,
-        decoration: const InputDecoration(
-          hintText: '审核说明；拒绝时必填，例如：存在较多无实质内容的刷屏回复',
-          alignLabelWithHint: true,
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 5),
-      Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: _busy ? null : () => _review(order, 'reject'),
-              child: const Text('审核不通过'),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: FilledButton(
-              onPressed: _busy ? null : () => _review(order, 'approve'),
-              child: Text(_busy ? '提交中…' : '审核通过'),
-            ),
-          ),
-        ],
-      ),
-    ]);
-  }
-
   Widget _detailCard(List<Widget> children) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -652,7 +861,7 @@ class _StoreOrderReviewDetailScreenState
 
   Widget _detailRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -676,6 +885,13 @@ class _StoreOrderReviewDetailScreenState
 
   String _displayName(AdminStoreOrder order) =>
       order.nickname.trim().isEmpty ? '@${order.username}' : order.nickname;
+
+  String _formatDateTime(DateTime value) {
+    final local = value.toLocal();
+    String pad(int number) => number.toString().padLeft(2, '0');
+    return '${local.year}-${pad(local.month)}-${pad(local.day)} '
+        '${pad(local.hour)}:${pad(local.minute)}';
+  }
 
   String _statusLabel(String value) => switch (value) {
     'pending_review' => '待审核',

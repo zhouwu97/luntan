@@ -567,7 +567,7 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orderID := newPostID()
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status, idempotency_key) VALUES ($1, $2, $3, $4, 'pending_review', $5)`, orderID, user.ID, input.ProductID, points, idempotencyKey); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status, idempotency_key, balance_at_submit) VALUES ($1, $2, $3, $4, 'pending_review', $5, $6)`, orderID, user.ID, input.ProductID, points, idempotencyKey, balance); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

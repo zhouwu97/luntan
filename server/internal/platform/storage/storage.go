@@ -191,6 +191,18 @@ func NewObjectStorageFromEnv() ObjectStorage {
 	return UnavailableMediaStorage{}
 }
 
+// normalizeHTTPObjectKey 将历史导入数据中的绝对媒体 URL 归一为对象路径。
+// 旧数据可能保存为 http(s)://旧域名/imported-media/...，而 HTTP 存储适配器
+// 只能把路径拼接到受控的内部存储地址上；绝不能直接信任数据库中的 host，
+// 否则既会拼出错误路径，也会让存储读取具备 SSRF 风险。
+func normalizeHTTPObjectKey(objectKey string) string {
+	raw := strings.TrimSpace(objectKey)
+	if parsed, err := url.Parse(raw); err == nil && parsed.IsAbs() && parsed.Host != "" {
+		return strings.TrimLeft(parsed.EscapedPath(), "/")
+	}
+	return strings.TrimLeft(raw, "/")
+}
+
 type UnavailableMediaStorage struct{}
 
 func (UnavailableMediaStorage) SignUpload(context.Context, string, string, string, time.Time) (string, error) {
@@ -225,6 +237,7 @@ func (s *HTTPMediaStorage) SignUpload(_ context.Context, assetID, objectKey, mim
 	if s.uploadBaseURL == "" || len(s.secret) == 0 {
 		return "", ErrStorageUnavailable
 	}
+	objectKey = normalizeHTTPObjectKey(objectKey)
 	expires := strconv.FormatInt(expiresAt.Unix(), 10)
 	message := assetID + "|" + objectKey + "|" + expires
 	hash := hmac.New(sha256.New, s.secret)
@@ -322,6 +335,7 @@ func (s *HTTPMediaStorage) VerifyUploaded(ctx context.Context, asset *MediaAsset
 }
 
 func (s *HTTPMediaStorage) Get(ctx context.Context, objectKey string) (io.ReadCloser, int64, string, error) {
+	objectKey = normalizeHTTPObjectKey(objectKey)
 	var getURL string
 	if s.internalBaseURL != "" {
 		getURL = s.internalBaseURL + "/" + strings.TrimLeft(objectKey, "/")
@@ -353,6 +367,7 @@ func (s *HTTPMediaStorage) Get(ctx context.Context, objectKey string) (io.ReadCl
 }
 
 func (s *HTTPMediaStorage) Put(ctx context.Context, objectKey string, mimeType string, reader io.Reader, size int64) error {
+	objectKey = normalizeHTTPObjectKey(objectKey)
 	var putURL string
 	if s.internalBaseURL != "" {
 		putURL = s.internalBaseURL + "/" + strings.TrimLeft(objectKey, "/")
@@ -385,6 +400,7 @@ func (s *HTTPMediaStorage) Put(ctx context.Context, objectKey string, mimeType s
 }
 
 func (s *HTTPMediaStorage) Delete(ctx context.Context, objectKey string) error {
+	objectKey = normalizeHTTPObjectKey(objectKey)
 	var deleteURL string
 	if s.internalBaseURL != "" {
 		deleteURL = s.internalBaseURL + "/" + strings.TrimLeft(objectKey, "/")

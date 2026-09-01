@@ -27,6 +27,7 @@ var (
 	ErrPasswordTooShort        = errors.New("password must be at least 8 characters")
 	ErrPasswordNotSet          = errors.New("password is not set for this account")
 	ErrCurrentPasswordRequired = errors.New("current password is required to change password")
+	ErrEmailNotVerified        = errors.New("email must be verified before password reset")
 )
 
 const (
@@ -98,6 +99,12 @@ type Service struct {
 	hasher BcryptPasswordHasher
 	clock  func() time.Time
 }
+
+// PasswordResetCodeVerifier 在密码事务内校验并消耗邮箱验证码。
+//
+// 验证器由 API 层注入，避免 auth 包依赖具体验证码存储实现；调用方必须
+// 使用传入的事务完成校验，保证验证码消费和密码更新具备原子性。
+type PasswordResetCodeVerifier func(context.Context, *sql.Tx, string, string) error
 
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db, clock: time.Now}
@@ -316,8 +323,33 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 // 密码；首次设置（旧自动注册遗留的无密码账号）无需旧密码，直接生效。
 // 修改成功后撤销该用户除当前会话外的全部会话与 refresh token。
 func (s *Service) SetPassword(ctx context.Context, userID, password, currentPassword, currentAccessToken string) error {
+	return s.setPassword(ctx, userID, password, currentPassword, currentAccessToken, "", "", nil)
+}
+
+// SetPasswordWithEmailCode 使用当前账号已验证的邮箱验证码设置或更新密码。
+// 验证码校验器必须在同一个数据库事务中校验并消费验证码，成功后会撤销
+// 当前会话之外的其他会话，降低旧设备或泄漏令牌继续使用的风险。
+func (s *Service) SetPasswordWithEmailCode(
+	ctx context.Context,
+	userID, password, email, emailCode, currentAccessToken string,
+	verify PasswordResetCodeVerifier,
+) error {
+	if strings.TrimSpace(email) == "" || strings.TrimSpace(emailCode) == "" || verify == nil {
+		return ErrInvalidInput
+	}
+	return s.setPassword(ctx, userID, password, "", currentAccessToken, email, emailCode, verify)
+}
+
+func (s *Service) setPassword(
+	ctx context.Context,
+	userID, password, currentPassword, currentAccessToken, verificationEmail, emailCode string,
+	verify PasswordResetCodeVerifier,
+) error {
 	if len([]rune(password)) < 8 {
 		return ErrPasswordTooShort
+	}
+	if verify != nil && strings.TrimSpace(currentPassword) != "" {
+		return ErrInvalidInput
 	}
 	if s == nil || s.db == nil {
 		return sql.ErrConnDone
@@ -340,6 +372,9 @@ func (s *Service) SetPassword(ctx context.Context, userID, password, currentPass
 	}
 	if err != nil {
 		return err
+	}
+	if verify != nil && !strings.EqualFold(strings.TrimSpace(email), strings.TrimSpace(verificationEmail)) {
+		return ErrInvalidInput
 	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT id, identifier, credential_hash FROM user_auth_methods WHERE user_id = $1 AND provider = 'password' FOR UPDATE`, userID)
@@ -366,6 +401,11 @@ func (s *Service) SetPassword(ctx context.Context, userID, password, currentPass
 	rows.Close()
 
 	if len(existing) == 0 {
+		if verify != nil {
+			if err := verify(ctx, tx, email, emailCode); err != nil {
+				return err
+			}
+		}
 		identifier := email
 		if identifier == "" {
 			identifier = username
@@ -373,17 +413,28 @@ func (s *Service) SetPassword(ctx context.Context, userID, password, currentPass
 		if _, err := tx.ExecContext(ctx, `INSERT INTO user_auth_methods (id, user_id, provider, identifier, credential_hash, created_at) VALUES ($1, $2, 'password', $3, $4, now())`, newID("uam"), userID, identifier, hash); err != nil {
 			return err
 		}
+		if verify != nil {
+			if err := revokeOtherSessionsTx(ctx, tx, userID, currentAccessToken); err != nil {
+				return err
+			}
+		}
 		return tx.Commit()
 	}
 
 	if currentPassword == "" {
-		return ErrCurrentPasswordRequired
-	}
-	for _, row := range existing {
-		if s.hasher.Compare(row.hash, currentPassword) != nil {
-			return ErrInvalidCredentials
+		if verify == nil {
+			return ErrCurrentPasswordRequired
 		}
-		break
+		if err := verify(ctx, tx, email, emailCode); err != nil {
+			return err
+		}
+	} else {
+		for _, row := range existing {
+			if s.hasher.Compare(row.hash, currentPassword) != nil {
+				return ErrInvalidCredentials
+			}
+			break
+		}
 	}
 	for _, row := range existing {
 		if _, err := tx.ExecContext(ctx, `UPDATE user_auth_methods SET credential_hash = $2 WHERE id = $1`, row.id, hash); err != nil {

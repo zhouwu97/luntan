@@ -92,4 +92,32 @@ void main() {
     state.hasLiked = true;
     expect(state.hasLiked, isTrue);
   });
+
+  test('MaskRegion 保留涂抹轨迹并兼容旧矩形格式', () {
+    const region = MaskRegion(
+      x: 0.1,
+      y: 0.2,
+      width: 0.7,
+      height: 0.2,
+      type: 'blur',
+      brushSize: 0.06,
+      points: [MaskPoint(x: 0.12, y: 0.3), MaskPoint(x: 0.8, y: 0.3)],
+    );
+    final json = region.toJson();
+    expect(json['brush_size'], 0.06);
+    expect((json['points'] as List).length, 2);
+    final restored = MaskRegion.fromJson(json);
+    expect(restored.points.length, 2);
+    expect(restored.points.last.x, closeTo(0.8, 0.0001));
+
+    final legacy = MaskRegion.fromJson(const {
+      'x': 0.1,
+      'y': 0.2,
+      'width': 0.3,
+      'height': 0.4,
+      'type': 'mosaic',
+    });
+    expect(legacy.points, isEmpty);
+    expect(legacy.toJson().containsKey('points'), isFalse);
+  });
 }

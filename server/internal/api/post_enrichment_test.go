@@ -32,6 +32,21 @@ func TestPublicMediaURLUpgradesLegacyAbsoluteMediaURL(t *testing.T) {
 	}
 }
 
+func TestPublicMediaURLGatewayNormalizesLegacyAppURL(t *testing.T) {
+	t.Setenv("MEDIA_DELIVERY_MODE", "gateway")
+	t.Setenv("OBJECT_STORAGE_PUBLIC_BASE_URL", "")
+
+	if got := publicMediaURL("http://43.161.249.91/imported-media/post.webp"); got != "/imported-media/post.webp" {
+		t.Fatalf("网关模式应将旧导入媒体地址归一为当前域名路径，得到 %q", got)
+	}
+	if got := publicMediaURL("http://43.161.249.91/api/v1/media-file/media_1/thumb"); got != "/api/v1/media-file/media_1/thumb" {
+		t.Fatalf("网关模式应将旧 API 媒体地址归一为当前域名路径，得到 %q", got)
+	}
+	if got := publicMediaURL("http://images.example.com/photos/post.webp"); got != "http://images.example.com/photos/post.webp" {
+		t.Fatalf("外部媒体 URL 不应被网关模式改写，得到 %q", got)
+	}
+}
+
 func TestEnrichPostResponsePopulatesAuthorAvatar(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

@@ -21,6 +21,7 @@ var (
 	ErrStoreOrderNotFound      = errors.New("store order not found")
 	ErrStoreOrderAlreadyReview = errors.New("store order already reviewed")
 	ErrStoreOrderReviewPending = errors.New("store order review pending")
+	ErrInvalidStoreReward      = errors.New("invalid store reward content")
 )
 
 func (s *Server) requireStoreOrderReviewer(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
@@ -49,6 +50,12 @@ type storeOrderCursor struct {
 	ID        string    `json:"id"`
 }
 
+type storeRewardContentCursor struct {
+	Priority int       `json:"priority"`
+	EarnedAt time.Time `json:"earned_at"`
+	ID       string    `json:"id"`
+}
+
 func encodeStoreOrderCursor(cursor storeOrderCursor) string {
 	data, _ := json.Marshal(cursor)
 	return base64.RawURLEncoding.EncodeToString(data)
@@ -64,6 +71,49 @@ func decodeStoreOrderCursor(value string) (storeOrderCursor, error) {
 		return storeOrderCursor{}, errors.New("invalid store order cursor")
 	}
 	return cursor, nil
+}
+
+func encodeStoreRewardContentCursor(cursor storeRewardContentCursor) (string, error) {
+	data, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeStoreRewardContentCursor(value string) (storeRewardContentCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return storeRewardContentCursor{}, err
+	}
+	var cursor storeRewardContentCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" || cursor.EarnedAt.IsZero() || cursor.Priority < 0 || cursor.Priority > 2 {
+		return storeRewardContentCursor{}, errors.New("invalid store reward content cursor")
+	}
+	return cursor, nil
+}
+
+func validStoreRewardContentSource(source string) bool {
+	return source == "" || source == "post" || source == "comment"
+}
+
+func validStoreRewardContentStatus(status string) bool {
+	switch status {
+	case "", "normal", "deleted", "unavailable", "missing":
+		return true
+	default:
+		return false
+	}
+}
+
+func rewardContentPriority(status string, edited bool) int {
+	if status == "deleted" || status == "unavailable" || status == "missing" {
+		return 2
+	}
+	if edited {
+		return 1
+	}
+	return 0
 }
 
 func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +153,7 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 		SELECT o.id, o.user_id, u.username, COALESCE(up.nickname, u.username),
 		       p.id, p.name, o.points, o.status, o.created_at,
 		       COALESCE(o.reviewed_by, ''), o.reviewed_at, o.review_reason,
-		       u.points_balance
+		       u.points_balance, o.balance_at_submit
 		FROM store_orders o
 		JOIN users u ON u.id = o.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -153,10 +203,10 @@ type storeOrderRowScanner interface {
 
 func scanAdminStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
 	var id, userID, username, nickname, productID, productName, status, reviewedBy, reviewReason string
-	var points, userPoints int64
+	var points, userPoints, balanceAtSubmit int64
 	var createdAt time.Time
 	var reviewedAt sql.NullTime
-	if err := scanner.Scan(&id, &userID, &username, &nickname, &productID, &productName, &points, &status, &createdAt, &reviewedBy, &reviewedAt, &reviewReason, &userPoints); err != nil {
+	if err := scanner.Scan(&id, &userID, &username, &nickname, &productID, &productName, &points, &status, &createdAt, &reviewedBy, &reviewedAt, &reviewReason, &userPoints, &balanceAtSubmit); err != nil {
 		return nil, err
 	}
 	item := map[string]any{
@@ -164,6 +214,7 @@ func scanAdminStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
 		"product_id": productID, "product_name": productName, "points": points,
 		"status": status, "created_at": createdAt, "reviewed_by": reviewedBy,
 		"review_reason": reviewReason, "user_points": userPoints,
+		"balance_at_submit": balanceAtSubmit,
 	}
 	if reviewedAt.Valid {
 		item["reviewed_at"] = reviewedAt.Time
@@ -189,11 +240,14 @@ func (s *Server) getAdminStoreOrder(w http.ResponseWriter, r *http.Request, orde
 	}
 	var sourceRows *sql.Rows
 	sourceRows, err = s.db.QueryContext(r.Context(), `
-		SELECT source, COALESCE(SUM(delta), 0), COUNT(*)
-		FROM point_transactions
-		WHERE user_id = $1 AND delta > 0
-		GROUP BY source
-		ORDER BY SUM(delta) DESC, source ASC`, order["user_id"])
+		SELECT pt.source, COALESCE(SUM(pt.delta), 0), COUNT(*),
+		       COALESCE(SUM(CASE WHEN spi.point_transaction_id IS NOT NULL THEN pt.delta ELSE 0 END), 0)
+		FROM point_transactions pt
+		JOIN store_orders scope ON scope.id = $1 AND scope.user_id = pt.user_id
+		LEFT JOIN store_point_invalidations spi ON spi.point_transaction_id = pt.id
+		WHERE pt.user_id = $2 AND pt.delta > 0 AND pt.created_at <= scope.created_at
+		GROUP BY pt.source
+		ORDER BY SUM(pt.delta) DESC, pt.source ASC`, orderID, order["user_id"])
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -202,12 +256,12 @@ func (s *Server) getAdminStoreOrder(w http.ResponseWriter, r *http.Request, orde
 	sources := make([]map[string]any, 0)
 	for sourceRows.Next() {
 		var source string
-		var points, count int64
-		if err := sourceRows.Scan(&source, &points, &count); err != nil {
+		var points, count, invalidPoints int64
+		if err := sourceRows.Scan(&source, &points, &count, &invalidPoints); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		sources = append(sources, map[string]any{"source": source, "points": points, "count": count})
+		sources = append(sources, map[string]any{"source": source, "points": points, "count": count, "invalid_points": invalidPoints})
 	}
 	if err := sourceRows.Err(); err != nil {
 		writeInternalError(w, r, err)
@@ -221,11 +275,24 @@ func (s *Server) getAdminStoreOrder(w http.ResponseWriter, r *http.Request, orde
 	order["reserved_points"] = reserved
 	order["available_points"] = order["user_points"].(int64) - reserved
 	order["point_sources"] = sources
+	var invalidatedPoints int64
+	if err := s.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(SUM(pt.delta), 0)
+		FROM store_point_invalidations spi
+		JOIN point_transactions pt ON pt.id = spi.point_transaction_id
+		WHERE spi.user_id = $1 AND pt.delta > 0 AND pt.created_at <= $2`, order["user_id"], order["created_at"]).Scan(&invalidatedPoints); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	order["historical_invalidated_points"] = invalidatedPoints
+	balanceAtSubmit := order["balance_at_submit"].(int64)
+	order["eligible_points_at_submit"] = balanceAtSubmit - invalidatedPoints
 	httpserver.WriteJSON(w, http.StatusOK, order)
 }
 
 // getAdminStoreOrderRewardContent 将正向积分流水按业务幂等键还原到原始内容。
 // 这里不复用普通用户主页查询，因为普通查询会隐藏已删除、待审核和被编辑后的内容。
+// 查询范围固定在订单创建时，避免管理员等待审核期间出现新的奖励流水。
 func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.Request, orderID string) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -233,6 +300,31 @@ func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.
 	if _, ok := s.requireStoreOrderReviewer(w, r); !ok {
 		return
 	}
+	source := strings.TrimSpace(r.URL.Query().Get("source"))
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	if !validStoreRewardContentSource(source) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SOURCE", Message: "积分内容来源无效"})
+		return
+	}
+	if !validStoreRewardContentStatus(status) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CONTENT_STATUS", Message: "积分内容状态无效"})
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
+		return
+	}
+	var cursor *storeRewardContentCursor
+	if rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor")); rawCursor != "" {
+		decoded, decodeErr := decodeStoreRewardContentCursor(rawCursor)
+		if decodeErr != nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "积分内容游标无效"})
+			return
+		}
+		cursor = &decoded
+	}
+
 	var userID string
 	if err := s.db.QueryRowContext(r.Context(), `SELECT user_id FROM store_orders WHERE id = $1`, orderID).Scan(&userID); errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrStoreOrderNotFound)
@@ -242,69 +334,102 @@ func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.
 		return
 	}
 
+	args := []any{orderID, source, status}
+	where := "($2 = '' OR source = $2) AND ($3 = '' OR current_status = $3)"
+	if cursor != nil {
+		where += " AND (review_priority < $4 OR (review_priority = $4 AND earned_at < $5) OR (review_priority = $4 AND earned_at = $5 AND id < $6))"
+		args = append(args, cursor.Priority, cursor.EarnedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT pt.id, pt.source, pt.delta, pt.reason, pt.created_at, pt.idempotency_key,
-		       p.id, p.title, p.content,
-		       pr.id, COALESCE(pr.title, p.title), COALESCE(pr.content, p.content),
-		       c.id, c.content, COALESCE(NULLIF(c.original_content, ''), c.content),
-		       parent.title,
-		       CASE
-		         WHEN pt.source = 'post' AND p.id IS NULL THEN 'missing'
-		         WHEN pt.source = 'post' AND (p.deleted_at IS NOT NULL OR p.publication_status = 'deleted' OR p.post_status = 'deleted') THEN 'deleted'
-		         WHEN pt.source = 'post' AND (p.publication_status <> 'published' OR p.moderation_status <> 'normal' OR p.post_status <> 'published') THEN 'unavailable'
-		         WHEN pt.source = 'comment' AND c.id IS NULL THEN 'missing'
-		         WHEN pt.source = 'comment' AND (c.deleted_at IS NOT NULL OR c.publication_status = 'deleted') THEN 'deleted'
-		         WHEN pt.source = 'comment' AND (c.publication_status <> 'published' OR c.moderation_status <> 'normal') THEN 'unavailable'
-		         ELSE 'normal'
-		       END,
-		       CASE
-		         WHEN pt.source = 'post' THEN COALESCE(pr.title, p.title) IS DISTINCT FROM p.title
-		              OR COALESCE(pr.content, p.content) IS DISTINCT FROM p.content
-		         WHEN pt.source = 'comment' THEN COALESCE(NULLIF(c.original_content, ''), c.content) IS DISTINCT FROM c.content
-		         ELSE false
-		       END
-		FROM point_transactions pt
-		LEFT JOIN posts p
-		       ON pt.source = 'post'
-		      AND pt.idempotency_key = 'post:create:' || p.id
-		      AND p.author_id = pt.user_id
-		LEFT JOIN LATERAL (
-			SELECT pr0.id, pr0.title, pr0.content
-			FROM post_revisions pr0
-			WHERE pr0.post_id = p.id
-			ORDER BY pr0.created_at ASC, pr0.id ASC
-			LIMIT 1
-		) pr ON true
-		LEFT JOIN comments c
-		       ON pt.source = 'comment'
-		      AND pt.idempotency_key = 'comment:create:' || c.id
-		      AND c.author_id = pt.user_id
-		LEFT JOIN posts parent ON parent.id = c.post_id
-		WHERE pt.user_id = $1
-		  AND pt.delta > 0
-		  AND ((pt.source = 'post' AND pt.idempotency_key LIKE 'post:create:%')
-		    OR (pt.source = 'comment' AND pt.idempotency_key LIKE 'comment:create:%'))
-		ORDER BY pt.created_at DESC, pt.id DESC`, userID)
+		WITH reward_rows AS (
+			SELECT pt.id, pt.source, pt.delta, pt.reason, pt.created_at AS earned_at, pt.idempotency_key,
+			       p.id AS post_id, p.title AS post_title, p.content AS post_content,
+			       pr.id AS post_revision_id,
+			       COALESCE(pr.title, p.title) AS reward_title,
+			       COALESCE(pr.content, p.content) AS reward_content,
+			       c.id AS comment_id, c.content AS comment_content,
+			       COALESCE(NULLIF(c.original_content, ''), c.content) AS comment_original_content,
+			       parent.title AS parent_title,
+			       CASE
+			         WHEN pt.source = 'post' AND p.id IS NULL THEN 'missing'
+			         WHEN pt.source = 'post' AND (p.deleted_at IS NOT NULL OR p.publication_status = 'deleted' OR p.post_status = 'deleted') THEN 'deleted'
+			         WHEN pt.source = 'post' AND (p.publication_status <> 'published' OR p.moderation_status <> 'normal' OR p.post_status <> 'published') THEN 'unavailable'
+			         WHEN pt.source = 'comment' AND c.id IS NULL THEN 'missing'
+			         WHEN pt.source = 'comment' AND (c.deleted_at IS NOT NULL OR c.publication_status = 'deleted') THEN 'deleted'
+			         WHEN pt.source = 'comment' AND (c.publication_status <> 'published' OR c.moderation_status <> 'normal') THEN 'unavailable'
+			         ELSE 'normal'
+			       END AS current_status,
+			       CASE
+			         WHEN pt.source = 'post' THEN COALESCE(pr.title, p.title) IS DISTINCT FROM p.title
+			              OR COALESCE(pr.content, p.content) IS DISTINCT FROM p.content
+			         WHEN pt.source = 'comment' THEN COALESCE(NULLIF(c.original_content, ''), c.content) IS DISTINCT FROM c.content
+			         ELSE false
+			       END AS edited_since_reward,
+			       (spi.point_transaction_id IS NOT NULL) AS invalidated,
+			       COALESCE(spi.reason, '') AS invalidation_reason
+			FROM point_transactions pt
+			JOIN store_orders scope ON scope.id = $1 AND scope.user_id = pt.user_id
+			LEFT JOIN store_point_invalidations spi ON spi.point_transaction_id = pt.id
+			LEFT JOIN posts p
+			       ON pt.source = 'post'
+			      AND pt.idempotency_key = 'post:create:' || p.id
+			      AND p.author_id = pt.user_id
+			LEFT JOIN LATERAL (
+				SELECT pr0.id, pr0.title, pr0.content
+				FROM post_revisions pr0
+				WHERE pr0.post_id = p.id
+				ORDER BY pr0.created_at ASC, pr0.id ASC
+				LIMIT 1
+			) pr ON true
+			LEFT JOIN comments c
+			       ON pt.source = 'comment'
+			      AND pt.idempotency_key = 'comment:create:' || c.id
+			      AND c.author_id = pt.user_id
+			LEFT JOIN posts parent ON parent.id = c.post_id
+			WHERE pt.delta > 0
+			  AND pt.created_at <= scope.created_at
+			  AND ((pt.source = 'post' AND pt.idempotency_key LIKE 'post:create:%')
+			    OR (pt.source = 'comment' AND pt.idempotency_key LIKE 'comment:create:%'))
+		), ranked AS (
+			SELECT reward_rows.*,
+			       CASE
+			         WHEN current_status IN ('deleted', 'unavailable', 'missing') THEN 2
+			         WHEN edited_since_reward THEN 1
+			         ELSE 0
+			       END AS review_priority
+			FROM reward_rows
+		)
+		SELECT id, source, delta, reason, earned_at, idempotency_key,
+		       post_id, post_title, post_content, post_revision_id, reward_title, reward_content,
+		       comment_id, comment_content, comment_original_content, parent_title,
+		       current_status, edited_since_reward, invalidated, invalidation_reason, review_priority
+		FROM ranked
+		WHERE `+where+`
+		ORDER BY review_priority DESC, earned_at DESC, id DESC
+		LIMIT $`+strconv.Itoa(limitPosition), args...)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	defer rows.Close()
 
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
+	var lastCursor storeRewardContentCursor
 	for rows.Next() {
-		var transactionID, source, reason, idempotencyKey string
+		var transactionID, source, reason, idempotencyKey, currentStatus, invalidationReason string
 		var delta int64
 		var earnedAt time.Time
 		var postID, postTitle, postContent, postRevisionID, rewardTitle, rewardContent sql.NullString
 		var commentID, commentContent, commentOriginalContent, parentTitle sql.NullString
-		var currentStatus sql.NullString
-		var edited bool
+		var edited, invalidated bool
+		var priority int
 		if err := rows.Scan(
 			&transactionID, &source, &delta, &reason, &earnedAt, &idempotencyKey,
 			&postID, &postTitle, &postContent, &postRevisionID, &rewardTitle, &rewardContent,
 			&commentID, &commentContent, &commentOriginalContent, &parentTitle,
-			&currentStatus, &edited,
+			&currentStatus, &edited, &invalidated, &invalidationReason, &priority,
 		); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -339,9 +464,6 @@ func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.
 			currentContent = commentContent.String
 			snapshotAvailable = commentOriginalContent.Valid || commentContent.Valid
 		}
-		if targetID == "" {
-			currentStatus = sql.NullString{String: "missing", Valid: true}
-		}
 		items = append(items, map[string]any{
 			"id":                  transactionID,
 			"source":              source,
@@ -354,16 +476,35 @@ func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.
 			"content_at_reward":   contentAtReward,
 			"current_title":       currentTitle,
 			"current_content":     currentContent,
-			"current_status":      currentStatus.String,
+			"current_status":      currentStatus,
 			"edited_since_reward": edited,
 			"snapshot_available":  snapshotAvailable,
+			"invalidated":         invalidated,
+			"invalidation_reason": invalidationReason,
+			"review_priority":     priority,
 		})
+		if len(items) <= limit {
+			lastCursor = storeRewardContentCursor{Priority: priority, EarnedAt: earnedAt, ID: transactionID}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	var nextCursor any
+	if hasMore && len(items) > 0 {
+		encoded, encodeErr := encodeStoreRewardContentCursor(lastCursor)
+		if encodeErr != nil {
+			writeInternalError(w, r, encodeErr)
+			return
+		}
+		nextCursor = encoded
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
 }
 
 func (s *Server) loadAdminStoreOrder(ctx context.Context, queryer interface {
@@ -374,7 +515,7 @@ func (s *Server) loadAdminStoreOrder(ctx context.Context, queryer interface {
 		SELECT o.id, o.user_id, u.username, COALESCE(up.nickname, u.username),
 		       p.id, p.name, o.points, o.status, o.created_at,
 		       COALESCE(o.reviewed_by, ''), o.reviewed_at, o.review_reason,
-		       u.points_balance
+		       u.points_balance, o.balance_at_submit
 		FROM store_orders o
 		JOIN users u ON u.id = o.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -392,8 +533,9 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		return
 	}
 	var input struct {
-		Decision string `json:"decision"`
-		Reason   string `json:"reason"`
+		Decision              string   `json:"decision"`
+		Reason                string   `json:"reason"`
+		InvalidTransactionIDs []string `json:"invalid_transaction_ids"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "请求体格式错误"})
@@ -401,9 +543,24 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 	}
 	input.Decision = strings.TrimSpace(input.Decision)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if (input.Decision != "approve" && input.Decision != "reject") || len([]rune(input.Reason)) > 1000 || (input.Decision == "reject" && input.Reason == "") {
+	if (input.Decision != "approve" && input.Decision != "reject") || len([]rune(input.Reason)) > 1000 || (input.Decision == "reject" && input.Reason == "") || len(input.InvalidTransactionIDs) > 2000 {
 		writeAuthError(w, r, ErrInvalidStoreOrderReview)
 		return
+	}
+	seenInvalidations := make(map[string]struct{}, len(input.InvalidTransactionIDs))
+	transactionIDs := make([]string, 0, len(input.InvalidTransactionIDs))
+	for _, id := range input.InvalidTransactionIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			writeAuthError(w, r, ErrInvalidStoreReward)
+			return
+		}
+		if _, exists := seenInvalidations[id]; exists {
+			writeAuthError(w, r, ErrInvalidStoreReward)
+			return
+		}
+		seenInvalidations[id] = struct{}{}
+		transactionIDs = append(transactionIDs, id)
 	}
 
 	tx, err := s.db.BeginTx(r.Context(), nil)
@@ -426,13 +583,14 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		return
 	}
 	var productName string
-	var points int64
+	var points, balanceAtSubmit int64
+	var orderCreatedAt time.Time
 	var currentStatus string
 	if err := tx.QueryRowContext(r.Context(), `
-		SELECT p.name, o.points, o.status
+		SELECT p.name, o.points, o.status, o.created_at, o.balance_at_submit
 		FROM store_orders o JOIN store_products p ON p.id = o.product_id
 		WHERE o.id = $1
-		FOR UPDATE OF o`, orderID).Scan(&productName, &points, &currentStatus); errors.Is(err, sql.ErrNoRows) {
+		FOR UPDATE OF o`, orderID).Scan(&productName, &points, &currentStatus, &orderCreatedAt, &balanceAtSubmit); errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrStoreOrderNotFound)
 		return
 	} else if err != nil {
@@ -442,6 +600,39 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 	if currentStatus != "pending_review" {
 		writeAuthError(w, r, ErrStoreOrderAlreadyReview)
 		return
+	}
+	var historicalInvalidatedPoints int64
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT COALESCE(SUM(pt.delta), 0)
+		FROM store_point_invalidations spi
+		JOIN point_transactions pt ON pt.id = spi.point_transaction_id
+		WHERE spi.user_id = $1 AND pt.delta > 0 AND pt.created_at <= $2`, userID, orderCreatedAt).Scan(&historicalInvalidatedPoints); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	newInvalidatedPoints, err := validateStoreRewardSelections(r.Context(), tx, userID, orderID, orderCreatedAt, transactionIDs)
+	if errors.Is(err, ErrInvalidStoreReward) {
+		writeAuthError(w, r, err)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	eligiblePoints := balanceAtSubmit - historicalInvalidatedPoints - newInvalidatedPoints
+	if input.Decision == "approve" && eligiblePoints < points {
+		writeAuthError(w, r, ErrInsufficientPoints)
+		return
+	}
+	if len(transactionIDs) > 0 {
+		invalidationReason := input.Reason
+		if invalidationReason == "" {
+			invalidationReason = "管理员判定该奖励不计入兑换资格"
+		}
+		if err := insertStorePointInvalidations(r.Context(), tx, userID, orderID, operator.ID, invalidationReason, transactionIDs); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	now := time.Now().UTC()
 	newStatus := "rejected"
@@ -482,6 +673,8 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 	}
 	if err := appendAdminLogTx(r.Context(), tx, operator.ID, "store.order."+input.Decision, "store_order", orderID, input.Reason, requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
 		"user_id": userID, "product_name": productName, "points": points, "from_status": "pending_review", "to_status": newStatus,
+		"balance_at_submit": balanceAtSubmit, "historical_invalidated_points": historicalInvalidatedPoints,
+		"new_invalidated_points": newInvalidatedPoints, "eligible_points_at_submit": eligiblePoints,
 	}, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -505,5 +698,62 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": orderID, "status": newStatus, "balance": newBalance, "review_reason": input.Reason})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"id":                            orderID,
+		"status":                        newStatus,
+		"balance":                       newBalance,
+		"review_reason":                 input.Reason,
+		"balance_at_submit":             balanceAtSubmit,
+		"historical_invalidated_points": historicalInvalidatedPoints,
+		"new_invalidated_points":        newInvalidatedPoints,
+		"eligible_points_at_submit":     eligiblePoints,
+	})
+}
+
+func validateStoreRewardSelections(ctx context.Context, tx *sql.Tx, userID, orderID string, orderCreatedAt time.Time, transactionIDs []string) (int64, error) {
+	if len(transactionIDs) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, 0, len(transactionIDs))
+	args := []any{userID, orderID, orderCreatedAt}
+	for index, id := range transactionIDs {
+		placeholders = append(placeholders, "$"+strconv.Itoa(index+4))
+		args = append(args, id)
+	}
+	var count, points int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(pt.delta), 0)
+		FROM point_transactions pt
+		LEFT JOIN store_point_invalidations spi ON spi.point_transaction_id = pt.id
+		WHERE pt.user_id = $1
+		  AND pt.id IN (`+strings.Join(placeholders, ",")+`)
+		  AND pt.delta > 0
+		  AND spi.point_transaction_id IS NULL
+		  AND ((pt.source = 'post' AND pt.idempotency_key LIKE 'post:create:%')
+		    OR (pt.source = 'comment' AND pt.idempotency_key LIKE 'comment:create:%'))
+		  AND pt.created_at <= $3
+		  AND EXISTS (SELECT 1 FROM store_orders WHERE id = $2 AND user_id = pt.user_id AND created_at = $3)`, args...).Scan(&count, &points)
+	if err != nil {
+		return 0, err
+	}
+	if count != int64(len(transactionIDs)) {
+		return 0, ErrInvalidStoreReward
+	}
+	return points, nil
+}
+
+func insertStorePointInvalidations(ctx context.Context, tx *sql.Tx, userID, orderID, reviewerID, reason string, transactionIDs []string) error {
+	placeholders := make([]string, 0, len(transactionIDs))
+	args := []any{userID, orderID, reviewerID, reason}
+	for index, id := range transactionIDs {
+		placeholders = append(placeholders, "$"+strconv.Itoa(index+5))
+		args = append(args, id)
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO store_point_invalidations (point_transaction_id, user_id, source_order_id, reason, reviewed_by)
+		SELECT pt.id, pt.user_id, $2, $4, $3
+		FROM point_transactions pt
+		WHERE pt.user_id = $1 AND pt.id IN (`+strings.Join(placeholders, ",")+`)
+		ON CONFLICT (point_transaction_id) DO NOTHING`, args...)
+	return err
 }

@@ -238,6 +238,10 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 | GET | `/me/points` | 是 | 我的积分余额与流水 |
 | POST | `/store/orders` | 是 | 兑换（需幂等键） |
 | GET | `/me/store-orders` | 是 | 我的兑换记录 |
+| GET | `/admin/store/orders` | 管理员 | 待审核兑换申请分页 |
+| GET | `/admin/store/orders/{id}` | 管理员 | 申请快照、历史无效积分与兑换资格 |
+| GET | `/admin/store/orders/{id}/reward-content` | 管理员 | 按申请时间截止的发帖/评论奖励证据分页 |
+| POST | `/admin/store/orders/{id}/review` | 管理员 | 审核并提交不计入兑换的积分流水 |
 
 兑换请求头 `Idempotency-Key` 与正文 `{ "product_id": "string" }` 共同保证
 幂等；重复请求返回既有订单，不重复扣分。错误码含 `INSUFFICIENT_POINTS`、
@@ -258,6 +262,20 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 发帖、点赞与评论奖励统一通过幂等事件键写入流水。固定规则为：发帖 +5、
 点赞 +1、评论 +1，并按北京时间自然日限制每位用户最多获得 20 积分；
 当日剩余额度不足时只补足到 20，兑换扣分不占用当日获取额度。
+
+兑换审核的 `POST /admin/store/orders/{id}/review` 请求体为：
+```json
+{
+  "decision": "approve",
+  "reason": "存在无实质内容的回复",
+  "invalid_transaction_ids": ["point-transaction-id"]
+}
+```
+`invalid_transaction_ids` 只能选择该申请提交时已经产生的发帖/评论奖励流水。
+服务端会将其持久化为兑换资格无效记录，并按
+`balance_at_submit - 历史无效积分 - 本次新判定无效积分` 计算有效积分；
+新获得的积分不能补足本次申请。奖励证据接口支持 `cursor`、`limit`、`source`
+和 `status` 参数，默认按删除/不可见、已编辑、正常内容优先返回。
 
 ### 通知与搜索
 

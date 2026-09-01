@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS ranking_toy_comments_root_created_idx;

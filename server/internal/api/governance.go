@@ -212,6 +212,28 @@ func (s *Server) getAdmin(w http.ResponseWriter, r *http.Request, adminID string
 	httpserver.WriteJSON(w, http.StatusOK, resp)
 }
 
+func maskRiskEmail(value string) string {
+	value = strings.TrimSpace(value)
+	at := strings.LastIndex(value, "@")
+	if at <= 0 || at >= len(value)-1 {
+		return ""
+	}
+	local := []rune(value[:at])
+	if len(local) == 0 {
+		return ""
+	}
+	return string(local[:1]) + "***@" + value[at+1:]
+}
+
+func riskContentPreview(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	runes := []rune(value)
+	if len(runes) > 240 {
+		return string(runes[:240]) + "…"
+	}
+	return value
+}
+
 func (s *Server) riskOverview(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -236,7 +258,31 @@ func (s *Server) riskOverview(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id, event_type, severity, ip_address, metadata, created_at FROM risk_events ORDER BY created_at DESC LIMIT 30`)
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT re.id, re.event_type, re.severity, re.ip_address, re.metadata, re.created_at,
+		       COALESCE(NULLIF(re.metadata->>'target_type', ''), '') AS target_type,
+		       COALESCE(NULLIF(re.metadata->>'target_id', ''), '') AS target_id,
+			CASE
+				   WHEN re.metadata->>'target_type' IN ('post', 'comment') THEN COALESCE(p.title, '')
+				   ELSE ''
+				END AS target_title,
+		       CASE
+			       WHEN re.metadata->>'target_type' = 'post' THEN COALESCE(p.content, '')
+			       WHEN re.metadata->>'target_type' = 'comment' THEN COALESCE(cm.content, '')
+			       ELSE ''
+		       END AS content_preview,
+		       COALESCE(NULLIF(up.nickname, ''), NULLIF(u.username, ''), '') AS account_name,
+		       COALESCE(NULLIF(u.email, ''), NULLIF(re.metadata->>'email', ''), '') AS account_email
+		FROM risk_events re
+		LEFT JOIN users u ON u.id = re.user_id
+		LEFT JOIN user_profiles up ON up.user_id = re.user_id
+		LEFT JOIN comments cm ON re.metadata->>'target_type' = 'comment'
+		                      AND cm.id = NULLIF(re.metadata->>'target_id', '')
+		LEFT JOIN posts p ON (
+				(re.metadata->>'target_type' = 'post' AND p.id = NULLIF(re.metadata->>'target_id', ''))
+				OR (re.metadata->>'target_type' = 'comment' AND p.id = cm.post_id)
+			)
+		ORDER BY re.created_at DESC LIMIT 30`)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -247,11 +293,27 @@ func (s *Server) riskOverview(w http.ResponseWriter, r *http.Request) {
 		var id, eventType, severity, ip string
 		var metadata []byte
 		var createdAt time.Time
-		if err := rows.Scan(&id, &eventType, &severity, &ip, &metadata, &createdAt); err != nil {
+		var targetType, targetID, targetTitle, contentPreview, accountName, accountEmail string
+		if err := rows.Scan(&id, &eventType, &severity, &ip, &metadata, &createdAt, &targetType, &targetID, &targetTitle, &contentPreview, &accountName, &accountEmail); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		events = append(events, map[string]any{"id": id, "event_type": eventType, "severity": severity, "ip_address": ip, "metadata": string(metadata), "created_at": createdAt})
+		// metadata 中可能包含邮箱等私有字段，只用于服务端取上下文，绝不原样返回。
+		_ = metadata
+		event := map[string]any{
+			"id":              id,
+			"event_type":      eventType,
+			"severity":        severity,
+			"ip_address":      ip,
+			"target_type":     targetType,
+			"target_id":       targetID,
+			"target_title":    riskContentPreview(targetTitle),
+			"content_preview": riskContentPreview(contentPreview),
+			"account_name":    accountName,
+			"email":           maskRiskEmail(accountEmail),
+			"created_at":      createdAt,
+		}
+		events = append(events, event)
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"code_requests": codeRequests, "abnormal_ips": abnormalIPs, "automatic_restrictions": automaticRestrictions, "events": events})
 }

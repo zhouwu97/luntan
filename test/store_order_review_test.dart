@@ -131,4 +131,65 @@ void main() {
     await tester.pumpAndSettle();
     expect(reviewedDecision, 'approve');
   });
+
+  test('兑换审核仓库解析奖励分页并提交人工排除流水', () async {
+    Map<String, dynamic>? reviewBody;
+    final client = MockClient((request) async {
+      if (request.method == 'GET' &&
+          request.url.path ==
+              '/api/v1/admin/store/orders/order-1/reward-content') {
+        expect(request.url.queryParameters['limit'], '1');
+        expect(request.url.queryParameters['source'], 'comment');
+        return _json({
+          'items': [
+            {
+              'id': 'tx-comment-1',
+              'source': 'comment',
+              'target_type': 'comment',
+              'target_id': 'comment-1',
+              'points': 1,
+              'reason': '评论奖励',
+              'earned_at': '2026-08-31T12:00:00Z',
+              'title_at_reward': '帖子标题',
+              'content_at_reward': '666',
+              'current_title': '帖子标题',
+              'current_content': '666',
+              'current_status': 'normal',
+              'edited_since_reward': false,
+              'snapshot_available': true,
+              'invalidated': false,
+            },
+          ],
+          'next_cursor': 'next-1',
+          'has_more': true,
+        });
+      }
+      if (request.method == 'POST' &&
+          request.url.path == '/api/v1/admin/store/orders/order-1/review') {
+        reviewBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _json({'id': 'order-1', 'status': 'approved'});
+      }
+      return _json({'message': 'not found'}, 404);
+    });
+    final repository = PlatformRepository(
+      ApiClient(baseUri: Uri.parse('https://example.com'), client: client),
+    );
+
+    final page = await repository.getStoreOrderRewardContentPage(
+      'order-1',
+      limit: 1,
+      source: 'comment',
+    );
+    expect(page.items.single.invalidated, false);
+    expect(page.items.single.contentAtReward, '666');
+    expect(page.nextCursor, 'next-1');
+    expect(page.hasMore, true);
+
+    await repository.reviewStoreOrder(
+      id: 'order-1',
+      decision: 'approve',
+      invalidTransactionIds: const ['tx-comment-1'],
+    );
+    expect(reviewBody?['invalid_transaction_ids'], ['tx-comment-1']);
+  });
 }

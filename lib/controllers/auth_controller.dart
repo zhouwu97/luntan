@@ -315,12 +315,14 @@ class AuthController extends ChangeNotifier {
   Future<void> setPassword({
     required String password,
     String? currentPassword,
+    String? emailCode,
   }) async {
     error = null;
     try {
       await _repository.setPassword(
         password: password,
         currentPassword: currentPassword,
+        emailCode: emailCode,
       );
     } on ApiException catch (exception) {
       error = exception;

@@ -39,6 +39,7 @@ import 'screens/governance_screens.dart';
 import 'screens/activity_management_screen.dart';
 import 'screens/ranking_submission_review_screen.dart';
 import 'screens/store_order_review_screen.dart';
+import 'screens/change_password_dialog.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
 import 'widgets/bookmark_picker_sheet.dart';
@@ -466,6 +467,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               publishRepository: repositories.publish,
               platformRepository: repositories.platform,
               canModerate: canModerate,
+              canRestoreCensored: apiMode && canManageAdmins,
               onOpenUserId: openUserProfile,
             ),
           ),
@@ -1058,6 +1060,30 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     }
   }
 
+  void _openChangePassword() {
+    final auth = authController;
+    final user = currentUser;
+    final email = user?.email?.trim();
+    if (auth == null || user == null || user.accountType == 'guest') {
+      _showQuickFeedback('请先登录邮箱账号');
+      return;
+    }
+    if (email == null || email.isEmpty || !user.emailVerified) {
+      _showQuickFeedback('请先完成邮箱验证后再修改密码');
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: appContext,
+        builder: (_) => ChangePasswordDialog(
+          controller: auth,
+          email: email,
+          onSuccess: () => _showQuickFeedback('密码已修改，其他设备已退出登录'),
+        ),
+      ),
+    );
+  }
+
   Widget _authOrMain() {
     final auth = authController;
     if (auth == null) return _mainShell();
@@ -1104,6 +1130,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
                 !apiMode || authController?.status == AuthStatus.authenticated,
             platform: repositories.platform,
             canModerate: canModerate,
+            canRestoreCensored: apiMode && canManageAdmins,
             unread: unreadCount,
             interactionController: interactionController,
             feedRepository: repositories.isApiMode ? repositories.feed : null,
@@ -1148,6 +1175,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
                 : null,
             onLogout: _logout,
             onDeleteAccount: apiMode ? _deleteAccount : null,
+            onChangePassword: apiMode && isAuthenticated
+                ? _openChangePassword
+                : null,
             onRequireAuth: _openLogin,
             onOpenRelations: openUserRelations,
             refreshToken: profileRefreshToken,

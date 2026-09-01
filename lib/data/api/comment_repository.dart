@@ -378,4 +378,3 @@ int? _nullableInt(dynamic value) =>
     value is num ? value.toInt() : int.tryParse('$value');
 DateTime _date(dynamic value, DateTime fallback) =>
     value is String ? DateTime.tryParse(value) ?? fallback : fallback;
-

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -810,7 +811,10 @@ type moderateMediaInput struct {
 
 const (
 	maxModerationMaskRegions = 32
+	maxModerationMaskPoints  = 512
 	maxModerationReasonRunes = 500
+	minModerationBrushSize   = 0.005
+	maxModerationBrushSize   = 0.25
 )
 
 func validateModerationInput(input moderateMediaInput) (string, string, error) {
@@ -826,6 +830,7 @@ func validateModerationInput(input moderateMediaInput) (string, string, error) {
 	if len(input.MaskRegions) > maxModerationMaskRegions {
 		return "TOO_MANY_MASK_REGIONS", "打码区域不能超过 32 个", errors.New("too many mask regions")
 	}
+	pointCount := 0
 	for _, region := range input.MaskRegions {
 		if math.IsNaN(region.X) || math.IsNaN(region.Y) || math.IsNaN(region.Width) || math.IsNaN(region.Height) ||
 			math.IsInf(region.X, 0) || math.IsInf(region.Y, 0) || math.IsInf(region.Width, 0) || math.IsInf(region.Height, 0) ||
@@ -834,8 +839,77 @@ func validateModerationInput(input moderateMediaInput) (string, string, error) {
 			(region.Type != "mosaic" && region.Type != "blur") {
 			return "INVALID_MASK_REGION", "打码区域坐标或样式无效", errors.New("invalid mask region")
 		}
+		if math.IsNaN(region.BrushSize) || math.IsInf(region.BrushSize, 0) ||
+			(region.BrushSize != 0 && (region.BrushSize < minModerationBrushSize || region.BrushSize > maxModerationBrushSize)) {
+			return "INVALID_MASK_REGION", "涂抹笔刷大小无效", errors.New("invalid brush size")
+		}
+		pointCount += len(region.Points)
+		if len(region.Points) > maxModerationMaskPoints {
+			return "TOO_MANY_MASK_POINTS", "单个涂抹区域的轨迹点不能超过 512 个", errors.New("too many mask points")
+		}
+		for _, point := range region.Points {
+			if math.IsNaN(point.X) || math.IsNaN(point.Y) || math.IsInf(point.X, 0) || math.IsInf(point.Y, 0) ||
+				point.X < 0 || point.Y < 0 || point.X > 1 || point.Y > 1 {
+				return "INVALID_MASK_REGION", "涂抹轨迹坐标无效", errors.New("invalid brush point")
+			}
+		}
+	}
+	if pointCount > maxModerationMaskRegions*maxModerationMaskPoints {
+		return "TOO_MANY_MASK_POINTS", "涂抹轨迹点数量过多", errors.New("too many mask points")
 	}
 	return "", "", nil
+}
+
+type mediaModerationVersionKeys struct {
+	Original string
+	Detail   string
+	Thumb    string
+}
+
+// ensureMediaModerationBaselineTx 为新媒体补齐第 1 版“初始发布状态”。迁移会
+// 为存量数据执行同样的回填；这里使用 ON CONFLICT 保证新旧媒体都能安全复用。
+func ensureMediaModerationBaselineTx(ctx context.Context, tx *sql.Tx, mediaID string) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO media_moderation_versions (
+			id, media_id, version_no, moderation_status, mask_regions,
+			original_object_key, detail_object_key, thumb_object_key,
+			reason, created_at
+		)
+		SELECT $1, ma.id, 1, 'normal', '[]'::jsonb,
+			COALESCE((SELECT mv.object_key FROM media_variants mv
+				WHERE mv.media_id = ma.id AND mv.variant = 'original' AND mv.status = 'ready'), ma.object_key),
+			COALESCE((SELECT mv.object_key FROM media_variants mv
+				WHERE mv.media_id = ma.id AND mv.variant = 'detail' AND mv.status = 'ready'), ''),
+			COALESCE((SELECT mv.object_key FROM media_variants mv
+				WHERE mv.media_id = ma.id AND mv.variant = 'thumb' AND mv.status = 'ready'), ''),
+			'初始发布状态', ma.created_at
+		FROM media_assets ma
+		WHERE ma.id = $2
+		ON CONFLICT (media_id, version_no) DO NOTHING`, newPostID(), mediaID)
+	return err
+}
+
+// appendMediaModerationVersionTx 在调用方已经更新 media_assets（从而取得
+// 该媒体行锁）后追加版本。这样并发审核也会按严格递增的版本号落库。
+func appendMediaModerationVersionTx(ctx context.Context, tx *sql.Tx, mediaID, status string, regionsJSON []byte, keys mediaModerationVersionKeys, operatorID, reason string, createdAt time.Time) (int, error) {
+	var versionNo int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(version_no), 0) + 1
+		FROM media_moderation_versions
+		WHERE media_id = $1`, mediaID).Scan(&versionNo); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO media_moderation_versions (
+			id, media_id, version_no, moderation_status, mask_regions,
+			original_object_key, detail_object_key, thumb_object_key,
+			operator_id, reason, created_at
+		) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
+		newPostID(), mediaID, versionNo, status, string(regionsJSON),
+		keys.Original, keys.Detail, keys.Thumb, operatorID, reason, createdAt); err != nil {
+		return 0, err
+	}
+	return versionNo, nil
 }
 
 func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID string) {
@@ -865,6 +939,10 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 	}
 	if code, message, err := validateModerationInput(input); err != nil {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: code, Message: message})
+		return
+	}
+	if input.ModerationStatus == "normal" && !s.hasGlobalRole(r, user.ID, "super_admin") {
+		writeAuthError(w, r, ErrSuperAdminRequired)
 		return
 	}
 	if input.ModerationStatus == "normal" {
@@ -1032,6 +1110,10 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			return
 		}
 		defer tx.Rollback()
+		if err := ensureMediaModerationBaselineTx(r.Context(), tx, mediaID); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to ensure media moderation baseline: %w", err))
+			return
+		}
 
 		for _, v := range []struct {
 			variant string
@@ -1073,6 +1155,14 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			writeInternalError(w, r, err)
 			return
 		}
+		if _, err := appendMediaModerationVersionTx(r.Context(), tx, mediaID, "censored", regionsJSON, mediaModerationVersionKeys{
+			Original: origKey,
+			Detail:   detailKey,
+			Thumb:    thumbKey,
+		}, user.ID, input.Reason, now); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to append media moderation version: %w", err))
+			return
+		}
 
 		if err := appendAdminLogTx(r.Context(), tx, user.ID, "media.moderation", "media", mediaID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
 			"status":  "censored",
@@ -1096,6 +1186,10 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			return
 		}
 		defer tx.Rollback()
+		if err := ensureMediaModerationBaselineTx(r.Context(), tx, mediaID); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to ensure media moderation baseline: %w", err))
+			return
+		}
 
 		_, err = tx.ExecContext(r.Context(), `
 			UPDATE media_assets
@@ -1108,6 +1202,12 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			WHERE id = $4`, user.ID, now, input.Reason, mediaID)
 		if err != nil {
 			writeInternalError(w, r, err)
+			return
+		}
+		if _, err := appendMediaModerationVersionTx(r.Context(), tx, mediaID, "normal", []byte(`[]`), mediaModerationVersionKeys{
+			Original: objectKey,
+		}, user.ID, input.Reason, now); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to append media moderation version: %w", err))
 			return
 		}
 

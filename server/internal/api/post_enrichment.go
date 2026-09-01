@@ -306,6 +306,12 @@ func publicMediaURL(objectKey string) string {
 		if normalized := normalizeAbsoluteMediaURL(parsed, base); normalized != "" {
 			return normalized
 		}
+		// 网关模式下，历史导入记录可能仍携带 HTTP/IP 的完整 URL。
+		// 这些地址属于应用自己的媒体路径，只保留 path 交由当前域名处理，
+		// 避免 mixed content、IP 暴露和旧源站地址失效。
+		if mediaDeliveryModeFromEnv() == "gateway" && isAppMediaPath(parsed.Path) {
+			return parsed.Path
+		}
 		return objectKey
 	}
 	key := strings.TrimLeft(objectKey, "/")

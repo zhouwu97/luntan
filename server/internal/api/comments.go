@@ -133,8 +133,16 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SORT", Message: "sort 仅支持 asc、desc、hot"})
 		return
 	}
-	var exists string
-	err = s.db.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL`, postID).Scan(&exists)
+	// 评论列表的可见性必须与帖子详情保持一致：公开帖子对所有人可读，
+	// 作者本人和审核人员也可以读取自己有权限查看的待审核帖子。
+	// 如果这里仍只检查 published/normal，作者打开自己的待审核帖子时会
+	// 得到 POST_NOT_FOUND，客户端就会显示“评论加载失败”。
+	var postAuthorID, communityID, publicationStatus, moderationStatus string
+	err = s.db.QueryRowContext(r.Context(), `
+		SELECT author_id, community_id, publication_status, moderation_status
+		FROM posts
+		WHERE id = $1 AND deleted_at IS NULL`, postID).
+		Scan(&postAuthorID, &communityID, &publicationStatus, &moderationStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrPostNotFound)
 		return
@@ -142,6 +150,14 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	if publicationStatus != "published" || moderationStatus != "normal" {
+		viewer, ok := resolveOptionalViewer(s, r)
+		canReview := ok && viewer.ID != "" && s.hasScopedPermission(r, viewer.ID, "report.review", communityID)
+		if !ok || (viewer.ID != postAuthorID && !canReview) {
+			writeAuthError(w, r, ErrPostNotFound)
+			return
+		}
 	}
 
 	args := []any{postID}

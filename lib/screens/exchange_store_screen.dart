@@ -159,6 +159,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   bool _ordersLoadFailed = false;
   bool _hasPendingReview = false;
   int _reservedPoints = 0;
+  int _ordersGeneration = 0;
   // 兑换幂等键按商品持久到请求成功为止，弱网重试时复用同一个键，
   // 避免服务端把重试当成新订单重复扣积分。
   final Map<String, String> _pendingRedeemKeys = <String, String>{};
@@ -172,23 +173,33 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   }
 
   Future<List<StoreOrder>> _loadOrders() async {
+    final generation = ++_ordersGeneration;
+
+    setState(() {
+      _ordersLoading = true;
+      _ordersLoadFailed = false;
+    });
+
     try {
       final orders = await widget.repository.orders();
-      if (mounted) {
-        setState(() {
-          _ordersLoading = false;
-          _ordersLoadFailed = false;
-          _hasPendingReview = orders.any(
-            (order) => order.status == 'pending_review',
-          );
-          _reservedPoints = orders
-              .where((order) => order.status == 'pending_review')
-              .fold(0, (total, order) => total + order.points);
-        });
+
+      if (!mounted || generation != _ordersGeneration) {
+        return orders;
       }
+
+      setState(() {
+        _ordersLoading = false;
+        _ordersLoadFailed = false;
+        _hasPendingReview = orders.any(
+          (order) => order.status == 'pending_review',
+        );
+        _reservedPoints = orders
+            .where((order) => order.status == 'pending_review')
+            .fold(0, (total, order) => total + order.points);
+      });
       return orders;
     } catch (_) {
-      if (mounted) {
+      if (mounted && generation == _ordersGeneration) {
         setState(() {
           _ordersLoading = false;
           _ordersLoadFailed = true;
@@ -465,6 +476,8 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
       _pendingRedeemKeys.remove(product.id);
       if (!mounted) return;
       setState(() {
+        // 兑换成功后立即设置 pending review 状态，避免刷新订单前的短窗口
+        _hasPendingReview = true;
         productsFuture = widget.repository.products();
         balanceFuture = widget.repository.balance();
         ordersFuture = _loadOrders();

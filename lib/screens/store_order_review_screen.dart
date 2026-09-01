@@ -53,6 +53,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
 
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _error = null;
       _loadMoreError = null;
       _items.clear();

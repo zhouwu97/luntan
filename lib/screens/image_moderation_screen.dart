@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
@@ -136,17 +137,21 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         decoded = await _decodePreviewImage(_sourceBytes!);
         _sourceBytes = null;
       } else {
-        // 编辑遮罩使用归一化坐标，不需要解码原始大图；优先服务端
-        // detail 变体可避免普通未打码图片绕过本地预览尺寸上限。
-        // 永远不要使用 originalUrl 进行编辑预览，防止大图 OOM。
-        final url = media.detailUrl ?? media.url ?? '';
+        // 编辑遮罩使用归一化坐标，不需要解码原始大图。
+        // 优先使用 detail variant，如果不存在则直接获取原始编码字节进行有界解码。
+        // 绝不使用 NetworkImage 进行解码，避免大图 OOM。
+        final detailUrl = media.detail?.url;
+        final url = detailUrl ?? media.url ?? '';
         if (url.isEmpty) {
           if (mounted) setState(() => _sourceLoadError = '图片地址为空');
           return;
         }
-        final bytes = await _fetchNetworkImageBytes(url);
+
+        final bytes = widget.platformRepository != null
+            ? await widget.platformRepository!.getMediaPreviewBytes(url)
+            : await _fetchRawImageBytes(url);
         if (!mounted || _images[_selectedImageIndex].id != mediaId) return;
-        decoded = await _decodePreviewImage(bytes);
+        decoded = await _decodePreviewImage(Uint8List.fromList(bytes));
       }
 
       if (!mounted || _images[_selectedImageIndex].id != mediaId) {
@@ -200,35 +205,22 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     }
   }
 
-  /// Fetches network image bytes for bounded decoding.
-  Future<Uint8List> _fetchNetworkImageBytes(String url) async {
-    final completer = Completer<Uint8List>();
-    final stream = NetworkImage(url).resolve(const ImageConfiguration());
-    late ImageStreamListener listener;
-    listener = ImageStreamListener(
-      (ImageInfo info, bool _) async {
-        try {
-          final byteData = await info.image.toByteData(
-            format: ui.ImageByteFormat.png,
-          );
-          if (byteData != null) {
-            completer.complete(byteData.buffer.asUint8List());
-          } else {
-            completer.completeError('Failed to convert image to bytes');
-          }
-        } catch (e) {
-          completer.completeError(e);
-        } finally {
-          stream.removeListener(listener);
-        }
-      },
-      onError: (Object error, StackTrace? _) {
-        if (!completer.isCompleted) completer.completeError(error);
-        stream.removeListener(listener);
-      },
-    );
-    stream.addListener(listener);
-    return completer.future;
+  /// Fetches raw image bytes directly via HTTP, without decoding.
+  /// Fallback for when PlatformRepository is not available.
+  Future<Uint8List> _fetchRawImageBytes(String url) async {
+    final uri = Uri.parse(url);
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode != 200) {
+        throw Exception('Failed to load image: ${response.statusCode}');
+      }
+      final bytes = await consolidateHttpClientResponseBytes(response);
+      return bytes;
+    } finally {
+      client.close();
+    }
   }
 
   /// Generates a pixelated (mosaic) variant by down-scaling then up-scaling

@@ -42,7 +42,7 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 		return err
 	}
 	// 必须在用户行锁建立后再检查一次。否则两个相同事件并发时，
-	// 两个事务都可能先读到“没有流水”，随后第二个事务会撞上唯一索引。
+	// 两个事务都可能先读到”没有流水”，随后第二个事务会撞上唯一索引。
 	var existingBalance int64
 	err := tx.QueryRowContext(ctx, `SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`, userID, idempotencyKey).Scan(&existingBalance)
 	if err == nil {
@@ -53,7 +53,7 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 	}
 	if dailyEarnLimit > 0 && delta > 0 {
 		var earnedToday int64
-		// 自然日按北京时间计算，与用户感知的“一天”一致；
+		// 自然日按北京时间计算，与用户感知的”一天”一致；
 		// 双重 AT TIME ZONE 把上海零点正确还原成 timestamptz，不受会话时区影响。
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID).Scan(&earnedToday); err != nil {
 			return err
@@ -71,4 +71,20 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7)`, newPostID(), userID, source, delta, newBalance, reason, idempotencyKey)
 	return err
+}
+
+// awardDailyPointTx 为每日积分入口统一发放积分，所有入口（点赞、发帖等）竞争同一份每日额度。
+// 幂等键格式为 daily:YYYY-MM-DD:user:userID，确保用户每天只能通过任一入口获得一次奖励。
+// source 用于审计流水来源（”like” 或 “post”），但不影响幂等性。
+func awardDailyPointTx(ctx context.Context, tx *sql.Tx, userID, source, reason string, delta int64) error {
+	if delta == 0 {
+		return nil
+	}
+	// 计算业务日期（北京时间的自然日）
+	var bizDate string
+	if err := tx.QueryRowContext(ctx, `SELECT to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD')`).Scan(&bizDate); err != nil {
+		return err
+	}
+	idempotencyKey := "daily:" + bizDate + ":user:" + userID
+	return awardPointsTx(ctx, tx, userID, source, reason, idempotencyKey, delta, 0)
 }

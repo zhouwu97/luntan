@@ -77,7 +77,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   // 公开帖子是首页主内容，未登录时直接进入浏览态；所有互动入口都通过
   // _requireCapability 读取同一份 /me 能力集合。
   bool browseWithoutAuth = true;
-  int unreadCount = 0;
+  final ValueNotifier<int> unreadCount = ValueNotifier<int>(0);
   int profileRefreshToken = 0;
   late final ForumRulesGateController rulesGate;
   bool rulesGateVisible = false;
@@ -158,8 +158,6 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         }
       });
     }
-    // Mock 与 API 都从同一个通知仓储读取角标；Mock 空通知列表自然返回 0。
-    unawaited(_refreshUnreadCount());
     rulesGate = widget.rulesGate ?? ForumRulesGateController.disabled();
     unawaited(
       rulesGate.restore().then((_) {
@@ -222,7 +220,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   void _handleSessionInvalidated() {
     authController?.invalidateSession();
-    unreadCount = 0;
+    unreadCount.value = 0;
     feedController.reset();
     personalFeedController.reset();
     interactionController.clearUserState();
@@ -253,7 +251,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_refreshUnreadCount());
+      if (authController?.status == AuthStatus.authenticated) {
+        unawaited(_refreshUnreadCount());
+      }
       unawaited(_checkForegroundUpdate());
     }
   }
@@ -425,13 +425,15 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         ? seedPost
         : null;
     if (!apiMode && postForHistory != null) store.recordHistory(postForHistory);
-    if (apiMode && repositories.profile != null) {
+    if (apiMode && repositories.profile != null && authController?.status == AuthStatus.authenticated) {
       // 浏览历史是服务端事实；失败不阻塞打开帖子，详情页仍可正常阅读。
-      repositories.profile!.recordHistory(normalizedPostId).catchError((error) {
-        if (kDebugMode) {
-          debugPrint('[History] Failed to record post visit: $error');
-        }
-      });
+      unawaited(
+        repositories.profile!.recordHistory(normalizedPostId).catchError((error) {
+          if (kDebugMode) {
+            debugPrint('[History] Failed to record post visit: $error');
+          }
+        }),
+      );
     }
     final detailController = PostDetailController(
       repository: repositories.post,
@@ -1037,11 +1039,15 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshUnreadCount() async {
+    if (apiMode && authController?.status != AuthStatus.authenticated) {
+      return;
+    }
     final platform = repositories.platform;
     if (platform == null) return;
     try {
       final value = await platform.unreadNotificationCount();
-      if (mounted) setState(() => unreadCount = value);
+      if (!mounted) return;
+      unreadCount.value = value;
     } catch (_) {
       // 未读数只是辅助信息，接口暂时不可用时不阻塞首页。
     }
@@ -1049,7 +1055,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   Future<void> _logout() async {
     await authController?.logout();
-    unreadCount = 0;
+    unreadCount.value = 0;
     feedController.reset();
     personalFeedController.reset();
     interactionController.clearUserState();
@@ -1058,7 +1064,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   Future<void> _deleteAccount() async {
     await repositories.auth?.deleteAccount();
-    unreadCount = 0;
+    unreadCount.value = 0;
     feedController.reset();
     personalFeedController.reset();
     interactionController.clearUserState();

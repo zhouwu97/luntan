@@ -132,9 +132,9 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 	defer tx.Rollback()
 
 	// Verify post exists, is not deleted, and matches feed public visibility rules
-	var status, moderation, postType string
+	var status, moderation, postType, authorID string
 	var publishedAt sql.NullTime
-	err = tx.QueryRowContext(r.Context(), `SELECT publication_status, moderation_status, type, published_at FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&status, &moderation, &postType, &publishedAt)
+	err = tx.QueryRowContext(r.Context(), `SELECT publication_status, moderation_status, type, published_at, author_id FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&status, &moderation, &postType, &publishedAt, &authorID)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "POST_NOT_FOUND", Message: "帖子不存在或已删除"})
 		return
@@ -173,6 +173,13 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 			expires_at = EXCLUDED.expires_at`,
 		postID, user.ID, position, input.ExpiresAt)
 	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	// 推荐奖励：一次性发给帖子作者 +20，不受每日积分上限约束；
+	// 幂等键为帖子维度，取消推荐不扣分，取消后再推荐也不会重复发放。
+	if err := awardPointsTx(r.Context(), tx, authorID, "recommend", "帖子被推荐", "post:recommend:"+postID, s.pointRewards.RecommendationBonus, 0); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

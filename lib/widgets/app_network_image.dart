@@ -76,10 +76,18 @@ class UserAvatarCache {
 
 /// 网络图片的统一封装。
 ///
-/// - 基于 [CachedNetworkImage] 提供磁盘缓存：重启后无需重新下载；
+/// - 基于 [CachedNetworkImage] 提供跨重启缓存（Android/iOS 有磁盘缓存；
+///   Web 平台依赖 Flutter ImageCache + 浏览器 HTTP 缓存）；
 /// - 自动按布局约束 × DPR 计算解码宽度（`memCacheWidth`），列表滚动时
 ///   不再把原图解码成整幅位图；
 /// - 统一占位与错误回退，URL 为空或非法时直接展示回退而不是抛异常。
+///
+/// **Web 平台注意事项**：
+/// - `cached_network_image` 在 Web 上没有自己的持久化缓存层；
+/// - 图片缓存完全依赖：Flutter 内存 ImageCache + 浏览器 HTTP 缓存；
+/// - 页面路由切换可能导致 Widget 树重建，如果图片从 ImageCache 被淘汰
+///   且浏览器缓存策略不理想，会重新请求图片；
+/// - 服务端应该为媒体响应设置合理的 Cache-Control/ETag 头。
 class AppNetworkImage extends StatelessWidget {
   const AppNetworkImage({
     super.key,

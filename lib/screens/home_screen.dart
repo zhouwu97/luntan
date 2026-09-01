@@ -1,5 +1,6 @@
 // ignore_for_file: unused_element
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -137,7 +138,7 @@ class HomeScreen extends StatefulWidget {
   final ValueChanged<String>? onOpenUserId;
   final ValueChanged<String>? onOpenCommunityId;
   final PlatformRepository? platform;
-  final int? unread;
+  final ValueListenable<int>? unread;
   final InteractionController interactionController;
   final FeedRepository? feedRepository;
   final CommunityRepository? communityRepository;
@@ -534,7 +535,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           onProfile: widget.onOpenProfile,
                           onSearch: openSearch,
                           onMessages: widget.onOpenMessages,
-                          unread: widget.unread ?? 0,
+                          unread: widget.unread ?? ValueNotifier<int>(0),
                           currentUser: widget.currentUser,
                         ),
                       ),
@@ -812,7 +813,7 @@ class _Header extends StatelessWidget {
   final VoidCallback onProfile;
   final VoidCallback onSearch;
   final VoidCallback onMessages;
-  final int unread;
+  final ValueListenable<int> unread;
   final AuthUser? currentUser;
 
   Widget _buildAvatar(BuildContext context) {
@@ -928,42 +929,47 @@ class _Header extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 7),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                onPressed: onMessages,
-                icon: const Icon(
-                  Icons.notifications_none_rounded,
-                  color: AppTheme.textPrimary,
-                  size: 25,
-                ),
-                tooltip: '系统通知',
-              ),
-              if (unread > 0)
-                Positioned(
-                  right: 4,
-                  top: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
+          ValueListenableBuilder<int>(
+            valueListenable: unread,
+            builder: (context, unreadValue, child) {
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    onPressed: onMessages,
+                    icon: const Icon(
+                      Icons.notifications_none_rounded,
+                      color: AppTheme.textPrimary,
+                      size: 25,
                     ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.pink,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      unread > 99 ? '99+' : '$unread',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
+                    tooltip: '系统通知',
+                  ),
+                  if (unreadValue > 0)
+                    Positioned(
+                      right: 4,
+                      top: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.pink,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          unreadValue > 99 ? '99+' : '$unreadValue',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-            ],
+                ],
+              );
+            },
           ),
         ],
       ),

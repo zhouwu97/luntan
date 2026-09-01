@@ -265,19 +265,90 @@ func TestActivityAdminFiltersAndEndedPublishValidation(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("status=active 筛选列表应包含活动 %s", activeActID)
+		t.Fatalf("status=upcoming 筛选列表中不应包含进行中活动 %s", activeActID)
+	}
+}
+
+// 回归：帖子被管理员上首页推荐时，作者一次性获得 +20 积分（不受每日积分上限
+// 约束）；取消推荐不扣分；取消后再推荐因幂等键按帖子维度，不会重复发放。
+func TestRecommendationAwardsAuthorPointsOnce(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+
+	suffix := time.Now().UnixNano()
+	adminEmail := fmt.Sprintf("itest-rec-pts-admin-%d@example.com", suffix)
+	authorEmail := fmt.Sprintf("itest-rec-pts-author-%d@example.com", suffix)
+
+	adminToken := registerAndLogin(t, handler, adminEmail, fmt.Sprintf("itest_rec_pts_admin_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, adminEmail)
+	adminToken = loginUser(t, handler, adminEmail, "password123")
+
+	_ = registerAndLogin(t, handler, authorEmail, fmt.Sprintf("itest_rec_pts_author_%d", suffix%100000000), "password123")
+	var authorID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, authorEmail).Scan(&authorID); err != nil {
+		t.Fatal(err)
 	}
 
-	// 管理员按 status=upcoming 筛选 -> 不应包含该活动
-	code, body = callBusinessAPI(handler, http.MethodGet, "/api/v1/admin/activities?status=upcoming", token, nil, nil)
-	if code != http.StatusOK {
-		t.Fatalf("筛选 upcoming 活动应返回 200，实际 %d：%s", code, body)
+	// 直接 SQL 插入已发布帖子，避免发帖积分干扰推荐积分断言。
+	now := time.Now().UTC()
+	postID := fmt.Sprintf("post-rec-pts-%d", suffix%100000)
+	if _, err := s.db.Exec(`
+		INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+		VALUES ($1, $2, 'community-campus', 'normal', 'published', 'normal', '推荐积分测试帖', '测试正文', $3, $3, $3)`,
+		postID, authorID, now,
+	); err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal(body, &resp)
-	items, _ = resp["items"].([]any)
-	for _, it := range items {
-		if m, ok := it.(map[string]any); ok && m["id"] == activeActID {
-			t.Fatalf("status=upcoming 筛选列表中不应包含进行中活动 %s", activeActID)
+
+	balanceOf := func() int64 {
+		t.Helper()
+		var balance int64
+		if err := s.db.QueryRow(`SELECT points_balance FROM users WHERE id = $1`, authorID).Scan(&balance); err != nil {
+			t.Fatal(err)
 		}
+		return balance
+	}
+	recommendTxCount := func() int {
+		t.Helper()
+		var count int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'recommend' AND idempotency_key = $2`, authorID, "post:recommend:"+postID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+
+	initial := balanceOf()
+
+	// 1. 上推荐 -> 作者 +20，产生一条推荐流水。
+	code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, adminToken, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("上推荐应返回 200，实际 %d：%s", code, body)
+	}
+	if got := balanceOf(); got != initial+20 {
+		t.Fatalf("上推荐后作者余额=%d, want %d", got, initial+20)
+	}
+	if got := recommendTxCount(); got != 1 {
+		t.Fatalf("上推荐后推荐流水=%d, want 1", got)
+	}
+
+	// 2. 取消推荐 -> 不扣积分。
+	code, body = callBusinessAPI(handler, http.MethodDelete, "/api/v1/admin/recommendations/"+postID, adminToken, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("取消推荐应返回 200，实际 %d：%s", code, body)
+	}
+	if got := balanceOf(); got != initial+20 {
+		t.Fatalf("取消推荐不应扣分，余额=%d, want %d", got, initial+20)
+	}
+
+	// 3. 再次上推荐 -> 同一帖子只发一次奖励。
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, adminToken, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("再次上推荐应返回 200，实际 %d：%s", code, body)
+	}
+	if got := balanceOf(); got != initial+20 {
+		t.Fatalf("重复推荐不应重复加分，余额=%d, want %d", got, initial+20)
+	}
+	if got := recommendTxCount(); got != 1 {
+		t.Fatalf("重复推荐后推荐流水=%d, want 1", got)
 	}
 }

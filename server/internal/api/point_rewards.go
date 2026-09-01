@@ -6,21 +6,22 @@ import (
 )
 
 // PointRewardRules 集中管理积分奖励与每日获取上限。
-// 产品已确认：发帖 +5、点赞 +1、评论 +1，每日最多获得 20 积分。
+// 产品已确认：发帖 +1、点赞 +1，每日最多获得 1 积分；评论不再发放积分。
+// 帖子被管理员推荐一次性奖励作者 +20，不受每日上限限制，取消推荐不扣分。
 // 这是用户可见的固定规则，不允许环境变量造成页面文案与实际发放不一致。
 type PointRewardRules struct {
-	PostCreate     int64
-	CommentCreate  int64
-	LikeCreate     int64
-	DailyEarnLimit int64
+	PostCreate          int64
+	LikeCreate          int64
+	DailyEarnLimit      int64
+	RecommendationBonus int64
 }
 
 func defaultPointRewardRules() PointRewardRules {
 	return PointRewardRules{
-		PostCreate:     5,
-		CommentCreate:  1,
-		LikeCreate:     1,
-		DailyEarnLimit: 20,
+		PostCreate:          1,
+		LikeCreate:          1,
+		DailyEarnLimit:      1,
+		RecommendationBonus: 20,
 	}
 }
 

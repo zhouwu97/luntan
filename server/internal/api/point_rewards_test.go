@@ -10,7 +10,7 @@ import (
 
 func TestPointRewardRulesMatchPublishedPolicy(t *testing.T) {
 	rules := pointRewardRulesFromEnv()
-	if rules.PostCreate != 5 || rules.LikeCreate != 1 || rules.CommentCreate != 1 || rules.DailyEarnLimit != 20 {
+	if rules.PostCreate != 1 || rules.LikeCreate != 1 || rules.DailyEarnLimit != 1 || rules.RecommendationBonus != 20 {
 		t.Fatalf("unexpected point policy: %+v", rules)
 	}
 }

@@ -182,6 +182,7 @@ class _PointsCenterScreenState extends State<PointsCenterScreen> {
       'post' => '发布帖子',
       'comment' => '参与回复',
       'login' => '每日登录',
+      'recommend' => '帖子推荐',
       _ => transaction.source.isEmpty ? '社区行为' : transaction.source,
     };
     return ListTile(

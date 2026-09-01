@@ -149,7 +149,7 @@ run_db_tool pg_dump --format=custom --no-owner --file="$BACKUP_DIR/predeploy.dum
     >"$BACKUP_DIR/pg_dump.log" 2>&1 || fail 'pre-migration database backup failed'
 sha256sum "$BACKUP_DIR/predeploy.dump" > "$BACKUP_DIR/predeploy.dump.sha256"
 
-if ! (cd "$RELEASE_DIR" && ./luntan-migrate >"$BACKUP_DIR/migrate.log" 2>&1); then
+if ! (cd "$RELEASE_DIR" && run_db_tool "$RELEASE_DIR/luntan-migrate" >"$BACKUP_DIR/migrate.log" 2>&1); then
     fail "database migration failed; see $BACKUP_DIR/migrate.log"
 fi
 

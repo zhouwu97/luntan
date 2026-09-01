@@ -149,6 +149,13 @@ func (s *Server) createBookmarkFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if idempotencyKey != "" {
+		// 同一用户对同一幂等键的并发创建必须串行化；否则多个事务都可能
+		// 先查不到记录，再同时竞争名称/幂等键唯一索引，导致重复请求误报 409。
+		var advisoryLock any
+		if err := tx.QueryRowContext(r.Context(), `SELECT pg_advisory_xact_lock(hashtext($1 || ':' || $2))`, user.ID, idempotencyKey).Scan(&advisoryLock); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 		var existingID, existingName string
 		var existingDefault bool
 		var existingSortOrder int

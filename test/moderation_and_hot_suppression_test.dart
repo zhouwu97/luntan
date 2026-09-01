@@ -70,13 +70,13 @@ void main() {
       ),
     );
 
-    expect(find.text('图片处理 (1/1)'), findsOneWidget);
+    expect(find.text('图片打码 1/1'), findsOneWidget);
     expect(find.text('马赛克'), findsOneWidget);
-    expect(find.text('毛玻璃模糊'), findsOneWidget);
-    expect(find.text('保存打码'), findsOneWidget);
+    expect(find.text('模糊'), findsOneWidget);
+    expect(find.text('保存并应用'), findsOneWidget);
 
     // Switch to blur
-    await tester.tap(find.text('毛玻璃模糊'));
+    await tester.tap(find.text('模糊'));
     await tester.pump();
   });
 

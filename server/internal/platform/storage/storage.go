@@ -699,16 +699,44 @@ func (s *LocalMediaStorage) uploadSignature(assetID, objectKey, expires string) 
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+func (s *LocalMediaStorage) objectRootForKey(objectKey string) string {
+	key := strings.TrimSpace(objectKey)
+	if parsed, parseErr := url.Parse(key); parseErr == nil && parsed.IsAbs() && parsed.Host != "" {
+		key = strings.TrimLeft(parsed.Path, "/")
+	}
+	if strings.HasPrefix(key, "imported-media/") && filepath.Base(filepath.Clean(s.root)) == "user-media" {
+		return filepath.Dir(s.root)
+	}
+	return s.root
+}
+
 func (s *LocalMediaStorage) objectPath(objectKey string) (string, error) {
 	key := strings.TrimSpace(objectKey)
 	if key == "" || strings.Contains(key, "\\") {
 		return "", ErrInvalidMedia
 	}
+	rootDir := s.root
+	// 历史导入数据可能把公网 URL 写进 object_key，而文件实际位于
+	// MEDIA_STORAGE_DIR 的父级 imported-media 目录。只接受固定的
+	// imported-media 前缀并忽略 URL host，避免把任意绝对 URL 当成本地路径。
+	if parsed, parseErr := url.Parse(key); parseErr == nil && parsed.IsAbs() && parsed.Host != "" {
+		key = strings.TrimLeft(parsed.Path, "/")
+		if !strings.HasPrefix(key, "imported-media/") {
+			return "", ErrInvalidMedia
+		}
+	}
+	if strings.HasPrefix(key, "imported-media/") {
+		if filepath.Base(filepath.Clean(rootDir)) != "user-media" {
+			return "", ErrInvalidMedia
+		}
+		rootDir = filepath.Dir(rootDir)
+		key = strings.TrimPrefix(key, "imported-media/")
+	}
 	cleaned := path.Clean(key)
 	if cleaned != key || cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
 		return "", ErrInvalidMedia
 	}
-	root, err := filepath.Abs(s.root)
+	root, err := filepath.Abs(rootDir)
 	if err != nil {
 		return "", ErrStorageUnavailable
 	}
@@ -732,7 +760,7 @@ func (s *LocalMediaStorage) writeObject(objectKey string, reader io.Reader, expe
 		return ErrStorageUnavailable
 	}
 	// 用户媒体会由 Nginx 作为公开帖子内容读取，根目录到对象目录都需要可遍历。
-	if err := s.makePublicDirs(filepath.Dir(filePath)); err != nil {
+	if err := s.makePublicDirs(filepath.Dir(filePath), s.objectRootForKey(objectKey)); err != nil {
 		return ErrStorageUnavailable
 	}
 	temporary, err := os.CreateTemp(s.root, ".media-upload-*")
@@ -767,8 +795,8 @@ func (s *LocalMediaStorage) writeObject(objectKey string, reader io.Reader, expe
 	return nil
 }
 
-func (s *LocalMediaStorage) makePublicDirs(directory string) error {
-	root, err := filepath.Abs(s.root)
+func (s *LocalMediaStorage) makePublicDirs(directory, rootDir string) error {
+	root, err := filepath.Abs(rootDir)
 	if err != nil {
 		return err
 	}

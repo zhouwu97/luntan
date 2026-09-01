@@ -285,3 +285,32 @@ func TestLocalMediaStorageSignedUploadAndVerify(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalMediaStorageReadsLegacyAbsoluteImportedObjectKey(t *testing.T) {
+	baseDir := t.TempDir()
+	rootDir := filepath.Join(baseDir, "user-media")
+	if err := os.MkdirAll(rootDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	data := createTestJPEG(80, 60)
+	store := NewLocalMediaStorage(rootDir, "local-test-secret")
+	legacyObjectKey := "http://43.161.249.91/imported-media/post-import-1.webp"
+	if err := store.Put(context.Background(), legacyObjectKey, "image/webp", bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatalf("Put legacy absolute object key failed: %v", err)
+	}
+	rc, size, mimeType, err := store.Get(
+		context.Background(),
+		legacyObjectKey,
+	)
+	if err != nil {
+		t.Fatalf("Get legacy absolute object key failed: %v", err)
+	}
+	defer rc.Close()
+	if size != int64(len(data)) || mimeType != "image/webp" {
+		t.Fatalf("unexpected legacy object metadata: size=%d mime=%q", size, mimeType)
+	}
+
+	if _, _, _, err := store.Get(context.Background(), "https://example.test/private/file.webp"); err != ErrInvalidMedia {
+		t.Fatalf("unscoped absolute object key error = %v, want ErrInvalidMedia", err)
+	}
+}

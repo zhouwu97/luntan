@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import '../data/api/api_client.dart';
@@ -8,8 +11,8 @@ import '../theme/app_theme.dart';
 import '../widgets/app_network_image.dart';
 
 /// 管理员图片打码处理页面。
-/// 仅处理图片类型媒体，支持涂抹轨迹、马赛克/模糊效果切换、撤销、清除打码、
-/// 服务端同步保存和初始/修改版本回溯。
+/// 支持涂抹轨迹、马赛克/模糊真实预览、撤销/重做、橡皮擦（整笔删除）、
+/// 服务端同步保存和版本历史回溯。
 class ImageModerationScreen extends StatefulWidget {
   const ImageModerationScreen({
     super.key,
@@ -33,18 +36,40 @@ class ImageModerationScreen extends StatefulWidget {
 class _ImageModerationScreenState extends State<ImageModerationScreen> {
   late int _selectedImageIndex;
   late List<MaskRegion> _currentRegions;
+
   final List<List<MaskRegion>> _undoHistory = [];
-  String _currentType = 'mosaic'; // 'mosaic' or 'blur'
-  double _brushSize = 0.045;
+  final List<List<MaskRegion>> _redoHistory = [];
+
+  String _currentType = 'mosaic'; // 'mosaic' | 'blur'
+  String _currentTool = 'brush'; // 'brush' | 'eraser'
+  double _brushSize = 0.04;
   List<Offset>? _activeStroke;
   bool _isSaving = false;
+
+  // Decoded source image and pre-generated mosaic variant for real preview.
+  ui.Image? _decodedImage;
+  ui.Image? _mosaicImage;
   Uint8List? _sourceBytes;
-  String? _sourceMediaId;
   String? _sourceLoadError;
+
+  // Version history.
   List<MediaModerationVersion> _moderationHistory = const [];
   bool _historyLoading = false;
 
+  // Canvas dimensions set by LayoutBuilder — used for coordinate normalisation
+  // and eraser hit testing.
+  double _canvasW = 0;
+  double _canvasH = 0;
+
+  // Whether an undo snapshot was already pushed during the current eraser swipe
+  // (so all deletions in one swipe revert as a single undo step).
+  bool _eraserUndoPushed = false;
+
   List<MediaAsset> get _images => widget.post.images;
+
+  // ──────────────────────────────────────────────────────────────
+  // Lifecycle
+  // ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
@@ -54,19 +79,147 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       _images.isEmpty ? 0 : _images.length - 1,
     );
     _loadCurrentMediaRegions();
-    _loadCurrentMediaSource();
+    _loadAndDecodeImage();
     _loadCurrentMediaHistory();
   }
 
+  @override
+  void dispose() {
+    _decodedImage?.dispose();
+    _mosaicImage?.dispose();
+    super.dispose();
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // Data loading
+  // ──────────────────────────────────────────────────────────────
+
   void _loadCurrentMediaRegions() {
     if (_images.isNotEmpty) {
-      final media = _images[_selectedImageIndex];
-      _currentRegions = List<MaskRegion>.from(media.maskRegions);
+      _currentRegions =
+          List<MaskRegion>.from(_images[_selectedImageIndex].maskRegions);
     } else {
       _currentRegions = [];
     }
     _undoHistory.clear();
+    _redoHistory.clear();
     _activeStroke = null;
+  }
+
+  /// Loads the source image bytes, decodes them into a [ui.Image], and
+  /// pre-generates the pixelated mosaic variant for real-time preview.
+  Future<void> _loadAndDecodeImage() async {
+    _decodedImage?.dispose();
+    _mosaicImage?.dispose();
+    _decodedImage = null;
+    _mosaicImage = null;
+    _sourceBytes = null;
+    _sourceLoadError = null;
+    if (mounted) setState(() {});
+
+    if (_images.isEmpty) return;
+
+    final media = _images[_selectedImageIndex];
+    final mediaId = media.id;
+
+    try {
+      ui.Image decoded;
+
+      if (media.isCensored && widget.platformRepository != null) {
+        // Admin endpoint returns the uncensored original bytes.
+        final bytes = await widget.platformRepository!
+            .getAdminMediaSource(mediaId: mediaId);
+        if (!mounted || _images[_selectedImageIndex].id != mediaId) return;
+        _sourceBytes = Uint8List.fromList(bytes);
+        final codec = await ui.instantiateImageCodec(_sourceBytes!);
+        final frame = await codec.getNextFrame();
+        decoded = frame.image;
+      } else {
+        final url =
+            media.originalUrl ?? media.detailUrl ?? media.url ?? '';
+        if (url.isEmpty) {
+          if (mounted) setState(() => _sourceLoadError = '图片地址为空');
+          return;
+        }
+        decoded = await _resolveNetworkImage(url);
+      }
+
+      if (!mounted || _images[_selectedImageIndex].id != mediaId) {
+        decoded.dispose();
+        return;
+      }
+
+      final mosaicVariant = await _buildMosaicVariant(decoded);
+      if (!mounted || _images[_selectedImageIndex].id != mediaId) {
+        decoded.dispose();
+        mosaicVariant.dispose();
+        return;
+      }
+
+      setState(() {
+        _decodedImage = decoded;
+        _mosaicImage = mosaicVariant;
+      });
+    } catch (_) {
+      if (mounted &&
+          _images.isNotEmpty &&
+          _images[_selectedImageIndex].id == mediaId) {
+        setState(() => _sourceLoadError = '原图加载失败，请重试');
+      }
+    }
+  }
+
+  /// Uses Flutter's image cache to resolve a network URL into a [ui.Image].
+  Future<ui.Image> _resolveNetworkImage(String url) {
+    final completer = Completer<ui.Image>();
+    final stream =
+        NetworkImage(url).resolve(const ImageConfiguration());
+    late ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (ImageInfo info, bool _) {
+        completer.complete(info.image.clone());
+        stream.removeListener(listener);
+      },
+      onError: (Object error, StackTrace? _) {
+        if (!completer.isCompleted) completer.completeError(error);
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+    return completer.future;
+  }
+
+  /// Generates a pixelated (mosaic) variant by down-scaling then up-scaling
+  /// with nearest-neighbour interpolation.  Block size matches the server's
+  /// `max(8, (w+h)/100)`.
+  Future<ui.Image> _buildMosaicVariant(ui.Image source) async {
+    final w = source.width;
+    final h = source.height;
+    final block = max(8, (w + h) ~/ 100);
+    final sw = max(1, w ~/ block);
+    final sh = max(1, h ~/ block);
+
+    // Down-scale.
+    final r1 = ui.PictureRecorder();
+    Canvas(r1).drawImageRect(
+      source,
+      Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+      Rect.fromLTWH(0, 0, sw.toDouble(), sh.toDouble()),
+      Paint(),
+    );
+    final small = await r1.endRecording().toImage(sw, sh);
+
+    // Nearest-neighbour up-scale.
+    final r2 = ui.PictureRecorder();
+    Canvas(r2).drawImageRect(
+      small,
+      Rect.fromLTWH(0, 0, sw.toDouble(), sh.toDouble()),
+      Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+      Paint()..filterQuality = FilterQuality.none,
+    );
+    final result = await r2.endRecording().toImage(w, h);
+    small.dispose();
+    return result;
   }
 
   Future<void> _loadCurrentMediaHistory() async {
@@ -85,80 +238,235 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     } catch (_) {
       // 版本接口不可用时不阻断当前打码流程，服务端仍是最终审计来源。
     } finally {
-      if (mounted && _images[_selectedImageIndex].id == mediaId) {
+      if (mounted &&
+          _images.isNotEmpty &&
+          _images[_selectedImageIndex].id == mediaId) {
         setState(() => _historyLoading = false);
       }
     }
   }
 
-  Future<void> _loadCurrentMediaSource() async {
-    _sourceBytes = null;
-    _sourceMediaId = null;
-    _sourceLoadError = null;
-    if (_images.isEmpty || widget.platformRepository == null) {
-      if (mounted) setState(() {});
-      return;
-    }
-    final media = _images[_selectedImageIndex];
-    if (!media.isCensored) {
-      if (mounted) setState(() {});
-      return;
-    }
-    final mediaID = media.id;
-    try {
-      final bytes = await widget.platformRepository!.getAdminMediaSource(
-        mediaId: mediaID,
-      );
-      if (!mounted || _images[_selectedImageIndex].id != mediaID) return;
-      setState(() {
-        _sourceBytes = Uint8List.fromList(bytes);
-        _sourceMediaId = mediaID;
-      });
-    } catch (error) {
-      if (!mounted || _images[_selectedImageIndex].id != mediaID) return;
-      setState(() => _sourceLoadError = '原图加载失败，请重试');
-    }
-  }
+  // ──────────────────────────────────────────────────────────────
+  // Undo / Redo / Clear
+  // ──────────────────────────────────────────────────────────────
 
-  void _pushHistory() {
+  void _pushUndo() {
     _undoHistory.add(List<MaskRegion>.from(_currentRegions));
+    _redoHistory.clear();
   }
 
   void _undo() {
-    if (_undoHistory.isNotEmpty) {
-      setState(() {
-        _currentRegions = _undoHistory.removeLast();
-      });
+    if (_undoHistory.isEmpty) return;
+    setState(() {
+      _redoHistory.add(List<MaskRegion>.from(_currentRegions));
+      _currentRegions = _undoHistory.removeLast();
+    });
+  }
+
+  void _redo() {
+    if (_redoHistory.isEmpty) return;
+    setState(() {
+      _undoHistory.add(List<MaskRegion>.from(_currentRegions));
+      _currentRegions = _redoHistory.removeLast();
+    });
+  }
+
+  void _confirmClearAll() {
+    if (_currentRegions.isEmpty) return;
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF23262F),
+        title:
+            const Text('清除全部打码？', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          '当前图片上的所有未保存打码都会被移除。',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    ).then((yes) {
+      if (yes == true && mounted) {
+        _pushUndo();
+        setState(() => _currentRegions.clear());
+      }
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // Gesture Handling (Brush / Eraser)
+  // ──────────────────────────────────────────────────────────────
+
+  void _onPanStart(Offset pos) {
+    if (_currentTool == 'eraser') {
+      _eraserUndoPushed = false;
+      _tryEraseAt(pos);
+    } else {
+      setState(() => _activeStroke = <Offset>[pos]);
     }
   }
 
-  void _clearAll() {
-    _pushHistory();
+  void _onPanUpdate(Offset pos) {
+    if (_currentTool == 'eraser') {
+      _tryEraseAt(pos);
+    } else {
+      final s = _activeStroke;
+      if (s == null || s.length >= 512) return;
+      if (s.isNotEmpty && (s.last - pos).distance < 1.5) return;
+      setState(() => s.add(pos));
+    }
+  }
+
+  void _onPanEnd() {
+    if (_currentTool == 'eraser') {
+      _eraserUndoPushed = false;
+      return;
+    }
+    _commitStroke();
+  }
+
+  void _onPanCancel() {
+    if (mounted) setState(() => _activeStroke = null);
+    _eraserUndoPushed = false;
+  }
+
+  void _commitStroke() {
+    final stroke = _activeStroke;
+    if (stroke == null || stroke.isEmpty || _canvasW <= 0 || _canvasH <= 0) {
+      setState(() => _activeStroke = null);
+      return;
+    }
+
+    final points = stroke
+        .map((p) => MaskPoint(
+              x: (p.dx / _canvasW).clamp(0.0, 1.0),
+              y: (p.dy / _canvasH).clamp(0.0, 1.0),
+            ))
+        .toList(growable: false);
+
+    var left = points.map((p) => p.x).reduce(min);
+    var top = points.map((p) => p.y).reduce(min);
+    var right = points.map((p) => p.x).reduce(max);
+    var bottom = points.map((p) => p.y).reduce(max);
+
+    const minBox = 0.004;
+    if (right - left < minBox) {
+      final cx = (left + right) / 2;
+      left = (cx - minBox / 2).clamp(0.0, 1.0 - minBox);
+      right = left + minBox;
+    }
+    if (bottom - top < minBox) {
+      final cy = (top + bottom) / 2;
+      top = (cy - minBox / 2).clamp(0.0, 1.0 - minBox);
+      bottom = top + minBox;
+    }
+
+    _pushUndo();
     setState(() {
-      _currentRegions.clear();
+      _currentRegions.add(MaskRegion(
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+        type: _currentType,
+        points: points,
+        brushSize: _brushSize,
+      ));
+      _activeStroke = null;
     });
   }
+
+  /// Removes the top-most region whose brush stroke covers [pos].
+  void _tryEraseAt(Offset pos) {
+    if (_canvasW <= 0 || _canvasH <= 0) return;
+    final nx = (pos.dx / _canvasW).clamp(0.0, 1.0);
+    final ny = (pos.dy / _canvasH).clamp(0.0, 1.0);
+
+    for (int i = _currentRegions.length - 1; i >= 0; i--) {
+      if (_hitTestRegion(_currentRegions[i], nx, ny)) {
+        if (!_eraserUndoPushed) {
+          _pushUndo();
+          _eraserUndoPushed = true;
+        }
+        setState(() => _currentRegions.removeAt(i));
+        return;
+      }
+    }
+  }
+
+  /// Point-in-brush hit test mirroring the server's `pointInBrush`.
+  bool _hitTestRegion(MaskRegion r, double nx, double ny) {
+    if (r.points.isEmpty) {
+      return nx >= r.x &&
+          nx <= r.x + r.width &&
+          ny >= r.y &&
+          ny <= r.y + r.height;
+    }
+    final se = min(_canvasW, _canvasH);
+    final radius = max(4.0, r.brushSize * se / 2);
+    final px = nx * _canvasW;
+    final py = ny * _canvasH;
+
+    for (int i = 0; i < r.points.length; i++) {
+      final ax = r.points[i].x * _canvasW;
+      final ay = r.points[i].y * _canvasH;
+      if (i == 0) {
+        if (_distSq(px, py, ax, ay, ax, ay) <= radius * radius) return true;
+        continue;
+      }
+      final bx = r.points[i - 1].x * _canvasW;
+      final by = r.points[i - 1].y * _canvasH;
+      if (_distSq(px, py, ax, ay, bx, by) <= radius * radius) return true;
+    }
+    return false;
+  }
+
+  /// Squared distance from point (px, py) to line segment (ax, ay)→(bx, by).
+  static double _distSq(
+      double px, double py, double ax, double ay, double bx, double by) {
+    final dx = bx - ax, dy = by - ay;
+    if (dx == 0 && dy == 0) {
+      final ex = px - ax, ey = py - ay;
+      return ex * ex + ey * ey;
+    }
+    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))
+        .clamp(0.0, 1.0);
+    final cx = ax + t * dx - px, cy = ay + t * dy - py;
+    return cx * cx + cy * cy;
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // Save
+  // ──────────────────────────────────────────────────────────────
 
   Future<void> _saveModeration({bool resetToNormal = false}) async {
     if (_isSaving || _images.isEmpty) return;
     final media = _images[_selectedImageIndex];
 
     if (resetToNormal && !widget.canRestoreCensored) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('只有超级管理员可以恢复未打码原图'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('只有超级管理员可以恢复未打码原图'),
+        backgroundColor: Colors.redAccent,
+      ));
       return;
     }
     if (!resetToNormal && _currentRegions.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先在图片上涂抹需要遮挡的内容'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('请先在图片上涂抹需要遮挡的内容'),
+        backgroundColor: Colors.orange,
+      ));
       return;
     }
 
@@ -177,147 +485,51 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       }
 
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            status == 'censored' ? '打码处理已保存，服务端已生成打码图变体' : '已恢复原图正常展示',
-          ),
-          backgroundColor: AppTheme.primary,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(status == 'censored'
+            ? '打码处理已保存，服务端已生成打码图变体'
+            : '已恢复原图正常展示'),
+        backgroundColor: AppTheme.primary,
+      ));
       widget.onSaved?.call();
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(userFacingApiMessage(e, fallback: '图片处理失败，请稍后重试')),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content:
+            Text(userFacingApiMessage(e, fallback: '图片处理失败，请稍后重试')),
+        backgroundColor: Colors.redAccent,
+      ));
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  void _beginStroke(Offset position) {
-    setState(() => _activeStroke = <Offset>[position]);
-  }
+  // ──────────────────────────────────────────────────────────────
+  // Helpers
+  // ──────────────────────────────────────────────────────────────
 
-  void _appendStroke(Offset position) {
-    final stroke = _activeStroke;
-    if (stroke == null || stroke.length >= 512) return;
-    if (stroke.isNotEmpty && (stroke.last - position).distance < 1.5) return;
-    setState(() => stroke.add(position));
-  }
-
-  void _finishStroke(double canvasW, double canvasH) {
-    final stroke = _activeStroke;
-    if (stroke == null || stroke.isEmpty || canvasW <= 0 || canvasH <= 0) {
-      setState(() => _activeStroke = null);
-      return;
-    }
-    final points = stroke
-        .map(
-          (point) => MaskPoint(
-            x: (point.dx / canvasW).clamp(0.0, 1.0),
-            y: (point.dy / canvasH).clamp(0.0, 1.0),
-          ),
-        )
-        .toList(growable: false);
-    var left = points.map((point) => point.x).reduce((a, b) => a < b ? a : b);
-    var top = points.map((point) => point.y).reduce((a, b) => a < b ? a : b);
-    var right = points.map((point) => point.x).reduce((a, b) => a > b ? a : b);
-    var bottom = points.map((point) => point.y).reduce((a, b) => a > b ? a : b);
-    const minBox = 0.004;
-    if (right - left < minBox) {
-      final center = (left + right) / 2;
-      left = (center - minBox / 2).clamp(0.0, 1.0 - minBox);
-      right = left + minBox;
-    }
-    if (bottom - top < minBox) {
-      final center = (top + bottom) / 2;
-      top = (center - minBox / 2).clamp(0.0, 1.0 - minBox);
-      bottom = top + minBox;
-    }
-    _pushHistory();
+  void _switchImage(int index) {
+    if (index == _selectedImageIndex || _isSaving) return;
     setState(() {
-      _currentRegions.add(
-        MaskRegion(
-          x: left,
-          y: top,
-          width: right - left,
-          height: bottom - top,
-          type: _currentType,
-          points: points,
-          brushSize: _brushSize,
-        ),
-      );
-      _activeStroke = null;
+      _selectedImageIndex = index;
+      _loadCurrentMediaRegions();
     });
+    _loadAndDecodeImage();
+    _loadCurrentMediaHistory();
   }
 
-  Widget _buildSourceImage(MediaAsset currentMedia, String imageUrl) {
-    if (currentMedia.isCensored && widget.platformRepository != null) {
-      if (_sourceMediaId == currentMedia.id && _sourceBytes != null) {
-        return Image.memory(
-          _sourceBytes!,
-          fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => _sourceError('原图无法显示'),
-        );
-      }
-      if (_sourceLoadError != null) {
-        return _sourceError(
-          _sourceLoadError!,
-          onRetry: _loadCurrentMediaSource,
-        );
-      }
-      return const Center(
-        child: CircularProgressIndicator(color: AppTheme.primary),
-      );
-    }
-
-    return AppNetworkImage(
-      url: imageUrl,
-      fit: BoxFit.contain,
-      errorBuilder: (_) => _sourceError('图片加载中或无法访问'),
-    );
+  String _fmtTime(DateTime dt) {
+    final l = dt.toLocal();
+    return '${l.month.toString().padLeft(2, '0')}-'
+        '${l.day.toString().padLeft(2, '0')} '
+        '${l.hour.toString().padLeft(2, '0')}:'
+        '${l.minute.toString().padLeft(2, '0')}';
   }
 
-  Widget _sourceError(String message, {VoidCallback? onRetry}) {
-    return Container(
-      color: Colors.black26,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(message, style: const TextStyle(color: Colors.white70)),
-            if (onRetry != null) ...[
-              const SizedBox(height: 10),
-              OutlinedButton(
-                onPressed: _isSaving ? null : onRetry,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white54),
-                ),
-                child: const Text('重试'),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatHistoryTime(DateTime value) {
-    final local = value.toLocal();
-    final month = local.month.toString().padLeft(2, '0');
-    final day = local.day.toString().padLeft(2, '0');
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '$month-$day $hour:$minute';
-  }
+  // ──────────────────────────────────────────────────────────────
+  // Build
+  // ──────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -326,591 +538,793 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         backgroundColor: const Color(0xFF181A20),
         appBar: AppBar(
           backgroundColor: const Color(0xFF23262F),
-          title: const Text('图片处理', style: TextStyle(color: Colors.white)),
+          title:
+              const Text('图片处理', style: TextStyle(color: Colors.white)),
         ),
         body: const Center(
-          child: Text('该帖子没有图片可处理', style: TextStyle(color: Colors.white70)),
+          child: Text('该帖子没有图片可处理',
+              style: TextStyle(color: Colors.white70)),
         ),
       );
     }
 
-    final currentMedia = _images[_selectedImageIndex];
-    final imageUrl =
-        currentMedia.originalUrl ??
-        currentMedia.detailUrl ??
-        currentMedia.url ??
-        '';
-
     return Scaffold(
       backgroundColor: const Color(0xFF181A20),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF23262F),
-        elevation: 0,
-        title: Text(
-          '图片处理 (${_selectedImageIndex + 1}/${_images.length})',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 17,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: '撤销上一步',
-            icon: Icon(
-              Icons.undo,
-              color: (!_isSaving && _undoHistory.isNotEmpty)
-                  ? Colors.white
-                  : Colors.white38,
-            ),
-            onPressed: (!_isSaving && _undoHistory.isNotEmpty) ? _undo : null,
-          ),
-          IconButton(
-            tooltip: '清空打码',
-            icon: Icon(
-              Icons.delete_outline,
-              color: (!_isSaving && _currentRegions.isNotEmpty)
-                  ? Colors.redAccent
-                  : Colors.white38,
-            ),
-            onPressed: (!_isSaving && _currentRegions.isNotEmpty)
-                ? _clearAll
-                : null,
-          ),
-          TextButton(
-            onPressed: _isSaving ? null : () => _saveModeration(),
-            child: _isSaving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text(
-                    '保存打码',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
+      appBar: _appBar(),
       body: Column(
         children: [
-          if (_images.length > 1)
-            Container(
-              height: 72,
-              color: const Color(0xFF23262F),
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: _images.length,
-                itemBuilder: (context, index) {
-                  final m = _images[index];
-                  final isSelected = index == _selectedImageIndex;
-                  return GestureDetector(
-                    onTap: _isSaving
-                        ? null
-                        : () {
-                            if (index != _selectedImageIndex) {
-                              setState(() {
-                                _selectedImageIndex = index;
-                                _loadCurrentMediaRegions();
-                              });
-                              _loadCurrentMediaSource();
-                              _loadCurrentMediaHistory();
-                            }
-                          },
-                    child: Container(
-                      width: 56,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: isSelected
-                              ? AppTheme.primary
-                              : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: AppNetworkImage(
-                        url: m.thumbUrl ?? m.url,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_) => Container(
-                          color: Colors.grey[800],
-                          child: const Icon(Icons.image, color: Colors.white54),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
+          if (_images.length > 1) _thumbStrip(),
           Expanded(
             child: IgnorePointer(
               ignoring: _isSaving,
-              child: Center(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final imgW = currentMedia.width?.toDouble() ?? 800;
-                    final imgH = currentMedia.height?.toDouble() ?? 600;
-                    final aspect = (imgW > 0 && imgH > 0) ? imgW / imgH : 4 / 3;
+              child: _editorCanvas(),
+            ),
+          ),
+          _versionBar(),
+          IgnorePointer(ignoring: _isSaving, child: _toolbar()),
+        ],
+      ),
+    );
+  }
 
-                    return AspectRatio(
-                      aspectRatio: aspect,
-                      child: LayoutBuilder(
-                        builder: (canvasCtx, canvasConstraints) {
-                          final canvasW = canvasConstraints.maxWidth;
-                          final canvasH = canvasConstraints.maxHeight;
+  // ── AppBar ──────────────────────────────────────────────────
 
-                          return Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              _buildSourceImage(currentMedia, imageUrl),
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onPanStart: (details) =>
-                                    _beginStroke(details.localPosition),
-                                onPanUpdate: (details) =>
-                                    _appendStroke(details.localPosition),
-                                onPanEnd: (_) =>
-                                    _finishStroke(canvasW, canvasH),
-                                onPanCancel: () {
-                                  if (mounted) {
-                                    setState(() => _activeStroke = null);
-                                  }
-                                },
-                                child: CustomPaint(
-                                  painter: _MaskCanvasPainter(
-                                    regions: _currentRegions,
-                                    activeStroke: _activeStroke,
-                                    brushSize: _brushSize,
-                                    currentType: _currentType,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    );
-                  },
+  PreferredSizeWidget _appBar() {
+    return AppBar(
+      backgroundColor: const Color(0xFF23262F),
+      elevation: 0,
+      title: Text(
+        '图片打码 ${_selectedImageIndex + 1}/${_images.length}',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      actions: [
+        IconButton(
+          tooltip: '撤销',
+          icon: Icon(Icons.undo,
+              color: _undoHistory.isNotEmpty && !_isSaving
+                  ? Colors.white
+                  : Colors.white38),
+          onPressed:
+              _undoHistory.isNotEmpty && !_isSaving ? _undo : null,
+        ),
+        IconButton(
+          tooltip: '重做',
+          icon: Icon(Icons.redo,
+              color: _redoHistory.isNotEmpty && !_isSaving
+                  ? Colors.white
+                  : Colors.white38),
+          onPressed:
+              _redoHistory.isNotEmpty && !_isSaving ? _redo : null,
+        ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Colors.white),
+          enabled: !_isSaving,
+          color: const Color(0xFF2A2E38),
+          onSelected: (v) {
+            if (v == 'clear') _confirmClearAll();
+            if (v == 'restore') _saveModeration(resetToNormal: true);
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'clear',
+              enabled: _currentRegions.isNotEmpty,
+              child: const Row(children: [
+                Icon(Icons.delete_outline,
+                    color: Colors.redAccent, size: 20),
+                SizedBox(width: 8),
+                Text('清除全部打码',
+                    style: TextStyle(color: Colors.white)),
+              ]),
+            ),
+            if (_images[_selectedImageIndex].isCensored &&
+                widget.canRestoreCensored)
+              const PopupMenuItem(
+                value: 'restore',
+                child: Row(children: [
+                  Icon(Icons.restore,
+                      color: Colors.orangeAccent, size: 20),
+                  SizedBox(width: 8),
+                  Text('恢复未打码版本',
+                      style: TextStyle(color: Colors.white)),
+                ]),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Image Thumbnail Strip ──────────────────────────────────
+
+  Widget _thumbStrip() {
+    return Container(
+      height: 72,
+      color: const Color(0xFF23262F),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _images.length,
+        itemBuilder: (_, i) {
+          final m = _images[i];
+          final sel = i == _selectedImageIndex;
+          return GestureDetector(
+            onTap: () => _switchImage(i),
+            child: Container(
+              width: 56,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: sel ? AppTheme.primary : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: AppNetworkImage(
+                url: m.thumbUrl ?? m.url,
+                fit: BoxFit.cover,
+                errorBuilder: (_) => Container(
+                  color: Colors.grey[800],
+                  child:
+                      const Icon(Icons.image, color: Colors.white54),
                 ),
               ),
             ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Editor Canvas ──────────────────────────────────────────
+
+  Widget _editorCanvas() {
+    if (_decodedImage == null) {
+      if (_sourceLoadError != null) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_sourceLoadError!,
+                  style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 10),
+              OutlinedButton(
+                onPressed: _isSaving ? null : _loadAndDecodeImage,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54),
+                ),
+                child: const Text('重试'),
+              ),
+            ],
           ),
-          if (_historyLoading || _moderationHistory.isNotEmpty)
-            Container(
-              height: 88,
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-              color: const Color(0xFF1F222A),
+        );
+      }
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primary),
+      );
+    }
+
+    final imgW = _decodedImage!.width.toDouble();
+    final imgH = _decodedImage!.height.toDouble();
+    final aspect = (imgW > 0 && imgH > 0) ? imgW / imgH : 4 / 3;
+
+    return Center(
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: LayoutBuilder(
+          builder: (_, cons) {
+            _canvasW = cons.maxWidth;
+            _canvasH = cons.maxHeight;
+
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (d) => _onPanStart(d.localPosition),
+              onPanUpdate: (d) => _onPanUpdate(d.localPosition),
+              onPanEnd: (_) => _onPanEnd(),
+              onPanCancel: _onPanCancel,
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  size: Size(_canvasW, _canvasH),
+                  isComplex: true,
+                  willChange: true,
+                  painter: _EffectPainter(
+                    source: _decodedImage!,
+                    mosaic: _mosaicImage,
+                    regions: _currentRegions,
+                    activeStroke: _activeStroke,
+                    brushSize: _brushSize,
+                    activeType: _currentType,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // ── Version Summary Bar ────────────────────────────────────
+
+  Widget _versionBar() {
+    if (!_historyLoading && _moderationHistory.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    String label;
+    if (_historyLoading && _moderationHistory.isEmpty) {
+      label = '加载中…';
+    } else {
+      final v = _moderationHistory.first;
+      label = v.isInitial
+          ? 'v${v.versionNo} · 初发布 · 未打码'
+          : v.moderationStatus == 'censored'
+              ? 'v${v.versionNo} · 已打码'
+              : 'v${v.versionNo} · 已恢复原图';
+    }
+
+    return InkWell(
+      onTap: _moderationHistory.isNotEmpty ? _showVersionSheet : null,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1F222A),
+          border: Border(
+            top: BorderSide(color: Color(0xFF353945), width: 0.5),
+            bottom: BorderSide(color: Color(0xFF353945), width: 0.5),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.history, color: Colors.white54, size: 18),
+            const SizedBox(width: 8),
+            const Text('版本',
+                style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 13),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            if (_moderationHistory.isNotEmpty)
+              const Icon(Icons.chevron_right,
+                  color: Colors.white38, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showVersionSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1F222A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('版本记录',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const Divider(color: Colors.white12, height: 1),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.45,
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 12),
+                itemCount: _moderationHistory.length,
+                itemBuilder: (_, i) => _versionTile(i),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _versionTile(int index) {
+    final v = _moderationHistory[index];
+    final isLast = index == _moderationHistory.length - 1;
+    final statusLabel = v.isInitial
+        ? '初发布 · 未打码'
+        : v.moderationStatus == 'censored'
+            ? '已打码'
+            : '已恢复原图';
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Timeline dot + connector.
+          SizedBox(
+            width: 24,
+            child: Column(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: v.isInitial
+                        ? Colors.transparent
+                        : AppTheme.primary,
+                    border: Border.all(
+                      color: v.isInitial
+                          ? Colors.white54
+                          : AppTheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                ),
+                if (!isLast)
+                  Expanded(
+                    child: Container(width: 1.5, color: Colors.white24),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    '版本记录',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                  Text('v${v.versionNo}  $statusLabel',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(_fmtTime(v.createdAt),
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 12)),
+                  if (v.reason.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(v.reason,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12)),
                     ),
-                  ),
-                  const SizedBox(height: 5),
-                  Expanded(
-                    child: _historyLoading && _moderationHistory.isEmpty
-                        ? const Align(
-                            alignment: Alignment.centerLeft,
-                            child: SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                          )
-                        : ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _moderationHistory.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(width: 6),
-                            itemBuilder: (context, index) {
-                              final version = _moderationHistory[index];
-                              final label = version.isInitial
-                                  ? '初发布·未打码'
-                                  : version.moderationStatus == 'censored'
-                                  ? '已打码'
-                                  : '已恢复原图';
-                              return Container(
-                                width: 138,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF2A2E38),
-                                  borderRadius: BorderRadius.circular(7),
-                                  border: Border.all(color: Colors.white12),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      'v${version.versionNo}  $label',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    Text(
-                                      version.reason.isEmpty
-                                          ? '无备注'
-                                          : version.reason,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                    Text(
-                                      _formatHistoryTime(version.createdAt),
-                                      style: const TextStyle(
-                                        color: Colors.white38,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                  ),
                 ],
-              ),
-            ),
-          IgnorePointer(
-            ignoring: _isSaving,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-              decoration: const BoxDecoration(
-                color: Color(0xFF23262F),
-                border: Border(
-                  top: BorderSide(color: Color(0xFF353945), width: 1),
-                ),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.brush_outlined,
-                          color: AppTheme.primary,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 6),
-                        const Expanded(
-                          child: Text(
-                            '在图片上直接涂抹需要遮挡的内容',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                        if (currentMedia.isCensored &&
-                            widget.canRestoreCensored)
-                          TextButton.icon(
-                            icon: const Icon(
-                              Icons.restore,
-                              color: Colors.orangeAccent,
-                              size: 17,
-                            ),
-                            label: const Text(
-                              '恢复原图',
-                              style: TextStyle(color: Colors.orangeAccent),
-                            ),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: () =>
-                                _saveModeration(resetToNormal: true),
-                          )
-                        else if (currentMedia.isCensored)
-                          const Text(
-                            '仅超级管理员可恢复',
-                            style: TextStyle(
-                              color: Colors.white38,
-                              fontSize: 11,
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        const Text(
-                          '遮挡样式',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
-                        ),
-                        ChoiceChip(
-                          label: const Text('马赛克'),
-                          selected: _currentType == 'mosaic',
-                          selectedColor: AppTheme.primary,
-                          onSelected: (val) {
-                            if (val) setState(() => _currentType = 'mosaic');
-                          },
-                        ),
-                        ChoiceChip(
-                          label: const Text('毛玻璃模糊'),
-                          selected: _currentType == 'blur',
-                          selectedColor: AppTheme.primary,
-                          onSelected: (val) {
-                            if (val) setState(() => _currentType = 'blur');
-                          },
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        const Text(
-                          '笔刷大小',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
-                        ),
-                        Expanded(
-                          child: Slider(
-                            value: _brushSize,
-                            min: 0.01,
-                            max: 0.12,
-                            divisions: 22,
-                            activeColor: AppTheme.primary,
-                            inactiveColor: Colors.white24,
-                            onChanged: (value) =>
-                                setState(() => _brushSize = value),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 36,
-                          child: Text(
-                            '${(_brushSize * 100).round()}%',
-                            textAlign: TextAlign.right,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Bottom Toolbar ─────────────────────────────────────────
+
+  Widget _toolbar() {
+    final previewDia = (_brushSize * 100).clamp(6.0, 36.0);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFF23262F),
+        border:
+            Border(top: BorderSide(color: Color(0xFF353945), width: 1)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Effect type
+            _labelRow('效果', [
+              _chip('马赛克', _currentType == 'mosaic',
+                  () => setState(() => _currentType = 'mosaic')),
+              const SizedBox(width: 8),
+              _chip('模糊', _currentType == 'blur',
+                  () => setState(() => _currentType = 'blur')),
+            ]),
+            const SizedBox(height: 8),
+
+            // Tool
+            _labelRow('工具', [
+              _chip('画笔', _currentTool == 'brush',
+                  () => setState(() => _currentTool = 'brush'),
+                  icon: Icons.brush_outlined),
+              const SizedBox(width: 8),
+              _chip('橡皮擦', _currentTool == 'eraser',
+                  () => setState(() => _currentTool = 'eraser'),
+                  icon: Icons.auto_fix_normal),
+            ]),
+            const SizedBox(height: 6),
+
+            // Brush size
+            Row(
+              children: [
+                const SizedBox(
+                  width: 48,
+                  child: Text('大小',
+                      style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                ),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 7),
+                    ),
+                    child: Slider(
+                      value: _brushSize,
+                      min: 0.01,
+                      max: 0.12,
+                      divisions: 22,
+                      activeColor: AppTheme.primary,
+                      inactiveColor: Colors.white24,
+                      onChanged: (v) =>
+                          setState(() => _brushSize = v),
+                    ),
+                  ),
+                ),
+                Container(
+                  width: max(previewDia, 6),
+                  height: max(previewDia, 6),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border:
+                        Border.all(color: Colors.white54, width: 1.5),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 32,
+                  child: Text('${(_brushSize * 100).round()}%',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Primary action
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
+                ),
+                onPressed: _isSaving ? null : () => _saveModeration(),
+                child: _isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('保存并应用',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Reusable chip helpers ──────────────────────────────────
+
+  Widget _labelRow(String label, List<Widget> children) {
+    return Row(children: [
+      SizedBox(
+        width: 48,
+        child: Text(label,
+            style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 13,
+                fontWeight: FontWeight.w600)),
+      ),
+      ...children,
+    ]);
+  }
+
+  Widget _chip(String label, bool selected, VoidCallback onTap,
+      {IconData? icon}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.primary : const Color(0xFF2A2E38),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+              color: selected ? AppTheme.primary : Colors.white24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon,
+                  size: 15,
+                  color: selected ? Colors.white : Colors.white70),
+              const SizedBox(width: 4),
+            ],
+            Text(label,
+                style: TextStyle(
+                  color: selected ? Colors.white : Colors.white70,
+                  fontSize: 13,
+                  fontWeight:
+                      selected ? FontWeight.bold : FontWeight.normal,
+                )),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _MaskCanvasPainter extends CustomPainter {
-  _MaskCanvasPainter({
+// ──────────────────────────────────────────────────────────────────
+// Real Effect Preview Painter
+//
+// Renders the source image with true mosaic / Gaussian-blur effects
+// applied only inside the brush-stroke mask, matching the server's
+// `processor.go` semantics (saveLayer + BlendMode.srcIn).
+// ──────────────────────────────────────────────────────────────────
+
+class _EffectPainter extends CustomPainter {
+  _EffectPainter({
+    required this.source,
+    this.mosaic,
     required this.regions,
     this.activeStroke,
     required this.brushSize,
-    required this.currentType,
+    required this.activeType,
   });
 
+  final ui.Image source;
+  final ui.Image? mosaic;
   final List<MaskRegion> regions;
   final List<Offset>? activeStroke;
   final double brushSize;
-  final String currentType;
-
-  Path _pathForPoints(List<MaskPoint> points, Size size) {
-    final path = Path();
-    if (points.isEmpty) return path;
-    path.moveTo(points.first.x * size.width, points.first.y * size.height);
-    for (final point in points.skip(1)) {
-      path.lineTo(point.x * size.width, point.y * size.height);
-    }
-    return path;
-  }
-
-  void _drawStroke(
-    Canvas canvas,
-    List<MaskPoint> points,
-    Size size, {
-    required double width,
-    required Color color,
-    PaintingStyle style = PaintingStyle.stroke,
-    StrokeCap cap = StrokeCap.round,
-  }) {
-    if (points.isEmpty) return;
-    final paint = Paint()
-      ..color = color
-      ..style = style
-      ..strokeWidth = width
-      ..strokeCap = cap
-      ..strokeJoin = StrokeJoin.round;
-    final path = _pathForPoints(points, size);
-    if (points.length == 1) {
-      canvas.drawCircle(
-        Offset(points.first.x * size.width, points.first.y * size.height),
-        width / 2,
-        paint,
-      );
-    } else {
-      canvas.drawPath(path, paint);
-    }
-  }
-
-  void _drawActiveStroke(
-    Canvas canvas,
-    List<Offset> points,
-    Size size, {
-    required double width,
-    required Color color,
-  }) {
-    if (points.isEmpty) return;
-    final normalized = points
-        .map(
-          (point) => MaskPoint(
-            x: (point.dx / size.width).clamp(0.0, 1.0),
-            y: (point.dy / size.height).clamp(0.0, 1.0),
-          ),
-        )
-        .toList(growable: false);
-    _drawStroke(canvas, normalized, size, width: width, color: color);
-  }
-
-  double _brushPixelSize(double normalizedSize, Size size) {
-    final shortEdge = size.width < size.height ? size.width : size.height;
-    return (normalizedSize.clamp(0.01, 0.25) * shortEdge).clamp(
-      4.0,
-      shortEdge * 0.8,
-    );
-  }
+  final String activeType;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final mosaicPaint = Paint()
-      ..color = const Color(0xCC333333)
-      ..style = PaintingStyle.fill;
+    final srcW = source.width.toDouble();
+    final srcH = source.height.toDouble();
+    final srcRect = Rect.fromLTWH(0, 0, srcW, srcH);
+    final dst = Rect.fromLTWH(0, 0, size.width, size.height);
 
-    final blurPaint = Paint()
-      ..color = const Color(0xAAEEEEEE)
-      ..style = PaintingStyle.fill;
+    // 1. Draw source image.
+    canvas.drawImageRect(source, srcRect, dst, Paint());
 
-    final borderPaint = Paint()
-      ..color = AppTheme.primary
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-
-    final gridPaint = Paint()
-      ..color = Colors.white24
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-
-    for (int i = 0; i < regions.length; i++) {
-      final r = regions[i];
-      if (r.points.isNotEmpty) {
-        final width = _brushPixelSize(r.brushSize, size);
-        final overlayColor = r.type == 'blur'
-            ? const Color(0xAAEEEEEE)
-            : const Color(0xCC333333);
-        _drawStroke(canvas, r.points, size, width: width, color: overlayColor);
-        if (r.type == 'mosaic') {
-          // 在涂抹轨迹上叠加细纹，帮助管理员确认马赛克覆盖范围。
-          _drawStroke(
-            canvas,
-            r.points,
-            size,
-            width: 1.0,
-            color: Colors.white24,
-          );
-        }
-        _drawStroke(
-          canvas,
-          r.points,
-          size,
-          width: 1.5,
-          color: AppTheme.primary,
-        );
-        continue;
-      }
-      final rect = Rect.fromLTWH(
-        r.x * size.width,
-        r.y * size.height,
-        r.width * size.width,
-        r.height * size.height,
-      );
-
-      canvas.drawRect(rect, r.type == 'blur' ? blurPaint : mosaicPaint);
-
-      if (r.type == 'mosaic') {
-        const double step = 12.0;
-        for (double x = rect.left; x < rect.right; x += step) {
-          canvas.drawLine(
-            Offset(x, rect.top),
-            Offset(x, rect.bottom),
-            gridPaint,
-          );
-        }
-        for (double y = rect.top; y < rect.bottom; y += step) {
-          canvas.drawLine(
-            Offset(rect.left, y),
-            Offset(rect.right, y),
-            gridPaint,
-          );
-        }
-      }
-
-      canvas.drawRect(rect, borderPaint);
+    // 2. Committed effect regions.
+    for (final r in regions) {
+      _paintRegion(canvas, size, r, srcRect, dst);
     }
 
-    final active = activeStroke;
-    if (active != null && active.isNotEmpty) {
-      _drawActiveStroke(
-        canvas,
-        active,
-        size,
-        width: _brushPixelSize(brushSize, size),
-        color: currentType == 'blur'
-            ? const Color(0xAAEEEEEE)
-            : const Color(0xCC333333),
+    // 3. Active stroke real-time preview.
+    _paintActiveStroke(canvas, size, srcRect, dst);
+  }
+
+  // ── Per-region rendering ──────────────────────────────────
+
+  void _paintRegion(Canvas canvas, Size size, MaskRegion r,
+      Rect srcRect, Rect dst) {
+    if (r.points.isEmpty) {
+      _paintRectRegion(canvas, size, r, srcRect, dst);
+      return;
+    }
+
+    final path = _smoothPath(r.points, size);
+    final bpx = _brushPx(r.brushSize, size);
+
+    canvas.saveLayer(dst, Paint());
+    _strokeMask(canvas, path, bpx);
+    if (r.points.length == 1) {
+      _dotMask(canvas, r.points.first, size, bpx);
+    }
+    _compositeEffect(canvas, r.type, srcRect, dst, r.brushSize, size);
+    canvas.restore();
+  }
+
+  /// Backwards-compatible handling for legacy rectangle-based regions.
+  void _paintRectRegion(Canvas canvas, Size size, MaskRegion r,
+      Rect srcRect, Rect dst) {
+    final rect = Rect.fromLTWH(
+      r.x * size.width,
+      r.y * size.height,
+      r.width * size.width,
+      r.height * size.height,
+    );
+
+    if (r.type == 'blur') {
+      final sigma = _sigma(0.04, size);
+      canvas.saveLayer(
+        rect,
+        Paint()
+          ..imageFilter =
+              ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
       );
-      _drawActiveStroke(
-        canvas,
-        active,
-        size,
-        width: 2.0,
-        color: Colors.yellowAccent,
+      canvas.drawImageRect(source, srcRect, dst, Paint());
+      canvas.restore();
+    } else if (mosaic != null) {
+      canvas.save();
+      canvas.clipRect(rect);
+      canvas.drawImageRect(
+        mosaic!,
+        Rect.fromLTWH(
+            0, 0, mosaic!.width.toDouble(), mosaic!.height.toDouble()),
+        dst,
+        Paint(),
+      );
+      canvas.restore();
+    }
+  }
+
+  // ── Active stroke rendering ───────────────────────────────
+
+  void _paintActiveStroke(
+      Canvas canvas, Size size, Rect srcRect, Rect dst) {
+    final pts = activeStroke;
+    if (pts == null || pts.isEmpty) return;
+
+    final maskPts = pts
+        .map((p) => MaskPoint(
+              x: (p.dx / size.width).clamp(0.0, 1.0),
+              y: (p.dy / size.height).clamp(0.0, 1.0),
+            ))
+        .toList();
+    final path = _smoothPath(maskPts, size);
+    final bpx = _brushPx(brushSize, size);
+
+    // Real effect preview.
+    canvas.saveLayer(dst, Paint());
+    _strokeMask(canvas, path, bpx);
+    if (maskPts.length == 1) {
+      _dotMask(canvas, maskPts.first, size, bpx);
+    }
+    _compositeEffect(canvas, activeType, srcRect, dst, brushSize, size);
+    canvas.restore();
+
+    // Faint guide line so the user can see the exact path.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0x40FFFFFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  // ── Shared compositing helpers ────────────────────────────
+
+  /// Draws the white-stroke mask that defines the effect coverage area.
+  void _strokeMask(Canvas canvas, Path path, double bpx) {
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFFFFFFFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = bpx
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  /// Fills a single-point dot mask.
+  void _dotMask(
+      Canvas canvas, MaskPoint pt, Size size, double bpx) {
+    canvas.drawCircle(
+      Offset(pt.x * size.width, pt.y * size.height),
+      bpx / 2,
+      Paint()..color = const Color(0xFFFFFFFF),
+    );
+  }
+
+  /// Draws the effect image (blur or mosaic) through the previously drawn
+  /// mask using [BlendMode.srcIn].
+  void _compositeEffect(Canvas canvas, String type, Rect srcRect,
+      Rect dst, double bSize, Size canvasSize) {
+    if (type == 'blur') {
+      final s = _sigma(bSize, canvasSize);
+      canvas.drawImageRect(
+        source,
+        srcRect,
+        dst,
+        Paint()
+          ..blendMode = BlendMode.srcIn
+          ..imageFilter = ui.ImageFilter.blur(sigmaX: s, sigmaY: s),
+      );
+    } else if (mosaic != null) {
+      canvas.drawImageRect(
+        mosaic!,
+        Rect.fromLTWH(
+            0, 0, mosaic!.width.toDouble(), mosaic!.height.toDouble()),
+        dst,
+        Paint()..blendMode = BlendMode.srcIn,
+      );
+    } else {
+      // Fallback while mosaic image is still generating.
+      canvas.drawRect(
+        dst,
+        Paint()
+          ..blendMode = BlendMode.srcIn
+          ..color = const Color(0xCC808080),
       );
     }
   }
 
+  // ── Path & metric helpers ─────────────────────────────────
+
+  /// Builds a smooth centre-line path using midpoint quadratic Bézier curves.
+  Path _smoothPath(List<MaskPoint> pts, Size s) {
+    final path = Path();
+    if (pts.isEmpty) return path;
+    path.moveTo(pts.first.x * s.width, pts.first.y * s.height);
+    if (pts.length < 3) {
+      for (final p in pts.skip(1)) {
+        path.lineTo(p.x * s.width, p.y * s.height);
+      }
+      return path;
+    }
+    for (var i = 1; i < pts.length - 1; i++) {
+      final cx = pts[i].x * s.width, cy = pts[i].y * s.height;
+      final nx = pts[i + 1].x * s.width, ny = pts[i + 1].y * s.height;
+      path.quadraticBezierTo(cx, cy, (cx + nx) / 2, (cy + ny) / 2);
+    }
+    path.lineTo(pts.last.x * s.width, pts.last.y * s.height);
+    return path;
+  }
+
+  double _brushPx(double norm, Size s) {
+    final se = s.width < s.height ? s.width : s.height;
+    return (norm.clamp(0.01, 0.25) * se).clamp(4.0, se * 0.8);
+  }
+
+  /// Converts the server's box-blur kernel into an approximate Gaussian sigma
+  /// in canvas-pixel space.
+  double _sigma(double bSize, Size s) {
+    final se = min(s.width, s.height);
+    final radiusPx = max(4.0, bSize * se / 2);
+    return max(4.0, radiusPx * 0.75);
+  }
+
   @override
-  bool shouldRepaint(covariant _MaskCanvasPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _EffectPainter old) => true;
 }

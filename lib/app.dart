@@ -83,6 +83,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   bool rulesGateVisible = false;
   final navigatorKey = GlobalKey<NavigatorState>();
   final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+  bool _showBrandSplash = true;
 
   BuildContext get appContext => navigatorKey.currentContext ?? context;
 
@@ -167,6 +168,15 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
     updateCoordinator = AppUpdateCoordinator();
     unawaited(_checkStartupRequiredUpdate());
+
+    // 品牌启动画面延迟消失
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 750));
+      if (!mounted) return;
+      setState(() {
+        _showBrandSplash = false;
+      });
+    });
   }
 
   late final AppUpdateCoordinator updateCoordinator;
@@ -1223,8 +1233,30 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     theme: AppTheme.light,
     navigatorKey: navigatorKey,
     scaffoldMessengerKey: scaffoldMessengerKey,
-    home: _authOrMain(),
+    home: _showBrandSplash ? const _BrandSplashScreen() : _authOrMain(),
   );
+}
+
+class _BrandSplashScreen extends StatelessWidget {
+  const _BrandSplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFBEAEC),
+      body: Center(
+        child: SizedBox(
+          width: width * 0.70,
+          child: Image.asset(
+            'assets/images/brand_splash.png',
+            fit: BoxFit.contain,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _SplashScreen extends StatelessWidget {

@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- 启动背景使用品牌粉色，与 Flutter Splash 无缝衔接 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FBEAEC" />
+        </shape>
+    </item>
 </layer-list>

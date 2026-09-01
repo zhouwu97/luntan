@@ -68,10 +68,16 @@ void main() {
       expect(
         styles,
         contains(
-          'android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground',
+          'android:windowSplashScreenAnimatedIcon">@drawable/splash_icon',
         ),
-        reason: '$path 必须使用统一的前景层图标',
+        reason: '$path 必须使用完整的品牌插画作为启动图标',
       );
     }
+
+    expect(
+      File('android/app/src/main/res/drawable/splash_icon.png').existsSync(),
+      isTrue,
+      reason: '必须有完整的启动画面图标',
+    );
   });
 }

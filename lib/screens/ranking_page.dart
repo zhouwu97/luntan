@@ -11,6 +11,8 @@ import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
 import '../widgets/app_network_image.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
+import '../widgets/comments/comment_more_button.dart';
+import '../widgets/comments/comment_image_viewer.dart';
 import '../widgets/comments/comment_skeleton.dart';
 import 'ranking_reorder_screen.dart';
 import 'ranking_toy_submission_screen.dart';
@@ -1867,6 +1869,28 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
+  void _showRankingCommentMenu(RankingToyComment comment) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => Wrap(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.copy_outlined),
+            title: const Text('复制内容'),
+            onTap: () {
+              Navigator.pop(sheetContext);
+              Clipboard.setData(ClipboardData(text: comment.content));
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _loadMoreServerComments() async {
     final detail = _remoteDetail;
     final cursor = detail?.commentsNextCursor;
@@ -1912,7 +1936,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   Future<void> _openRankingThread(RankingToyComment root) async {
     final repository = widget.repository;
     if (repository == null) return;
-    await showModalBottomSheet<void>(
+    final changed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -1933,6 +1957,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
             repository.setCommentLike(commentId: comment.id, active: active),
       ),
     );
+    if (changed == true && mounted) {
+      await _loadRemoteDetail();
+    }
   }
 
   @override
@@ -2032,6 +2059,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                           onLike: _toggleServerCommentLike,
                           onReply: _openRankingThread,
                           onViewReplies: _openRankingThread,
+                          onMore: (comment) => _showRankingCommentMenu(comment),
                         ),
                       ],
                     ),
@@ -2706,6 +2734,7 @@ class _ReviewSection extends StatelessWidget {
     this.onLike,
     this.onReply,
     this.onViewReplies,
+    this.onMore,
   });
 
   final bool sortByWeight;
@@ -2721,6 +2750,7 @@ class _ReviewSection extends StatelessWidget {
   final ValueChanged<RankingToyComment>? onLike;
   final ValueChanged<RankingToyComment>? onReply;
   final ValueChanged<RankingToyComment>? onViewReplies;
+  final ValueChanged<RankingToyComment>? onMore;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -2848,6 +2878,7 @@ class _ReviewSection extends StatelessWidget {
             onViewReplies: onViewReplies == null
                 ? null
                 : () => onViewReplies!(comment),
+            onMore: onMore == null ? null : () => onMore!(comment),
           ),
         )
         .toList();
@@ -2872,6 +2903,7 @@ class _ReviewCard extends StatelessWidget {
        onReply = null,
        onReplyTo = null,
        onViewReplies = null,
+       onMore = null,
        commentReplyCount = 0;
 
   _ReviewCard.server({
@@ -2881,6 +2913,7 @@ class _ReviewCard extends StatelessWidget {
     this.onReply,
     this.onReplyTo,
     this.onViewReplies,
+    this.onMore,
   }) : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
        likes = '${comment.likeCount}',
        content = comment.content,
@@ -2911,6 +2944,7 @@ class _ReviewCard extends StatelessWidget {
   final VoidCallback? onReply;
   final ValueChanged<RankingToyComment>? onReplyTo;
   final VoidCallback? onViewReplies;
+  final VoidCallback? onMore;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -3063,13 +3097,17 @@ class _ReviewCard extends StatelessWidget {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      for (final item in media)
+                      for (var index = 0; index < media.length; index++)
                         GestureDetector(
-                          onTap: onReply,
+                          onTap: () => CommentImageViewer.open(
+                            context,
+                            imageUrls: media.map((item) => item.url).toList(),
+                            initialIndex: index,
+                          ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
                             child: AppNetworkImage(
-                              url: item.url,
+                              url: media[index].url,
                               width: 96,
                               height: 96,
                               fit: BoxFit.cover,
@@ -3123,6 +3161,11 @@ class _ReviewCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
+              if (onMore != null)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: CommentMoreButton(onPressed: onMore!),
                 ),
               if (reply != null) ...[
                 const SizedBox(height: 10),

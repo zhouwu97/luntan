@@ -6,7 +6,9 @@ import '../../data/api/ranking_repository.dart';
 import '../../domain/models.dart' show relativeTimeLabel;
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
+import '../app_network_image.dart';
 import 'comment_skeleton.dart';
+import 'comment_image_viewer.dart';
 import '../link_text.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
@@ -66,6 +68,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   bool loading = false;
   bool loadingMore = false;
   bool sending = false;
+  bool changed = false;
   bool hasMore = true;
   _ReplyLoadState loadState = _ReplyLoadState.loading;
 
@@ -178,6 +181,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
           replies.add(comment);
         }
         widget.rootComment.replyCount += 1;
+        changed = true;
         loadState = _ReplyLoadState.loaded;
         sending = false;
       });
@@ -289,7 +293,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                         const Spacer(),
                         IconButton(
                           tooltip: '关闭',
-                          onPressed: () => Navigator.of(context).pop(),
+                          onPressed: () => Navigator.of(context).pop(changed),
                           icon: const Icon(Icons.close_rounded, size: 20),
                         ),
                       ],
@@ -306,8 +310,12 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                           InkWell(
                             onTap: () {
                               if (widget.rootComment.authorId.isNotEmpty &&
-                                  !widget.rootComment.authorId.startsWith('guest')) {
-                                widget.onAuthorTap?.call(widget.rootComment.authorId);
+                                  !widget.rootComment.authorId.startsWith(
+                                    'guest',
+                                  )) {
+                                widget.onAuthorTap?.call(
+                                  widget.rootComment.authorId,
+                                );
                               }
                             },
                             borderRadius: BorderRadius.circular(15),
@@ -335,9 +343,15 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                                   children: [
                                     InkWell(
                                       onTap: () {
-                                        if (widget.rootComment.authorId.isNotEmpty &&
-                                            !widget.rootComment.authorId.startsWith('guest')) {
-                                          widget.onAuthorTap?.call(widget.rootComment.authorId);
+                                        if (widget
+                                                .rootComment
+                                                .authorId
+                                                .isNotEmpty &&
+                                            !widget.rootComment.authorId
+                                                .startsWith('guest')) {
+                                          widget.onAuthorTap?.call(
+                                            widget.rootComment.authorId,
+                                          );
                                         }
                                       },
                                       borderRadius: BorderRadius.circular(4),
@@ -372,6 +386,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                                     height: 1.45,
                                   ),
                                 ),
+                                _buildMedia(widget.rootComment.media),
                               ],
                             ),
                           ),
@@ -465,7 +480,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         children: [
           InkWell(
             onTap: () {
-              if (reply.authorId.isNotEmpty && !reply.authorId.startsWith('guest')) {
+              if (reply.authorId.isNotEmpty &&
+                  !reply.authorId.startsWith('guest')) {
                 widget.onAuthorTap?.call(reply.authorId);
               }
             },
@@ -492,7 +508,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                   children: [
                     InkWell(
                       onTap: () {
-                        if (reply.authorId.isNotEmpty && !reply.authorId.startsWith('guest')) {
+                        if (reply.authorId.isNotEmpty &&
+                            !reply.authorId.startsWith('guest')) {
                           widget.onAuthorTap?.call(reply.authorId);
                         }
                       },
@@ -544,6 +561,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                     height: 1.55,
                   ),
                 ),
+                _buildMedia(reply.media),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -591,6 +609,45 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMedia(List<RankingToyCommentMedia> media) {
+    final imageUrls = media
+        .map((item) => item.url.trim())
+        .where((url) => url.isNotEmpty)
+        .toList();
+    if (imageUrls.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (var index = 0; index < imageUrls.length; index++)
+            GestureDetector(
+              onTap: () => CommentImageViewer.open(
+                context,
+                imageUrls: imageUrls,
+                initialIndex: index,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: AppNetworkImage(
+                  url: imageUrls[index],
+                  width: 96,
+                  height: 96,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_) => const SizedBox(
+                    width: 96,
+                    height: 96,
+                    child: Icon(Icons.broken_image_outlined),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

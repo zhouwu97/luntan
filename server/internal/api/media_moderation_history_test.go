@@ -21,7 +21,7 @@ func TestListMediaModerationHistoryReturnsInitialAndModifiedStates(t *testing.T)
 	defer db.Close()
 	expectModerationPermission(mock)
 	createdAt := time.Date(2026, 9, 1, 1, 2, 3, 0, time.UTC)
-	mock.ExpectQuery(`(?s)SELECT id, version_no, moderation_status, mask_regions::text, operator_id, reason, created_at.*FROM media_moderation_versions.*WHERE media_id = \$1.*ORDER BY version_no ASC`).
+	mock.ExpectQuery(`(?s)SELECT id, version_no, moderation_status, mask_regions::text, operator_id, reason, created_at.*FROM media_moderation_versions.*WHERE media_id = \$1 OR media_id_snapshot = \$1.*ORDER BY version_no ASC`).
 		WithArgs("media-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "version_no", "moderation_status", "mask_regions", "operator_id", "reason", "created_at"}).
 			AddRow("version-1", 1, "normal", "[]", nil, "初始发布状态", createdAt).

@@ -8,11 +8,13 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,6 +87,78 @@ func TestMemoryStorageCRUD(t *testing.T) {
 	}
 	if store.HasObject(key) {
 		t.Fatalf("expected object deleted")
+	}
+}
+
+func TestMemoryStorageVerifyUploadedValidatesBytesAndDimensions(t *testing.T) {
+	store := NewMemoryStorage()
+	ctx := context.Background()
+	jpegBytes := createTestJPEG(120, 80)
+	digest := sha256.Sum256(jpegBytes)
+	key := "media/u1/verified.jpg"
+	if err := store.Put(ctx, key, "image/jpeg", bytes.NewReader(jpegBytes), int64(len(jpegBytes))); err != nil {
+		t.Fatal(err)
+	}
+
+	valid := &MediaAsset{
+		ObjectKey: key,
+		MimeType:  "image/jpeg",
+		Width:     120,
+		Height:    80,
+		Size:      int64(len(jpegBytes)),
+		SHA256:    hex.EncodeToString(digest[:]),
+	}
+	if err := store.VerifyUploaded(ctx, valid); err != nil {
+		t.Fatalf("valid JPEG rejected: %v", err)
+	}
+
+	wrongDimensions := *valid
+	wrongDimensions.Width = 121
+	if err := store.VerifyUploaded(ctx, &wrongDimensions); err != ErrInvalidMedia {
+		t.Fatalf("dimension mismatch error = %v, want ErrInvalidMedia", err)
+	}
+
+	wrongHash := *valid
+	wrongHash.SHA256 = strings.Repeat("0", 64)
+	if err := store.VerifyUploaded(ctx, &wrongHash); err != ErrInvalidMedia {
+		t.Fatalf("checksum mismatch error = %v, want ErrInvalidMedia", err)
+	}
+
+	pngImage := image.NewRGBA(image.Rect(0, 0, 32, 24))
+	var pngBuffer bytes.Buffer
+	if err := png.Encode(&pngBuffer, pngImage); err != nil {
+		t.Fatal(err)
+	}
+	pngBytes := pngBuffer.Bytes()
+	pngDigest := sha256.Sum256(pngBytes)
+	pngKey := "media/u1/wrong-mime.png"
+	if err := store.Put(ctx, pngKey, "image/jpeg", bytes.NewReader(pngBytes), int64(len(pngBytes))); err != nil {
+		t.Fatal(err)
+	}
+	spoofedMime := &MediaAsset{
+		ObjectKey: pngKey,
+		MimeType:  "image/jpeg",
+		Size:      int64(len(pngBytes)),
+		SHA256:    hex.EncodeToString(pngDigest[:]),
+	}
+	if err := store.VerifyUploaded(ctx, spoofedMime); err != ErrInvalidMedia {
+		t.Fatalf("content/MIME mismatch error = %v, want ErrInvalidMedia", err)
+	}
+
+	corruptBytes := []byte("this is not an image")
+	corruptDigest := sha256.Sum256(corruptBytes)
+	corruptKey := "media/u1/corrupt.jpg"
+	if err := store.Put(ctx, corruptKey, "image/jpeg", bytes.NewReader(corruptBytes), int64(len(corruptBytes))); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := &MediaAsset{
+		ObjectKey: corruptKey,
+		MimeType:  "image/jpeg",
+		Size:      int64(len(corruptBytes)),
+		SHA256:    hex.EncodeToString(corruptDigest[:]),
+	}
+	if err := store.VerifyUploaded(ctx, corrupt); err != ErrInvalidMedia {
+		t.Fatalf("corrupt image error = %v, want ErrInvalidMedia", err)
 	}
 }
 

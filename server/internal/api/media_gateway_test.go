@@ -209,7 +209,7 @@ func TestGatewayObjectKeyBlocksProcessedSource(t *testing.T) {
 	}
 }
 
-func TestGatewayObjectKeyAllowsUnprocessedSource(t *testing.T) {
+func TestGatewayObjectKeyBlocksUnprocessedSource(t *testing.T) {
 	s, mock, store := newGatewayTestServer(t, "gateway")
 	key := "media/u-1/media_legacy"
 	if err := store.Put(context.Background(), key, "image/jpeg", bytes.NewReader([]byte("legacy")), 6); err != nil {
@@ -224,11 +224,8 @@ func TestGatewayObjectKeyAllowsUnprocessedSource(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.serveMediaFile(rec, req, key)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 for unprocessed legacy source (transitional)", rec.Code)
-	}
-	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
-		t.Fatalf("Cache-Control = %q, want private, no-store", got)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for unprocessed image source", rec.Code)
 	}
 }
 

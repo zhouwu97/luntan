@@ -686,6 +686,9 @@ class AdminStoreOrder {
     required this.userPoints,
     this.balanceAtSubmit = 0,
     this.hasBalanceAtSubmit = true,
+    this.balanceSnapshotTrusted = true,
+    this.invalidatedCount = 0,
+    this.invalidatedPoints = 0,
     this.reviewedBy = '',
     this.reviewedAt,
     this.reviewReason = '',
@@ -703,6 +706,9 @@ class AdminStoreOrder {
   final int userPoints;
   final int balanceAtSubmit;
   final bool hasBalanceAtSubmit;
+  final bool balanceSnapshotTrusted;
+  final int invalidatedCount;
+  final int invalidatedPoints;
   final String reviewedBy;
   final DateTime? reviewedAt;
   final String reviewReason;
@@ -722,6 +728,9 @@ class AdminStoreOrderDetail extends AdminStoreOrder {
     required super.userPoints,
     super.balanceAtSubmit,
     super.hasBalanceAtSubmit,
+    super.balanceSnapshotTrusted,
+    super.invalidatedCount,
+    super.invalidatedPoints,
     super.reviewedBy,
     super.reviewedAt,
     super.reviewReason,
@@ -1227,6 +1236,9 @@ class PlatformRepository {
       userPoints: base.userPoints,
       balanceAtSubmit: base.balanceAtSubmit,
       hasBalanceAtSubmit: base.hasBalanceAtSubmit,
+      balanceSnapshotTrusted: base.balanceSnapshotTrusted,
+      invalidatedCount: base.invalidatedCount,
+      invalidatedPoints: base.invalidatedPoints,
       reviewedBy: base.reviewedBy,
       reviewedAt: base.reviewedAt,
       reviewReason: base.reviewReason,
@@ -1332,6 +1344,9 @@ class PlatformRepository {
       userPoints: _int(value['user_points']),
       balanceAtSubmit: _int(value['balance_at_submit']),
       hasBalanceAtSubmit: value.containsKey('balance_at_submit'),
+      balanceSnapshotTrusted: value['balance_snapshot_trusted'] != false,
+      invalidatedCount: _int(value['invalidated_count']),
+      invalidatedPoints: _int(value['invalidated_points']),
       reviewedBy: _string(value['reviewed_by']),
       reviewedAt: _nullableDate(value['reviewed_at']),
       reviewReason: _string(value['review_reason']),

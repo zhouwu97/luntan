@@ -31,6 +31,14 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = false;
+  String _selectedStatus = 'pending_review';
+
+  static const _statusFilters = <({String value, String label})>[
+    (value: 'pending_review', label: '待审核'),
+    (value: 'approved', label: '已通过'),
+    (value: 'rejected', label: '已驳回'),
+    (value: 'all', label: '全部'),
+  ];
 
   @override
   void initState() {
@@ -48,7 +56,9 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       _hasMore = false;
     });
     try {
-      final page = await widget.repository.listStoreOrderPage();
+      final page = await widget.repository.listStoreOrderPage(
+        status: _selectedStatus,
+      );
       if (!mounted) return;
       setState(() {
         _items.addAll(page.items);
@@ -73,7 +83,10 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       _loadMoreError = null;
     });
     try {
-      final page = await widget.repository.listStoreOrderPage(cursor: cursor);
+      final page = await widget.repository.listStoreOrderPage(
+        status: _selectedStatus,
+        cursor: cursor,
+      );
       if (!mounted) return;
       setState(() {
         _items.addAll(page.items);
@@ -91,6 +104,12 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   }
 
   Future<void> _refresh() => _loadFirstPage();
+
+  Future<void> _selectStatus(String status) async {
+    if (status == _selectedStatus) return;
+    setState(() => _selectedStatus = status);
+    await _loadFirstPage();
+  }
 
   Future<void> _openDetail(AdminStoreOrder item) async {
     final changed = await Navigator.of(context).push<bool>(
@@ -120,7 +139,33 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
         backgroundColor: AppTheme.background,
         elevation: 0,
       ),
-      body: RefreshIndicator(onRefresh: _refresh, child: _buildBody()),
+      body: Column(
+        children: [
+          _buildStatusFilters(),
+          Expanded(
+            child: RefreshIndicator(onRefresh: _refresh, child: _buildBody()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusFilters() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+      child: Row(
+        children: [
+          for (final filter in _statusFilters) ...[
+            ChoiceChip(
+              label: Text(filter.label),
+              selected: filter.value == _selectedStatus,
+              onSelected: (_) => _selectStatus(filter.value),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
+      ),
     );
   }
 
@@ -153,7 +198,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       return ListView(
         children: const [
           SizedBox(height: 180),
-          Center(child: Text('当前没有待审核的兑换申请')),
+          Center(child: Text('当前没有符合条件的兑换申请')),
         ],
       );
     }
@@ -198,6 +243,7 @@ class _StoreOrderListTile extends StatelessWidget {
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
@@ -237,12 +283,52 @@ class _StoreOrderListTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '申请于 ${relativeTimeLabel(item.createdAt)} · 当前积分 ${item.userPoints}',
+                      '审核状态：${_statusLabel(item.status)}',
+                      style: TextStyle(
+                        color: item.status == 'rejected'
+                            ? AppTheme.orange
+                            : AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '申请时间 ${relativeTimeLabel(item.createdAt)} · 当前积分 ${item.userPoints}',
                       style: const TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 11,
                       ),
                     ),
+                    if (item.status != 'pending_review' &&
+                        item.reviewedAt != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '审核于 ${relativeTimeLabel(item.reviewedAt!)} · ${item.reviewedBy.isEmpty ? '管理员' : item.reviewedBy}',
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                    if (item.invalidatedPoints > 0)
+                      Text(
+                        '已剔除 ${item.invalidatedCount} 笔奖励 · ${item.invalidatedPoints} 积分',
+                        style: const TextStyle(
+                          color: AppTheme.orange,
+                          fontSize: 11,
+                        ),
+                      ),
+                    if (item.reviewReason.trim().isNotEmpty)
+                      Text(
+                        '审核理由：${item.reviewReason}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -253,6 +339,17 @@ class _StoreOrderListTile extends StatelessWidget {
       ),
     );
   }
+
+  String _statusLabel(String value) => switch (value) {
+    'pending_review' => '待审核',
+    'approved' => '审核通过 · 待领取',
+    'rejected' => '审核未通过',
+    'pending' => '待领取',
+    'claimed' => '已领取',
+    'completed' => '已完成',
+    'cancelled' => '已取消',
+    _ => value.isEmpty ? '未知状态' : value,
+  };
 }
 
 class StoreOrderReviewDetailScreen extends StatefulWidget {
@@ -469,15 +566,29 @@ class _StoreOrderReviewDetailScreenState
                 _detailRow('当前积分', '${order.userPoints}'),
                 _detailRow('历史无效积分', '${order.historicalInvalidatedPoints}'),
                 _detailRow('申请时有效积分', '${_baseEligiblePoints(order)}'),
+                if (!order.balanceSnapshotTrusted)
+                  _detailRow('积分快照', '历史快照待校准，仅供审核参考'),
                 _detailRow(
                   '冻结 / 可用',
                   '${order.reservedPoints} / ${order.availablePoints}',
                 ),
                 _detailRow(
-                  '申请 / 截止',
-                  '${relativeTimeLabel(order.createdAt)} / ${_formatDateTime(order.createdAt)}',
+                  '申请时间',
+                  '${relativeTimeLabel(order.createdAt)} · ${_formatDateTime(order.createdAt)}',
                 ),
                 _detailRow('订单状态', _statusLabel(order.status)),
+                if (order.reviewedAt != null)
+                  _detailRow('审核时间', _formatDateTime(order.reviewedAt!)),
+                if (order.reviewedAt != null)
+                  _detailRow(
+                    '审核人',
+                    order.reviewedBy.isEmpty ? '管理员' : order.reviewedBy,
+                  ),
+                if (order.invalidatedPoints > 0)
+                  _detailRow(
+                    '本次无效奖励',
+                    '${order.invalidatedCount} 笔 / ${order.invalidatedPoints} 积分',
+                  ),
               ]),
               const SizedBox(height: 12),
               if (order.pointSources.isNotEmpty) ...[
@@ -684,34 +795,37 @@ class _StoreOrderReviewDetailScreenState
         style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
       ),
       children: [
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          value: excluded,
-          onChanged: item.invalidated
-              ? null
-              : (value) {
-                  setState(() {
-                    if (value == true) {
-                      _invalidTransactionIds.add(item.id);
-                    } else {
-                      _invalidTransactionIds.remove(item.id);
-                    }
-                  });
-                },
-          title: Text(
-            item.invalidated ? '已判定不计入兑换' : '不计入兑换',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        Material(
+          color: Colors.transparent,
+          child: CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            value: excluded,
+            onChanged: item.invalidated
+                ? null
+                : (value) {
+                    setState(() {
+                      if (value == true) {
+                        _invalidTransactionIds.add(item.id);
+                      } else {
+                        _invalidTransactionIds.remove(item.id);
+                      }
+                    });
+                  },
+            title: Text(
+              item.invalidated ? '已判定不计入兑换' : '不计入兑换',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+            subtitle: item.invalidated && item.invalidationReason.isNotEmpty
+                ? Text(
+                    '判定说明：${item.invalidationReason}',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+                  )
+                : null,
           ),
-          subtitle: item.invalidated && item.invalidationReason.isNotEmpty
-              ? Text(
-                  '判定说明：${item.invalidationReason}',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                  ),
-                )
-              : null,
         ),
         if (!item.snapshotAvailable)
           const Align(

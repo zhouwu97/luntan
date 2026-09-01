@@ -3,9 +3,25 @@
 `MEDIA_DELIVERY_MODE=gateway` 只在应用层提供鉴权和变体白名单；对象存储仍必须在部署层设置为私有。生产上线前逐项确认：
 
 1. `media/` bucket 或 prefix 禁止匿名 `GET`，并撤销历史的公开 ACL、CDN Origin Access 和静态目录映射。
-2. `STORAGE_INTERNAL_BASE_URL` 只解析到服务端可访问的内网源站，不向浏览器、客户端或公网 DNS 暴露。
-3. 若设置 `MEDIA_INTERNAL_ACCEL_PREFIX`，Nginx 的对应 location 必须带 `internal`；公网只能进入 `/api/v1/media-file/`，不能直接进入该前缀。
-4. 修改 ACL 后清理 CDN 与浏览器缓存，并用匿名请求分别验证源图、普通变体和 `censored_*` 变体。
+2. 先运行 `/app/luntan-media-backfill --dry-run` 检查待回填图片数量，再运行
+   `/app/luntan-media-backfill` 投递 `media.process`，等待 worker 消费完成。
+   使用下面的查询确认所有 ready 图片均有 ready 的 `original`、`detail`、`thumb`：
+
+   ```sql
+   SELECT count(*) AS pending_backfill
+   FROM media_assets ma
+   WHERE ma.status = 'ready' AND ma.deleted_at IS NULL AND ma.mime_type LIKE 'image/%'
+     AND NOT (
+       EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'original' AND mv.status = 'ready')
+       AND EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'detail' AND mv.status = 'ready')
+       AND EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'thumb' AND mv.status = 'ready')
+     );
+   ```
+
+   `pending_backfill` 必须为 0，且 `outbox_events` 中同类事件的 `failed` 数量必须为 0。
+3. `STORAGE_INTERNAL_BASE_URL` 只解析到服务端可访问的内网源站，不向浏览器、客户端或公网 DNS 暴露。
+4. 若设置 `MEDIA_INTERNAL_ACCEL_PREFIX`，Nginx 的对应 location 必须带 `internal`；公网只能进入 `/api/v1/media-file/`，不能直接进入该前缀。
+5. 修改 ACL 后清理 CDN 与浏览器缓存，并用匿名请求分别验证源图、旧 object key、普通变体和 `censored_*` 变体。
 
 下面是使用 Nginx 代理内网对象存储的最小模板。请替换 upstream、TLS 和鉴权细节，不要把 `object-storage-internal` 指向公网地址：
 

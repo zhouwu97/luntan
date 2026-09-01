@@ -18,11 +18,13 @@ http.Response _json(Object value, [int status = 200]) => http.Response(
 void main() {
   testWidgets('兑换审核工作台展示申请详情并提交审核决定', (tester) async {
     String? reviewedDecision;
+    String? requestedStatus;
     String? openedUserId;
     int? openedTab;
     final client = MockClient((request) async {
       if (request.method == 'GET' &&
           request.url.path == '/api/v1/admin/store/orders') {
+        requestedStatus = request.url.queryParameters['status'];
         return _json({
           'items': [
             {
@@ -111,10 +113,16 @@ void main() {
 
     expect(find.text('兑换审核'), findsOneWidget);
     expect(find.text('测试用户'), findsOneWidget);
+    expect(requestedStatus, 'pending_review');
+    await tester.tap(find.text('已驳回'));
+    await tester.pumpAndSettle();
+    expect(requestedStatus, 'rejected');
     await tester.tap(find.text('测试用户'));
     await tester.pumpAndSettle();
 
     expect(find.text('论坛纪念徽章'), findsOneWidget);
+    expect(find.text('申请时间'), findsOneWidget);
+    expect(find.text('申请 / 截止'), findsNothing);
     expect(find.text('查看他的发帖'), findsOneWidget);
     expect(find.text('发帖奖励'), findsOneWidget);
     await tester.tap(find.text('查看他的评论'));

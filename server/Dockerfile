@@ -7,6 +7,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/luntan-api ./cmd/api
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/luntan-worker ./cmd/worker
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/luntan-migrate ./cmd/migrate
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/luntan-media-backfill ./cmd/media-backfill
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/luntan-smtp-test ./cmd/smtp-test
 
 FROM alpine:3.22
@@ -15,6 +16,7 @@ WORKDIR /app
 COPY --from=builder /out/luntan-api /app/luntan-api
 COPY --from=builder /out/luntan-worker /app/luntan-worker
 COPY --from=builder /out/luntan-migrate /app/luntan-migrate
+COPY --from=builder /out/luntan-media-backfill /app/luntan-media-backfill
 COPY --from=builder /out/luntan-smtp-test /app/luntan-smtp-test
 COPY migrations /app/migrations
 USER luntan

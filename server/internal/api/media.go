@@ -480,10 +480,9 @@ func mediaCacheControl(moderationStatus, variant string) string {
 //   - /api/v1/media-file/{mediaID}/{variant}：受控网关形态，客户端不接触内部
 //     object key，任何分发模式下都执行“默认拒绝 + 公开变体白名单 + 资源公开
 //     可见”校验；
-//   - /api/v1/media-file/{objectKey}：历史兜底形态。direct 模式维持原有
-//     censored 黑名单行为（bucket 尚未切私有时回滚安全），gateway 模式切换为
-//     默认拒绝：图片源图与非白名单变体一律 404，仅对尚未回填衍生图的存量
-//     公开媒体保留源图过渡豁免（跑完 cmd/media-backfill 后自动锁死）。
+//   - /api/v1/media-file/{objectKey}：历史兜底形态。direct 模式仍通过服务端
+//     鉴权，gateway 模式默认拒绝图片源图与非白名单变体；图片源不会因为尚未
+//     回填衍生图而获得过渡豁免。
 //
 // censored_* 打码变体内容不可变（写入时经 SHA256 校验），下发一年期 immutable
 // 缓存头；受审核管理的对象下发 private/no-store。gateway 模式配置
@@ -587,14 +586,17 @@ func (s *Server) serveMediaFileGateway(w http.ResponseWriter, r *http.Request, b
 		s.serveAuthorizedMediaObject(w, r, backend, objectKey, mediaCacheControl(moderationStatus, variantName))
 		return
 	}
-	// 请求的是源对象：非 normal 状态（censored 等）与已生成衍生图的图片一律
-	// 拒绝；视频源是唯一可播放表示放行；尚未回填衍生图的存量图片源暂时放行
-	// （过渡豁免，media-backfill 后自动锁死）。
+	// 请求的是源对象：非 normal 状态与图片源一律拒绝。图片必须通过受控变体
+	// 分发，避免存量媒体在回填前存在“无变体即放行”的绕过窗口；视频源是唯一
+	// 仍允许直接播放的表示。
 	if moderationStatus != "normal" {
 		writeAuthError(w, r, ErrMediaNotFound)
 		return
 	}
-	if !strings.HasPrefix(mimeType, "video/") && hasProcessedVariants {
+	if !strings.HasPrefix(mimeType, "video/") {
+		// 查询仍保留该字段，兼容现有 SQL mock 与部署期间的诊断信息；无论
+		// 是否已生成变体，图片源都不能从 gateway 直接返回。
+		_ = hasProcessedVariants
 		writeAuthError(w, r, ErrMediaNotFound)
 		return
 	}
@@ -871,11 +873,11 @@ type mediaModerationVersionKeys struct {
 func ensureMediaModerationBaselineTx(ctx context.Context, tx *sql.Tx, mediaID string) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO media_moderation_versions (
-			id, media_id, version_no, moderation_status, mask_regions,
+			id, media_id, media_id_snapshot, version_no, moderation_status, mask_regions,
 			original_object_key, detail_object_key, thumb_object_key,
 			reason, created_at
 		)
-		SELECT $1, ma.id, 1, 'normal', '[]'::jsonb,
+		SELECT $1, ma.id, ma.id, 1, 'normal', '[]'::jsonb,
 			COALESCE((SELECT mv.object_key FROM media_variants mv
 				WHERE mv.media_id = ma.id AND mv.variant = 'original' AND mv.status = 'ready'), ma.object_key),
 			COALESCE((SELECT mv.object_key FROM media_variants mv
@@ -901,10 +903,10 @@ func appendMediaModerationVersionTx(ctx context.Context, tx *sql.Tx, mediaID, st
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_moderation_versions (
-			id, media_id, version_no, moderation_status, mask_regions,
+			id, media_id, media_id_snapshot, version_no, moderation_status, mask_regions,
 			original_object_key, detail_object_key, thumb_object_key,
 			operator_id, reason, created_at
-		) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
+		) VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
 		newPostID(), mediaID, versionNo, status, string(regionsJSON),
 		keys.Original, keys.Detail, keys.Thumb, operatorID, reason, createdAt); err != nil {
 		return 0, err

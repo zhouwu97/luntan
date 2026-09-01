@@ -64,15 +64,17 @@ func TestPublishToNotificationJourneyAgainstPostgres(t *testing.T) {
 		t.Fatalf("upload-token: status=%d body=%s", tokenRes.Code, tokenRes.Body.String())
 	}
 	var token struct {
-		MediaID   string `json:"media_id"`
-		ObjectKey string `json:"object_key"`
+		MediaID string `json:"media_id"`
 	}
 	if err := json.Unmarshal(tokenRes.Body.Bytes(), &token); err != nil {
 		t.Fatal(err)
 	}
+	// object_key 是存储层内部字段，上传凭证接口不会返回它；真实客户端只
+	// 保存 media_id。集成测试按服务端约定还原 MemoryStorage 的测试寻址。
+	objectKey := "media/" + author.ID + "/" + token.MediaID
 	// MemoryStorage 的 memory:// 上传地址没有 HTTP 语义，这里等价模拟客户端
 	// 把字节 PUT 到签名地址的动作。
-	if err := store.Put(ctx, token.ObjectKey, "image/jpeg", bytes.NewReader(rawJPEG), int64(len(rawJPEG))); err != nil {
+	if err := store.Put(ctx, objectKey, "image/jpeg", bytes.NewReader(rawJPEG), int64(len(rawJPEG))); err != nil {
 		t.Fatal(err)
 	}
 	completeBody, _ := json.Marshal(map[string]any{"size": len(rawJPEG), "sha256": rawHash})
@@ -243,9 +245,9 @@ func TestPublishToNotificationJourneyAgainstPostgres(t *testing.T) {
 		t.Fatalf("media.process event status=%s, want succeeded", mediaEventStatus)
 	}
 	for _, variantKey := range []string{
-		token.ObjectKey + "_thumb.jpg",
-		token.ObjectKey + "_detail.jpg",
-		token.ObjectKey + "_original.jpg",
+		objectKey + "_thumb.jpg",
+		objectKey + "_detail.jpg",
+		objectKey + "_original.jpg",
 	} {
 		if _, ok := store.GetBytes(variantKey); !ok {
 			t.Fatalf("storage missing generated variant %s", variantKey)

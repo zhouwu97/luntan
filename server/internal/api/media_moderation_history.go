@@ -29,7 +29,7 @@ func (s *Server) listMediaModerationHistory(w http.ResponseWriter, r *http.Reque
 		SELECT id, version_no, moderation_status, mask_regions::text,
 		       operator_id, reason, created_at
 		FROM media_moderation_versions
-		WHERE media_id = $1
+		WHERE media_id = $1 OR media_id_snapshot = $1
 		ORDER BY version_no ASC`, mediaID)
 	if err != nil {
 		writeInternalError(w, r, err)

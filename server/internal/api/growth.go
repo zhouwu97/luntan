@@ -422,7 +422,7 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT p.id, p.name, p.description, p.emoji, p.points, p.color,
-		       COUNT(o.id) FILTER (WHERE o.status <> 'cancelled') AS redeemed_count
+		       COUNT(o.id) FILTER (WHERE o.status IN ('claimed', 'completed')) AS redeemed_count
 		FROM store_products p
 		LEFT JOIN store_orders o ON o.product_id = p.id
 		WHERE p.active = true

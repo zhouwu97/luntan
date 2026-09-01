@@ -812,8 +812,18 @@ func (w *limitedPrefixWriter) Write(value []byte) (int, error) {
 
 func (w *limitedPrefixWriter) Bytes() []byte { return w.buffer.Bytes() }
 
+func detectedMediaType(prefix []byte) string {
+	// Go 标准库的 DetectContentType 对部分 WebP 文件返回
+	// application/octet-stream；WebP 的 RIFF/WEBP 文件头是稳定的，先做
+	// 精确识别，再交给标准库处理 JPEG、PNG 和视频等其他格式。
+	if len(prefix) >= 12 && string(prefix[:4]) == "RIFF" && string(prefix[8:12]) == "WEBP" {
+		return "image/webp"
+	}
+	return http.DetectContentType(prefix)
+}
+
 func verifyMediaContent(prefix []byte, asset *MediaAsset) error {
-	detected, _, err := mime.ParseMediaType(http.DetectContentType(prefix))
+	detected, _, err := mime.ParseMediaType(detectedMediaType(prefix))
 	if err != nil || !strings.EqualFold(detected, asset.MimeType) {
 		return ErrInvalidMedia
 	}

@@ -238,7 +238,7 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 | GET | `/me/points` | 是 | 我的积分余额与流水 |
 | POST | `/store/orders` | 是 | 兑换（需幂等键） |
 | GET | `/me/store-orders` | 是 | 我的兑换记录 |
-| GET | `/admin/store/orders` | 管理员 | 待审核兑换申请分页 |
+| GET | `/admin/store/orders` | 管理员 | 兑换申请分页；`status` 支持 `pending_review`、`approved`、`rejected`、`all` |
 | GET | `/admin/store/orders/{id}` | 管理员 | 申请快照、历史无效积分与兑换资格 |
 | GET | `/admin/store/orders/{id}/reward-content` | 管理员 | 按申请时间截止的发帖/评论奖励证据分页 |
 | POST | `/admin/store/orders/{id}/review` | 管理员 | 审核并提交不计入兑换的积分流水 |
@@ -276,6 +276,11 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 `balance_at_submit - 历史无效积分 - 本次新判定无效积分` 计算有效积分；
 新获得的积分不能补足本次申请。奖励证据接口支持 `cursor`、`limit`、`source`
 和 `status` 参数，默认按删除/不可见、已编辑、正常内容优先返回。
+审核结果响应会返回 `new_invalidated_count` 与 `new_invalidated_points`；兑换审核
+列表还会返回审核时间、审核人、该订单新增的无效奖励数/积分，以及
+`balance_snapshot_trusted`。迁移前订单的余额只能作为参考，不能视为真实提交时余额。
+商品列表中的 `redeemed_count` 只统计 `claimed` 与 `completed` 订单，不统计待审核、
+驳回、取消或仅审核通过但尚未领取的订单。
 
 ### 通知与搜索
 

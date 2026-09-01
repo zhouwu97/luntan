@@ -356,6 +356,7 @@ func validEmailAddress(value string) bool {
 }
 
 func emailRiskMetadata(email string) []byte {
-	data, _ := json.Marshal(map[string]string{"email": email})
+	// 风控日志需要可关联的弱标识，但不应把可直接识别的邮箱长期写入审计表。
+	data, _ := json.Marshal(map[string]string{"email": maskRiskEmail(email)})
 	return data
 }

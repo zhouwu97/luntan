@@ -38,7 +38,7 @@ func (s *Server) requireStoreOrderReviewer(w http.ResponseWriter, r *http.Reques
 
 func validStoreOrderStatus(status string) bool {
 	switch status {
-	case "pending_review", "approved", "rejected", "pending", "claimed", "completed", "cancelled":
+	case "all", "pending_review", "approved", "rejected", "pending", "claimed", "completed", "cancelled":
 		return true
 	default:
 		return false
@@ -136,15 +136,21 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
 		return
 	}
-	args := []any{status}
-	where := "o.status = $1"
+	args := make([]any, 0, 3)
+	where := "TRUE"
+	if status != "all" {
+		args = append(args, status)
+		where = "o.status = $1"
+	}
 	if rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor")); rawCursor != "" {
 		cursor, decodeErr := decodeStoreOrderCursor(rawCursor)
 		if decodeErr != nil {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "兑换订单游标无效"})
 			return
 		}
-		where += " AND (o.created_at, o.id) < ($2, $3)"
+		createdAtPosition := len(args) + 1
+		idPosition := createdAtPosition + 1
+		where += " AND (o.created_at, o.id) < ($" + strconv.Itoa(createdAtPosition) + ", $" + strconv.Itoa(idPosition) + ")"
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
 	limitPosition := len(args) + 1
@@ -153,7 +159,13 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 		SELECT o.id, o.user_id, u.username, COALESCE(up.nickname, u.username),
 		       p.id, p.name, o.points, o.status, o.created_at,
 		       COALESCE(o.reviewed_by, ''), o.reviewed_at, o.review_reason,
-		       u.points_balance, o.balance_at_submit
+		       u.points_balance, o.balance_at_submit, o.balance_snapshot_trusted,
+		       COALESCE((SELECT COUNT(*) FROM store_point_invalidations spi
+		                 WHERE spi.source_order_id = o.id), 0),
+		       COALESCE((SELECT SUM(pt.delta)
+		                 FROM store_point_invalidations spi
+		                 JOIN point_transactions pt ON pt.id = spi.point_transaction_id
+		                 WHERE spi.source_order_id = o.id), 0)
 		FROM store_orders o
 		JOIN users u ON u.id = o.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -203,10 +215,11 @@ type storeOrderRowScanner interface {
 
 func scanAdminStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
 	var id, userID, username, nickname, productID, productName, status, reviewedBy, reviewReason string
-	var points, userPoints, balanceAtSubmit int64
+	var points, userPoints, balanceAtSubmit, invalidatedCount, invalidatedPoints int64
+	var balanceSnapshotTrusted bool
 	var createdAt time.Time
 	var reviewedAt sql.NullTime
-	if err := scanner.Scan(&id, &userID, &username, &nickname, &productID, &productName, &points, &status, &createdAt, &reviewedBy, &reviewedAt, &reviewReason, &userPoints, &balanceAtSubmit); err != nil {
+	if err := scanner.Scan(&id, &userID, &username, &nickname, &productID, &productName, &points, &status, &createdAt, &reviewedBy, &reviewedAt, &reviewReason, &userPoints, &balanceAtSubmit, &balanceSnapshotTrusted, &invalidatedCount, &invalidatedPoints); err != nil {
 		return nil, err
 	}
 	item := map[string]any{
@@ -214,7 +227,10 @@ func scanAdminStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
 		"product_id": productID, "product_name": productName, "points": points,
 		"status": status, "created_at": createdAt, "reviewed_by": reviewedBy,
 		"review_reason": reviewReason, "user_points": userPoints,
-		"balance_at_submit": balanceAtSubmit,
+		"balance_at_submit":        balanceAtSubmit,
+		"balance_snapshot_trusted": balanceSnapshotTrusted,
+		"invalidated_count":        invalidatedCount,
+		"invalidated_points":       invalidatedPoints,
 	}
 	if reviewedAt.Valid {
 		item["reviewed_at"] = reviewedAt.Time
@@ -515,7 +531,13 @@ func (s *Server) loadAdminStoreOrder(ctx context.Context, queryer interface {
 		SELECT o.id, o.user_id, u.username, COALESCE(up.nickname, u.username),
 		       p.id, p.name, o.points, o.status, o.created_at,
 		       COALESCE(o.reviewed_by, ''), o.reviewed_at, o.review_reason,
-		       u.points_balance, o.balance_at_submit
+		       u.points_balance, o.balance_at_submit, o.balance_snapshot_trusted,
+		       COALESCE((SELECT COUNT(*) FROM store_point_invalidations spi
+		                 WHERE spi.source_order_id = o.id), 0),
+		       COALESCE((SELECT SUM(pt.delta)
+		                 FROM store_point_invalidations spi
+		                 JOIN point_transactions pt ON pt.id = spi.point_transaction_id
+		                 WHERE spi.source_order_id = o.id), 0)
 		FROM store_orders o
 		JOIN users u ON u.id = o.user_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
@@ -619,6 +641,7 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		writeInternalError(w, r, err)
 		return
 	}
+	newInvalidatedCount := len(transactionIDs)
 	eligiblePoints := balanceAtSubmit - historicalInvalidatedPoints - newInvalidatedPoints
 	if input.Decision == "approve" && eligiblePoints < points {
 		writeAuthError(w, r, ErrInsufficientPoints)
@@ -674,22 +697,31 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 	if err := appendAdminLogTx(r.Context(), tx, operator.ID, "store.order."+input.Decision, "store_order", orderID, input.Reason, requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
 		"user_id": userID, "product_name": productName, "points": points, "from_status": "pending_review", "to_status": newStatus,
 		"balance_at_submit": balanceAtSubmit, "historical_invalidated_points": historicalInvalidatedPoints,
-		"new_invalidated_points": newInvalidatedPoints, "eligible_points_at_submit": eligiblePoints,
+		"new_invalidated_count": newInvalidatedCount, "new_invalidated_points": newInvalidatedPoints,
+		"eligible_points_at_submit": eligiblePoints,
 	}, now); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	message := fmt.Sprintf("你申请兑换「%s」已通过，已扣除 %d 积分，请留意领取通知。", productName, points)
-	if input.Decision == "reject" {
-		message = fmt.Sprintf("你申请兑换「%s」未通过审核。原因：%s；本次相关积分不计入兑换资格。\n如继续正常参与论坛讨论，后续仍可重新申请兑换。", productName, input.Reason)
-	}
+	message := storeOrderReviewNotification(
+		productName,
+		input.Decision,
+		input.Reason,
+		points,
+		newInvalidatedCount,
+		newInvalidatedPoints,
+	)
 	if err := enqueueNotificationWithDataTx(tx, userID, operator.ID, "store.order.reviewed", "store_order", orderID, map[string]any{
-		"title":        "兑换申请审核结果",
-		"message":      message,
-		"status":       newStatus,
-		"product_name": productName,
-		"points":       points,
-		"reason":       input.Reason,
+		"title":                  "兑换申请审核结果",
+		"message":                message,
+		"status":                 newStatus,
+		"product_name":           productName,
+		"points":                 points,
+		"reason":                 input.Reason,
+		"invalidated_count":      newInvalidatedCount,
+		"invalidated_points":     newInvalidatedPoints,
+		"new_invalidated_count":  newInvalidatedCount,
+		"new_invalidated_points": newInvalidatedPoints,
 	}, now); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -705,9 +737,30 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		"review_reason":                 input.Reason,
 		"balance_at_submit":             balanceAtSubmit,
 		"historical_invalidated_points": historicalInvalidatedPoints,
+		"new_invalidated_count":         newInvalidatedCount,
 		"new_invalidated_points":        newInvalidatedPoints,
 		"eligible_points_at_submit":     eligiblePoints,
 	})
+}
+
+// storeOrderReviewNotification 只描述本次审核实际发生的状态变化，避免拒绝订单
+// 时把“没有失效处理”误写成“相关积分不计入资格”。
+func storeOrderReviewNotification(productName, decision, reason string, points int64, invalidatedCount int, invalidatedPoints int64) string {
+	if decision == "approve" {
+		message := fmt.Sprintf("你申请兑换「%s」已通过审核，已扣除 %d 积分，请留意领取通知。", productName, points)
+		if invalidatedCount > 0 {
+			message += fmt.Sprintf("本次另认定 %d 条奖励记录无效，对应 %d 积分不再计入后续兑换资格。", invalidatedCount, invalidatedPoints)
+		}
+		return message
+	}
+
+	message := fmt.Sprintf("你申请兑换「%s」未通过审核。\n原因：%s\n", productName, reason)
+	if invalidatedCount > 0 {
+		message += fmt.Sprintf("本次共认定 %d 条奖励记录无效，对应 %d 积分不再计入兑换资格。\n", invalidatedCount, invalidatedPoints)
+	} else {
+		message += "本次审核未对你的历史积分作失效处理。\n"
+	}
+	return message + "你后续新获得的有效积分仍可正常用于兑换。"
 }
 
 func validateStoreRewardSelections(ctx context.Context, tx *sql.Tx, userID, orderID string, orderCreatedAt time.Time, transactionIDs []string) (int64, error) {

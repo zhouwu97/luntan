@@ -56,6 +56,10 @@ artifacts/
 # Go 构建产物：部署时从源码构建，避免仓库中的二进制与源码版本漂移。
 /bin/
 /server/build/
+/server/.release-staging-*/
+server/*.exe
+*-acceptance-*.tar.gz
+android/app/ci-release.keystore
 
 # Local runtime data, test scripts & credentials
 .data/

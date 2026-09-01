@@ -63,3 +63,13 @@ func TestRiskOverviewIncludesSafeTargetContext(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEmailRiskMetadataStoresMaskedEmail(t *testing.T) {
+	metadata := string(emailRiskMetadata("person@example.com"))
+	if !strings.Contains(metadata, "p***@example.com") {
+		t.Fatalf("masked email missing from risk metadata: %s", metadata)
+	}
+	if strings.Contains(metadata, "person@example.com") {
+		t.Fatalf("risk metadata must not contain the raw email: %s", metadata)
+	}
+}

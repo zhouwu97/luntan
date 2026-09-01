@@ -96,8 +96,9 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
   void _loadCurrentMediaRegions() {
     if (_images.isNotEmpty) {
-      _currentRegions =
-          List<MaskRegion>.from(_images[_selectedImageIndex].maskRegions);
+      _currentRegions = List<MaskRegion>.from(
+        _images[_selectedImageIndex].maskRegions,
+      );
     } else {
       _currentRegions = [];
     }
@@ -127,16 +128,15 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
       if (media.isCensored && widget.platformRepository != null) {
         // Admin endpoint returns the uncensored original bytes.
-        final bytes = await widget.platformRepository!
-            .getAdminMediaSource(mediaId: mediaId);
+        final bytes = await widget.platformRepository!.getAdminMediaSource(
+          mediaId: mediaId,
+        );
         if (!mounted || _images[_selectedImageIndex].id != mediaId) return;
         _sourceBytes = Uint8List.fromList(bytes);
-        final codec = await ui.instantiateImageCodec(_sourceBytes!);
-        final frame = await codec.getNextFrame();
-        decoded = frame.image;
+        decoded = await _decodePreviewImage(_sourceBytes!);
+        _sourceBytes = null;
       } else {
-        final url =
-            media.originalUrl ?? media.detailUrl ?? media.url ?? '';
+        final url = media.originalUrl ?? media.detailUrl ?? media.url ?? '';
         if (url.isEmpty) {
           if (mounted) setState(() => _sourceLoadError = '图片地址为空');
           return;
@@ -169,11 +169,36 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     }
   }
 
+  /// Decodes a bounded preview so large originals do not allocate full-size
+  /// RGBA buffers in the editor. Mask coordinates remain normalised.
+  Future<ui.Image> _decodePreviewImage(Uint8List bytes) async {
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    const maxDimension = 2048;
+    final scale = min(
+      1.0,
+      maxDimension / max(descriptor.width, descriptor.height),
+    );
+    final targetWidth = max(1, (descriptor.width * scale).round());
+    final targetHeight = max(1, (descriptor.height * scale).round());
+    final codec = await descriptor.instantiateCodec(
+      targetWidth: targetWidth,
+      targetHeight: targetHeight,
+    );
+    try {
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } finally {
+      codec.dispose();
+      descriptor.dispose();
+      buffer.dispose();
+    }
+  }
+
   /// Uses Flutter's image cache to resolve a network URL into a [ui.Image].
   Future<ui.Image> _resolveNetworkImage(String url) {
     final completer = Completer<ui.Image>();
-    final stream =
-        NetworkImage(url).resolve(const ImageConfiguration());
+    final stream = NetworkImage(url).resolve(const ImageConfiguration());
     late ImageStreamListener listener;
     listener = ImageStreamListener(
       (ImageInfo info, bool _) {
@@ -277,8 +302,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF23262F),
-        title:
-            const Text('清除全部打码？', style: TextStyle(color: Colors.white)),
+        title: const Text('清除全部打码？', style: TextStyle(color: Colors.white)),
         content: const Text(
           '当前图片上的所有未保存打码都会被移除。',
           style: TextStyle(color: Colors.white70),
@@ -348,10 +372,12 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     }
 
     final points = stroke
-        .map((p) => MaskPoint(
-              x: (p.dx / _canvasW).clamp(0.0, 1.0),
-              y: (p.dy / _canvasH).clamp(0.0, 1.0),
-            ))
+        .map(
+          (p) => MaskPoint(
+            x: (p.dx / _canvasW).clamp(0.0, 1.0),
+            y: (p.dy / _canvasH).clamp(0.0, 1.0),
+          ),
+        )
         .toList(growable: false);
 
     var left = points.map((p) => p.x).reduce(min);
@@ -373,15 +399,17 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
     _pushUndo();
     setState(() {
-      _currentRegions.add(MaskRegion(
-        x: left,
-        y: top,
-        width: right - left,
-        height: bottom - top,
-        type: _currentType,
-        points: points,
-        brushSize: _brushSize,
-      ));
+      _currentRegions.add(
+        MaskRegion(
+          x: left,
+          y: top,
+          width: right - left,
+          height: bottom - top,
+          type: _currentType,
+          points: points,
+          brushSize: _brushSize,
+        ),
+      );
       _activeStroke = null;
     });
   }
@@ -433,14 +461,22 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
   /// Squared distance from point (px, py) to line segment (ax, ay)→(bx, by).
   static double _distSq(
-      double px, double py, double ax, double ay, double bx, double by) {
+    double px,
+    double py,
+    double ax,
+    double ay,
+    double bx,
+    double by,
+  ) {
     final dx = bx - ax, dy = by - ay;
     if (dx == 0 && dy == 0) {
       final ex = px - ax, ey = py - ay;
       return ex * ex + ey * ey;
     }
-    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))
-        .clamp(0.0, 1.0);
+    final t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(
+      0.0,
+      1.0,
+    );
     final cx = ax + t * dx - px, cy = ay + t * dy - py;
     return cx * cx + cy * cy;
   }
@@ -455,18 +491,22 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
 
     if (resetToNormal && !widget.canRestoreCensored) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('只有超级管理员可以恢复未打码原图'),
-        backgroundColor: Colors.redAccent,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('只有超级管理员可以恢复未打码原图'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
       return;
     }
     if (!resetToNormal && _currentRegions.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('请先在图片上涂抹需要遮挡的内容'),
-        backgroundColor: Colors.orange,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请先在图片上涂抹需要遮挡的内容'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
@@ -485,21 +525,24 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       }
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(status == 'censored'
-            ? '打码处理已保存，服务端已生成打码图变体'
-            : '已恢复原图正常展示'),
-        backgroundColor: AppTheme.primary,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'censored' ? '打码处理已保存，服务端已生成打码图变体' : '已恢复原图正常展示',
+          ),
+          backgroundColor: AppTheme.primary,
+        ),
+      );
       widget.onSaved?.call();
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content:
-            Text(userFacingApiMessage(e, fallback: '图片处理失败，请稍后重试')),
-        backgroundColor: Colors.redAccent,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(userFacingApiMessage(e, fallback: '图片处理失败，请稍后重试')),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -538,12 +581,10 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         backgroundColor: const Color(0xFF181A20),
         appBar: AppBar(
           backgroundColor: const Color(0xFF23262F),
-          title:
-              const Text('图片处理', style: TextStyle(color: Colors.white)),
+          title: const Text('图片处理', style: TextStyle(color: Colors.white)),
         ),
         body: const Center(
-          child: Text('该帖子没有图片可处理',
-              style: TextStyle(color: Colors.white70)),
+          child: Text('该帖子没有图片可处理', style: TextStyle(color: Colors.white70)),
         ),
       );
     }
@@ -555,10 +596,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
         children: [
           if (_images.length > 1) _thumbStrip(),
           Expanded(
-            child: IgnorePointer(
-              ignoring: _isSaving,
-              child: _editorCanvas(),
-            ),
+            child: IgnorePointer(ignoring: _isSaving, child: _editorCanvas()),
           ),
           _versionBar(),
           IgnorePointer(ignoring: _isSaving, child: _toolbar()),
@@ -584,21 +622,23 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       actions: [
         IconButton(
           tooltip: '撤销',
-          icon: Icon(Icons.undo,
-              color: _undoHistory.isNotEmpty && !_isSaving
-                  ? Colors.white
-                  : Colors.white38),
-          onPressed:
-              _undoHistory.isNotEmpty && !_isSaving ? _undo : null,
+          icon: Icon(
+            Icons.undo,
+            color: _undoHistory.isNotEmpty && !_isSaving
+                ? Colors.white
+                : Colors.white38,
+          ),
+          onPressed: _undoHistory.isNotEmpty && !_isSaving ? _undo : null,
         ),
         IconButton(
           tooltip: '重做',
-          icon: Icon(Icons.redo,
-              color: _redoHistory.isNotEmpty && !_isSaving
-                  ? Colors.white
-                  : Colors.white38),
-          onPressed:
-              _redoHistory.isNotEmpty && !_isSaving ? _redo : null,
+          icon: Icon(
+            Icons.redo,
+            color: _redoHistory.isNotEmpty && !_isSaving
+                ? Colors.white
+                : Colors.white38,
+          ),
+          onPressed: _redoHistory.isNotEmpty && !_isSaving ? _redo : null,
         ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -612,25 +652,25 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
             PopupMenuItem(
               value: 'clear',
               enabled: _currentRegions.isNotEmpty,
-              child: const Row(children: [
-                Icon(Icons.delete_outline,
-                    color: Colors.redAccent, size: 20),
-                SizedBox(width: 8),
-                Text('清除全部打码',
-                    style: TextStyle(color: Colors.white)),
-              ]),
+              child: const Row(
+                children: [
+                  Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                  SizedBox(width: 8),
+                  Text('清除全部打码', style: TextStyle(color: Colors.white)),
+                ],
+              ),
             ),
             if (_images[_selectedImageIndex].isCensored &&
                 widget.canRestoreCensored)
               const PopupMenuItem(
                 value: 'restore',
-                child: Row(children: [
-                  Icon(Icons.restore,
-                      color: Colors.orangeAccent, size: 20),
-                  SizedBox(width: 8),
-                  Text('恢复未打码版本',
-                      style: TextStyle(color: Colors.white)),
-                ]),
+                child: Row(
+                  children: [
+                    Icon(Icons.restore, color: Colors.orangeAccent, size: 20),
+                    SizedBox(width: 8),
+                    Text('恢复未打码版本', style: TextStyle(color: Colors.white)),
+                  ],
+                ),
               ),
           ],
         ),
@@ -669,8 +709,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                 fit: BoxFit.cover,
                 errorBuilder: (_) => Container(
                   color: Colors.grey[800],
-                  child:
-                      const Icon(Icons.image, color: Colors.white54),
+                  child: const Icon(Icons.image, color: Colors.white54),
                 ),
               ),
             ),
@@ -689,8 +728,10 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(_sourceLoadError!,
-                  style: const TextStyle(color: Colors.white70)),
+              Text(
+                _sourceLoadError!,
+                style: const TextStyle(color: Colors.white70),
+              ),
               const SizedBox(height: 10),
               OutlinedButton(
                 onPressed: _isSaving ? null : _loadAndDecodeImage,
@@ -764,8 +805,8 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       label = v.isInitial
           ? 'v${v.versionNo} · 初发布 · 未打码'
           : v.moderationStatus == 'censored'
-              ? 'v${v.versionNo} · 已打码'
-              : 'v${v.versionNo} · 已恢复原图';
+          ? 'v${v.versionNo} · 已打码'
+          : 'v${v.versionNo} · 已恢复原图';
     }
 
     return InkWell(
@@ -784,21 +825,24 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
           children: [
             const Icon(Icons.history, color: Colors.white54, size: 18),
             const SizedBox(width: 8),
-            const Text('版本',
-                style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold)),
+            const Text(
+              '版本',
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(label,
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 13),
-                  overflow: TextOverflow.ellipsis),
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             if (_moderationHistory.isNotEmpty)
-              const Icon(Icons.chevron_right,
-                  color: Colors.white38, size: 20),
+              const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
           ],
         ),
       ),
@@ -820,11 +864,14 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
               padding: EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('版本记录',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold)),
+                child: Text(
+                  '版本记录',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
             const Divider(color: Colors.white12, height: 1),
@@ -835,7 +882,9 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
               child: ListView.builder(
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 itemCount: _moderationHistory.length,
                 itemBuilder: (_, i) => _versionTile(i),
               ),
@@ -852,8 +901,8 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     final statusLabel = v.isInitial
         ? '初发布 · 未打码'
         : v.moderationStatus == 'censored'
-            ? '已打码'
-            : '已恢复原图';
+        ? '已打码'
+        : '已恢复原图';
 
     return IntrinsicHeight(
       child: Row(
@@ -870,21 +919,15 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                   margin: const EdgeInsets.only(top: 4),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: v.isInitial
-                        ? Colors.transparent
-                        : AppTheme.primary,
+                    color: v.isInitial ? Colors.transparent : AppTheme.primary,
                     border: Border.all(
-                      color: v.isInitial
-                          ? Colors.white54
-                          : AppTheme.primary,
+                      color: v.isInitial ? Colors.white54 : AppTheme.primary,
                       width: 2,
                     ),
                   ),
                 ),
                 if (!isLast)
-                  Expanded(
-                    child: Container(width: 1.5, color: Colors.white24),
-                  ),
+                  Expanded(child: Container(width: 1.5, color: Colors.white24)),
               ],
             ),
           ),
@@ -895,21 +938,29 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('v${v.versionNo}  $statusLabel',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600)),
+                  Text(
+                    'v${v.versionNo}  $statusLabel',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(_fmtTime(v.createdAt),
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 12)),
+                  Text(
+                    _fmtTime(v.createdAt),
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
                   if (v.reason.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(v.reason,
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12)),
+                      child: Text(
+                        v.reason,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -929,8 +980,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       decoration: const BoxDecoration(
         color: Color(0xFF23262F),
-        border:
-            Border(top: BorderSide(color: Color(0xFF353945), width: 1)),
+        border: Border(top: BorderSide(color: Color(0xFF353945), width: 1)),
       ),
       child: SafeArea(
         top: false,
@@ -939,23 +989,35 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
           children: [
             // Effect type
             _labelRow('效果', [
-              _chip('马赛克', _currentType == 'mosaic',
-                  () => setState(() => _currentType = 'mosaic')),
+              _chip(
+                '马赛克',
+                _currentType == 'mosaic',
+                () => setState(() => _currentType = 'mosaic'),
+              ),
               const SizedBox(width: 8),
-              _chip('模糊', _currentType == 'blur',
-                  () => setState(() => _currentType = 'blur')),
+              _chip(
+                '模糊',
+                _currentType == 'blur',
+                () => setState(() => _currentType = 'blur'),
+              ),
             ]),
             const SizedBox(height: 8),
 
             // Tool
             _labelRow('工具', [
-              _chip('画笔', _currentTool == 'brush',
-                  () => setState(() => _currentTool = 'brush'),
-                  icon: Icons.brush_outlined),
+              _chip(
+                '画笔',
+                _currentTool == 'brush',
+                () => setState(() => _currentTool = 'brush'),
+                icon: Icons.brush_outlined,
+              ),
               const SizedBox(width: 8),
-              _chip('橡皮擦', _currentTool == 'eraser',
-                  () => setState(() => _currentTool = 'eraser'),
-                  icon: Icons.auto_fix_normal),
+              _chip(
+                '橡皮擦',
+                _currentTool == 'eraser',
+                () => setState(() => _currentTool = 'eraser'),
+                icon: Icons.auto_fix_normal,
+              ),
             ]),
             const SizedBox(height: 6),
 
@@ -964,18 +1026,22 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
               children: [
                 const SizedBox(
                   width: 48,
-                  child: Text('大小',
-                      style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600)),
+                  child: Text(
+                    '大小',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
                 Expanded(
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       trackHeight: 3,
                       thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 7),
+                        enabledThumbRadius: 7,
+                      ),
                     ),
                     child: Slider(
                       value: _brushSize,
@@ -984,8 +1050,7 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                       divisions: 22,
                       activeColor: AppTheme.primary,
                       inactiveColor: Colors.white24,
-                      onChanged: (v) =>
-                          setState(() => _brushSize = v),
+                      onChanged: (v) => setState(() => _brushSize = v),
                     ),
                   ),
                 ),
@@ -994,17 +1059,17 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                   height: max(previewDia, 6),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border:
-                        Border.all(color: Colors.white54, width: 1.5),
+                    border: Border.all(color: Colors.white54, width: 1.5),
                   ),
                 ),
                 const SizedBox(width: 6),
                 SizedBox(
                   width: 32,
-                  child: Text('${(_brushSize * 100).round()}%',
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 11)),
+                  child: Text(
+                    '${(_brushSize * 100).round()}%',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
                 ),
               ],
             ),
@@ -1019,7 +1084,8 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                   backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   elevation: 0,
                 ),
                 onPressed: _isSaving ? null : () => _saveModeration(),
@@ -1032,10 +1098,13 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('保存并应用',
+                    : const Text(
+                        '保存并应用',
                         style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold)),
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
             ),
           ],
@@ -1047,21 +1116,30 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
   // ── Reusable chip helpers ──────────────────────────────────
 
   Widget _labelRow(String label, List<Widget> children) {
-    return Row(children: [
-      SizedBox(
-        width: 48,
-        child: Text(label,
+    return Row(
+      children: [
+        SizedBox(
+          width: 48,
+          child: Text(
+            label,
             style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 13,
-                fontWeight: FontWeight.w600)),
-      ),
-      ...children,
-    ]);
+              color: Colors.white54,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        ...children,
+      ],
+    );
   }
 
-  Widget _chip(String label, bool selected, VoidCallback onTap,
-      {IconData? icon}) {
+  Widget _chip(
+    String label,
+    bool selected,
+    VoidCallback onTap, {
+    IconData? icon,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -1071,24 +1149,28 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
           color: selected ? AppTheme.primary : const Color(0xFF2A2E38),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: selected ? AppTheme.primary : Colors.white24),
+            color: selected ? AppTheme.primary : Colors.white24,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon,
-                  size: 15,
-                  color: selected ? Colors.white : Colors.white70),
+              Icon(
+                icon,
+                size: 15,
+                color: selected ? Colors.white : Colors.white70,
+              ),
               const SizedBox(width: 4),
             ],
-            Text(label,
-                style: TextStyle(
-                  color: selected ? Colors.white : Colors.white70,
-                  fontSize: 13,
-                  fontWeight:
-                      selected ? FontWeight.bold : FontWeight.normal,
-                )),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.white70,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
           ],
         ),
       ),
@@ -1142,8 +1224,13 @@ class _EffectPainter extends CustomPainter {
 
   // ── Per-region rendering ──────────────────────────────────
 
-  void _paintRegion(Canvas canvas, Size size, MaskRegion r,
-      Rect srcRect, Rect dst) {
+  void _paintRegion(
+    Canvas canvas,
+    Size size,
+    MaskRegion r,
+    Rect srcRect,
+    Rect dst,
+  ) {
     if (r.points.isEmpty) {
       _paintRectRegion(canvas, size, r, srcRect, dst);
       return;
@@ -1162,8 +1249,13 @@ class _EffectPainter extends CustomPainter {
   }
 
   /// Backwards-compatible handling for legacy rectangle-based regions.
-  void _paintRectRegion(Canvas canvas, Size size, MaskRegion r,
-      Rect srcRect, Rect dst) {
+  void _paintRectRegion(
+    Canvas canvas,
+    Size size,
+    MaskRegion r,
+    Rect srcRect,
+    Rect dst,
+  ) {
     final rect = Rect.fromLTWH(
       r.x * size.width,
       r.y * size.height,
@@ -1176,8 +1268,7 @@ class _EffectPainter extends CustomPainter {
       canvas.saveLayer(
         rect,
         Paint()
-          ..imageFilter =
-              ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
       );
       canvas.drawImageRect(source, srcRect, dst, Paint());
       canvas.restore();
@@ -1187,7 +1278,11 @@ class _EffectPainter extends CustomPainter {
       canvas.drawImageRect(
         mosaic!,
         Rect.fromLTWH(
-            0, 0, mosaic!.width.toDouble(), mosaic!.height.toDouble()),
+          0,
+          0,
+          mosaic!.width.toDouble(),
+          mosaic!.height.toDouble(),
+        ),
         dst,
         Paint(),
       );
@@ -1197,16 +1292,17 @@ class _EffectPainter extends CustomPainter {
 
   // ── Active stroke rendering ───────────────────────────────
 
-  void _paintActiveStroke(
-      Canvas canvas, Size size, Rect srcRect, Rect dst) {
+  void _paintActiveStroke(Canvas canvas, Size size, Rect srcRect, Rect dst) {
     final pts = activeStroke;
     if (pts == null || pts.isEmpty) return;
 
     final maskPts = pts
-        .map((p) => MaskPoint(
-              x: (p.dx / size.width).clamp(0.0, 1.0),
-              y: (p.dy / size.height).clamp(0.0, 1.0),
-            ))
+        .map(
+          (p) => MaskPoint(
+            x: (p.dx / size.width).clamp(0.0, 1.0),
+            y: (p.dy / size.height).clamp(0.0, 1.0),
+          ),
+        )
         .toList();
     final path = _smoothPath(maskPts, size);
     final bpx = _brushPx(brushSize, size);
@@ -1248,8 +1344,7 @@ class _EffectPainter extends CustomPainter {
   }
 
   /// Fills a single-point dot mask.
-  void _dotMask(
-      Canvas canvas, MaskPoint pt, Size size, double bpx) {
+  void _dotMask(Canvas canvas, MaskPoint pt, Size size, double bpx) {
     canvas.drawCircle(
       Offset(pt.x * size.width, pt.y * size.height),
       bpx / 2,
@@ -1259,8 +1354,14 @@ class _EffectPainter extends CustomPainter {
 
   /// Draws the effect image (blur or mosaic) through the previously drawn
   /// mask using [BlendMode.srcIn].
-  void _compositeEffect(Canvas canvas, String type, Rect srcRect,
-      Rect dst, double bSize, Size canvasSize) {
+  void _compositeEffect(
+    Canvas canvas,
+    String type,
+    Rect srcRect,
+    Rect dst,
+    double bSize,
+    Size canvasSize,
+  ) {
     if (type == 'blur') {
       final s = _sigma(bSize, canvasSize);
       canvas.drawImageRect(
@@ -1275,7 +1376,11 @@ class _EffectPainter extends CustomPainter {
       canvas.drawImageRect(
         mosaic!,
         Rect.fromLTWH(
-            0, 0, mosaic!.width.toDouble(), mosaic!.height.toDouble()),
+          0,
+          0,
+          mosaic!.width.toDouble(),
+          mosaic!.height.toDouble(),
+        ),
         dst,
         Paint()..blendMode = BlendMode.srcIn,
       );

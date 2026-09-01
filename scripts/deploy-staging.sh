@@ -101,7 +101,9 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 WORK_DIR="$(mktemp -d "$BASE_DIR/staging/.deploy-${RELEASE_SHA}.XXXXXX")"
 RELEASE_DIR="$BASE_DIR/releases/${RELEASE_SHA}-${timestamp}"
 BACKUP_DIR="$BASE_DIR/backups/staging-${RELEASE_SHA}-${timestamp}"
-install -d -m 0700 "$BACKUP_DIR"
+# PostgreSQL 使用本地 peer 认证时，备份进程以数据库系统用户运行；目录
+# 必须同时允许该用户写入，root 仍可在失败处理阶段读取日志和保留备份。
+install -d -m 0700 -o "$DB_OS_USER" -g "$DB_OS_USER" "$BACKUP_DIR"
 
 mapfile -t archive_entries < <(tar -tzf "$ARCHIVE_PATH")
 (( ${#archive_entries[@]} > 0 )) || fail 'release archive is empty'

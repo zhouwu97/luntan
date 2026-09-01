@@ -21,7 +21,7 @@ import '../domain/repositories.dart';
 ///
 /// 本地启动默认通过正式域名的 HTTPS 入口访问 Go 服务，避免明文传输
 /// 登录令牌、媒体请求和其他 API 数据。部署到其他环境时仍可通过
-/// API_BASE_URL 覆盖；生产环境必须显式使用 HTTPS 地址。
+/// API_BASE_URL 覆盖；正式 release 未覆盖时使用这个官方 HTTPS 地址。
 const defaultDevelopmentApiBaseUrl = 'https://shengbeijiang.com';
 
 String apiBaseUrlFromEnvironment({String? defaultBaseUrl, bool? releaseBuild}) {
@@ -30,16 +30,23 @@ String apiBaseUrlFromEnvironment({String? defaultBaseUrl, bool? releaseBuild}) {
     'APP_ENV',
     defaultValue: 'development',
   );
-  // release 包必须显式走 production 规则，避免漏传 dart-define 时退回到
-  // 开发环境默认 HTTP 地址。测试和 debug 包仍可显式使用 Mock/QA 配置。
+  // release 包必须显式走 production 规则；即使构建入口漏传 dart-define，
+  // 也只能回退到官方 HTTPS 地址，不能退回 Mock。QA/staging 仍必须显式配置。
   final isReleaseBuild =
       releaseBuild ?? const bool.fromEnvironment('dart.vm.product');
   final appEnv =
       isReleaseBuild && configuredAppEnv.toLowerCase() == 'development'
       ? 'production'
       : configuredAppEnv;
+  final isOfficialProductionRelease =
+      isReleaseBuild && appEnv.trim().toLowerCase() == 'production';
+  final fallbackBaseUrl = isOfficialProductionRelease
+      ? (defaultBaseUrl ?? defaultDevelopmentApiBaseUrl)
+      : (defaultBaseUrl ?? '');
   final effective = configured.trim().isEmpty
-      ? (requiresConfiguredApi(appEnv) ? '' : (defaultBaseUrl ?? ''))
+      ? (requiresConfiguredApi(appEnv) && !isOfficialProductionRelease
+            ? ''
+            : fallbackBaseUrl)
       : configured;
   return resolveApiBaseUrl(configured: effective, appEnv: appEnv);
 }
@@ -57,8 +64,8 @@ bool requiresConfiguredApi(String appEnv) {
 
 /// 解析编译期 API 地址。
 ///
-/// QA 可以继续使用 HTTP；生产构建必须显式声明 APP_ENV=production，并且
-/// 通过 HTTPS 访问 API，避免 Token、媒体和 PWA 资源落入明文链路。
+/// QA 可以继续使用 HTTP；production 通过 HTTPS 访问 API，避免 Token、媒体和
+/// PWA 资源落入明文链路。release 构建缺少地址时由上层补入官方 HTTPS 默认值。
 String resolveApiBaseUrl({required String configured, required String appEnv}) {
   final baseUrl = configured.trim();
   if (baseUrl.isEmpty) {

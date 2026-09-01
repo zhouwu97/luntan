@@ -37,8 +37,8 @@ jobs:
           -keysize 2048
           -validity 1
           -dname "CN=CI Release, OU=CI, O=Luntan, C=CN"
-      # Release 构建必须按生产规则注入配置：客户端在 release 且未显式声明
-      # APP_ENV 时按 production 校验，缺少 API_BASE_URL 会直接进入启动错误页。
+      # Release 构建显式注入配置；客户端即使被其他入口漏传参数，也只会回退到
+      # 官方 HTTPS 地址，不会退回 Mock 或明文 API。
       - run: >-
           flutter build web --release --base-href=/forum/
           --dart-define=APP_ENV=production

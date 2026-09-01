@@ -10,7 +10,7 @@
 
 ## 当前状态
 
-正式客户端默认连接自己的 Go API（默认地址为 `https://shengbeijiang.com`），首页默认请求最新帖子并按发帖时间排序；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建必须显式设置 `APP_ENV=production` 和 HTTPS API 地址；服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
+正式客户端默认连接自己的 Go API（默认地址为 `https://shengbeijiang.com`），首页默认请求最新帖子并按发帖时间排序；客户端不会在运行时直接请求源站。通过 `API_BASE_URL` 可以覆盖开发、测试或生产环境地址。API 模式的访问令牌保存在平台安全存储中，杀掉 App 后会自动恢复登录态，`ForumStore` 不参与正式业务写入。生产构建推荐显式设置 `APP_ENV=production` 和 HTTPS API 地址；即使构建入口漏传，release 客户端也只会回退到该官方 HTTPS 地址，不会退回 Mock。服务端会拒绝缺少数据库、对象存储或 SMTP 配置的生产启动。
 
 已覆盖的主要功能：
 
@@ -207,7 +207,7 @@ flutter build web --release --base-href=/forum/ \
   --dart-define=APP_ENV=qa
 ```
 
-- QA 通过 HTTPS 域名访问，必须显式传 `APP_ENV=qa`：release 构建缺省时客户端按 production 规则强制校验 API 配置，启动即报「应用配置异常」。
+- QA 通过 HTTPS 域名访问，必须显式传 `APP_ENV=qa` 和 `API_BASE_URL`；不能依赖 production 的官方默认值，以免环境串线。
 - `web/flutter_bootstrap.js` 为入库的自定义引导模板，canvaskit 从应用本地目录加载而不请求 gstatic（国内拉取 wasm 易超时导致白屏），部署时不要删除。
 - 产物解压到新发布目录并切换 `/opt/luntan-qa/web` 符号链接，回滚时把链接指回旧目录即可；nginx 对 `/forum/` 已配置协商缓存，发布后浏览器直接拉到新版。
 
@@ -240,6 +240,25 @@ flutter build web --release --base-href=/forum/ \
 ### 发布 Android 软件内更新
 
 “检查更新”和 APK 下载都由 Go API 提供，不依赖网页下载页。先构建 APK，再生成服务端可校验的发布清单：
+
+推荐使用仓库脚本构建。脚本默认按 production 构建，并自动注入正式 API、Web 地址以及 Android 自适应图标；构建 QA 包时显式覆盖环境和地址：
+
+```powershell
+.\scripts\build_android_release.ps1 `
+  -VersionName 0.01 `
+  -VersionCode 1
+
+# QA 示例
+.\scripts\build_android_release.ps1 `
+  -VersionName 0.01 `
+  -VersionCode 1 `
+  -AppEnvironment qa `
+  -ApiBaseUrl https://shengbeijiang.com `
+  -WebBaseUrl https://shengbeijiang.com
+```
+
+不建议把不带 `API_BASE_URL` 的裸 `flutter build apk --release` 作为正式发布流程：
+应用虽会回退到官方 HTTPS API，但不会执行脚本提供的版本、ARM64 和发布前检查。
 
 ```powershell
 flutter build apk --release --build-name 0.01 --build-number 1 `
@@ -285,9 +304,14 @@ Flutter：
 ```bash
 flutter analyze
 flutter test
-flutter build web --release
-flutter build apk --release
+flutter build web --release \
+  --dart-define=APP_ENV=production \
+  --dart-define=API_BASE_URL=https://shengbeijiang.com \
+  --dart-define=WEB_BASE_URL=https://shengbeijiang.com
 ```
+
+Android release APK 请使用上面的 `scripts/build_android_release.ps1`，它会同时执行
+ARM64-only 检查、配置注入和自适应图标资源构建。
 
 Go API：
 

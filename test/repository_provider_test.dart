@@ -53,13 +53,13 @@ void main() {
     );
   });
 
-  test('release 构建漏传环境参数时拒绝开发默认 HTTP 地址', () {
+  test('release 构建漏传环境参数时使用正式 HTTPS 默认地址', () {
     expect(
-      () => apiBaseUrlFromEnvironment(
+      apiBaseUrlFromEnvironment(
         defaultBaseUrl: defaultDevelopmentApiBaseUrl,
         releaseBuild: true,
       ),
-      throwsA(isA<StateError>()),
+      defaultDevelopmentApiBaseUrl,
     );
   });
 }

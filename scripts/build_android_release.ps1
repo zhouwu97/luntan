@@ -11,6 +11,11 @@ param(
     [string]$Changelog,
     [long]$MinimumSupportedVersionCode = 0,
 
+    # Release APK 默认连接正式 HTTPS API；QA 或私有环境必须显式覆盖三项编译期配置。
+    [string]$AppEnvironment = 'production',
+    [string]$ApiBaseUrl = 'https://shengbeijiang.com',
+    [string]$WebBaseUrl = 'https://shengbeijiang.com',
+
     [switch]$Publish
 )
 
@@ -27,6 +32,39 @@ if ($Publish) {
     }
 }
 
+$normalizedAppEnvironment = $AppEnvironment.Trim().ToLowerInvariant()
+if ($normalizedAppEnvironment -notin @('production', 'qa', 'staging')) {
+    throw 'AppEnvironment 只能是 production、qa 或 staging'
+}
+
+function Assert-HttpUrl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$RequireHttps
+    )
+
+    $trimmed = $Value.Trim()
+    $uri = $null
+    if ([string]::IsNullOrWhiteSpace($trimmed) -or
+        -not [Uri]::TryCreate($trimmed, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Host -eq '' -or
+        ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https')) {
+        throw "$Name 必须是完整的 HTTP(S) 地址"
+    }
+    if ($RequireHttps -and $uri.Scheme -ne 'https') {
+        throw "正式环境的 $Name 必须使用 HTTPS"
+    }
+}
+
+Assert-HttpUrl -Value $ApiBaseUrl -Name 'ApiBaseUrl' -RequireHttps:($normalizedAppEnvironment -eq 'production')
+Assert-HttpUrl -Value $WebBaseUrl -Name 'WebBaseUrl'
+
 Set-Location -LiteralPath (Join-Path $PSScriptRoot '..')
 
 if (-not (Get-Command 'flutter' -ErrorAction SilentlyContinue)) {
@@ -42,11 +80,15 @@ flutter pub get
 if ($LASTEXITCODE -ne 0) { throw "flutter pub get 失败（exit $LASTEXITCODE）" }
 
 Write-Output '==> flutter build apk (arm64-v8a only)'
+Write-Output "运行时配置: APP_ENV=$normalizedAppEnvironment API_BASE_URL=$($ApiBaseUrl.Trim()) WEB_BASE_URL=$($WebBaseUrl.Trim())"
 flutter build apk `
     --release `
     --target-platform android-arm64 `
     --build-name $VersionName `
-    --build-number $VersionCode
+    --build-number $VersionCode `
+    "--dart-define=APP_ENV=$normalizedAppEnvironment" `
+    "--dart-define=API_BASE_URL=$($ApiBaseUrl.Trim())" `
+    "--dart-define=WEB_BASE_URL=$($WebBaseUrl.Trim())"
 if ($LASTEXITCODE -ne 0) { throw "flutter build apk 失败（exit $LASTEXITCODE）" }
 
 $apkPath = Join-Path (Get-Location) 'build/app/outputs/flutter-apk/app-release.apk'

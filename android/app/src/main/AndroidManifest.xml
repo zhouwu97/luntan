@@ -5,7 +5,8 @@
     <application
         android:label="圣杯酱"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/luntan_launcher"
+        android:roundIcon="@mipmap/luntan_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules">
         <provider

@@ -58,6 +58,15 @@ artifacts/
 /server/build/
 /server/.release-staging-*/
 server/*.exe
+*.tar.gz
+.release-*/
+.tmp-release-*/
+server/server/.tmp-release-*/
+/server/luntan-api
+/server/luntan-worker
+/server/luntan-migrate
+/server/luntan-media-backfill
+/server/luntan-smtp-test
 *-acceptance-*.tar.gz
 android/app/ci-release.keystore
 

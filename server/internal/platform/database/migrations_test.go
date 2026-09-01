@@ -64,6 +64,23 @@ func TestMigrationsAgainstPostgres(t *testing.T) {
 	if err := Migrate(ctx, db, filepath.Join("..", "..", "..", "migrations")); err != nil {
 		t.Fatal(err)
 	}
+	var hasDirtyColumn bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'schema_migrations' AND column_name = 'dirty'
+	)`).Scan(&hasDirtyColumn); err != nil {
+		t.Fatal(err)
+	}
+	if !hasDirtyColumn {
+		t.Fatal("schema_migrations 缺少 dirty 列")
+	}
+	var dirtyCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE dirty`).Scan(&dirtyCount); err != nil {
+		t.Fatal(err)
+	}
+	if dirtyCount != 0 {
+		t.Fatalf("schema_migrations 存在 dirty 记录: %d", dirtyCount)
+	}
 	for _, table := range []string{"users", "user_profiles", "community_categories", "communities", "posts", "user_auth_methods", "sessions", "refresh_tokens", "post_revisions", "post_idempotency_keys", "media_assets", "media_variants", "media_moderation_versions", "post_media", "comments", "comment_idempotency_keys", "post_reactions", "comment_reactions", "bookmarks", "bookmark_folders", "bookmark_folder_items", "user_follows", "community_follows", "community_members", "notifications", "reports", "moderation_cases", "moderation_actions", "roles", "permissions", "role_permissions", "user_roles", "audit_logs", "blocks", "outbox_events", "point_transactions", "experience_transactions", "polls", "poll_options", "poll_votes", "market_items", "user_post_histories", "store_products", "store_orders", "store_point_invalidations", "moderation_appeals", "moderation_appeal_media", "ranking_toys", "ranking_toy_user_states", "ranking_toy_rating_distribution", "ranking_toy_comments", "ranking_toy_comment_likes", "email_codes", "guest_sessions", "bans", "restrictions", "admin_invites", "login_devices", "risk_events", "admin_log_chain", "admin_logs", "ip_restrictions", "home_recommendations", "ranking_toy_submissions"} {
 		var exists bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {

@@ -199,8 +199,43 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(r.Context(), `UPDATE media_assets SET status = 'ready', width = $1, height = $2, completed_at = $3, updated_at = $3 WHERE id = $4 AND owner_id = $5 AND status = 'pending'`, asset.Width, asset.Height, now, mediaID, user.ID); err != nil {
+	result, err := tx.ExecContext(r.Context(), `UPDATE media_assets SET status = 'ready', width = $1, height = $2, completed_at = $3, updated_at = $3 WHERE id = $4 AND owner_id = $5 AND status = 'pending'`, asset.Width, asset.Height, now, mediaID, user.ID)
+	if err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if affected != 1 {
+		// 条件更新未命中表示另一个请求已经完成了状态迁移，或媒体在此期间
+		// 被删除。重新读取当前状态可以保持重复 complete 的幂等响应，同时
+		// 严格禁止非 winner 再写入 media.process outbox。
+		var currentStatus string
+		var currentWidth, currentHeight int
+		var currentUpdatedAt time.Time
+		var currentCompletedAt sql.NullTime
+		if err := tx.QueryRowContext(r.Context(), `SELECT status, width, height, updated_at, completed_at FROM media_assets WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`, mediaID, user.ID).
+			Scan(&currentStatus, &currentWidth, &currentHeight, &currentUpdatedAt, &currentCompletedAt); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeAuthError(w, r, ErrMediaNotFound)
+			} else {
+				writeInternalError(w, r, err)
+			}
+			return
+		}
+		if currentStatus != "ready" {
+			writeAuthError(w, r, ErrInvalidMedia)
+			return
+		}
+		asset.Status = currentStatus
+		asset.Width = currentWidth
+		asset.Height = currentHeight
+		asset.UpdatedAt = currentUpdatedAt
+		asset.CompletedAt = currentCompletedAt
+		httpserver.WriteJSON(w, http.StatusOK, mediaResponse(asset))
 		return
 	}
 	if err := enqueueOutboxTx(tx, "media.process", "media", mediaID, map[string]any{

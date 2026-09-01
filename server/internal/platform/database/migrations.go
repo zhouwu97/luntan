@@ -60,7 +60,8 @@ func Migrate(ctx context.Context, db *sql.DB, directory string) error {
 	}
 	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version text PRIMARY KEY,
-		applied_at timestamptz NOT NULL DEFAULT now()
+		applied_at timestamptz NOT NULL DEFAULT now(),
+		dirty boolean NOT NULL DEFAULT false
 	)`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
@@ -85,7 +86,7 @@ func Migrate(ctx context.Context, db *sql.DB, directory string) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", migration.Version, err)
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, migration.Version); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, dirty) VALUES ($1, false)`, migration.Version); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("record migration %s: %w", migration.Version, err)
 		}

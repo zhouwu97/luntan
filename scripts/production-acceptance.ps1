@@ -387,14 +387,20 @@ Write-Header "5. 数据库迁移状态"
 
 Write-Host "检查数据库迁移状态..." -ForegroundColor Gray
 
-$migrationQuery = @"
-SELECT version || '|' || CASE WHEN dirty THEN 't' ELSE 'f' END
-FROM schema_migrations
-ORDER BY version DESC
-LIMIT 1;
-"@
-
 try {
+    # 旧环境的 schema_migrations 只有 version/applied_at；当前迁移器会补齐
+    # dirty 列。先探测列是否存在，避免验收脚本自身阻断已完成的旧环境迁移。
+    $hasDirtyColumn = Test-DatabaseQuery -Query @"
+SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'schema_migrations' AND column_name = 'dirty'
+) THEN '1' ELSE '0' END;
+"@ -ConnectionString $DatabaseUrl
+    $migrationQuery = if ($hasDirtyColumn -eq '1') {
+        "SELECT version || '|' || CASE WHEN dirty THEN 't' ELSE 'f' END FROM schema_migrations ORDER BY version::int DESC LIMIT 1;"
+    } else {
+        "SELECT version || '|f' FROM schema_migrations ORDER BY version::int DESC LIMIT 1;"
+    }
     $migrationStatus = Test-DatabaseQuery -Query $migrationQuery -ConnectionString $DatabaseUrl
     if ($migrationStatus) {
         $parts = $migrationStatus -split '\|'

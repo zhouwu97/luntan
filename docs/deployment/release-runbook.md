@@ -4,9 +4,30 @@
 
 1. PR 必须先通过 `.github/workflows/ci.yml`。
 2. 冻结通过审核的完整 commit SHA；staging 和 production 都不得使用 `latest`。
-3. 手动触发 `deploy-staging`，并在 GitHub `staging` environment 配置 `STAGING_DEPLOY_COMMAND`。
-4. 部署命令必须按顺序执行：拉取 `IMAGE_TAG`、运行 `/app/luntan-migrate`、启动 API、检查 `/health` 和 `/ready`、观察 `/metrics`。
-5. 迁移失败时停止 rollout，不允许跳过 migration 继续发布。
+3. GitHub `staging` environment 必须配置以下 SSH secrets：
+   `STAGING_SSH_HOST`、`STAGING_SSH_USER`、`STAGING_SSH_PRIVATE_KEY`；可选
+   `STAGING_SSH_PORT`，默认 22。禁止把服务器密码、私钥或数据库连接串提交到仓库。
+4. 手动触发 `deploy-staging` 并填写完整 40 位 `release_sha`。workflow 会对同一 SHA
+   执行 Go/Flutter 验证、构建服务器归档、推送同 SHA 的 GHCR 镜像，并把归档交给
+   `scripts/deploy-staging.sh`。
+5. 目标机使用不可变 release 目录：先备份数据库，再运行该 release 的
+   `luntan-migrate`，然后切换 systemd 的 API/worker 与 Nginx Web 链接，最后执行
+   `scripts/staging-smoke.sh` 检查 `/health`、`/ready`、Feed、商城、发布清单、媒体
+   网关、迁移状态和 outbox。任一步失败会自动回指上一份应用 release。
+6. 迁移失败时停止 rollout，不允许跳过 migration 继续发布。应用回滚不会自动执行
+   数据库 down migration；增量迁移必须保持旧版本可兼容，必要时使用备份恢复演练。
+
+目标机手工部署（仅用于没有 GitHub runner 的受控运维场景）：
+
+```bash
+bash scripts/deploy-staging.sh /opt/luntan-qa/staging/incoming/staging-release-<sha>.tar.gz <sha>
+```
+
+手工回滚到指定目录：
+
+```bash
+bash scripts/rollback-staging.sh /opt/luntan-qa/releases/<sha>-<timestamp>
+```
 
 ## Production
 

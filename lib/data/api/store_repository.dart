@@ -34,6 +34,7 @@ class ApiStoreProduct {
     required this.points,
     required this.color,
     required this.redeemedCount,
+    this.imageUrl = '',
   });
   final String id;
   final String name;
@@ -42,6 +43,7 @@ class ApiStoreProduct {
   final int points;
   final int color;
   final int redeemedCount;
+  final String imageUrl;
 }
 
 class StoreOrder {
@@ -84,6 +86,7 @@ class StoreRepository {
         points: _int(data['points']),
         color: _int(data['color']),
         redeemedCount: _int(data['redeemed_count']),
+        imageUrl: _string(data['image_url']),
       );
     }).toList();
   }

@@ -7,6 +7,7 @@ import '../data/mock_forum_data.dart';
 import '../data/api/api_client.dart';
 import '../data/api/store_repository.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_network_image.dart';
 import '../widgets/points_wallet_card.dart';
 import 'points_screen.dart';
 
@@ -301,10 +302,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: const Text(
-                          '重试',
-                          style: TextStyle(fontSize: 12),
-                        ),
+                        child: const Text('重试', style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
@@ -355,7 +353,8 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                   product: items[index],
                   onRedeem: () => _redeem(items[index]),
                   busy: _redeeming.contains(items[index].id),
-                  blocked: _ordersLoading || _ordersLoadFailed || _hasPendingReview,
+                  blocked:
+                      _ordersLoading || _ordersLoadFailed || _hasPendingReview,
                 ),
               ),
               const SizedBox(height: 24),
@@ -540,7 +539,10 @@ class _ApiProductCard extends StatelessWidget {
               color: Color(product.color),
               borderRadius: BorderRadius.circular(15),
             ),
-            child: Text(product.emoji, style: const TextStyle(fontSize: 52)),
+            child: _ProductArtwork(
+              networkUrl: product.imageUrl,
+              fallbackEmoji: product.emoji,
+            ),
           ),
         ),
         const SizedBox(height: 10),
@@ -621,7 +623,10 @@ class _ProductCard extends StatelessWidget {
                 color: Color(product.color),
                 borderRadius: BorderRadius.circular(15),
               ),
-              child: Text(product.emoji, style: const TextStyle(fontSize: 52)),
+              child: _ProductArtwork(
+                assetPath: product.imageAsset,
+                fallbackEmoji: product.emoji,
+              ),
             ),
           ),
           const SizedBox(height: 10),
@@ -670,4 +675,45 @@ class _ProductCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ProductArtwork extends StatelessWidget {
+  const _ProductArtwork({
+    required this.fallbackEmoji,
+    this.assetPath,
+    this.networkUrl,
+  });
+
+  final String fallbackEmoji;
+  final String? assetPath;
+  final String? networkUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final localAsset = assetPath?.trim();
+    if (localAsset != null && localAsset.isNotEmpty) {
+      return Image.asset(
+        localAsset,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => _fallback(),
+      );
+    }
+
+    final remoteImage = networkUrl?.trim();
+    if (remoteImage != null && remoteImage.isNotEmpty) {
+      return AppNetworkImage(
+        url: remoteImage,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.contain,
+        errorBuilder: (_) => _fallback(),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() =>
+      Center(child: Text(fallbackEmoji, style: const TextStyle(fontSize: 52)));
 }

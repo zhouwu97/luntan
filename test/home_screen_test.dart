@@ -244,6 +244,22 @@ void main() {
     ]);
   });
 
+  testWidgets('首页展示热门帖子入口，圈主只展示推荐、最新和热门', (tester) async {
+    final repository = _PagedHomeFeed([
+      FeedPage(items: [_post('visible')], hasMore: false),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(_homeFor(controller, repository));
+    await tester.pumpAndSettle();
+
+    expect(find.text('推荐'), findsOneWidget);
+    expect(find.text('最新'), findsOneWidget);
+    expect(find.text('热门'), findsOneWidget);
+    expect(find.text('精华'), findsNothing);
+    expect(find.text('热门帖子'), findsOneWidget);
+  });
+
   testWidgets('最新排序下显示按回复与按发帖胶囊，无需登录即可切换', (tester) async {
     final pages = [
       FeedPage(

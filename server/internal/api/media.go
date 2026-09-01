@@ -456,9 +456,9 @@ const mediaPublicVisibilityExpr = `EXISTS (
 		)`
 
 // parseGatewayMediaPath 解析 /api/v1/media-file/{mediaID}/{variant} 受控网关
-// 形态。客户端永远不需要知道内部 object key；首段必须是受控的 media_ 或
-// media- 前缀媒体 ID，避免与 media/{userID}/{mediaID} 形态的历史 objectKey
-// 混淆，同时兼容早期导入数据使用的连字符 ID。
+// 形态。客户端永远不需要知道内部 object key；首段必须是受控的 media_、
+// media- 或榜单导入器使用的 mda- 前缀媒体 ID，避免与
+// media/{userID}/{mediaID} 形态的历史 objectKey 混淆。
 func parseGatewayMediaPath(rest string) (mediaID, variant string, ok bool) {
 	segments := strings.Split(rest, "/")
 	if len(segments) != 2 {
@@ -487,7 +487,8 @@ func isGatewayShapedPath(rest string) bool {
 
 func isGatewayMediaID(id string) bool {
 	return (strings.HasPrefix(id, "media_") && len(id) > len("media_")) ||
-		(strings.HasPrefix(id, "media-") && len(id) > len("media-"))
+		(strings.HasPrefix(id, "media-") && len(id) > len("media-")) ||
+		(strings.HasPrefix(id, "mda-") && len(id) > len("mda-"))
 }
 
 // publicVariantAllowed 实现公开变体白名单：censored 媒体只放行 censored_*
@@ -575,7 +576,7 @@ func (s *Server) serveGatewayMediaVariant(w http.ResponseWriter, r *http.Request
 		FROM media_assets ma
 		JOIN media_variants mv ON mv.media_id = ma.id AND mv.variant = $2 AND mv.status = 'ready'
 		WHERE ma.id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
-		  AND `+mediaPublicVisibilityExpr, mediaID, variant).Scan(&mimeType, &moderationStatus, &objectKey)
+		  AND (`+mediaPublicVisibilityExpr+`)`, mediaID, variant).Scan(&mimeType, &moderationStatus, &objectKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrMediaNotFound)
 		return
@@ -611,7 +612,7 @@ func (s *Server) serveMediaFileGateway(w http.ResponseWriter, r *http.Request, b
 		WHERE ma.status = 'ready' AND ma.deleted_at IS NULL
 		  AND (ma.object_key = $1 OR EXISTS (SELECT 1 FROM media_variants kv
 				WHERE kv.media_id = ma.id AND kv.object_key = $1 AND kv.status = 'ready'))
-		  AND `+mediaPublicVisibilityExpr, objectKey).Scan(&mimeType, &moderationStatus, &variantName, &hasProcessedVariants)
+		  AND (`+mediaPublicVisibilityExpr+`)`, objectKey).Scan(&mimeType, &moderationStatus, &variantName, &hasProcessedVariants)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrMediaNotFound)
 		return

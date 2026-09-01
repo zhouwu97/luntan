@@ -549,6 +549,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasPrefix(path, "/api/v1/media-file/"):
 		s.serveMediaFile(w, r, strings.TrimPrefix(path, "/api/v1/media-file/"))
 		return
+	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasPrefix(path, "/api/v1/store/products/") && strings.HasSuffix(path, "/image"):
+		productID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/store/products/"), "/image")
+		if productID != "" && !strings.Contains(productID, "/") {
+			s.serveStoreProductImage(w, r, productID)
+			return
+		}
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/ranking/toys/") && strings.HasSuffix(path, "/want"):
 		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toys/"), "/want")
 		s.setRankingToyFlag(w, r, toyID, "wanted", true)

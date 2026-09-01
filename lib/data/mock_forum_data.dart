@@ -106,6 +106,7 @@ class StoreProduct {
     required this.emoji,
     required this.points,
     required this.color,
+    this.imageAsset,
   });
 
   final String name;
@@ -113,6 +114,7 @@ class StoreProduct {
   final String emoji;
   final int points;
   final int color;
+  final String? imageAsset;
 }
 
 class ForumStore extends ChangeNotifier {
@@ -857,6 +859,7 @@ const storeProducts = [
     emoji: '🏅',
     points: 60,
     color: 0xFFFFD77A,
+    imageAsset: 'assets/images/store/badge.jpg',
   ),
   StoreProduct(
     name: '论坛纪念立牌',
@@ -864,6 +867,7 @@ const storeProducts = [
     emoji: '🪧',
     points: 300,
     color: 0xFFD9C9F5,
+    imageAsset: 'assets/images/store/standee.jpg',
   ),
   StoreProduct(
     name: '200元杯子盲盒（可许愿）',

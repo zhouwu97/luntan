@@ -94,4 +94,28 @@ void main() {
     expect(products.single.redeemedCount, 42);
     client.close();
   });
+
+  test('StoreRepository maps product image_url served by the API', () async {
+    final client = ApiClient(
+      baseUri: Uri.parse('https://example.com'),
+      client: MockClient(
+        (request) async => request.url.path == '/api/v1/store/products'
+            ? http.Response.bytes(
+                utf8.encode(
+                  '{"items":[{"id":"badge","name":"论坛纪念徽章","description":"纪念品","emoji":"🏅","points":60,"color":16766842,"image_url":"/api/v1/store/products/badge/image","redeemed_count":0}]}',
+                ),
+                200,
+                headers: const {
+                  'content-type': 'application/json; charset=utf-8',
+                },
+              )
+            : http.Response('{}', 200),
+      ),
+    );
+
+    final products = await StoreRepository(client).products();
+
+    expect(products.single.imageUrl, '/api/v1/store/products/badge/image');
+    client.close();
+  });
 }

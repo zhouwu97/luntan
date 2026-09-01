@@ -1191,6 +1191,13 @@ class _FeedToolbar extends StatelessWidget {
   final ValueChanged<FeedSort> onSortChanged;
   final ValueChanged<LatestOrder> onLatestOrderChanged;
 
+  // 圈主内容只展示推荐、最新和热门；精华不再作为公开入口。
+  static const visibleSorts = [
+    FeedSort.recommended,
+    FeedSort.latest,
+    FeedSort.hot,
+  ];
+
   @override
   Widget build(BuildContext context) {
     final showCapsule = selected == FeedSort.latest;
@@ -1204,7 +1211,7 @@ class _FeedToolbar extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
-                children: FeedSort.values
+                children: visibleSorts
                     .map(
                       (sort) => _SortItemButton(
                         sort: sort,

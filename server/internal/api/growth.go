@@ -443,7 +443,16 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 			writeInternalError(w, r, err)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "description": description, "emoji": emoji, "points": points, "color": color, "redeemed_count": redeemedCount})
+		items = append(items, map[string]any{
+			"id":             id,
+			"name":           name,
+			"description":    description,
+			"emoji":          emoji,
+			"points":         points,
+			"color":          color,
+			"image_url":      storeProductImageURL(id),
+			"redeemed_count": redeemedCount,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)

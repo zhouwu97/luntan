@@ -79,6 +79,36 @@ func TestGatewayMediaVariantServesPublicVariantOfPublishedPost(t *testing.T) {
 	}
 }
 
+// 回归：公开性条件包含多个 OR EXISTS，必须整体受 media_id 条件约束。
+// 如果缺少外层括号，PostgreSQL 的 AND 优先级会让其他公开媒体绕过
+// ma.id = $1，导致不同媒体请求都返回同一个任意变体。
+func TestGatewayMediaVariantScopesVisibilityToRequestedMedia(t *testing.T) {
+	s, mock, store := newGatewayTestServer(t, "gateway")
+	key := "media/u-2/media_requested_detail.jpg"
+	payload := []byte("requested-media")
+	if err := store.Put(context.Background(), key, "image/jpeg", bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(`(?s)WHERE ma\.id = \$1.*AND \(EXISTS \(.*OR EXISTS \(.*\)\)`).
+		WithArgs("media_requested", "detail").
+		WillReturnRows(sqlmock.NewRows([]string{"mime_type", "moderation_status", "object_key"}).
+			AddRow("image/jpeg", "normal", key))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media_requested/detail", nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, "media_requested/detail")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), payload) {
+		t.Fatalf("body mismatch: %q", rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
 func TestGatewayMediaVariantRejectsPendingPost(t *testing.T) {
 	s, mock, _ := newGatewayTestServer(t, "gateway")
 	mock.ExpectQuery(`(?s)SELECT ma\.mime_type.*JOIN media_variants mv.*p\.moderation_status = 'normal'`).
@@ -478,6 +508,7 @@ func TestParseGatewayMediaPath(t *testing.T) {
 		{"media_abc123/detail", "media_abc123", "detail", true},
 		{"media_abc123/censored_thumb", "media_abc123", "censored_thumb", true},
 		{"media-import-7715-0/thumb", "media-import-7715-0", "thumb", true},
+		{"mda-6ed519e20612b852cb88cf22/detail", "mda-6ed519e20612b852cb88cf22", "detail", true},
 		{"media_abc123/evil", "", "", false},
 		{"media/user-1/media-1", "", "", false},
 		{"imported-media/post.webp", "", "", false},

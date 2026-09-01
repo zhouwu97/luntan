@@ -18,35 +18,45 @@ void main() {
     expect(script, contains('https://shengbeijiang.com'));
   });
 
-  test('Android 应用必须使用独立的自适应自定义图标资源', () {
+  test('Android 应用必须使用 flutter_launcher_icons 生成的统一图标', () {
     final manifest =
         File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
     final adaptiveIcon = File(
-      'android/app/src/main/res/mipmap-anydpi-v26/luntan_launcher.xml',
+      'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
     );
-    final foreground = File(
-      'android/app/src/main/res/drawable-nodpi/luntan_launcher_foreground.png',
+    final colorsXml = File(
+      'android/app/src/main/res/values/colors.xml',
     );
 
-    expect(manifest, contains('android:icon="@mipmap/luntan_launcher"'));
-    expect(
-      manifest,
-      contains('android:roundIcon="@mipmap/luntan_launcher"'),
-    );
-    expect(manifest, isNot(contains('@mipmap/ic_launcher')));
+    expect(manifest, contains('android:icon="@mipmap/ic_launcher"'));
+    expect(manifest, contains('android:roundIcon="@mipmap/ic_launcher"'));
     expect(adaptiveIcon.existsSync(), isTrue);
-    expect(foreground.existsSync(), isTrue);
+    expect(colorsXml.existsSync(), isTrue);
+
+    final adaptiveContent = adaptiveIcon.readAsStringSync();
     expect(
-      adaptiveIcon.readAsStringSync(),
-      contains('android:drawable="@drawable/luntan_launcher_foreground"'),
+      adaptiveContent,
+      contains('android:drawable="@drawable/ic_launcher_foreground"'),
     );
+    expect(
+      adaptiveContent,
+      contains('android:drawable="@color/ic_launcher_background"'),
+    );
+
     for (final density in ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
       expect(
         File(
-          'android/app/src/main/res/mipmap-$density/luntan_launcher.png',
+          'android/app/src/main/res/mipmap-$density/ic_launcher.png',
         ).existsSync(),
         isTrue,
-        reason: '$density 必须保留旧系统的自定义图标回退资源',
+        reason: '$density 必须有 ic_launcher 回退资源',
+      );
+      expect(
+        File(
+          'android/app/src/main/res/drawable-$density/ic_launcher_foreground.png',
+        ).existsSync(),
+        isTrue,
+        reason: '$density 必须有前景层资源',
       );
     }
 
@@ -58,9 +68,9 @@ void main() {
       expect(
         styles,
         contains(
-          'android:windowSplashScreenAnimatedIcon">@drawable/luntan_launcher_foreground',
+          'android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground',
         ),
-        reason: '$path 必须覆盖 Android 12+ 的系统启动图标',
+        reason: '$path 必须使用统一的前景层图标',
       );
     }
   });

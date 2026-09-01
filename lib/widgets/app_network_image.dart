@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 /// 媒体 URL 的基准地址，由启动流程注入 API base。
@@ -77,16 +78,19 @@ class UserAvatarCache {
 /// 网络图片的统一封装。
 ///
 /// - 基于 [CachedNetworkImage] 提供跨重启缓存（Android/iOS 有磁盘缓存；
-///   Web 平台依赖 Flutter ImageCache + 浏览器 HTTP 缓存）；
+///   Web 平台使用 [Image.network]，依赖 Flutter ImageCache + 浏览器 HTTP 缓存）；
 /// - 自动按布局约束 × DPR 计算解码宽度（`memCacheWidth`），列表滚动时
 ///   不再把原图解码成整幅位图；
 /// - 统一占位与错误回退，URL 为空或非法时直接展示回退而不是抛异常。
 ///
 /// **Web 平台注意事项**：
-/// - `cached_network_image` 在 Web 上没有自己的持久化缓存层；
-/// - 图片缓存完全依赖：Flutter 内存 ImageCache + 浏览器 HTTP 缓存；
-/// - 页面路由切换可能导致 Widget 树重建，如果图片从 ImageCache 被淘汰
-///   且浏览器缓存策略不理想，会重新请求图片；
+/// - `cached_network_image` 的 Web 实现对 CanvasKit 路由重建的支持较弱，
+///   重新挂载时可能留下已完成但未绘制的黑色画布；
+/// - Web 改用 Flutter 原生 [Image.network]，让 NetworkImage 和浏览器直接
+///   管理同一个 URL 的加载/缓存状态，避免 CachedNetworkImage Web 分支的
+///   解码器状态与列表元素生命周期错位；
+/// - Web 不再传递 `cacheWidth`/`cacheHeight`，Feed/详情已经通过 thumb/detail
+///   变体控制传输尺寸，避免同一 URL 因不同解码尺寸产生不稳定的缓存键；
 /// - 服务端应该为媒体响应设置合理的 Cache-Control/ETag 头。
 class AppNetworkImage extends StatelessWidget {
   const AppNetworkImage({
@@ -172,6 +176,46 @@ class AppNetworkImage extends StatelessWidget {
           }
         }
 
+        Widget defaultPlaceholder() => const ColoredBox(
+          color: Color(0xFFF4F6F9),
+          child: SizedBox.expand(),
+        );
+
+        Widget defaultError() => const ColoredBox(
+          color: Color(0xFFF4F6F9),
+          child: SizedBox.expand(
+            child: FittedBox(
+              fit: BoxFit.none,
+              child: Icon(
+                Icons.broken_image_outlined,
+                size: 24,
+                color: Color(0xFFB9C0CC),
+              ),
+            ),
+          ),
+        );
+
+        if (kIsWeb) {
+          // Web 端使用原生 NetworkImage。媒体 URL 已按展示场景选择
+          // thumb/detail 变体，因此这里不再附加解码尺寸，避免 CanvasKit
+          // 在详情进出后复用不同 ResizeImage 状态而不重绘。
+          return Image.network(
+            resolved,
+            width: width,
+            height: height,
+            fit: fit,
+            alignment: alignment,
+            gaplessPlayback: true,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return placeholder?.call(context) ?? defaultPlaceholder();
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return errorBuilder?.call(context) ?? defaultError();
+            },
+          );
+        }
+
         return CachedNetworkImage(
           imageUrl: resolved,
           width: width,
@@ -183,25 +227,10 @@ class AppNetworkImage extends StatelessWidget {
           memCacheHeight: autoHeight,
           placeholder: placeholder != null
               ? (context, _) => placeholder!(context)
-              : (context, _) => const ColoredBox(
-                  color: Color(0xFFF4F6F9),
-                  child: SizedBox.expand(),
-                ),
+              : (context, _) => defaultPlaceholder(),
           errorWidget: errorBuilder != null
               ? (context, _, _) => errorBuilder!(context)
-              : (context, _, _) => const ColoredBox(
-                  color: Color(0xFFF4F6F9),
-                  child: SizedBox.expand(
-                    child: FittedBox(
-                      fit: BoxFit.none,
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        size: 24,
-                        color: Color(0xFFB9C0CC),
-                      ),
-                    ),
-                  ),
-                ),
+              : (context, _, _) => defaultError(),
         );
       },
     );

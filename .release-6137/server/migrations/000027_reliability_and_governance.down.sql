@@ -1,0 +1,12 @@
+ALTER TABLE admin_logs DROP COLUMN IF EXISTS ip_address;
+ALTER TABLE ip_restrictions DROP COLUMN IF EXISTS revoked_by;
+ALTER TABLE ip_restrictions DROP COLUMN IF EXISTS created_by;
+ALTER TABLE ip_restrictions DROP COLUMN IF EXISTS restriction_type;
+DROP INDEX IF EXISTS ip_restrictions_active_idx;
+DROP TABLE IF EXISTS ip_restrictions;
+DROP INDEX IF EXISTS email_codes_status_lookup_idx;
+ALTER TABLE email_codes DROP CONSTRAINT IF EXISTS email_codes_status_check;
+ALTER TABLE email_codes DROP COLUMN IF EXISTS failure_reason;
+ALTER TABLE email_codes DROP COLUMN IF EXISTS verified_at;
+ALTER TABLE email_codes DROP COLUMN IF EXISTS sent_at;
+ALTER TABLE email_codes DROP COLUMN IF EXISTS status;

@@ -4,6 +4,7 @@ import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_motion.dart';
+import '../widgets/admin_media_preview.dart';
 
 class ModerationConsoleScreen extends StatefulWidget {
   const ModerationConsoleScreen({
@@ -53,6 +54,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
     final request = ++generation;
     setState(() {
       loading = true;
+      // 取消上一筛选条件下尚未完成的分页请求。旧请求返回时会因
+      // generation 不一致被丢弃，不能把新筛选条件永久留在 loadingMore。
+      loadingMore = false;
       error = null;
       items.clear();
       nextCursor = null;
@@ -60,7 +64,10 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       loadMoreError = null;
     });
     try {
-      final page = await widget.repository.listModerationCases(status: status);
+      final page = await widget.repository.listModerationCases(
+        status: status,
+        source: sourceFilter,
+      );
       if (!mounted || request != generation) return;
       setState(() {
         items.addAll(page.items);
@@ -87,6 +94,7 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
     try {
       final page = await widget.repository.listModerationCases(
         status: status,
+        source: sourceFilter,
         cursor: cursor,
       );
       if (!mounted || request != generation) return;
@@ -110,8 +118,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
   }
 
   List<ModerationCase> get _filteredItems {
-    if (sourceFilter == null || sourceFilter!.isEmpty) return items;
-    return items.where((item) => item.source == sourceFilter).toList();
+    // 来源筛选已经由服务端在 cursor/limit 之前完成；这里不再对当前页
+    // 做 where，避免把后续页面中的案件伪装成空结果。
+    return items;
   }
 
   Future<void> _action(ModerationCase item) async {
@@ -132,7 +141,11 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                 padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                 child: Text(
                   '选择处置动作',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppTheme.textPrimary),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
               ),
               const SizedBox(height: 4),
@@ -154,7 +167,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                       decoration: BoxDecoration(
                         color: value == 'delete' || value == 'ban'
                             ? AppTheme.softRose
-                            : (value == 'mute' ? AppTheme.softAmber : AppTheme.softBlue),
+                            : (value == 'mute'
+                                  ? AppTheme.softAmber
+                                  : AppTheme.softBlue),
                         borderRadius: BorderRadius.circular(11),
                       ),
                       alignment: Alignment.center,
@@ -168,7 +183,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                             : Icons.visibility_outlined,
                         color: value == 'delete' || value == 'ban'
                             ? AppTheme.pink
-                            : (value == 'mute' ? AppTheme.orange : AppTheme.primary),
+                            : (value == 'mute'
+                                  ? AppTheme.orange
+                                  : AppTheme.primary),
                         size: 20,
                       ),
                     ),
@@ -180,9 +197,16 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                         'ban' => '封禁账号（限制全站登录）',
                         _ => '删除违规内容（永久清理）',
                       },
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF8FA3B8), size: 18),
+                    trailing: const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Color(0xFF8FA3B8),
+                      size: 18,
+                    ),
                     onTap: () => Navigator.pop(context, value),
                   ),
                 ),
@@ -207,8 +231,13 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
           await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Text('确认删除内容？', style: TextStyle(fontWeight: FontWeight.w800)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: const Text(
+                '确认删除内容？',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
               content: const Text('删除后内容将不再公开显示，此操作需要记录审核理由。'),
               actions: [
                 TextButton(
@@ -243,7 +272,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
     } catch (cause) {
       if (mounted) {
         final msg = userFacingApiMessage(cause, fallback: '审核操作失败');
-        if (msg.contains('conflict') || msg.contains('409') || msg.contains('已处理')) {
+        if (msg.contains('conflict') ||
+            msg.contains('409') ||
+            msg.contains('已处理')) {
           widget.onFeedback('该案件已由其他管理员处理，列表已自动刷新');
           _load();
         } else {
@@ -260,8 +291,13 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('选择禁言时间', style: TextStyle(fontWeight: FontWeight.w800)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            '选择禁言时间',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -374,12 +410,20 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                 const SizedBox(height: 4),
                 Text(
                   '案件编号：${detail.id} · ${_formatSource(detail.source)}',
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11.5, fontFamily: 'monospace'),
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11.5,
+                    fontFamily: 'monospace',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 const Text(
                   '被举报内容',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.textPrimary),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Container(
@@ -395,26 +439,71 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                       if (_detailText(detail.target, 'title') != '—') ...[
                         Text(
                           _detailText(detail.target, 'title'),
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
                         ),
                         const SizedBox(height: 6),
                       ],
                       Text(
                         _detailText(detail.target, 'content'),
-                        style: const TextStyle(height: 1.5, fontSize: 13, color: AppTheme.textPrimary),
+                        style: const TextStyle(
+                          height: 1.5,
+                          fontSize: 13,
+                          color: AppTheme.textPrimary,
+                        ),
                       ),
                     ],
                   ),
                 ),
+                if (detail.media.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    '图片证据（${detail.media.length}）',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final media in detail.media)
+                        AdminMediaPreview(
+                          repository: widget.repository,
+                          media: media,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    '图片通过管理员私有预览加载，不使用公开媒体网关。',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Text(
                   '作者：${_detailText(detail.target, 'author_name')} · 社区：${detail.communityId.isEmpty ? '平台全域' : detail.communityId}',
-                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11.5),
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11.5,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 const Text(
                   '举报信息',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.textPrimary),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: AppTheme.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Container(
@@ -426,14 +515,22 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                   padding: const EdgeInsets.all(12),
                   child: Text(
                     '举报人数：${_detailText(detail.report, 'count')} 次\n举报理由：${_detailText(detail.report, 'reasons')}',
-                    style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppTheme.textSecondary),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      height: 1.4,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ),
                 if (detail.account.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   const Text(
                     '账号情况',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppTheme.textPrimary),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      color: AppTheme.textPrimary,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Container(
@@ -445,7 +542,11 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                     padding: const EdgeInsets.all(12),
                     child: Text(
                       '账号状态：${_detailText(detail.account, 'status')}\n历史处罚：${_detailText(detail.account, 'punishment_count')} 次\n近期被举报：${_detailText(detail.account, 'report_count')} 次',
-                      style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppTheme.textSecondary),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.4,
+                        color: AppTheme.textSecondary,
+                      ),
                     ),
                   ),
                 ],
@@ -460,7 +561,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                     label: const Text('执行处置动作'),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
               ],
@@ -490,8 +593,13 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(action == 'restore' ? '填写恢复理由' : '填写审核处置理由', style: const TextStyle(fontWeight: FontWeight.w800)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text(
+            action == 'restore' ? '填写恢复理由' : '填写审核处置理由',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -597,16 +705,14 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                 const SizedBox(width: 14),
                 _buildSourceChip('全部来源', null),
                 const SizedBox(width: 8),
-                _buildSourceChip('用户举报', 'report'),
+                _buildSourceChip('用户举报', 'user_report'),
                 const SizedBox(width: 8),
-                _buildSourceChip('自动规则', 'auto'),
+                _buildSourceChip('自动规则', 'auto_rule'),
               ],
             ),
           ),
 
-          Expanded(
-            child: _buildBody(displayItems),
-          ),
+          Expanded(child: _buildBody(displayItems)),
         ],
       ),
     );
@@ -627,7 +733,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
           color: isSelected ? AppTheme.softBlue : Colors.white,
           borderRadius: BorderRadius.circular(11),
           border: Border.all(
-            color: isSelected ? const Color(0xFFD7E6FF) : const Color(0xFFD4DFE9),
+            color: isSelected
+                ? const Color(0xFFD7E6FF)
+                : const Color(0xFFD4DFE9),
           ),
         ),
         child: Text(
@@ -635,7 +743,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-            color: isSelected ? const Color(0xFF3E78CC) : const Color(0xFF6B8197),
+            color: isSelected
+                ? const Color(0xFF3E78CC)
+                : const Color(0xFF6B8197),
           ),
         ),
       ),
@@ -645,7 +755,11 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
   Widget _buildSourceChip(String label, String? value) {
     final isSelected = sourceFilter == value;
     return GestureDetector(
-      onTap: () => setState(() => sourceFilter = value),
+      onTap: () {
+        if (sourceFilter == value) return;
+        setState(() => sourceFilter = value);
+        _load();
+      },
       child: AnimatedContainer(
         duration: AppMotion.fast,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6.5),
@@ -653,7 +767,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
           color: isSelected ? const Color(0xFFEDF8F5) : Colors.white,
           borderRadius: BorderRadius.circular(11),
           border: Border.all(
-            color: isSelected ? const Color(0xFFD0EFE6) : const Color(0xFFD4DFE9),
+            color: isSelected
+                ? const Color(0xFFD0EFE6)
+                : const Color(0xFFD4DFE9),
           ),
         ),
         child: Text(
@@ -661,7 +777,9 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-            color: isSelected ? const Color(0xFF2C8C77) : const Color(0xFF6B8197),
+            color: isSelected
+                ? const Color(0xFF2C8C77)
+                : const Color(0xFF6B8197),
           ),
         ),
       ),
@@ -691,9 +809,17 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
               const Spacer(),
               Row(
                 children: [
-                  Container(height: 18, width: 60, color: const Color(0xFFEAF0F6)),
+                  Container(
+                    height: 18,
+                    width: 60,
+                    color: const Color(0xFFEAF0F6),
+                  ),
                   const SizedBox(width: 8),
-                  Container(height: 18, width: 60, color: const Color(0xFFEAF0F6)),
+                  Container(
+                    height: 18,
+                    width: 60,
+                    color: const Color(0xFFEAF0F6),
+                  ),
                 ],
               ),
             ],
@@ -706,14 +832,18 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
-            const SizedBox(height: 10),
-            const Text('加载案件失败', style: TextStyle(color: AppTheme.pink, fontSize: 13)),
-            const SizedBox(height: 12),
-            FilledButton.tonal(
-              onPressed: _load,
-              child: const Text('重新加载'),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 36,
+              color: AppTheme.textSecondary,
             ),
+            const SizedBox(height: 10),
+            const Text(
+              '加载案件失败',
+              style: TextStyle(color: AppTheme.pink, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonal(onPressed: _load, child: const Text('重新加载')),
           ],
         ),
       );
@@ -736,7 +866,11 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.verified_user_outlined, size: 28, color: Color(0xFF6B8299)),
+                    child: const Icon(
+                      Icons.verified_user_outlined,
+                      size: 28,
+                      color: Color(0xFF6B8299),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   const Text(
@@ -750,7 +884,10 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
                   const SizedBox(height: 4),
                   const Text(
                     '当前分类下没有待处理或符合筛选的案件',
-                    style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -769,14 +906,22 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
         },
         child: ListView.separated(
           padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
-          itemCount: displayItems.length + (loadingMore || loadMoreError != null ? 1 : 0),
+          itemCount:
+              displayItems.length +
+              (loadingMore || loadMoreError != null ? 1 : 0),
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, index) {
             if (index >= displayItems.length) {
               return loadingMore
                   ? const Padding(
                       padding: EdgeInsets.all(16),
-                      child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
                     )
                   : Center(
                       child: TextButton(
@@ -922,7 +1067,11 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color),
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
       ),
     );
   }
@@ -937,7 +1086,11 @@ class _ModerationConsoleScreenState extends State<ModerationConsoleScreen> {
       ),
       child: Text(
         label,
-        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF637B92)),
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF637B92),
+        ),
       ),
     );
   }

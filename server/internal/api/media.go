@@ -805,6 +805,96 @@ func (s *Server) getAdminMediaSource(w http.ResponseWriter, r *http.Request, med
 	_, _ = io.Copy(w, rc)
 }
 
+// getAdminMediaPreview 返回审核员查看内容所需的编码预览字节。
+//
+// 公开媒体网关会按帖子/评论可见性拒绝 pending、hidden 等内容，因此审核
+// 页面不能拿 /media-file/{id}/detail 作为待审核证据。这里在管理员权限
+// 校验后优先读取受控 detail 变体；打码媒体只允许读取 censored_* 变体，
+// 缺失时才回退源对象。整个响应不进入公共缓存。
+func (s *Server) getAdminMediaPreview(w http.ResponseWriter, r *http.Request, mediaID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.canModerate(r, user) {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+
+	var objectKey, mimeType, moderationStatus string
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(preferred.object_key, ma.object_key), ma.mime_type,
+		       COALESCE(ma.moderation_status, 'normal')
+		FROM media_assets ma
+		LEFT JOIN LATERAL (
+			SELECT mv.object_key
+			FROM media_variants mv
+			WHERE mv.media_id = ma.id AND mv.status = 'ready'
+			  AND (
+				(COALESCE(ma.moderation_status, 'normal') = 'censored'
+				 AND mv.variant IN ('censored_detail', 'censored_thumb', 'censored_original'))
+				OR
+				(COALESCE(ma.moderation_status, 'normal') <> 'censored'
+				 AND mv.variant IN ('detail', 'thumb', 'original'))
+			  )
+			ORDER BY CASE mv.variant
+				WHEN 'censored_detail' THEN 1
+				WHEN 'detail' THEN 1
+				WHEN 'censored_thumb' THEN 2
+				WHEN 'thumb' THEN 2
+				WHEN 'censored_original' THEN 3
+				WHEN 'original' THEN 3
+				ELSE 4
+			END
+			LIMIT 1
+		) preferred ON true
+		WHERE ma.id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL`, mediaID).
+		Scan(&objectKey, &mimeType, &moderationStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	backend := s.mediaStorage
+	if backend == nil {
+		writeAuthError(w, r, ErrStorageUnavailable)
+		return
+	}
+	rc, size, contentType, err := backend.Get(r.Context(), objectKey)
+	if err != nil {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	defer rc.Close()
+
+	// moderationStatus is intentionally read even though all variants here are
+	// private; retaining the value makes the fail-closed policy explicit and
+	// prevents a future refactor from treating this as a public media response.
+	_ = moderationStatus
+	w.Header().Set("Cache-Control", "private, no-store")
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	} else if mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
+	}
+	if rs, ok := rc.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	if r.Method == http.MethodHead {
+		return
+	}
+	_, _ = io.Copy(w, rc)
+}
+
 type moderateMediaInput struct {
 	ModerationStatus string             `json:"moderation_status"` // "censored" or "normal"
 	MaskRegions      []media.MaskRegion `json:"mask_regions"`

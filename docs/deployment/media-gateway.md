@@ -18,7 +18,15 @@
      );
    ```
 
-   `pending_backfill` 必须为 0，且 `outbox_events` 中同类事件的 `failed` 数量必须为 0。
+   `pending_backfill` 必须为 0，且 `outbox_events` 中 `media.process` 与
+   `media.delete` 两类事件的 `failed` 数量都必须为 0：
+
+   ```sql
+   SELECT event_type, count(*) AS failed_events
+   FROM outbox_events
+   WHERE event_type IN ('media.process', 'media.delete') AND status = 'failed'
+   GROUP BY event_type;
+   ```
 
    QA 使用本地磁盘时，`MEDIA_STORAGE_DIR` 通常指向 `.../imported-media/user-media`。
    历史 `object_key` 若是 `http(s)://旧域名/imported-media/...`，服务会仅按固定
@@ -26,6 +34,10 @@
 3. `STORAGE_INTERNAL_BASE_URL` 只解析到服务端可访问的内网源站，不向浏览器、客户端或公网 DNS 暴露。
 4. 若设置 `MEDIA_INTERNAL_ACCEL_PREFIX`，Nginx 的对应 location 必须带 `internal`；公网只能进入 `/api/v1/media-file/`，不能直接进入该前缀。
 5. 修改 ACL 后清理 CDN 与浏览器缓存，并用匿名请求分别验证源图、旧 object key、普通变体和 `censored_*` 变体。
+   打码媒体的 `/api/v1/media-file/{id}/original` 必须对普通用户和管理员都拒绝；
+   管理员源图只能通过带 JWT 的 `/api/v1/admin/media/{id}/source` 获取，审核证据
+   预览使用 `/api/v1/admin/media/{id}/preview`，二者都必须返回
+   `Cache-Control: private, no-store`。
 
 下面是使用 Nginx 代理内网对象存储的最小模板。请替换 upstream、TLS 和鉴权细节，不要把 `object-storage-internal` 指向公网地址：
 

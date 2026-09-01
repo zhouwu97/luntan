@@ -13,6 +13,10 @@
 .PARAMETER DatabaseUrl
 生产数据库连接串（仅用于验证查询）
 
+.PARAMETER SmtpProbeEmail
+已验证的生产邮箱地址。脚本会通过真实验证码接口发送一次探测邮件，
+用于确认 SMTP 投递链路，而不是只确认接口能返回参数错误。
+
 .PARAMETER SkipMediaValidation
 跳过媒体私有化验证（仅用于测试脚本本身）
 
@@ -26,6 +30,9 @@ param(
 
     [Parameter(Mandatory=$false)]
     [string]$DatabaseUrl = $env:DATABASE_URL,
+
+    [Parameter(Mandatory=$false)]
+    [string]$SmtpProbeEmail = $env:PRODUCTION_ACCEPTANCE_EMAIL,
 
     [Parameter(Mandatory=$false)]
     [switch]$SkipMediaValidation = $false
@@ -68,19 +75,37 @@ function Write-CheckResult {
 function Test-HttpEndpoint {
     param(
         [string]$Url,
+        [string]$Method = 'GET',
         [int]$ExpectedStatus = 200,
-        [hashtable]$Headers = @{}
+        [hashtable]$Headers = @{},
+        [string]$Body = $null,
+        [string]$ContentType = 'application/json'
     )
 
     try {
-        $response = Invoke-WebRequest -Uri $Url -Method Get -Headers $Headers -SkipHttpErrorCheck -TimeoutSec 10
+        $requestOptions = @{
+            Uri = $Url
+            Method = $Method
+            Headers = $Headers
+            SkipHttpErrorCheck = $true
+            MaximumRedirection = 0
+            TimeoutSec = 10
+        }
+        if ($null -ne $Body) {
+            $requestOptions.Body = $Body
+            $requestOptions.ContentType = $ContentType
+        }
+        $response = Invoke-WebRequest @requestOptions
         return @{
+            Reachable = $true
             Success = ($response.StatusCode -eq $ExpectedStatus)
             StatusCode = $response.StatusCode
-            Content = $response.Content
+            Content = [string]$response.Content
+            Location = $response.Headers['Location']
         }
     } catch {
         return @{
+            Reachable = $false
             Success = $false
             Error = $_.Exception.Message
         }
@@ -135,14 +160,14 @@ if ($readyCheck.Success) {
     Write-CheckResult "API 就绪检查" "Fail" "服务未就绪"
 }
 
-# 1.3 版本信息
-Write-Host "获取 API 版本..." -ForegroundColor Gray
-$versionCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/version"
+# 1.3 发布版本信息
+Write-Host "获取当前发布版本..." -ForegroundColor Gray
+$versionCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/releases/latest"
 if ($versionCheck.Success) {
-    Write-CheckResult "API 版本信息" "Pass" "版本信息可访问"
+    Write-CheckResult "API 版本信息" "Pass" "发布清单可访问"
     Write-Host "  版本详情: $($versionCheck.Content)" -ForegroundColor DarkGray
 } else {
-    Write-CheckResult "API 版本信息" "Warning" "无法获取版本信息"
+    Write-CheckResult "API 版本信息" "Fail" "无法获取发布清单（状态: $($versionCheck.StatusCode)）"
 }
 
 # ============================================
@@ -183,7 +208,7 @@ WHERE ma.status = 'ready' AND ma.deleted_at IS NULL AND ma.mime_type LIKE 'image
     $outboxQuery = @"
 SELECT count(*) AS failed_events
 FROM outbox_events
-WHERE event_type = 'media.process' AND status = 'failed';
+WHERE event_type IN ('media.process', 'media.delete') AND status = 'failed';
 "@
 
     try {
@@ -194,7 +219,7 @@ WHERE event_type = 'media.process' AND status = 'failed';
             Write-CheckResult "Outbox 失败事件" "Fail" "failed_events = $failedEvents"
         }
     } catch {
-        Write-CheckResult "Outbox 失败事件" "Warning" "无法查询: $_"
+        Write-CheckResult "Outbox 失败事件" "Fail" "无法查询数据库: $_"
     }
 
     # 2.3 旧媒体路径应返回 404
@@ -222,7 +247,25 @@ WHERE event_type = 'media.process' AND status = 'failed';
     $mediaIdQuery = @"
 SELECT m.id
 FROM media_assets m
-WHERE m.status = 'ready' AND m.deleted_at IS NULL
+WHERE m.status = 'ready' AND m.deleted_at IS NULL AND m.mime_type LIKE 'image/%'
+  AND EXISTS (
+      SELECT 1 FROM media_variants mv
+      WHERE mv.media_id = m.id AND mv.variant = 'thumb' AND mv.status = 'ready'
+  )
+  AND (
+      EXISTS (
+          SELECT 1 FROM post_media pm
+          JOIN posts p ON p.id = pm.post_id
+          WHERE pm.media_id = m.id AND p.deleted_at IS NULL
+            AND p.publication_status = 'published' AND p.moderation_status = 'normal'
+      ) OR EXISTS (
+          SELECT 1 FROM comment_media cm
+          JOIN comments c ON c.id = cm.comment_id
+          WHERE cm.media_id = m.id AND c.deleted_at IS NULL
+            AND c.publication_status = 'published' AND c.moderation_status = 'normal'
+      )
+  )
+ORDER BY m.created_at DESC, m.id DESC
 LIMIT 1;
 "@
 
@@ -233,13 +276,13 @@ LIMIT 1;
             if ($mediaGatewayCheck.Success) {
                 Write-CheckResult "媒体网关端点" "Pass" "可通过网关访问媒体"
             } else {
-                Write-CheckResult "媒体网关端点" "Warning" "网关返回状态: $($mediaGatewayCheck.StatusCode)"
+                Write-CheckResult "媒体网关端点" "Fail" "网关返回状态: $($mediaGatewayCheck.StatusCode)"
             }
         } else {
-            Write-CheckResult "媒体网关端点" "Warning" "无可用媒体进行测试"
+            Write-CheckResult "媒体网关端点" "Fail" "没有可用于匿名网关验收的公开 ready 媒体"
         }
     } catch {
-        Write-CheckResult "媒体网关端点" "Warning" "无法测试: $_"
+        Write-CheckResult "媒体网关端点" "Fail" "无法查询或测试: $_"
     }
 
 } else {
@@ -255,10 +298,10 @@ Write-Header "3. 安全配置验证"
 # 3.1 HTTPS 强制
 Write-Host "检查 HTTPS 强制..." -ForegroundColor Gray
 $httpCheck = Test-HttpEndpoint -Url "http://$ServerHost/health"
-if ($httpCheck.Success -and $httpCheck.StatusCode -in @(301, 302, 307, 308)) {
-    Write-CheckResult "HTTPS 重定向" "Pass" "HTTP 请求被重定向到 HTTPS"
-} elseif ($httpCheck.Success -and $httpCheck.StatusCode -eq 200) {
-    Write-CheckResult "HTTPS 重定向" "Warning" "HTTP 请求未重定向，建议启用 HTTPS 强制"
+if ($httpCheck.Reachable -and $httpCheck.StatusCode -in @(301, 302, 307, 308) -and $httpCheck.Location -match '^https://') {
+    Write-CheckResult "HTTPS 重定向" "Pass" "HTTP 请求收到原始 $($httpCheck.StatusCode) 并重定向到 HTTPS"
+} elseif ($httpCheck.Reachable) {
+    Write-CheckResult "HTTPS 重定向" "Fail" "HTTP 请求未严格重定向到 HTTPS（状态: $($httpCheck.StatusCode)，Location: $($httpCheck.Location)）"
 } else {
     Write-CheckResult "HTTPS 重定向" "Pass" "HTTP 端口不可访问（已关闭）"
 }
@@ -287,42 +330,53 @@ if ($adminCheck.StatusCode -eq 401) {
 
 Write-Header "4. APK 更新链路验证"
 
-# 4.1 检查更新 API
-Write-Host "检查 APK 更新 API..." -ForegroundColor Gray
-$updateApiCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/android/check-update"
-if ($updateApiCheck.Success) {
-    Write-CheckResult "APK 更新 API" "Pass" "更新 API 可访问"
+# 4.1 检查与服务端实际路由一致的发布接口
+Write-Host "检查 APK 发布清单和更新 API..." -ForegroundColor Gray
+$latestReleaseCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/releases/latest"
+$updateApiCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/app/update?platform=android&channel=stable&version_name=0.0.1&version_code=1"
+if ($latestReleaseCheck.Success -and $updateApiCheck.Success) {
+    Write-CheckResult "APK 更新 API" "Pass" "发布清单与更新接口均可访问"
 
-    # 解析响应检查下载 URL
     try {
+        $releaseInfo = $latestReleaseCheck.Content | ConvertFrom-Json
         $updateInfo = $updateApiCheck.Content | ConvertFrom-Json
-        if ($updateInfo.download_url) {
-            $downloadUrl = $updateInfo.download_url
-            Write-Host "  下载 URL: $downloadUrl" -ForegroundColor DarkGray
+        $downloadUrl = [string]$releaseInfo.download_url
+        if (-not $downloadUrl) {
+            $downloadUrl = [string]$updateInfo.download_url
+        }
+        if (-not $downloadUrl) {
+            throw "响应未返回 download_url"
+        }
+        Write-Host "  下载 URL: $downloadUrl" -ForegroundColor DarkGray
 
-            # 检查下载 URL 是否使用 HTTPS
-            if ($downloadUrl -match '^https://') {
-                Write-CheckResult "APK 下载 HTTPS" "Pass" "下载 URL 使用 HTTPS"
-            } else {
-                Write-CheckResult "APK 下载 HTTPS" "Fail" "下载 URL 未使用 HTTPS"
-            }
-
-            # 检查下载 URL 域名白名单
-            $allowedHosts = @('download.shengbeijiang.com', 'github.com', 'ghcr.io')
-            $urlHost = ([System.Uri]$downloadUrl).Host
-            if ($urlHost -in $allowedHosts) {
-                Write-CheckResult "APK 下载域名" "Pass" "下载域名在白名单中: $urlHost"
-            } else {
-                Write-CheckResult "APK 下载域名" "Warning" "下载域名 $urlHost 不在预期白名单中"
-            }
+        try {
+            $downloadUri = [System.Uri]$downloadUrl
+        } catch {
+            throw "download_url 不是有效 URL"
+        }
+        if ($downloadUri.Scheme -eq 'https') {
+            Write-CheckResult "APK 下载 HTTPS" "Pass" "下载 URL 使用 HTTPS"
         } else {
-            Write-CheckResult "APK 下载配置" "Warning" "更新 API 未返回 download_url"
+            Write-CheckResult "APK 下载 HTTPS" "Fail" "下载 URL 未使用 HTTPS"
+        }
+
+        $configuredDownloadHosts = $env:PRODUCTION_ALLOWED_DOWNLOAD_HOSTS
+        $allowedHosts = if ($configuredDownloadHosts) {
+            $configuredDownloadHosts.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ }
+        } else {
+            @('download.shengbeijiang.com')
+        }
+        $urlHost = $downloadUri.Host.ToLowerInvariant()
+        if ($downloadUri.Scheme -eq 'https' -and $urlHost -in $allowedHosts) {
+            Write-CheckResult "APK 下载域名" "Pass" "下载域名在白名单中: $urlHost"
+        } else {
+            Write-CheckResult "APK 下载域名" "Fail" "下载域名 $urlHost 不在生产白名单中"
         }
     } catch {
-        Write-CheckResult "APK 更新响应解析" "Warning" "无法解析更新 API 响应"
+        Write-CheckResult "APK 更新响应解析" "Fail" "无法解析完整发布响应: $_"
     }
 } else {
-    Write-CheckResult "APK 更新 API" "Fail" "更新 API 不可访问"
+    Write-CheckResult "APK 更新 API" "Fail" "发布清单或更新 API 不可访问（latest=$($latestReleaseCheck.StatusCode), update=$($updateApiCheck.StatusCode)）"
 }
 
 # ============================================
@@ -334,7 +388,7 @@ Write-Header "5. 数据库迁移状态"
 Write-Host "检查数据库迁移状态..." -ForegroundColor Gray
 
 $migrationQuery = @"
-SELECT version, dirty
+SELECT version || '|' || CASE WHEN dirty THEN 't' ELSE 'f' END
 FROM schema_migrations
 ORDER BY version DESC
 LIMIT 1;
@@ -344,6 +398,9 @@ try {
     $migrationStatus = Test-DatabaseQuery -Query $migrationQuery -ConnectionString $DatabaseUrl
     if ($migrationStatus) {
         $parts = $migrationStatus -split '\|'
+        if ($parts.Count -ne 2) {
+            throw "迁移状态格式无效: $migrationStatus"
+        }
         $version = $parts[0].Trim()
         $dirty = $parts[1].Trim()
 
@@ -353,30 +410,44 @@ try {
             Write-CheckResult "数据库迁移" "Fail" "迁移状态 dirty=true，需要修复"
         }
     } else {
-        Write-CheckResult "数据库迁移" "Warning" "无法获取迁移状态"
+        Write-CheckResult "数据库迁移" "Fail" "无法获取迁移状态"
     }
 } catch {
-    Write-CheckResult "数据库迁移" "Warning" "无法查询迁移表: $_"
+    Write-CheckResult "数据库迁移" "Fail" "无法查询迁移表: $_"
 }
 
 # ============================================
-# 6. SMTP 配置验证（间接验证）
+# 6. SMTP 配置验证（真实投递链路）
 # ============================================
 
 Write-Header "6. SMTP 配置验证"
 
-Write-Host "检查 SMTP 配置（通过验证码 API）..." -ForegroundColor Gray
+Write-Host "检查 SMTP 配置（通过真实验证码 API）..." -ForegroundColor Gray
 
-# 尝试请求验证码接口，看是否返回正确的错误（而不是 SMTP 未配置错误）
-$smtpTestCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/auth/send-code" `
-    -ExpectedStatus 400
-
-if ($smtpTestCheck.StatusCode -in @(400, 401, 422)) {
-    Write-CheckResult "SMTP 配置" "Pass" "验证码接口可响应（SMTP 已配置）"
-} elseif ($smtpTestCheck.StatusCode -eq 500) {
-    Write-CheckResult "SMTP 配置" "Fail" "验证码接口返回 500，可能 SMTP 未配置"
+if (-not $SmtpProbeEmail) {
+    Write-CheckResult "SMTP 配置" "Fail" "必须提供 -SmtpProbeEmail 或 PRODUCTION_ACCEPTANCE_EMAIL"
 } else {
-    Write-CheckResult "SMTP 配置" "Warning" "无法确认 SMTP 配置状态"
+    $escapedProbeEmail = $SmtpProbeEmail.Replace("'", "''")
+    $probeUserQuery = "SELECT CASE WHEN EXISTS (SELECT 1 FROM users WHERE lower(email) = lower('$escapedProbeEmail') AND email_verified = true AND deleted_at IS NULL) THEN '1' ELSE '0' END;"
+    try {
+        $probeUserExists = Test-DatabaseQuery -Query $probeUserQuery -ConnectionString $DatabaseUrl
+        if ($probeUserExists -ne '1') {
+            Write-CheckResult "SMTP 配置" "Fail" "探测邮箱不是已验证的生产账号，无法证明真实投递链路"
+        } else {
+            # 当前服务端真实路由是 POST /api/v1/auth/code/request；携带已注册邮箱
+            # 才会进入 SMTP 发送分支，而不是因为邮箱不存在直接返回 202。
+            $smtpBody = (@{ email = $SmtpProbeEmail; scene = 'login' } | ConvertTo-Json -Compress)
+            $smtpTestCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/auth/code/request" `
+                -Method 'POST' -Body $smtpBody -ExpectedStatus 200
+            if ($smtpTestCheck.Success) {
+                Write-CheckResult "SMTP 配置" "Pass" "验证码接口成功受理真实投递"
+            } else {
+                Write-CheckResult "SMTP 配置" "Fail" "验证码接口未返回 200（状态: $($smtpTestCheck.StatusCode)）"
+            }
+        }
+    } catch {
+        Write-CheckResult "SMTP 配置" "Fail" "无法验证探测邮箱或 SMTP: $_"
+    }
 }
 
 # ============================================
@@ -400,8 +471,8 @@ if ($script:FailedChecks.Count -gt 0) {
 } elseif ($script:WarningChecks.Count -gt 0) {
     Write-Host "`n警告的检查项:" -ForegroundColor Yellow
     $script:WarningChecks | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-    Write-Host "`n⚠️  生产环境验收基本通过，但存在警告项，请确认是否可接受" -ForegroundColor Yellow
-    exit 0
+    Write-Host "`n❌ 生产环境验收未通过：存在未决警告项，请先将其明确为通过或失败" -ForegroundColor Red
+    exit 1
 } else {
     Write-Host "`n✅ 生产环境验收完全通过，可以正式上线" -ForegroundColor Green
     exit 0

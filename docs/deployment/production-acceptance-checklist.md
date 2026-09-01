@@ -17,14 +17,15 @@
 # 设置数据库连接串
 $env:DATABASE_URL = "postgresql://user:password@101.42.27.44:5432/luntan"
 
-# 运行完整验收
-./scripts/production-acceptance.ps1 -ServerHost 101.42.27.44
+# 运行完整验收（必须使用一个已验证的生产邮箱做真实 SMTP 探测）
+$env:PRODUCTION_ACCEPTANCE_EMAIL = "ops@example.com"
+./scripts/production-acceptance.ps1 -ServerHost 101.42.27.44 -SmtpProbeEmail $env:PRODUCTION_ACCEPTANCE_EMAIL
 ```
 
 **预期结果**：
 - 所有检查项通过（绿色 ✓）
 - 无失败项（红色 ✗）
-- 警告项已确认可接受
+- 无未决警告项；脚本遇到警告也会以退出码 1 终止
 
 **验收脚本检查内容**：
 
@@ -32,20 +33,20 @@ $env:DATABASE_URL = "postgresql://user:password@101.42.27.44:5432/luntan"
 |------|--------|--------|
 | 基础连接 | `/health` 返回 200 | 必须 |
 | 基础连接 | `/ready` 返回 200 | 必须 |
-| 基础连接 | API 版本信息可访问 | 建议 |
+| 基础连接 | `/api/v1/app/releases/latest` 发布清单可访问 | 必须 |
 | 媒体私有化 | `pending_backfill = 0` | 必须 |
-| 媒体私有化 | outbox `failed = 0` | 必须 |
+| 媒体私有化 | outbox `media.process` 和 `media.delete` 的 `failed = 0` | 必须 |
 | 媒体私有化 | `/media/` 返回 404 | 必须 |
 | 媒体私有化 | `/_protected_media/` 不可公开访问 | 必须 |
 | 媒体私有化 | 媒体网关端点正常工作 | 必须 |
-| 安全配置 | HTTP → HTTPS 重定向 | 建议 |
+| 安全配置 | HTTP → HTTPS 返回原始 301/302/307/308，且 Location 为 HTTPS | 必须（HTTP 端口关闭时可通过） |
 | 安全配置 | `/metrics` 不可公开访问 | 必须 |
 | 安全配置 | 管理员端点需要认证 | 必须 |
-| APK 更新 | 更新 API 可访问 | 必须 |
+| APK 更新 | `/api/v1/app/releases/latest` 与 `/api/v1/app/update` 可访问 | 必须 |
 | APK 更新 | 下载 URL 使用 HTTPS | 必须 |
-| APK 更新 | 下载域名在白名单中 | 建议 |
+| APK 更新 | 下载域名在 `PRODUCTION_ALLOWED_DOWNLOAD_HOSTS` 白名单中 | 必须 |
 | 数据库 | 迁移状态干净 (dirty=false) | 必须 |
-| SMTP | 验证码接口可响应 | 必须 |
+| SMTP | `POST /api/v1/auth/code/request` 使用已验证账号真实发送验证码 | 必须 |
 
 ### 1.2 验收脚本失败时的处理
 
@@ -70,7 +71,7 @@ WHERE ma.status = 'ready' AND ma.deleted_at IS NULL
 /app/luntan-media-backfill
 
 # 等待 worker 处理完成
-# 观察 outbox_events 表中 media.process 事件的状态
+# 观察 outbox_events 表中 media.process 和 media.delete 事件的状态
 ```
 
 #### Outbox 失败事件
@@ -321,15 +322,23 @@ nginx -t && nginx -s reload
    ```bash
    # 尝试访问 original
    curl -I https://api.shengbeijiang.com/api/v1/media-file/{media_id}/original
-   # 预期: 403 Forbidden（非管理员）
+   # 预期: 404 Not Found（普通用户；管理员也必须被通用媒体网关拒绝）
    ```
 
-7. 测试管理员访问源图（应该成功）
+7. 测试管理员访问审核源图（应该成功）
    - [ ] 使用管理员 token
    ```bash
    curl -I -H "Authorization: Bearer {admin_token}" \
-     https://api.shengbeijiang.com/api/v1/media-file/{media_id}/original
-   # 预期: 200 OK（管理员）
+     https://api.shengbeijiang.com/api/v1/admin/media/{media_id}/source
+   # 预期: 200 OK，Cache-Control: private, no-store
+   ```
+
+8. 测试管理员审核预览（应该成功）
+   - [ ] 使用管理员 token
+   ```bash
+   curl -I -H "Authorization: Bearer {admin_token}" \
+     https://api.shengbeijiang.com/api/v1/admin/media/{media_id}/preview
+   # 预期: 200 OK，Cache-Control: private, no-store；pending/hidden 附件也可访问
    ```
 
 **预期结果**：
@@ -338,7 +347,9 @@ nginx -t && nginx -s reload
 - [ ] 旧路径访问失败
 - [ ] 内部路径公网访问失败
 - [ ] 打码图片 original 普通用户访问失败
-- [ ] 管理员可访问源图
+- [ ] 打码图片 original 管理员通过通用网关访问也失败
+- [ ] 管理员通过 `/api/v1/admin/media/{id}/source` 可访问源图
+- [ ] 管理员通过 `/api/v1/admin/media/{id}/preview` 可查看 pending/hidden 附件
 
 **失败标准**：
 - 任何源文件可以绕过网关直接访问
@@ -410,6 +421,20 @@ nginx -t && nginx -s reload
 - 包名不一致无法安装
 - 安装后数据丢失或登录状态丢失
 - 出现版本回退警告
+
+### 2.7 审核来源筛选与图片证据测试
+
+1. 准备跨页案件：第一页全部为自动规则案件，下一页至少有一个用户举报案件。
+2. 在审核中心选择“用户举报”，确认请求携带 `source=user_report`，列表直接显示跨页的用户举报案件。
+3. 在用户举报案件详情中确认帖子和评论附件都显示在“图片证据”区域。
+4. 使用 pending 或 hidden 帖子重复测试，确认图片通过管理员 JWT 预览接口加载，不因公开媒体可见性返回 404。
+5. 在加载更多请求尚未返回时切换来源，确认新来源仍可继续加载下一页，不出现永久 loading。
+
+**失败标准**：
+- 只在当前页本地筛来源导致真实案件显示为空
+- 评论附件未出现在案件详情
+- pending/hidden 附件依赖公开网关而无法查看
+- 切换来源后“加载更多”永久不可用
 
 ---
 
@@ -543,7 +568,7 @@ docker run -d --name luntan-api-rollback ghcr.io/zhouwu97/luntan:{previous_versi
 - 数据库版本: PostgreSQL 14+
 - Go 版本: 1.22+
 - Flutter 版本: 3.x
-- 当前代码版本: `9555ae4`
+- 当前代码版本: 以本次部署使用的 Git commit SHA 为准
 
 ### B. 紧急联系方式
 

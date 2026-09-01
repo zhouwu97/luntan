@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/zhouwu97/luntan/server/internal/auth"
 	"github.com/zhouwu97/luntan/server/internal/platform/storage"
 )
 
@@ -385,6 +386,61 @@ func TestGetAdminMediaSourceRejectsAnonymous(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("admin source must not touch media rows before auth: %v", err)
+	}
+}
+
+func TestGetAdminMediaPreviewRejectsAnonymous(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Server{db: db, mediaStorage: storage.NewMemoryStorage()}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/media/media-1/preview", nil)
+	rec := httptest.NewRecorder()
+	s.getAdminMediaPreview(rec, req, "media-1")
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for anonymous admin preview access", rec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("admin preview must not touch media rows before auth: %v", err)
+	}
+}
+
+func TestGetAdminMediaPreviewUsesPrivateDetailVariant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := storage.NewMemoryStorage()
+	if err := store.Put(context.Background(), "media/u-1/m-detail", "image/jpeg", bytes.NewReader([]byte("detail")), 6); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db, mediaStorage: store}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/media/m-1/preview", nil)
+	req = req.WithContext(context.WithValue(req.Context(), authenticatedUserContextKey{}, auth.User{ID: "admin-1"}))
+
+	mock.ExpectQuery(`(?s)SELECT EXISTS \(.*p\.name = \$2.*community_id IS NULL`).
+		WithArgs("admin-1", "moderation.action").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(`(?s)SELECT COALESCE\(preferred\.object_key.*FROM media_assets ma.*LEFT JOIN LATERAL`).
+		WithArgs("m-1").
+		WillReturnRows(sqlmock.NewRows([]string{"object_key", "mime_type", "moderation_status"}).
+			AddRow("media/u-1/m-detail", "image/jpeg", "normal"))
+
+	rec := httptest.NewRecorder()
+	s.getAdminMediaPreview(rec, req, "m-1")
+	if rec.Code != http.StatusOK || rec.Body.String() != "detail" {
+		t.Fatalf("preview response: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

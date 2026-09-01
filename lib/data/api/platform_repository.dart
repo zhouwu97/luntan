@@ -280,6 +280,32 @@ class ModerationCasePage {
   final bool hasMore;
 }
 
+/// 审核案件中的附件证据。
+///
+/// 审核案件可能对应待审核或已隐藏内容，图片不能依赖公开媒体网关；
+/// [previewUrl] 始终指向需要管理员权限的预览接口。
+class ModerationMediaEvidence {
+  const ModerationMediaEvidence({
+    required this.id,
+    required this.type,
+    required this.width,
+    required this.height,
+    required this.moderationStatus,
+    this.thumbUrl,
+    this.detailUrl,
+    this.previewUrl,
+  });
+
+  final String id;
+  final String type;
+  final int width;
+  final int height;
+  final String moderationStatus;
+  final String? thumbUrl;
+  final String? detailUrl;
+  final String? previewUrl;
+}
+
 class ModerationCaseDetail {
   const ModerationCaseDetail({
     required this.id,
@@ -294,6 +320,7 @@ class ModerationCaseDetail {
     this.target = const <String, dynamic>{},
     this.report = const <String, dynamic>{},
     this.account = const <String, dynamic>{},
+    this.media = const <ModerationMediaEvidence>[],
   });
 
   final String id;
@@ -308,6 +335,7 @@ class ModerationCaseDetail {
   final Map<String, dynamic> target;
   final Map<String, dynamic> report;
   final Map<String, dynamic> account;
+  final List<ModerationMediaEvidence> media;
 }
 
 class IpRestriction {
@@ -1103,6 +1131,17 @@ class PlatformRepository {
     );
   }
 
+  /// 获取审核员专用的有界预览编码字节。
+  ///
+  /// 服务端优先返回 detail（打码媒体优先返回 censored_detail），缺失时
+  /// 才回退到源图；响应始终 private/no-store，不能被公开缓存。
+  Future<List<int>> getAdminMediaPreview({required String mediaId}) {
+    return _client.getBytes(
+      '/api/v1/admin/media/$mediaId/preview',
+      headers: const {'Accept': 'image/*'},
+    );
+  }
+
   Future<List<MediaModerationVersion>> getMediaModerationHistory({
     required String mediaId,
   }) async {
@@ -1393,6 +1432,7 @@ class PlatformRepository {
 
   Future<ModerationCasePage> listModerationCases({
     String status = '',
+    String? source,
     String? cursor,
     int limit = 20,
   }) async {
@@ -1401,6 +1441,7 @@ class PlatformRepository {
       queryParameters: {
         'limit': '$limit',
         if (status.isNotEmpty) 'status': status,
+        if (source != null && source.isNotEmpty) 'source': source,
         ...?(cursor == null ? null : {'cursor': cursor}),
       },
     );
@@ -1463,6 +1504,7 @@ class PlatformRepository {
       target: map(payload['target']),
       report: map(payload['report']),
       account: map(payload['account']),
+      media: _parseModerationMedia(map(payload['target'])['media']),
     );
   }
 
@@ -1939,6 +1981,28 @@ class PlatformRepository {
               .toList()
         : <ActivityItem>[];
     return items;
+  }
+
+  List<ModerationMediaEvidence> _parseModerationMedia(dynamic raw) {
+    if (raw is! List) return const <ModerationMediaEvidence>[];
+    return raw.whereType<Map>().map((item) {
+      final value = Map<String, dynamic>.from(item);
+      String? nullableString(dynamic rawValue) =>
+          rawValue is String && rawValue.isNotEmpty ? rawValue : null;
+      return ModerationMediaEvidence(
+        id: _string(value['id']),
+        type: _string(value['type'], fallback: 'image'),
+        width: _int(value['width']),
+        height: _int(value['height']),
+        moderationStatus: _string(
+          value['moderation_status'],
+          fallback: 'normal',
+        ),
+        thumbUrl: nullableString(value['thumb_url']),
+        detailUrl: nullableString(value['detail_url']),
+        previewUrl: nullableString(value['preview_url']),
+      );
+    }).toList();
   }
 
   String _string(dynamic value, {String fallback = ''}) =>

@@ -295,6 +295,22 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 通知分类使用 `all`、`interaction`、`community`、`moderation`；处罚通知的
 `target_data` 带有 `moderation_action_id` 和 `appealable`，客户端据此进入正式处理详情。
 
+### 审核案件 Moderation Cases
+
+| 方法 | 路径 | 登录 | 说明 |
+|---|---|---|---|
+| GET | `/moderation/cases?status=&source=&cursor=&limit=` | 管理员 | 案件游标分页；`source` 支持 `user_report`、`auto_rule`、`manual_admin`，筛选在服务端分页前执行 |
+| GET | `/moderation/cases/{id}` | 管理员 | 返回案件目标、举报汇总、账号信息和 `target.media` 图片/视频证据 |
+| POST | `/moderation/cases/{id}/actions` | 管理员 | 提交隐藏、恢复、删除、禁言或封禁处置 |
+| GET | `/admin/media/{id}/preview` | 管理员 | 私有审核预览；支持 pending/hidden 附件，响应 `Cache-Control: private, no-store` |
+| GET | `/admin/media/{id}/source` | 管理员 | 私有审核源图；仅供打码编辑器读取，响应 `Cache-Control: private, no-store` |
+
+`target.media` 中每项包含 `id`、`type`、`width`、`height`、`moderation_status`、
+`thumb_url`、`detail_url` 和 `preview_url`。这些 URL 均指向管理员私有预览路由，
+不暴露对象存储 `object_key`，也不依赖公开媒体网关的帖子/评论可见性。
+普通媒体审核预览优先使用 `detail` 变体；已打码媒体优先使用
+`censored_detail`，缺失时才回退到管理员可见的源对象。
+
 ### 处罚与申诉 Moderation Appeals
 
 | 方法 | 路径 | 登录 | 说明 |

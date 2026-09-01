@@ -250,6 +250,16 @@ func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	if status == "pending" {
+		// 客户端将“待处理”称为 pending，数据库案件状态沿用创建时的
+		// open；在查询入口统一归一化，避免审核中心出现假空列表。
+		status = "open"
+	}
+	source, err := normalizeModerationSourceFilter(r.URL.Query().Get("source"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SOURCE", Message: "source 无效"})
+		return
+	}
 	var cursor *moderationCursor
 	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
 		decoded, decodeErr := decodeModerationCursor(raw)
@@ -260,7 +270,9 @@ func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
 		cursor = &decoded
 	}
 	communityExpression := `COALESCE(p.community_id, cp.community_id, '')`
-	args := []any{status, user.ID}
+	// source 必须在服务端分页前参与 WHERE，客户端不能对已经截断的页面
+	// 做二次过滤，否则后续页面中的真实案件会被错误地显示为不存在。
+	args := []any{status, source, user.ID}
 	query := `
 		SELECT mc.id, mc.target_type, mc.target_id, mc.source, mc.risk_level, mc.status, mc.created_at, mc.resolved_at,
 		       ` + communityExpression + ` AS community_id
@@ -269,16 +281,17 @@ func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN comments c ON mc.target_type = 'comment' AND c.id = mc.target_id
 		LEFT JOIN posts cp ON c.post_id = cp.id
 		WHERE ($1 = '' OR mc.status = $1)
+		  AND ($2 = '' OR mc.source = $2)
 		  AND EXISTS (
 			SELECT 1
 			FROM user_roles ur
 			JOIN role_permissions rp ON rp.role_id = ur.role_id
 			JOIN permissions pmt ON pmt.id = rp.permission_id
-			WHERE ur.user_id = $2 AND pmt.name = 'report.review'
+			WHERE ur.user_id = $3 AND pmt.name = 'report.review'
 			  AND (ur.community_id IS NULL OR ur.community_id = ` + communityExpression + `)
 		  )`
 	if cursor != nil {
-		query += " AND (mc.created_at, mc.id) > ($3, $4)"
+		query += " AND (mc.created_at, mc.id) > ($4, $5)"
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
 	limitPosition := len(args) + 1
@@ -329,6 +342,23 @@ func (s *Server) listModerationCases(w http.ResponseWriter, r *http.Request) {
 		nextCursor = encoded
 	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor, "has_more": hasMore})
+}
+
+// normalizeModerationSourceFilter 将客户端兼容别名统一到数据库中的来源值。
+// 空字符串表示不过滤；未知值直接拒绝，避免静默返回误导性的空列表。
+func normalizeModerationSourceFilter(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return "", nil
+	case "report", "user_report":
+		return "user_report", nil
+	case "auto", "auto_rule":
+		return "auto_rule", nil
+	case "manual_admin":
+		return "manual_admin", nil
+	default:
+		return "", errors.New("invalid moderation source")
+	}
 }
 
 func encodeModerationCursor(cursor moderationCursor) (string, error) {
@@ -384,30 +414,6 @@ func (s *Server) getModerationCase(w http.ResponseWriter, r *http.Request, caseI
 			FROM posts p JOIN users u ON u.id = p.author_id
 			LEFT JOIN user_profiles up ON up.user_id = p.author_id WHERE p.id = $1`, targetID).
 			Scan(&authorID, &authorName, &title, &content, &targetCreatedAt)
-		if err == nil {
-			mediaRows, mediaErr := s.db.QueryContext(r.Context(), `SELECT media_id FROM post_media WHERE post_id = $1 ORDER BY sort_order, media_id`, targetID)
-			if mediaErr != nil {
-				writeInternalError(w, r, mediaErr)
-				return
-			}
-			mediaIDs := make([]string, 0)
-			for mediaRows.Next() {
-				var mediaID string
-				if scanErr := mediaRows.Scan(&mediaID); scanErr != nil {
-					mediaRows.Close()
-					writeInternalError(w, r, scanErr)
-					return
-				}
-				mediaIDs = append(mediaIDs, mediaID)
-			}
-			if rowsErr := mediaRows.Err(); rowsErr != nil {
-				mediaRows.Close()
-				writeInternalError(w, r, rowsErr)
-				return
-			}
-			mediaRows.Close()
-			target["media_ids"] = mediaIDs
-		}
 	case "comment":
 		err = s.db.QueryRowContext(r.Context(), `
 			SELECT c.author_id, COALESCE(up.nickname, u.username), '评论', c.content, c.created_at
@@ -432,11 +438,18 @@ func (s *Server) getModerationCase(w http.ResponseWriter, r *http.Request, caseI
 		writeInternalError(w, r, err)
 		return
 	}
+	mediaIDs, mediaEvidence, mediaErr := s.loadModerationMediaEvidence(r.Context(), targetType, targetID)
+	if mediaErr != nil {
+		writeInternalError(w, r, mediaErr)
+		return
+	}
 	target["author_id"] = authorID
 	target["author_name"] = authorName
 	target["title"] = title
 	target["content"] = content
 	target["created_at"] = targetCreatedAt
+	target["media_ids"] = mediaIDs
+	target["media"] = mediaEvidence
 
 	var reportCount int64
 	var reportReasons string
@@ -482,6 +495,73 @@ func (s *Server) getModerationCase(w http.ResponseWriter, r *http.Request, caseI
 		result["resolved_at"] = resolvedAt.Time
 	}
 	httpserver.WriteJSON(w, http.StatusOK, result)
+}
+
+// loadModerationMediaEvidence 统一加载帖子和评论附件，供管理员案件详情
+// 使用。案件可能来自 pending/hidden 内容，故不走公开可见性查询，也不把
+// object_key 放进响应；客户端应通过 admin_preview_url 请求私有预览。
+func (s *Server) loadModerationMediaEvidence(ctx context.Context, targetType, targetID string) ([]string, []map[string]any, error) {
+	var query string
+	switch targetType {
+	case "post":
+		query = `
+			SELECT ma.id, ma.mime_type, ma.width, ma.height,
+			       COALESCE(ma.moderation_status, 'normal')
+			FROM post_media pm
+			JOIN media_assets ma ON ma.id = pm.media_id
+			WHERE pm.post_id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
+			ORDER BY pm.sort_order ASC, ma.id ASC`
+	case "comment":
+		query = `
+			SELECT ma.id, ma.mime_type, ma.width, ma.height,
+			       COALESCE(ma.moderation_status, 'normal')
+			FROM comment_media cm
+			JOIN media_assets ma ON ma.id = cm.media_id
+			WHERE cm.comment_id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
+			ORDER BY cm.sort_order ASC, ma.id ASC`
+	default:
+		return []string{}, []map[string]any{}, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, targetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	mediaIDs := make([]string, 0)
+	evidence := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, mimeType, moderationStatus string
+		var width, height int
+		if err := rows.Scan(&id, &mimeType, &width, &height, &moderationStatus); err != nil {
+			return nil, nil, err
+		}
+		mediaIDs = append(mediaIDs, id)
+		previewURL := "/api/v1/admin/media/" + id + "/preview"
+		// thumb/detail 都保留在协议中供其他管理员客户端使用；当前 Flutter
+		// 客户端实际使用 preview_url，因为它能覆盖 pending/hidden 的权限场景。
+		evidence = append(evidence, map[string]any{
+			"id":                id,
+			"type":              mediaEvidenceType(mimeType),
+			"width":             width,
+			"height":            height,
+			"moderation_status": moderationStatus,
+			"thumb_url":         previewURL,
+			"detail_url":        previewURL,
+			"preview_url":       previewURL,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return mediaIDs, evidence, nil
+}
+
+func mediaEvidenceType(mimeType string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimeType)), "video/") {
+		return "video"
+	}
+	return "image"
 }
 
 func decodeModerationCursor(value string) (moderationCursor, error) {

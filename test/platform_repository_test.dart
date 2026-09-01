@@ -244,4 +244,77 @@ void main() {
       client.close();
     },
   );
+
+  test(
+    'PlatformRepository sends moderation source filter before pagination',
+    () async {
+      final calls = <String>[];
+      final client = ApiClient(
+        baseUri: Uri.parse('https://example.com'),
+        client: MockClient((request) async {
+          calls.add(request.url.toString());
+          return http.Response(
+            '{"items":[],"has_more":false}',
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final repository = ApiPlatformRepository(client);
+
+      final page = await repository.listModerationCases(
+        status: 'pending',
+        source: 'user_report',
+        limit: 20,
+      );
+
+      expect(page.items, isEmpty);
+      expect(
+        calls.single,
+        'https://example.com/api/v1/moderation/cases?limit=20&status=pending&source=user_report',
+      );
+      client.close();
+    },
+  );
+
+  test(
+    'PlatformRepository parses moderation attachment evidence and admin preview',
+    () async {
+      final calls = <String>[];
+      final client = ApiClient(
+        baseUri: Uri.parse('https://example.com'),
+        client: MockClient((request) async {
+          calls.add('${request.method} ${request.url.path}');
+          if (request.url.path.endsWith('/case-1')) {
+            return http.Response(
+              '{"id":"case-1","target_type":"post","target_id":"post-1","source":"user_report","risk_level":"low","status":"open","community_id":"c1","created_at":"2026-09-01T00:00:00Z","target":{"media":[{"id":"media-1","type":"image","width":1200,"height":800,"moderation_status":"censored","preview_url":"/api/v1/admin/media/media-1/preview"}]}}',
+              200,
+            );
+          }
+          return http.Response.bytes(
+            [1, 2, 3],
+            200,
+            headers: const {'content-type': 'image/jpeg'},
+          );
+        }),
+      );
+      final repository = ApiPlatformRepository(client);
+
+      final detail = await repository.getModerationCase('case-1');
+      final bytes = await repository.getAdminMediaPreview(mediaId: 'media-1');
+
+      expect(detail.media.single.id, 'media-1');
+      expect(detail.media.single.moderationStatus, 'censored');
+      expect(
+        detail.media.single.previewUrl,
+        '/api/v1/admin/media/media-1/preview',
+      );
+      expect(bytes, [1, 2, 3]);
+      expect(calls, [
+        'GET /api/v1/moderation/cases/case-1',
+        'GET /api/v1/admin/media/media-1/preview',
+      ]);
+      client.close();
+    },
+  );
 }

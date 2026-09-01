@@ -127,16 +127,23 @@ class _ImageModerationScreenState extends State<ImageModerationScreen> {
     try {
       ui.Image decoded;
 
-      if (media.isCensored && widget.platformRepository != null) {
-        // Admin endpoint returns the uncensored original bytes.
-        final bytes = await widget.platformRepository!.getAdminMediaSource(
-          mediaId: mediaId,
-        );
+      if (widget.platformRepository != null) {
+        // 审核编辑器不依赖公开媒体网关：待审核/已隐藏帖子会被公开
+        // 可见性门禁拦截。已打码媒体需要真实源图继续编辑，普通媒体
+        // 优先使用管理员 detail 预览以减少传输和内存压力。
+        final bytes = media.isCensored
+            ? await widget.platformRepository!.getAdminMediaSource(
+                mediaId: mediaId,
+              )
+            : await widget.platformRepository!.getAdminMediaPreview(
+                mediaId: mediaId,
+              );
         if (!mounted || _images[_selectedImageIndex].id != mediaId) return;
         _sourceBytes = Uint8List.fromList(bytes);
         decoded = await _decodePreviewImage(_sourceBytes!);
         _sourceBytes = null;
       } else {
+        // 没有 API 仓储时仅用于离线/预览；在线审核始终走上面的管理员接口。
         // 编辑遮罩使用归一化坐标，不需要解码原始大图。
         // 使用媒体网关 detail variant 获取编码字节进行有界解码。
         // 绝不使用 NetworkImage 进行解码，避免大图 OOM。

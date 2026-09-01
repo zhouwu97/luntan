@@ -285,6 +285,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/moderation-history")
 		s.listMediaModerationHistory(w, r, mediaID)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/media/") && strings.HasSuffix(path, "/preview"):
+		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/preview")
+		s.getAdminMediaPreview(w, r, mediaID)
+		return
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/media/") && strings.HasSuffix(path, "/source"):
 		mediaID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/media/"), "/source")
 		s.getAdminMediaSource(w, r, mediaID)

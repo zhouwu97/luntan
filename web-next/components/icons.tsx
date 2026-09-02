@@ -30,7 +30,8 @@ export type IconName =
   | "image"
   | "at"
   | "arrow-up-right"
-  | "refresh";
+  | "refresh"
+  | "download";
 
 const paths: Record<IconName, React.ReactNode> = {
   trophy: <><path d="M8 4h8v4.5a4 4 0 0 1-8 0V4Z" /><path d="M8 6H5a2 2 0 0 0 2 3M16 6h3a2 2 0 0 1-2 3M12 13v4M9 20h6M10 17h4" /></>,
@@ -63,6 +64,7 @@ const paths: Record<IconName, React.ReactNode> = {
   at: <><circle cx="12" cy="12" r="7" /><path d="M15.5 12a3.5 3.5 0 1 1-1.1-2.5v5c0 1.7 3.6 1.9 3.6-2.5" /></>,
   "arrow-up-right": <><path d="M7 17 17 7M8 7h9v9" /></>,
   refresh: <><path d="M20 11a8 8 0 0 0-14.8-3.8L4 9" /><path d="M4 4v5h5M4 13a8 8 0 0 0 14.8 3.8L20 15" /><path d="M20 20v-5h-5" /></>,
+  download: <><path d="M12 3.5v11.5" /><path d="m7.5 11 4.5 4.5L16.5 11" /><path d="M4.5 20h15" /></>,
 };
 
 export function Icon({ name, size = 20, strokeWidth = 1.8, ...props }: SVGProps<SVGSVGElement> & { name: IconName; size?: number; strokeWidth?: number }) {

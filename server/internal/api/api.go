@@ -339,6 +339,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPut && path == "/api/v1/admin/ranking/reorder":
 		s.reorderRankingToys(w, r)
 		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/ranking/views":
+		s.adminRankingView(w, r)
+		return
+	case r.Method == http.MethodPut && path == "/api/v1/admin/ranking/views/order":
+		s.reorderRankingView(w, r)
+		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admin/ranking/toys/") && strings.HasSuffix(path, "/coupon"):
 		toyID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/ranking/toys/"), "/coupon")
 		s.setRankingToyCoupon(w, r, toyID)

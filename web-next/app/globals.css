@@ -1044,3 +1044,157 @@ img { display: block; max-width: 100%; }
   .ranking-submit-form { gap: 18px; }
   .ranking-submit-two-fields { grid-template-columns: minmax(0, 1fr) 104px; }
 }
+
+/* ===== App 下载浮条（移动端首页底部导航上方） ===== */
+.app-download-banner { display: none; }
+
+@keyframes app-download-banner-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 760px) {
+  .app-download-banner {
+    position: fixed;
+    right: 12px;
+    bottom: calc(68px + 10px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    z-index: 21;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px 0 12px;
+    background: rgba(255, 255, 255, .97);
+    border: 1px solid #dbe8f4;
+    border-radius: 16px;
+    box-shadow: 0 10px 26px rgba(50, 100, 145, .16);
+    backdrop-filter: blur(14px);
+    animation: app-download-banner-in .32s var(--ease);
+  }
+  .app-download-banner-icon {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    color: var(--primary);
+    background: #e6f1ff;
+    border-radius: 11px;
+  }
+  .app-download-banner-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .app-download-banner-copy strong { font-size: 13px; letter-spacing: -.01em; }
+  .app-download-banner-copy small { color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .app-download-banner-cta {
+    flex: none;
+    min-height: 32px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--primary), var(--sky));
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .app-download-banner-cta:active { transform: scale(.96); }
+  .app-download-banner-close {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  /* 浮条可见时给页面留出一点底部空间，并把刷新按钮上移避让 */
+  body.app-download-banner-visible .page-frame { padding-bottom: 151px; }
+  body.app-download-banner-visible .mobile-refresh { bottom: 146px; }
+}
+
+/* ===== /download 下载落地页 ===== */
+.download-page { max-width: 780px; display: flex; flex-direction: column; gap: 18px; padding-bottom: 64px; }
+.download-hero { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding-top: 26px; }
+.download-app-icon { width: 54px; height: 54px; display: grid; place-items: center; color: var(--primary); background: #e6f1ff; border-radius: 17px; }
+.download-hero h1 { margin: 4px 0 0; font-size: clamp(30px, 5vw, 42px); letter-spacing: -.04em; line-height: 1.12; }
+.download-hero p { margin: 0; max-width: 560px; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.download-card { display: flex; flex-direction: column; gap: 18px; padding: 24px; background: var(--paper, #fff); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 18px 44px rgba(24, 42, 61, .07); }
+.download-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.download-metric span { display: block; color: var(--muted); font-size: 11px; }
+.download-metric strong { display: block; margin-top: 6px; font-size: 15px; letter-spacing: -.01em; }
+.download-changelog span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.download-changelog p { margin: 8px 0 0; white-space: pre-line; font-size: 14px; line-height: 1.8; }
+.download-button { min-height: 50px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; border-radius: 14px; background: linear-gradient(135deg, var(--primary), var(--sky)); color: #fff; font-size: 15px; font-weight: 800; box-shadow: 0 14px 30px rgba(50, 100, 145, .22); transition: .22s var(--ease); }
+.download-button:hover { transform: translateY(-2px); box-shadow: 0 18px 36px rgba(50, 100, 145, .26); }
+.download-button:active { transform: translateY(0); }
+.download-unavailable { padding: 14px 16px; border-radius: 12px; background: var(--soft, #f4f7fa); color: var(--muted); font-size: 13px; text-align: center; }
+.download-sha { margin: 0; word-break: break-all; color: var(--muted); font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; }
+.download-notes { display: grid; gap: 14px; }
+.download-note { padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255, 255, 255, .8); }
+.download-note strong { display: block; font-size: 13px; }
+.download-note p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.download-state { padding: 26px 20px; border: 1px dashed var(--line); border-radius: 18px; color: var(--muted); font-size: 14px; text-align: center; }
+.download-retry { display: inline-flex; margin-left: 10px; min-height: 34px; align-items: center; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--primary); font-size: 13px; font-weight: 700; cursor: pointer; }
+
+@media (max-width: 760px) {
+  .download-page { gap: 14px; padding-top: 8px; }
+  .download-hero { padding-top: 10px; }
+  .download-hero p { font-size: 13px; }
+  .download-card { padding: 18px; border-radius: 18px; }
+  .download-metrics { grid-template-columns: 1fr 1fr; }
+  .download-metric:last-child { grid-column: 1 / -1; }
+  .download-button { width: 100%; }
+}
+
+/* ===== 后台榜单排序管理 ===== */
+.admin-ranking-page { max-width: 860px; padding-bottom: 72px; }
+.admin-ranking-gate { padding: 64px 20px; text-align: center; }
+.admin-ranking-gate h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.03em; }
+.admin-ranking-gate p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+.admin-ranking-gate-link { display: inline-flex; min-height: 40px; align-items: center; padding: 0 18px; border-radius: 12px; background: var(--primary); color: #fff; font-size: 14px; font-weight: 700; }
+.admin-ranking-head { padding-top: 24px; }
+.admin-ranking-head h1 { margin: 0; font-size: clamp(24px, 4vw, 32px); letter-spacing: -.035em; }
+.admin-ranking-head p { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.75; }
+.admin-ranking-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; color: var(--muted); font-size: 12px; }
+.admin-ranking-filters { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255, 255, 255, .85); }
+.admin-ranking-filter { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-ranking-filter button { min-height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); font-size: 13px; font-weight: 600; cursor: pointer; }
+.admin-ranking-filter button.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.admin-ranking-modes { display: flex; gap: 8px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.admin-ranking-modes button { flex: 1; min-height: 38px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: 13px; font-weight: 700; cursor: pointer; }
+.admin-ranking-modes button.active { border-color: var(--primary); color: var(--primary); background: #eef5fd; }
+.admin-ranking-modes button:disabled { opacity: .55; cursor: not-allowed; }
+.admin-ranking-message { margin-top: 14px; padding: 11px 14px; border-radius: 12px; background: #eef5fd; color: var(--primary); font-size: 13px; }
+.admin-ranking-message.error { background: #fdeef2; color: #b23a5b; }
+.admin-ranking-state { margin-top: 20px; padding: 30px 18px; border: 1px dashed var(--line); border-radius: 16px; color: var(--muted); font-size: 14px; text-align: center; }
+.admin-ranking-list { margin: 18px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.admin-ranking-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.admin-ranking-row.draggable { cursor: grab; }
+.admin-ranking-row.draggable:active { cursor: grabbing; }
+.admin-ranking-order { flex: none; width: 26px; text-align: center; font-size: 13px; font-weight: 800; color: var(--primary); }
+.admin-ranking-grip { flex: none; color: #b7c2cc; font-size: 14px; }
+.admin-ranking-cover { flex: none; width: 42px; height: 42px; border-radius: 10px; object-fit: cover; background: var(--soft, #f4f7fa); }
+.admin-ranking-cover.placeholder { display: grid; place-items: center; color: #9fb2c2; }
+.admin-ranking-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; font-weight: 600; }
+.admin-ranking-new { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 8px; background: #e8f6ee; color: #178462; font-size: 10px; font-style: normal; font-weight: 800; vertical-align: 1px; }
+.admin-ranking-source { flex: none; color: var(--muted); font-size: 11px; }
+.admin-ranking-move { flex: none; display: flex; gap: 5px; }
+.admin-ranking-move button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); font-size: 13px; cursor: pointer; }
+.admin-ranking-move button:disabled { opacity: .4; cursor: not-allowed; }
+.admin-ranking-actions { display: flex; gap: 10px; margin-top: 18px; }
+.admin-ranking-actions button { min-height: 46px; flex: 1; border: 0; border-radius: 13px; font-size: 14px; font-weight: 800; cursor: pointer; }
+.admin-ranking-save { background: linear-gradient(135deg, var(--primary), var(--sky)); color: #fff; box-shadow: 0 12px 26px rgba(50, 100, 145, .2); }
+.admin-ranking-restore { border: 1px solid var(--line) !important; background: #fff; color: var(--ink); }
+.admin-ranking-actions button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+
+@media (max-width: 760px) {
+  .admin-ranking-head { padding-top: 12px; }
+  .admin-ranking-filters { padding: 12px; border-radius: 15px; }
+  .admin-ranking-source { display: none; }
+  .admin-ranking-actions { flex-direction: column; }
+}

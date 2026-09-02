@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CommunityRail } from "./community-rail";
+import { AppDownloadBanner } from "./app-download-banner";
 import { DiscoveryRail } from "./discovery-rail";
 import { FeedToolbar, type FeedSort, type LatestOrder } from "./feed-toolbar";
 import { HomeCommunityTabs } from "./home-community-tabs";
@@ -233,6 +234,7 @@ export function HomeShell() {
         </div>
       </main>
       <button type="button" className="mobile-refresh" aria-label="刷新首页内容" onClick={refreshFeed}><Icon name="refresh" size={21} /></button>
+      <AppDownloadBanner />
       <MobileNav onPublish={() => router.push(user ? "/publish" : "/login")} />
     </>
   );

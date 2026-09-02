@@ -11,6 +11,8 @@ import type {
   Post,
   ProfilePost,
   ProfileSummary,
+  RankingAdminView,
+  RankingAdminViewItem,
   RankingToy,
   RankingToyComment,
   RankingToyCommentPage,
@@ -728,4 +730,59 @@ export async function logout(): Promise<void> {
   } finally {
     clearAccessToken();
   }
+}
+
+export async function getRankingAdminView(tab = "", category = ""): Promise<RankingAdminView> {
+  const params = new URLSearchParams();
+  if (tab) params.set("tab", tab);
+  if (category) params.set("category", category);
+  const query = params.size ? `?${params.toString()}` : "";
+  const payload = await apiJson<JsonRecord>(`/admin/ranking/views${query}`);
+  const view = asRecord(payload.view);
+  return {
+    tab: asString(view.tab),
+    category: asString(view.category),
+    sortMode: asString(view.sort_mode) === "MANUAL" ? "MANUAL" : "AUTO",
+    version: asNumber(view.version),
+    updatedBy: asString(view.updated_by),
+    updatedAt: asString(view.updated_at) || undefined,
+    items: Array.isArray(payload.items) ? payload.items.map(parseRankingAdminViewItem) : [],
+    syncedAt: asString(payload.synced_at) || undefined,
+  };
+}
+
+function parseRankingAdminViewItem(raw: unknown): RankingAdminViewItem {
+  const item = asRecord(raw);
+  return {
+    toyId: asString(item.toy_id),
+    name: asString(item.name),
+    coverUrl: resolveMediaUrl(asString(item.cover_url), "thumb") ?? "",
+    sourceRank: asNumber(item.source_rank),
+    manualPosition: item.manual_position == null ? undefined : asNumber(item.manual_position),
+    displayPosition: asNumber(item.display_position),
+  };
+}
+
+export async function saveRankingAdminViewOrder(input: {
+  tab: string;
+  category: string;
+  mode: "AUTO" | "MANUAL";
+  orderedToyIds: string[];
+  version: number;
+}): Promise<{ mode: "AUTO" | "MANUAL"; version: number }> {
+  const payload = await apiJson<JsonRecord>("/admin/ranking/views/order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tab: input.tab,
+      category: input.category,
+      mode: input.mode,
+      ordered_toy_ids: input.orderedToyIds,
+      version: input.version,
+    }),
+  });
+  return {
+    mode: asString(payload.mode) === "MANUAL" ? "MANUAL" : "AUTO",
+    version: asNumber(payload.version),
+  };
 }

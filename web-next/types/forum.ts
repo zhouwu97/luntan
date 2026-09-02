@@ -238,3 +238,23 @@ export interface SearchResults {
   communities: Community[];
   toys: RankingToy[];
 }
+
+export interface RankingAdminViewItem {
+  toyId: string;
+  name: string;
+  coverUrl: string;
+  sourceRank: number;
+  manualPosition?: number;
+  displayPosition: number;
+}
+
+export interface RankingAdminView {
+  tab: string;
+  category: string;
+  sortMode: "AUTO" | "MANUAL";
+  version: number;
+  updatedBy: string;
+  updatedAt?: string;
+  items: RankingAdminViewItem[];
+  syncedAt?: string;
+}

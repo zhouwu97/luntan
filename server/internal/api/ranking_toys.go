@@ -156,28 +156,35 @@ func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 		if tabKey != "" && categoryKey == "" {
 			categoryKey = "CUP"
 		}
+		// 展示排序 = 人工覆盖层（ranking_manual_orders，仅管理员可写）优先，
+		// 未覆盖的商品回落到源榜单 rank；源排名本身永不修改，外部同步不会冲掉人工顺序。
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT `+rankingToyColumns("source_rank.rank")+`
-			FROM ranking_toy_rankings source_rank
-			JOIN ranking_toys t ON t.id = source_rank.toy_id
-			LEFT JOIN ranking_toy_user_states us
-			  ON us.toy_id = t.id AND us.user_id = $1
-			LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
-			LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
-			WHERE source_rank.source_provider = 'beiyoujiang'
-			  AND source_rank.tab_key = $2 AND source_rank.category_key = $3
-			  AND t.active = true
-			ORDER BY source_rank.rank ASC`, viewerID, tabKey, categoryKey)
+		SELECT `+rankingToyColumns("source_rank.rank")+`
+		FROM ranking_toy_rankings source_rank
+		JOIN ranking_toys t ON t.id = source_rank.toy_id
+		LEFT JOIN ranking_toy_user_states us
+		  ON us.toy_id = t.id AND us.user_id = $1
+		LEFT JOIN ranking_manual_orders mo
+		  ON mo.toy_id = t.id AND mo.tab_key = $2 AND mo.category_key = $3
+		LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
+		LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
+		WHERE source_rank.source_provider = 'beiyoujiang'
+		  AND source_rank.tab_key = $2 AND source_rank.category_key = $3
+		  AND t.active = true
+		ORDER BY mo.position ASC NULLS LAST, source_rank.rank ASC, t.id ASC`, viewerID, tabKey, categoryKey)
 	} else {
+		// 综合热榜视图键为 tab/category 双空，与细分榜共用同一覆盖层。
 		rows, err = s.db.QueryContext(r.Context(), `
-			SELECT `+rankingToyColumns("t.rank")+`
-			FROM ranking_toys t
-			LEFT JOIN ranking_toy_user_states us
-			  ON us.toy_id = t.id AND us.user_id = $1
-			LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
-			LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
-			WHERE t.active = true
-			ORDER BY t.rank ASC`, viewerID)
+		SELECT `+rankingToyColumns("t.rank")+`
+		FROM ranking_toys t
+		LEFT JOIN ranking_toy_user_states us
+		  ON us.toy_id = t.id AND us.user_id = $1
+		LEFT JOIN ranking_manual_orders mo
+		  ON mo.toy_id = t.id AND mo.tab_key = '' AND mo.category_key = ''
+		LEFT JOIN media_assets cover ON cover.id = t.cover_media_id AND cover.status = 'ready' AND cover.deleted_at IS NULL
+		LEFT JOIN media_assets hero ON hero.id = t.hero_media_id AND hero.status = 'ready' AND hero.deleted_at IS NULL
+		WHERE t.active = true
+		ORDER BY mo.position ASC NULLS LAST, t.rank ASC, t.id ASC`, viewerID)
 	}
 	if err != nil {
 		writeInternalError(w, r, err)

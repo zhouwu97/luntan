@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import { SessionProvider } from "../components/session-provider";
 
@@ -8,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="zh-CN" data-scroll-behavior="smooth"><body><SessionProvider>{children}</SessionProvider></body></html>;
+  return <html lang="zh-CN" data-scroll-behavior="smooth"><body><SessionProvider><Suspense fallback={<div className="page-frame"><div className="loading-stack"><div className="skeleton-card short" /></div></div>}>{children}</Suspense></SessionProvider></body></html>;
 }

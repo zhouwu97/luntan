@@ -36,12 +36,19 @@ async function send(path: string, init: RequestInit = {}): Promise<Response> {
   headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  return fetch(requestUrl(path), {
-    ...init,
-    headers,
-    credentials: "include",
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8_000);
+  try {
+    return await fetch(requestUrl(path), {
+      ...init,
+      headers,
+      credentials: "include",
+      cache: "no-store",
+      signal: init.signal ?? controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 async function refreshSessionInternal(): Promise<boolean> {

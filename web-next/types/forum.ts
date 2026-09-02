@@ -107,3 +107,66 @@ export interface AuthSession {
   accessToken: string;
   expiresIn?: number;
 }
+
+export interface ProfileSummary extends UserSummary {
+  bio: string;
+  experience: number;
+  postCount: number;
+  commentCount: number;
+  likeReceivedCount: number;
+  followerCount: number;
+  followingCount: number;
+  publicId?: string;
+  createdAt?: string;
+  isFollowing: boolean;
+  canFollow: boolean;
+}
+
+export interface ProfilePost {
+  id: string;
+  title: string;
+  contentPreview: string;
+  communityName: string;
+  commentCount: number;
+  likeCount: number;
+  viewCount: number;
+  createdAt: string;
+}
+
+export interface ActivityItem {
+  id: string;
+  title: string;
+  description: string;
+  coverUrl?: string;
+  startAt?: string;
+  endAt?: string;
+  location: string;
+  status: "upcoming" | "active" | "ended" | string;
+  phase?: string;
+  authorName: string;
+}
+
+export interface RankingToy {
+  id: string;
+  rank: number;
+  name: string;
+  merchant: string;
+  description: string;
+  tags: string[];
+  score: number;
+  wantCount: number;
+  ratingCount: number;
+  coverUrl?: string;
+  heroUrl?: string;
+}
+
+export interface ForumNotification {
+  id: string;
+  type: string;
+  actor: UserSummary;
+  targetType: string;
+  targetId: string;
+  targetData: Record<string, unknown>;
+  isRead: boolean;
+  createdAt: string;
+}

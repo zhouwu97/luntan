@@ -1,10 +1,11 @@
 import type { Comment, Community, Post } from "../types/forum";
+import { resolveAssetUrl } from "./config";
 
 const image = (id: string, altText: string) => ({
   id,
   type: "image" as const,
-  url: `https://shengbeijiang.com/api/v1/media-file/${id}/detail`,
-  thumbUrl: `https://shengbeijiang.com/api/v1/media-file/${id}/thumb`,
+  url: resolveAssetUrl(`/api/v1/media-file/${id}/detail`),
+  thumbUrl: resolveAssetUrl(`/api/v1/media-file/${id}/thumb`),
   altText,
 });
 

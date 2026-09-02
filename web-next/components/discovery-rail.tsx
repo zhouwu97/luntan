@@ -1,6 +1,7 @@
 import { Icon } from "./icons";
 import type { Post, SessionUser } from "../types/forum";
 import { compactCount } from "../lib/format";
+import Link from "next/link";
 
 export function DiscoveryRail({ posts, user, onLogin }: { posts: Post[]; user: SessionUser | null; onLogin: () => void }) {
   const topics = posts.slice(0, 5);
@@ -12,34 +13,34 @@ export function DiscoveryRail({ posts, user, onLogin }: { posts: Post[]; user: S
   return (
     <aside className="discovery-rail" aria-label="社区发现">
       <section className="discovery-panel">
-        <div className="discovery-heading"><h2>热门话题</h2><button type="button">更多 <Icon name="chevron-right" size={15} /></button></div>
+        <div className="discovery-heading"><h2>热门话题</h2><Link href="/?sort=hot">更多 <Icon name="chevron-right" size={15} /></Link></div>
         <div className="topic-list">
           {topics.length ? topics.map((post, index) => (
-            <div className="topic-row" key={post.id}>
+            <Link className="topic-row" key={post.id} href={`/post/${encodeURIComponent(post.id)}`}>
               <span className={`topic-index tone-${index % 3}`}>#</span>
               <span className="topic-title">{post.title}</span>
               <span className="topic-count">{compactCount(post.commentCount + post.likeCount)}<small>热度</small></span>
-            </div>
+            </Link>
           )) : <p className="empty-rail">暂时还没有热门内容</p>}
         </div>
       </section>
 
       <section className="discovery-panel ranking-panel">
-        <div className="discovery-heading"><h2>本周榜单</h2><button type="button">更多 <Icon name="chevron-right" size={15} /></button></div>
+        <div className="discovery-heading"><h2>本周榜单</h2><Link href="/ranking">更多 <Icon name="chevron-right" size={15} /></Link></div>
         <div className="ranking-list">
           {ranking.length ? ranking.map((post, index) => (
-            <div className="ranking-row" key={post.id}>
+            <Link className="ranking-row" key={post.id} href={`/user/${encodeURIComponent(post.author.id)}`}>
               <span className={`rank-number rank-${index + 1}`}>{index + 1}</span>
               <span className="ranking-avatar"><span>{post.author.nickname.slice(-1)}</span></span>
               <span className="ranking-name">{post.author.nickname}</span>
               <span className="level-label">Lv.{post.author.level || 1}</span>
-            </div>
+            </Link>
           )) : <p className="empty-rail">登录后查看榜单</p>}
         </div>
       </section>
 
       <section className="checkin-panel">
-        <div className="discovery-heading"><h2>签到积分</h2><button type="button">规则 <Icon name="chevron-right" size={15} /></button></div>
+        <div className="discovery-heading"><h2>签到积分</h2><span className="discovery-meta">每日一次</span></div>
         <div className="checkin-body">
           <div>
             <strong>{user ? "今天来过" : "登录后签到"}</strong>

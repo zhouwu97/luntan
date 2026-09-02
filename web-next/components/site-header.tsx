@@ -1,25 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
-import { initials } from "../lib/format";
+import { compactCount, initials } from "../lib/format";
 import { useSession } from "./session-provider";
 
 const navItems = [
   { label: "首页", href: "/" },
   { label: "排行榜", href: "/ranking" },
   { label: "热门", href: "/?sort=hot" },
-  { label: "活动", href: "/?view=activity" },
+  { label: "活动", href: "/activities" },
 ];
 
 export function SiteHeader() {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, ready, signOut } = useSession();
+  const searchParams = useSearchParams();
+  const { user, ready, unreadCount, signOut } = useSession();
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setQuery(searchParams.get("q") || "");
+  }, [searchParams]);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,15 +42,19 @@ export function SiteHeader() {
     <header className="site-header">
       <div className="header-inner">
         <Link href="/" className="brand" aria-label="圣杯酱首页">
-          <span className="brand-mark"><Icon name="trophy" size={23} /></span>
+          <span className="brand-mark"><Icon name="user" size={22} /></span>
           <span className="brand-word">圣杯酱</span>
         </Link>
 
         <nav className="desktop-nav" aria-label="主导航">
           {navItems.map((item) => {
-            const isActive = item.label === "首页" && pathname === "/";
+            const isActive = item.label === "首页"
+              ? pathname === "/" && searchParams.get("sort") !== "hot"
+              : item.label === "热门"
+                ? pathname === "/" && searchParams.get("sort") === "hot"
+                : pathname === item.href;
             return (
-              <Link key={item.label} href={item.href} className={`nav-link${isActive ? " active" : ""}`}>
+              <Link key={item.label} href={item.href} className={`nav-link${isActive ? " active" : ""}`} aria-current={isActive ? "page" : undefined}>
                 {item.label}
               </Link>
             );
@@ -63,13 +72,13 @@ export function SiteHeader() {
         </form>
 
         <div className="header-actions">
-          <button className="publish-button" type="button" onClick={() => router.push(user ? "/publish" : "/login")}>
+          <button className="publish-button" type="button" aria-label="发布帖子" onClick={() => router.push(user ? "/publish" : "/login")}>
             <Icon name="plus" size={19} />
             <span>发布帖子</span>
           </button>
           <button className="icon-button notification-button" type="button" aria-label="通知" onClick={() => router.push(user ? "/notifications" : "/login")}>
             <Icon name="bell" size={21} />
-            {user && <span className="notification-dot">3</span>}
+            {user && unreadCount > 0 && <span className="notification-dot">{unreadCount > 99 ? "99+" : compactCount(unreadCount)}</span>}
           </button>
           {ready && user ? (
             <div className="profile-menu-wrap">

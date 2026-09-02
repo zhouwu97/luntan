@@ -7,7 +7,12 @@ import type {
   FeedPage,
   MediaAsset,
   Post,
+  ActivityItem,
+  ForumNotification,
   SessionUser,
+  ProfilePost,
+  ProfileSummary,
+  RankingToy,
   UserSummary,
 } from "../../types/forum";
 import { apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
@@ -148,6 +153,7 @@ export async function getFeed(options: {
   communityId?: string;
   hasMedia?: boolean;
   limit?: number;
+  cursor?: string;
 }): Promise<FeedPage> {
   const params = new URLSearchParams({
     limit: String(options.limit ?? 20),
@@ -157,6 +163,7 @@ export async function getFeed(options: {
   });
   if (options.communityId) params.set("community_id", options.communityId);
   if (options.hasMedia) params.set("has_media", "true");
+  if (options.cursor) params.set("cursor", options.cursor);
   const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
     `/feed/latest?${params.toString()}`,
   );
@@ -165,6 +172,54 @@ export async function getFeed(options: {
     nextCursor: payload.next_cursor,
     hasMore: payload.has_more === true,
   };
+}
+
+export async function getActivities(): Promise<ActivityItem[]> {
+  const payload = await apiJson<{ items?: unknown[] }>("/activities");
+  return Array.isArray(payload.items)
+    ? payload.items.map((raw) => {
+        const item = asRecord(raw);
+        const status = asString(item.status, asString(item.phase, "upcoming"));
+        return {
+          id: asString(item.id),
+          title: asString(item.title, "未命名活动"),
+          description: asString(item.description),
+          coverUrl: resolveAssetUrl(asString(item.cover_url)),
+          startAt: asString(item.start_at) || undefined,
+          endAt: asString(item.end_at) || undefined,
+          location: asString(item.location),
+          status,
+          phase: asString(item.phase) || undefined,
+          authorName: asString(item.author_name, "社区官方"),
+        } satisfies ActivityItem;
+      })
+    : [];
+}
+
+export async function getRankingToys(tab = ""): Promise<RankingToy[]> {
+  const query = tab ? `?tab=${encodeURIComponent(tab)}` : "";
+  const payload = await apiJson<{ items?: unknown[] }>(`/ranking/toys${query}`);
+  return Array.isArray(payload.items)
+    ? payload.items.map((raw, index) => {
+        const item = asRecord(raw);
+        const tags = Array.isArray(item.tags)
+          ? item.tags.map((tag) => String(tag)).filter(Boolean)
+          : [];
+        return {
+          id: asString(item.id),
+          rank: asNumber(item.rank, index + 1),
+          name: asString(item.name, "未命名产品"),
+          merchant: asString(item.merchant),
+          description: asString(item.description),
+          tags,
+          score: asNumber(item.score),
+          wantCount: asNumber(item.want_count),
+          ratingCount: asNumber(item.rating_count),
+          coverUrl: resolveAssetUrl(asString(item.cover_url)),
+          heroUrl: resolveAssetUrl(asString(item.hero_url)),
+        } satisfies RankingToy;
+      })
+    : [];
 }
 
 export async function getPost(id: string): Promise<Post> {
@@ -253,6 +308,92 @@ export async function loginAsGuest(): Promise<AuthSession> {
 
 export async function getMe(): Promise<SessionUser> {
   return parseUser(await apiJson<JsonRecord>("/me")) as SessionUser;
+}
+
+export async function getUserProfile(id: string): Promise<ProfileSummary> {
+  const item = asRecord(await apiJson<JsonRecord>(`/users/${encodeURIComponent(id)}`));
+  const viewer = asRecord(item.viewer_state);
+  const user = parseUser(item);
+  return {
+    ...user,
+    bio: asString(item.bio, asString(item.signature, "")),
+    experience: asNumber(item.experience),
+    postCount: asNumber(item.post_count),
+    commentCount: asNumber(item.comment_count),
+    likeReceivedCount: asNumber(item.like_received_count),
+    followerCount: asNumber(item.follower_count),
+    followingCount: asNumber(item.following_count),
+    publicId: asString(item.public_id) || undefined,
+    createdAt: asString(item.created_at) || undefined,
+    isFollowing: asBoolean(viewer.is_following),
+    canFollow: asBoolean(viewer.can_follow),
+  };
+}
+
+export async function getUserPosts(id: string): Promise<ProfilePost[]> {
+  const payload = await apiJson<{ items?: unknown[] }>(`/users/${encodeURIComponent(id)}/posts?limit=20`);
+  return Array.isArray(payload.items)
+    ? payload.items.map((raw) => {
+        const item = asRecord(raw);
+        return {
+          id: asString(item.id),
+          title: asString(item.title, "未命名帖子"),
+          contentPreview: asString(item.content_preview, asString(item.content)),
+          communityName: asString(item.community_name, "社区"),
+          commentCount: asNumber(item.comment_count),
+          likeCount: asNumber(item.like_count),
+          viewCount: asNumber(item.view_count),
+          createdAt: asString(item.created_at, asString(item.published_at)),
+        } satisfies ProfilePost;
+      })
+    : [];
+}
+
+export async function setUserFollow(id: string, active: boolean): Promise<void> {
+  await apiFetch(`/users/${encodeURIComponent(id)}/follow`, { method: active ? "PUT" : "DELETE" });
+}
+
+export async function getNotifications(options: {
+  category?: string;
+  cursor?: string;
+  limit?: number;
+} = {}): Promise<{ items: ForumNotification[]; nextCursor?: string; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 30) });
+  if (options.category) params.set("category", options.category);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(`/notifications?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items)
+      ? payload.items.map((raw) => {
+          const item = asRecord(raw);
+          return {
+            id: asString(item.id),
+            type: asString(item.type),
+            actor: parseUser(item.actor),
+            targetType: asString(item.target_type),
+            targetId: asString(item.target_id),
+            targetData: asRecord(item.target_data),
+            isRead: asBoolean(item.is_read),
+            createdAt: asString(item.created_at),
+          } satisfies ForumNotification;
+        })
+      : [],
+    nextCursor: asString(payload.next_cursor) || undefined,
+    hasMore: payload.has_more === true,
+  };
+}
+
+export async function getUnreadNotificationCount(): Promise<number> {
+  const payload = await apiJson<JsonRecord>("/notifications/unread-count");
+  return asNumber(payload.unread_count);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await apiPost("/notifications/read-all", {});
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await apiFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH" });
 }
 
 export async function logout(): Promise<void> {

@@ -2,20 +2,20 @@ import 'package:flutter/material.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
-import '../data/api/ranking_repository.dart';
 import '../theme/app_theme.dart';
-import 'ranking_toy_submission_screen.dart';
 
 class RankingReorderScreen extends StatefulWidget {
   const RankingReorderScreen({
     super.key,
-    required this.rankingRepository,
     required this.platformRepository,
+    this.initialTab = '',
+    this.initialCategory = '',
     this.onFeedback,
   });
 
-  final RankingRepository rankingRepository;
   final PlatformRepository platformRepository;
+  final String initialTab;
+  final String initialCategory;
   final ValueChanged<String>? onFeedback;
 
   @override
@@ -23,38 +23,103 @@ class RankingReorderScreen extends StatefulWidget {
 }
 
 class _RankingReorderScreenState extends State<RankingReorderScreen> {
-  List<RankingToy> items = const [];
+  static const _tabs = <_RankingViewOption>[
+    _RankingViewOption('综合热榜', ''),
+    _RankingViewOption('慢玩入门', 'ENTRY'),
+    _RankingViewOption('进阶训练', 'ADVANCED'),
+    _RankingViewOption('超高刺激', 'HIGH'),
+    _RankingViewOption('榨汁玩具', 'EXTREME'),
+  ];
+  static const _categories = <_RankingViewOption>[
+    _RankingViewOption('全部', ''),
+    _RankingViewOption('飞机杯', 'CUP'),
+    _RankingViewOption('小型臀模', 'SMALL_MOLD'),
+    _RankingViewOption('大型臀模', 'LARGE_MOLD'),
+    _RankingViewOption('半身腿模', 'HALF_BODY'),
+    _RankingViewOption('润滑油', 'LUBE'),
+  ];
+
+  List<RankingViewOrderItem> items = const [];
   Object? error;
   bool loading = true;
   bool saving = false;
+  int _version = 0;
+  int _loadRequest = 0;
+  late String _tab;
+  late String _category;
 
   @override
   void initState() {
     super.initState();
+    _tab = widget.initialTab;
+    _category = _tab.isEmpty
+        ? widget.initialCategory
+        : widget.initialCategory.isEmpty
+        ? 'CUP'
+        : widget.initialCategory;
     _load();
   }
 
-  void _feedback(String message) => widget.onFeedback?.call(message);
+  void _feedback(String message) {
+    widget.onFeedback?.call(message);
+    if (widget.onFeedback == null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  String get _viewLabel {
+    final tabLabel = _tabs.firstWhere((item) => item.key == _tab).label;
+    if (_category.isEmpty) return tabLabel;
+    final categoryLabel = _categories
+        .firstWhere((item) => item.key == _category)
+        .label;
+    return '$tabLabel · $categoryLabel';
+  }
 
   Future<void> _load() async {
+    final request = ++_loadRequest;
+    final tab = _tab;
+    final category = _category;
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      final loaded = await widget.rankingRepository.list();
-      if (!mounted) return;
+      final loaded = await widget.platformRepository.getRankingViewOrder(
+        tab: tab,
+        category: category,
+      );
+      if (!mounted || request != _loadRequest) return;
       setState(() {
         items = loaded.items;
+        _version = loaded.version;
         loading = false;
       });
     } catch (cause) {
-      if (!mounted) return;
+      if (!mounted || request != _loadRequest) return;
       setState(() {
         loading = false;
         error = cause;
       });
     }
+  }
+
+  void _selectTab(String tab) {
+    if (saving || tab == _tab) return;
+    setState(() {
+      _tab = tab;
+      if (_tab.isNotEmpty && _category.isEmpty) _category = 'CUP';
+    });
+    _load();
+  }
+
+  void _selectCategory(String category) {
+    if (saving || category == _category) return;
+    if (_tab.isNotEmpty && category.isEmpty) return;
+    setState(() => _category = category);
+    _load();
   }
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
@@ -67,24 +132,33 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
         newIndex >= items.length) {
       return;
     }
-    final previous = List<RankingToy>.of(items);
-    final moved = items.removeAt(oldIndex);
-    items.insert(newIndex, moved);
-    setState(() => saving = true);
+
+    final previous = List<RankingViewOrderItem>.of(items);
+    final next = List<RankingViewOrderItem>.of(items);
+    final moved = next.removeAt(oldIndex);
+    next.insert(newIndex, moved);
+    final tab = _tab;
+    final category = _category;
+    setState(() {
+      items = next;
+      saving = true;
+      error = null;
+    });
     try {
-      await widget.platformRepository.reorderRankingToys(
-        items.map((item) => item.id).toList(),
+      final version = await widget.platformRepository.saveRankingViewOrder(
+        tab: tab,
+        category: category,
+        orderedToyIds: next.map((item) => item.toyId).toList(),
+        version: _version,
       );
-      if (mounted) _feedback('综合热榜名次已保存');
+      if (!mounted) return;
+      setState(() => _version = version);
+      _feedback('$_viewLabel 名次已保存');
     } catch (cause) {
       if (!mounted) return;
-      setState(() {
-        items
-          ..clear()
-          ..addAll(previous);
-      });
-      if (cause is ApiException && cause.code == 'RANKING_REORDER_STALE') {
-        _feedback('榜单有更新，请刷新后重试');
+      setState(() => items = previous);
+      if (cause is ApiException && cause.code == 'RANKING_VIEW_ORDER_STALE') {
+        _feedback('当前榜单有更新，请刷新后重试');
         await _load();
       } else {
         _feedback('名次保存失败，请稍后重试');
@@ -112,7 +186,19 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
           ),
       ],
     ),
-    body: _body(),
+    body: Column(
+      children: [
+        _ViewTabs(options: _tabs, selectedKey: _tab, onSelected: _selectTab),
+        _ViewTabs(
+          options: _categories,
+          selectedKey: _category,
+          onSelected: _selectCategory,
+          disabledKey: _tab.isEmpty ? null : '',
+          compact: true,
+        ),
+        Expanded(child: _body()),
+      ],
+    ),
   );
 
   Widget _body() {
@@ -132,7 +218,7 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
             SizedBox(height: 180),
             Center(
               child: Text(
-                '榜单暂无玩具',
+                '当前视图暂无玩具',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
             ),
@@ -145,19 +231,22 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const Text(
-                  '长按并拖动左侧把手调整顺序\n松手后立即保存',
-                  style: TextStyle(
-                    color: Color(0xFF72879A),
-                    fontSize: 11,
-                    height: 1.45,
+                Expanded(
+                  child: Text(
+                    '当前仅调整「$_viewLabel」\n长按并拖动左侧把手，松手后立即保存',
+                    style: const TextStyle(
+                      color: Color(0xFF72879A),
+                      fontSize: 11,
+                      height: 1.45,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 12),
                 Text(
                   saving ? '保存中…' : '${items.length} 项',
                   style: TextStyle(
@@ -187,12 +276,11 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
                 buildDefaultDragHandles: false,
                 itemBuilder: (context, index) {
                   final item = items[index];
-                  final isFirst = index == 0;
                   return Container(
-                    key: ValueKey(item.id),
+                    key: ValueKey(item.toyId),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      border: isFirst
+                      border: index == 0
                           ? null
                           : const Border(
                               top: BorderSide(
@@ -251,12 +339,7 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                [
-                                  rankingToyCategoryLabel(item.category),
-                                  if (item.merchant.isNotEmpty) item.merchant,
-                                ].join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                '源榜单名次 ${item.sourceRank}',
                                 style: const TextStyle(
                                   fontSize: 10.5,
                                   color: Color(0xFF7A8FA2),
@@ -277,4 +360,59 @@ class _RankingReorderScreenState extends State<RankingReorderScreen> {
       ),
     );
   }
+}
+
+class _ViewTabs extends StatelessWidget {
+  const _ViewTabs({
+    required this.options,
+    required this.selectedKey,
+    required this.onSelected,
+    this.disabledKey,
+    this.compact = false,
+  });
+
+  final List<_RankingViewOption> options;
+  final String selectedKey;
+  final ValueChanged<String> onSelected;
+  final String? disabledKey;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: compact ? 42 : 46,
+    color: compact ? const Color(0xFFF8FAFC) : Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final option in options)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(option.label),
+                selected: selectedKey == option.key,
+                onSelected: option.key == disabledKey
+                    ? null
+                    : (_) => onSelected(option.key),
+                visualDensity: VisualDensity.compact,
+                labelStyle: TextStyle(
+                  fontSize: compact ? 11 : 13,
+                  fontWeight: selectedKey == option.key
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _RankingViewOption {
+  const _RankingViewOption(this.label, this.key);
+
+  final String label;
+  final String key;
 }

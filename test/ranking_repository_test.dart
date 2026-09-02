@@ -88,11 +88,13 @@ void main() {
     await repository.rate(toyId: 'toy-yingchuan-2', score: 8);
     await repository.createComment(toyId: 'toy-yingchuan-2', content: '真实评论');
     await repository.setCommentLike(commentId: 'comment-1', active: true);
+    await repository.deleteComment('comment-1');
 
     expect(requests, [
       'POST /api/v1/ranking/toys/toy-yingchuan-2/rating',
       'POST /api/v1/ranking/toys/toy-yingchuan-2/comments',
       'PUT /api/v1/ranking/toy-comments/comment-1/like',
+      'DELETE /api/v1/ranking/toy-comments/comment-1',
     ]);
     client.close();
   });

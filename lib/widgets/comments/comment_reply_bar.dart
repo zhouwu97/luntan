@@ -302,10 +302,14 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
             child: Container(
               height: 42,
               decoration: BoxDecoration(
-                color: const Color(0xFFF2F3F5),
-                borderRadius: BorderRadius.circular(21),
+                color: const Color(0xFFF1F4F7),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: const Color(0xFFE4ECF3),
+                  width: 0.8,
+                ),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.centerLeft,
               child: Row(
                 children: [
@@ -318,7 +322,9 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
                   Text(
                     targetUser != null
                         ? '回复 @$targetUser…'
-                        : '友善地回复一句…',
+                        : widget.isSheetMode
+                            ? '回复这条讨论…'
+                            : '友善地回复一句…',
                     style: const TextStyle(
                       fontSize: 13,
                       color: Color(0xFF8B9DB0),
@@ -472,28 +478,39 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
               decoration: InputDecoration(
                 hintText: widget.target != null
                     ? '回复 @${targetUser ?? "用户"}…'
-                    : '友善地回复一句…',
+                    : widget.isSheetMode
+                        ? '回复这条讨论…'
+                        : '友善地回复一句…',
                 hintStyle: const TextStyle(
                   fontSize: 13,
                   color: Color(0xFF899AAC),
                 ),
                 filled: true,
-                fillColor: const Color(0xFFF2F3F5),
+                fillColor: const Color(0xFFF1F4F7),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(21),
-                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFE4ECF3),
+                    width: 0.8,
+                  ),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(21),
-                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFE4ECF3),
+                    width: 0.8,
+                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(21),
-                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(
+                    color: Color(0xFFCFE1FF),
+                    width: 1.0,
+                  ),
                 ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: 14,
                   vertical: 10,
                 ),
               ),

@@ -170,7 +170,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _autoFillingViewport = false;
   int _viewportFillAttempts = 0;
   bool _showBackToTop = false;
-  bool _loadingCommunities = false;
 
   bool get isApiMode => widget.feedRepository != null;
 
@@ -181,20 +180,16 @@ class _HomeScreenState extends State<HomeScreen> {
     selectedCommunityId = 'community-campus';
     selectedSort = isApiMode ? FeedSort.latest : widget.store.selectedSort;
     latestOrder = LatestOrder.comment;
-    communities = widget.communityRepository == null
-        ? selectHomeCommunities(widget.store.communities)
-        : const [];
+    // 三个首页导航是固定产品结构，接口只用于后台同步真实 ID 和统计信息。
+    communities = selectHomeCommunities(widget.store.communities);
     scrollController = ScrollController()..addListener(_onScroll);
     widget.feedController.addListener(_onFeedStateChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadFeed();
+    });
     if (widget.communityRepository != null) {
       _loadCommunities();
-    }
-    // 有板块仓储时，先加载标签再请求默认的酱紫社区流，避免标签和列表状态短暂不同步。
-    if (widget.communityRepository == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _loadFeed();
-      });
     }
   }
 
@@ -305,35 +300,66 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadCommunities() async {
-    if (mounted) setState(() => _loadingCommunities = true);
     try {
       final result = await widget.communityRepository!.getCommunities(
         status: CommunityStatus.active,
       );
       if (!mounted) return;
       final visibleCommunities = selectHomeCommunities(result);
+      final selectedCommunity = _findCommunityById(
+        communities,
+        selectedCommunityId,
+      );
+      // 先用当前 ID 匹配，再按名称适配服务端导入后的新 ID，避免后台同步
+      // 把用户刚刚切换的板块重置为默认板块。
+      final syncedSelection =
+          _findCommunityById(visibleCommunities, selectedCommunityId) ??
+          _findCommunityByName(visibleCommunities, selectedCommunity?.name);
+      final selectionChanged =
+          syncedSelection != null && syncedSelection.id != selectedCommunityId;
       setState(() {
-        communities = visibleCommunities;
-        final preferred = visibleCommunities
-            .where(
-              (item) =>
-                  item.id == 'community-campus' || item.name.trim() == '酱紫社区',
-            )
-            .toList();
-        selectedCommunityId = preferred.isNotEmpty
-            ? preferred.first.id
-            : visibleCommunities.isEmpty
-            ? 'community-campus'
-            : visibleCommunities.first.id;
+        communities = _mergeHomeCommunities(visibleCommunities);
+        if (selectionChanged) selectedCommunityId = syncedSelection.id;
       });
-      _resetViewportFillAttempts();
-      _loadFeed();
+      if (selectionChanged) {
+        _resetViewportFillAttempts();
+        _loadFeed();
+      }
     } catch (_) {
-      if (!mounted) return;
-      widget.onFeedback('板块加载失败，稍后可重试');
-    } finally {
-      if (mounted) setState(() => _loadingCommunities = false);
+      // 首页导航已有固定本地数据，后台同步失败不应打断用户浏览。
     }
+  }
+
+  List<Community> _mergeHomeCommunities(List<Community> remoteCommunities) {
+    return [
+      for (final local in selectHomeCommunities(widget.store.communities))
+        _findCommunityById(remoteCommunities, local.id) ??
+            _findCommunityByName(remoteCommunities, local.name) ??
+            local,
+    ];
+  }
+
+  Community? _findCommunityById(
+    Iterable<Community> source,
+    String? communityId,
+  ) {
+    if (communityId == null) return null;
+    for (final community in source) {
+      if (community.id == communityId) return community;
+    }
+    return null;
+  }
+
+  Community? _findCommunityByName(
+    Iterable<Community> source,
+    String? communityName,
+  ) {
+    if (communityName == null) return null;
+    final normalizedName = communityName.trim();
+    for (final community in source) {
+      if (community.name.trim() == normalizedName) return community;
+    }
+    return null;
   }
 
   ForumSection _sectionForCommunity(String communityId) =>
@@ -545,7 +571,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           communities: communities,
                           selectedCommunityId: selectedCommunityId,
                           onChanged: _selectCommunity,
-                          loading: _loadingCommunities,
                         ),
                       ),
                       SliverToBoxAdapter(
@@ -983,13 +1008,11 @@ class _SectionTabs extends StatelessWidget {
     required this.communities,
     required this.selectedCommunityId,
     required this.onChanged,
-    this.loading = false,
   });
 
   final List<Community> communities;
   final String? selectedCommunityId;
   final ValueChanged<String> onChanged;
-  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -1005,23 +1028,15 @@ class _SectionTabs extends StatelessWidget {
           border: Border.all(color: AppTheme.border, width: 0.8),
         ),
         child: tabs.isEmpty
-            ? loading
-                  ? const Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : const Center(
-                      child: Text(
-                        '暂无可用板块',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    )
+            ? const Center(
+                child: Text(
+                  '暂无可用板块',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              )
             : Row(
                 children: tabs
                     .map(

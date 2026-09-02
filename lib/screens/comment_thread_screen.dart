@@ -38,6 +38,7 @@ class CommentThreadScreen extends StatefulWidget {
     this.onToggleDislike,
     this.onAuthorTap,
     this.onMore,
+    this.onMoreAction,
   });
 
   final Comment rootComment;
@@ -55,6 +56,7 @@ class CommentThreadScreen extends StatefulWidget {
   final Future<void> Function(Comment comment)? onToggleDislike;
   final ValueChanged<String>? onAuthorTap;
   final ValueChanged<Comment>? onMore;
+  final void Function(Comment target, VoidCallback onDeleted)? onMoreAction;
 
   @override
   State<CommentThreadScreen> createState() => _CommentThreadScreenState();
@@ -72,6 +74,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
   bool sending = false;
   String? errorMessage;
   String? loadMoreError;
+  late int _replyCount = widget.rootComment.replyCount;
   _ReplyLoadState loadState = _ReplyLoadState.loading;
   int _generation = 0;
   bool _hasFocusedTarget = false;
@@ -230,6 +233,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
         currentReplyTarget = null;
         if (!replies.any((r) => r.id == newComment.id)) {
           replies.add(newComment);
+          _replyCount++;
         }
         loadState = _ReplyLoadState.loaded;
         sending = false;
@@ -300,8 +304,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
   String _replyTitle() => switch (loadState) {
     _ReplyLoadState.loading || _ReplyLoadState.error => '回复',
     _ReplyLoadState.loadedEmpty => '0 条回复',
-    _ReplyLoadState.loaded =>
-      '${widget.rootComment.replyCount ?? replies.length} 条回复',
+    _ReplyLoadState.loaded => '$_replyCount 条回复',
   };
 
   @override
@@ -640,7 +643,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
       return [
         const SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 40),
+            padding: EdgeInsets.symmetric(vertical: 40),
             child: Center(
               child: Text(
                 '暂无二级回复，来发第一条吧',
@@ -911,9 +914,30 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                               ),
                             ],
                             const Spacer(),
-                            if (widget.onMore != null)
+                            if (widget.onMore != null ||
+                                widget.onMoreAction != null)
                               CommentMoreButton(
-                                onPressed: () => widget.onMore!(reply),
+                                onPressed: () {
+                                  if (widget.onMoreAction != null) {
+                                    widget.onMoreAction!(reply, () {
+                                      if (mounted) {
+                                        setState(() {
+                                          replies.removeWhere(
+                                            (item) => item.id == reply.id,
+                                          );
+                                          _replyCount =
+                                              (_replyCount - 1).clamp(0, 1 << 30);
+                                          if (replies.isEmpty) {
+                                            loadState =
+                                                _ReplyLoadState.loadedEmpty;
+                                          }
+                                        });
+                                      }
+                                    });
+                                  } else {
+                                    widget.onMore?.call(reply);
+                                  }
+                                },
                               ),
                           ],
                         ),

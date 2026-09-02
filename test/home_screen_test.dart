@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -50,6 +52,22 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
   }
 }
 
+class _ControlledCommunityRepository implements CommunityRepository {
+  _ControlledCommunityRepository(this.future);
+
+  final Future<List<Community>> future;
+
+  @override
+  Future<List<Community>> getCommunities({
+    String? categoryId,
+    CommunityStatus? status,
+    bool? canPublish,
+  }) => future;
+
+  @override
+  Future<Community?> getCommunity(String id) async => null;
+}
+
 class _RecordingRecommendationRepository extends PlatformRepository {
   _RecordingRecommendationRepository()
     : super(ApiClient(baseUri: Uri.parse('https://example.com')));
@@ -90,7 +108,9 @@ Widget _homeFor(
   FeedController controller,
   _PagedHomeFeed repository, {
   PlatformRepository? platform,
+  CommunityRepository? communityRepository,
   bool canModerate = false,
+  ValueChanged<String>? onFeedback,
 }) {
   final store = ForumStore.uiOnly();
   return MaterialApp(
@@ -99,6 +119,7 @@ Widget _homeFor(
       feedController: controller,
       feedRepository: repository,
       platform: platform,
+      communityRepository: communityRepository,
       canModerate: canModerate,
       interactionController: InteractionController(
         repository: MockInteractionRepository(),
@@ -108,7 +129,7 @@ Widget _homeFor(
       onOpenComments: (_) {},
       onOpenProfile: () {},
       onOpenMessages: () {},
-      onFeedback: (_) {},
+      onFeedback: onFeedback ?? (_) {},
       onToggleLike: (_) {},
       onToggleBookmark: (_) {},
       onRequireAuth: () {},
@@ -343,5 +364,109 @@ void main() {
 
     // 溢出会直接让测试报 RenderFlex 异常；这里再确认提示文字仍在。
     expect(find.text('搜索帖子、用户、板块、榜单'), findsOneWidget);
+  });
+
+  testWidgets('板块接口较慢时固定首页导航首帧仍然可见', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final communities = Completer<List<Community>>();
+    final repository = _PagedHomeFeed([
+      const FeedPage(items: [], hasMore: false),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(
+      _homeFor(
+        controller,
+        repository,
+        communityRepository: _ControlledCommunityRepository(communities.future),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('大型拆箱'), findsOneWidget);
+    expect(find.bySemanticsLabel('酱紫社区'), findsOneWidget);
+    expect(find.text('杂鱼日常'), findsOneWidget);
+    expect(repository.calls, hasLength(1));
+    semantics.dispose();
+  });
+
+  testWidgets('板块接口失败时保留固定导航且不提示失败', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final communities = Completer<List<Community>>();
+    final feedback = <String>[];
+    final repository = _PagedHomeFeed([
+      const FeedPage(items: [], hasMore: false),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(
+      _homeFor(
+        controller,
+        repository,
+        communityRepository: _ControlledCommunityRepository(communities.future),
+        onFeedback: feedback.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+    communities.completeError(StateError('network unavailable'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('大型拆箱'), findsOneWidget);
+    expect(find.bySemanticsLabel('酱紫社区'), findsOneWidget);
+    expect(find.text('杂鱼日常'), findsOneWidget);
+    expect(feedback, isEmpty);
+    semantics.dispose();
+  });
+
+  testWidgets('板块同步期间切换板块不会被重置为默认板块', (tester) async {
+    final communities = Completer<List<Community>>();
+    final repository = _PagedHomeFeed([
+      const FeedPage(items: [], hasMore: false),
+      const FeedPage(items: [], hasMore: false),
+      const FeedPage(items: [], hasMore: false),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(
+      _homeFor(
+        controller,
+        repository,
+        communityRepository: _ControlledCommunityRepository(communities.future),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('杂鱼日常'));
+    await tester.pumpAndSettle();
+
+    communities.complete([
+      const Community(
+        id: 'community-import-unboxing',
+        slug: 'import-unboxing',
+        name: '大型拆箱',
+        description: '服务端数据',
+        categoryId: 'cat-import',
+        sortOrder: 10,
+      ),
+      const Community(
+        id: 'community-import-campus',
+        slug: 'import-campus',
+        name: '酱紫社区',
+        description: '服务端数据',
+        categoryId: 'cat-import',
+        sortOrder: 11,
+      ),
+      const Community(
+        id: 'community-import-daily',
+        slug: 'import-daily',
+        name: '杂鱼日常',
+        description: '服务端数据',
+        categoryId: 'cat-import',
+        sortOrder: 12,
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(controller.communityId, 'community-import-daily');
+    expect(controller.communityId, isNot('community-import-campus'));
   });
 }

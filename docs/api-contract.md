@@ -201,6 +201,10 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 | POST | `/comments/{id}/replies` | 是 | 回复评论（需幂等键） |
 | PATCH | `/comments/{id}` | 是 | 编辑 |
 | DELETE | `/comments/{id}` | 是 | 删除 |
+| POST | `/posts/{id}/comments` | 是 | 发布评论（支持 `parent_id` 楼中楼，需幂等键） |
+| POST | `/comments/{id}/replies` | 是 | 回复评论（需幂等键） |
+| PATCH | `/comments/{id}` | 是 | 编辑 |
+| DELETE | `/comments/{id}` | 是 | 删除 |
 | PUT/DELETE | `/comments/{id}/like` | 是 | 评论点赞/取消 |
 
 分页结构与 feed 一致（`{items, next_cursor, has_more}`）。
@@ -214,6 +218,7 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 | GET | `/ranking/toy-comments/{id}/replies?cursor=&limit=` | 否 | 按 `root_id` 分页整座楼的扁平回复 |
 | POST | `/ranking/toys/{id}/comments` | 是 | 发布一级评价或指定 `parent_id` 回复 |
 | PUT/DELETE | `/ranking/toy-comments/{id}/like` | 是 | 评价或楼中楼回复点赞/取消 |
+| DELETE | `/ranking/toy-comments/{id}` | 是（管理权限） | 软删除一级评价或楼中楼回复，守恒维护 reply_count |
 
 榜单根评价的 `reply_count` 表示整座楼的回复总数；回复二级评论时仍保持原始
 `parent_id`，但客户端在独立楼中楼中按 `root_id` 平铺展示。

@@ -1,15 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-import '../../data/api/api_client.dart' show ApiException;
+import '../../data/api/api_client.dart'
+    show ApiException, userFacingApiMessage;
 import '../../data/api/ranking_repository.dart';
 import '../../domain/models.dart' show relativeTimeLabel;
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import '../app_network_image.dart';
 import '../link_text.dart';
+import 'comment_action_menu.dart';
 import 'comment_common_widgets.dart';
 import 'comment_image_viewer.dart';
+import 'comment_more_button.dart';
 import 'comment_skeleton.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
@@ -32,6 +36,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
     this.isAuthenticated = true,
     this.canComment = true,
     this.canLike = true,
+    this.canManageRanking = false,
     this.onRequireAuth,
     this.blockedMessage = '当前身份暂不能评论，请登录邮箱账号后重试',
     this.onAuthorTap,
@@ -50,6 +55,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
   final bool isAuthenticated;
   final bool canComment;
   final bool canLike;
+  final bool canManageRanking;
   final VoidCallback? onRequireAuth;
   final String blockedMessage;
   final ValueChanged<String>? onAuthorTap;
@@ -65,6 +71,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   final replies = <RankingToyComment>[];
   final scrollController = ScrollController();
   final inputController = TextEditingController();
+  late int _replyCount = widget.rootComment.replyCount;
   RankingToyComment? replyTarget;
   String? nextCursor;
   String? errorMessage;
@@ -182,6 +189,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         replyTarget = null;
         if (!replies.any((item) => item.id == comment.id)) {
           replies.add(comment);
+          _replyCount++;
         }
         widget.onChanged?.call();
         loadState = _ReplyLoadState.loaded;
@@ -207,6 +215,88 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     }
   }
 
+  void _showRootMenu() {
+    showRankingCommentActionMenu(
+      context,
+      comment: widget.rootComment,
+      canManageRanking: widget.canManageRanking,
+      isReply: false,
+      onCopy: () {
+        Clipboard.setData(ClipboardData(text: widget.rootComment.content));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+      },
+      onDelete: _deleteRootComment,
+    );
+  }
+
+  Future<void> _deleteRootComment() async {
+    try {
+      await widget.repository.deleteComment(widget.rootComment.id);
+      if (!mounted) return;
+      widget.onChanged?.call();
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('评价已删除')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              userFacingApiMessage(error, fallback: '删除评价失败，请重试'),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  void _showReplyMenu(RankingToyComment reply) {
+    showRankingCommentActionMenu(
+      context,
+      comment: reply,
+      canManageRanking: widget.canManageRanking,
+      isReply: true,
+      onCopy: () {
+        Clipboard.setData(ClipboardData(text: reply.content));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
+      },
+      onDelete: () => _deleteReply(reply),
+    );
+  }
+
+  Future<void> _deleteReply(RankingToyComment reply) async {
+    try {
+      await widget.repository.deleteComment(reply.id);
+      if (!mounted) return;
+      setState(() {
+        replies.removeWhere((item) => item.id == reply.id);
+        _replyCount = (_replyCount - 1).clamp(0, 1 << 30);
+        if (replies.isEmpty) {
+          loadState = _ReplyLoadState.loadedEmpty;
+        }
+      });
+      widget.onChanged?.call();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('回复已删除')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              userFacingApiMessage(error, fallback: '删除回复失败，请重试'),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
@@ -228,52 +318,9 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     return comment.replyToUserNickname ?? '用户';
   }
 
-  Color _levelColor(int lvl) {
-    if (lvl >= 8) return AppTheme.purple;
-    if (lvl >= 6) return AppTheme.primary;
-    if (lvl >= 4) return AppTheme.mint;
-    return const Color(0xFF38AD8B);
-  }
-
-  Widget _rating(int? rating) {
-    if (rating == null) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF0F4),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ...List.generate(
-            5,
-            (index) => Icon(
-              index < ((rating + 1) ~/ 2)
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-              size: 11,
-              color: const Color(0xFFF76591),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            '$rating分',
-            style: const TextStyle(
-              color: Color(0xFFF76591),
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final rootName = _name(widget.rootComment);
-    final lvlColor = _levelColor(widget.rootComment.level);
 
     return Material(
       color: Colors.white,
@@ -327,16 +374,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF6FAFD),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFFE2EDF7),
-                              width: 0.8,
-                            ),
-                          ),
+                        child: CommentThreadRootCard(
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -380,10 +418,14 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                                           level: widget.rootComment.level,
                                           fontSize: 8.5,
                                         ),
-                                        const Spacer(),
-                                        RatingBadge(widget.rootComment.authorRating),
-                                      ],
-                                    ),
+                                         const Spacer(),
+                                         RatingBadge(widget.rootComment.authorRating),
+                                         const SizedBox(width: 4),
+                                         CommentMoreButton(
+                                           onPressed: _showRootMenu,
+                                         ),
+                                       ],
+                                     ),
                                     const SizedBox(height: 2),
                                     Text(
                                       relativeTimeLabel(widget.rootComment.createdAt),
@@ -398,7 +440,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                                       maxLines: 3,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                        fontSize: 13,
+                                        fontSize: 13.5,
                                         color: Color(0xFF243647),
                                         height: 1.5,
                                       ),
@@ -464,7 +506,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     if (replies.isEmpty) {
       return const SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 40),
+          padding: EdgeInsets.symmetric(vertical: 40),
           child: Center(
             child: Text(
               '暂无二级回复，来发第一条吧',
@@ -476,10 +518,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     }
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      sliver: SliverList.separated(
+      sliver: SliverList.builder(
         itemCount: replies.length + 1,
-        separatorBuilder: (_, _) =>
-            const Divider(height: 16, thickness: 1, color: Color(0xFFEFF3F6)),
         itemBuilder: (context, index) {
           if (index == replies.length) {
             if (loadingMore) {
@@ -502,7 +542,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
             }
             return const SizedBox(height: 16);
           }
-          return _buildReplyItem(replies[index]);
+          final isLast = index == replies.length - 1;
+          return _buildReplyItem(replies[index], isLast: isLast);
         },
       ),
     );
@@ -511,30 +552,41 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   String _replyTitle() => switch (loadState) {
     _ReplyLoadState.loading || _ReplyLoadState.error => '回复',
     _ReplyLoadState.loadedEmpty => '0 条回复',
-    _ReplyLoadState.loaded => '${widget.rootComment.replyCount} 条回复',
+    _ReplyLoadState.loaded => '$_replyCount 条回复',
   };
 
-  Widget _buildReplyItem(RankingToyComment reply) {
+  Widget _buildReplyItem(RankingToyComment reply, {bool isLast = false}) {
     final name = _name(reply);
     final replyTo = _replyToName(reply);
     final isLiked = reply.isLiked;
 
     return Container(
       key: GlobalObjectKey('ranking-reply:${reply.id}'),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CommentAvatar(
-            name: name,
-            avatarUrl: reply.avatarUrl,
-            size: 32,
-            onTap: () {
-              if (reply.authorId.isNotEmpty &&
-                  !reply.authorId.startsWith('guest')) {
-                widget.onAuthorTap?.call(reply.authorId);
-              }
-            },
+          Column(
+            children: [
+              CommentAvatar(
+                name: name,
+                avatarUrl: reply.avatarUrl,
+                size: 32,
+                onTap: () {
+                  if (reply.authorId.isNotEmpty &&
+                      !reply.authorId.startsWith('guest')) {
+                    widget.onAuthorTap?.call(reply.authorId);
+                  }
+                },
+              ),
+              if (!isLast)
+                Container(
+                  width: 1.0,
+                  height: 24,
+                  margin: const EdgeInsets.only(top: 4),
+                  color: const Color(0xFFE4EBF2),
+                ),
+            ],
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -622,8 +674,19 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                       isActive: isLiked,
                       activeColor: AppTheme.pink,
                     ),
+                    const Spacer(),
+                    CommentMoreButton(
+                      onPressed: () => _showReplyMenu(reply),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 4),
+                if (!isLast)
+                  const Divider(
+                    height: 1,
+                    thickness: 0.6,
+                    color: Color(0xFFEDF2F7),
+                  ),
               ],
             ),
           ),

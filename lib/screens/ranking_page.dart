@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../data/api/publish_repository.dart';
@@ -716,14 +712,19 @@ class _RankingPageState extends State<RankingPage> {
   }
 
   void _openReorderScreen() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => RankingReorderScreen(
-          rankingRepository: widget.repository!,
-          platformRepository: widget.platformRepository!,
-        ),
-      ),
-    );
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => RankingReorderScreen(
+              platformRepository: widget.platformRepository!,
+              initialTab: _selectedTabKey,
+              initialCategory: _selectedCategoryKey ?? '',
+            ),
+          ),
+        )
+        .then((_) {
+          if (mounted) _loadRemoteRanking();
+        });
   }
 
   @override
@@ -1878,9 +1879,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   void _showRankingCommentMenu(RankingToyComment comment) {
-    showCommentCopyMenu(
+    showRankingCommentActionMenu(
       context,
-      onCopied: () {
+      comment: comment,
+      canManageRanking: widget.canManageRanking,
+      onCopy: () {
         Clipboard.setData(ClipboardData(text: comment.content));
         ScaffoldMessenger.of(
           context,
@@ -1945,6 +1948,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         isAuthenticated: widget.isAuthenticated,
         canComment: widget.canComment,
         canLike: widget.canLike,
+        canManageRanking: widget.canManageRanking,
         onRequireAuth: widget.onRequireAuth,
         onReply: (target, content) => repository.createComment(
           toyId: item.id,
@@ -2895,10 +2899,10 @@ class _ReviewCard extends StatelessWidget {
     required this.avatarColor,
     this.level = 1,
     this.authorRating,
-    this.createdAt,
   }) : liked = false,
        media = const [],
        avatarUrl = null,
+       createdAt = null,
        onLike = null,
        replies = const [],
        onReply = null,
@@ -2951,7 +2955,9 @@ class _ReviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalReplies = commentReplyCount > 0 ? commentReplyCount : replies.length;
+    final totalReplies = commentReplyCount > 0
+        ? commentReplyCount
+        : replies.length;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -2974,11 +2980,7 @@ class _ReviewCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CommentAvatar(
-                name: user,
-                avatarUrl: avatarUrl,
-                size: 38,
-              ),
+              CommentAvatar(name: user, avatarUrl: avatarUrl, size: 38),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -2986,22 +2988,31 @@ class _ReviewCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Flexible(
-                          child: Text(
-                            user,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFF102844),
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  user,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xFF102844),
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              UserLevelBadge(level: level, fontSize: 8.5),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 5),
-                        UserLevelBadge(level: level, fontSize: 8.5),
-                        const Spacer(),
-                        RatingBadge(authorRating),
+                        const SizedBox(width: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: RatingBadge(authorRating),
+                        ),
                       ],
                     ),
                     if (createdAt != null) ...[
@@ -3091,8 +3102,7 @@ class _ReviewCard extends StatelessWidget {
                   activeColor: AppTheme.pink,
                 ),
                 const Spacer(),
-                if (onMore != null)
-                  CommentMoreButton(onPressed: onMore!),
+                if (onMore != null) CommentMoreButton(onPressed: onMore!),
               ],
             ),
           ),
@@ -3107,7 +3117,9 @@ class _ReviewCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   ...replies.take(2).map((r) {
-                    final rAuthor = r.nickname.isEmpty ? r.username : r.nickname;
+                    final rAuthor = r.nickname.isEmpty
+                        ? r.username
+                        : r.nickname;
                     final rReplyTo = r.replyToUserNickname;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2.5),

@@ -69,7 +69,7 @@ class _CommentItemState extends State<CommentItem>
     );
     _highlightAnimation = ColorTween(
       begin: const Color(0xFFEDF6FF),
-      end: Colors.transparent,
+      end: Colors.white,
     ).animate(
       CurvedAnimation(
         parent: _highlightController,
@@ -149,14 +149,22 @@ class _CommentItemState extends State<CommentItem>
     return AnimatedBuilder(
       animation: _highlightAnimation,
       builder: (context, child) {
+        final cardColor = widget.isHighlighted
+            ? (_highlightAnimation.value ?? Colors.white)
+            : Colors.white;
+
         return GestureDetector(
           onLongPress: widget.onLongPress,
           child: Container(
             decoration: BoxDecoration(
-              color: _highlightAnimation.value ?? Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
+              color: cardColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: const Color(0xFFE3EAF2),
+                width: 1.0,
+              ),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             child: child,
           ),
         );
@@ -166,112 +174,90 @@ class _CommentItemState extends State<CommentItem>
         children: [
           // 头部：头像 + 昵称（统一点击热区，支持跳转个人主页）
           if (!deleted)
-            InkWell(
-              onTap: widget.onAuthorTap != null ? _handleAuthorTap : null,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CommentAvatar(
-                      name: author,
-                      avatarUrl: avatar,
-                      size: 36,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CommentAvatar(
+                  name: author,
+                  avatarUrl: avatar,
+                  size: 36,
+                  onTap: widget.onAuthorTap != null ? _handleAuthorTap : null,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  author,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.textPrimary,
-                                    height: 1.2,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              UserLevelBadge(level: level, fontSize: 9),
-                              if (widget.isPostAuthor) ...[
-                                const SizedBox(width: 5),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 1.5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFEBF3FE),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: const Color(0xFFCFE2FA),
-                                      width: 0.6,
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    '楼主',
-                                    style: TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w800,
-                                      color: Color(0xFF2672D6),
-                                      height: 1.1,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          const SizedBox(height: 3),
-                          Row(
-                            children: [
-                              Text(
-                                relativeTimeLabel(comment.createdAt),
+                          Flexible(
+                            child: InkWell(
+                              onTap: widget.onAuthorTap != null
+                                  ? _handleAuthorTap
+                                  : null,
+                              borderRadius: BorderRadius.circular(4),
+                              child: Text(
+                                author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 10.5,
-                                  color: Color(0xFF94A5B7),
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textPrimary,
+                                  height: 1.2,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4.5,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  '#${comment.floor ?? widget.floor ?? 1}',
-                                  style: const TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF7E8E9E),
-                                  ),
-                                ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          UserLevelBadge(level: level, fontSize: 8.5),
+                          if (widget.isPostAuthor) ...[
+                            const SizedBox(width: 5),
+                            const PostAuthorBadge(fontSize: 8.5),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Text(
+                            relativeTimeLabel(comment.createdAt),
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              color: Color(0xFF9AA9B8),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4.5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '#${comment.floor ?? widget.floor}',
+                              style: const TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF7E8E9E),
                               ),
-                            ],
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
 
           // 正文区域（与头部对齐，左边距 46）
           if (!deleted)
             Padding(
-              padding: const EdgeInsets.only(left: 46, top: 4, right: 4),
+              padding: const EdgeInsets.only(left: 46, top: 6, right: 4),
               child: LinkText(
                 comment.content,
                 selectable: true,
@@ -302,7 +288,7 @@ class _CommentItemState extends State<CommentItem>
           // 操作栏（回复、点赞、踩、更多，触控热区 >= 36dp）
           if (!deleted)
             Padding(
-              padding: const EdgeInsets.only(left: 46, top: 6),
+              padding: const EdgeInsets.only(left: 46, top: 4),
               child: Row(
                 children: [
                   CommentActionButton(
@@ -315,7 +301,9 @@ class _CommentItemState extends State<CommentItem>
                     icon: comment.isDisliked
                         ? Icons.thumb_down_rounded
                         : Icons.thumb_down_off_alt_rounded,
-                    label: comment.dislikeCount > 0 ? '${comment.dislikeCount}' : null,
+                    label: comment.dislikeCount > 0
+                        ? '${comment.dislikeCount}'
+                        : null,
                     onTap: widget.onDislike,
                     isActive: comment.isDisliked,
                     activeColor: const Color(0xFF5A7B9C),

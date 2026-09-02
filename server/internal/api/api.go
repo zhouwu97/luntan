@@ -601,6 +601,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		commentID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/"), "/like")
 		s.toggleRankingToyCommentLike(w, r, commentID, false)
 		return
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/ranking/toy-comments/") && !strings.Contains(strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/"), "/"):
+		commentID := strings.TrimPrefix(path, "/api/v1/ranking/toy-comments/")
+		s.deleteRankingToyComment(w, r, commentID)
+		return
 	case strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/media/") || strings.HasPrefix(path, "/api/v1/comments/") || strings.HasPrefix(path, "/api/v1/users/") || strings.HasPrefix(path, "/api/v1/notifications/") || path == "/api/v1/me":
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusMethodNotAllowed, Code: "METHOD_NOT_ALLOWED", Message: "请求方法不支持"})
 		return

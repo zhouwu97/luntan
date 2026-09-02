@@ -43,44 +43,63 @@ class CommentReplyPreview extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (hasPreview)
-            ReplyPreviewSurface(
-              borderRadius: 10,
-              padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  ...previewItems.map(
-                    (reply) => _ReplyPreviewLine(
-                      key: ValueKey('reply-preview:${reply.id}'),
-                      reply: reply,
-                      onOpenThread: onOpenThread,
-                      onReplyTo: onReplyTo,
-                      onAuthorTap: onAuthorTap,
-                      onMore: onMore,
+                  // 左侧淡蓝 thread line（对齐 HTML 原型 .reply-preview:before）
+                  Container(
+                    width: 3,
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFCFE1F8),
+                      borderRadius: BorderRadius.circular(5),
                     ),
                   ),
-                  if (totalReplyCount > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: InkWell(
-                        onTap: onOpenThread,
-                        borderRadius: BorderRadius.circular(4),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 2,
-                            vertical: 3,
-                          ),
-                          child: Text(
-                            copyText,
-                            style: const TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.primary,
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: ReplyPreviewSurface(
+                      borderRadius: 10,
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ...previewItems.map(
+                            (reply) => _ReplyPreviewLine(
+                              key: ValueKey('reply-preview:${reply.id}'),
+                              reply: reply,
+                              onOpenThread: onOpenThread,
+                              onReplyTo: onReplyTo,
+                              onAuthorTap: onAuthorTap,
+                              onMore: onMore,
                             ),
                           ),
-                        ),
+                          if (totalReplyCount > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: InkWell(
+                                onTap: onOpenThread,
+                                borderRadius: BorderRadius.circular(4),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 2,
+                                    vertical: 3,
+                                  ),
+                                  child: Text(
+                                    copyText,
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
+                  ),
                 ],
               ),
             )

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhouwu97/luntan/server/internal/auth"
 	"github.com/zhouwu97/luntan/server/internal/platform/httpserver"
 )
 
@@ -1174,3 +1175,76 @@ func decodeRankingToyCommentCursor(value string) (rankingToyCommentCursor, error
 	}
 	return cursor, nil
 }
+
+func (s *Server) canManageRanking(r *http.Request, user auth.User) bool {
+	if s == nil || s.db == nil {
+		return false
+	}
+	return s.canModerate(r, user) || s.hasAnyPermission(r, user.ID, "admin.role.manage")
+}
+
+func (s *Server) deleteRankingToyComment(w http.ResponseWriter, r *http.Request, commentID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.canManageRanking(r, user) {
+		writeAuthError(w, r, ErrForbidden)
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	var toyID, rootID string
+	var parentID sql.NullString
+	var deletedAt sql.NullTime
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT toy_id, COALESCE(root_id, id), parent_id, deleted_at
+		FROM ranking_toy_comments
+		WHERE id = $1 FOR UPDATE`, commentID).Scan(&toyID, &rootID, &parentID, &deletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrRankingCommentNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if !deletedAt.Valid {
+		result, err := tx.ExecContext(r.Context(), `
+			UPDATE ranking_toy_comments
+			SET deleted_at = now(), updated_at = now()
+			WHERE id = $1 AND deleted_at IS NULL`, commentID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if affected > 0 && rootID != commentID {
+			if _, err := tx.ExecContext(r.Context(), `
+				UPDATE ranking_toy_comments
+				SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now()
+				WHERE id = $1`, rootID); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+

@@ -854,6 +854,35 @@ class AdminStoreRewardContentPage {
   final bool hasMore;
 }
 
+/// 管理端榜单视图中的单个条目。人工排序只在 [tab] 和 [category]
+/// 对应的视图内生效，不能回写外部同步的源榜单名次。
+class RankingViewOrderItem {
+  const RankingViewOrderItem({
+    required this.toyId,
+    required this.name,
+    required this.sourceRank,
+  });
+
+  final String toyId;
+  final String name;
+  final int sourceRank;
+}
+
+/// 一个可独立维护的榜单视图及其乐观锁版本。
+class RankingViewOrder {
+  const RankingViewOrder({
+    required this.tab,
+    required this.category,
+    required this.version,
+    required this.items,
+  });
+
+  final String tab;
+  final String category;
+  final int version;
+  final List<RankingViewOrderItem> items;
+}
+
 class PlatformRepository {
   PlatformRepository(this._client);
 
@@ -1401,11 +1430,59 @@ class PlatformRepository {
     );
   }
 
-  Future<void> reorderRankingToys(List<String> toyIds) async {
-    await _client.putJson(
-      '/api/v1/admin/ranking/reorder',
-      body: {'toy_ids': toyIds},
+  /// 读取指定 Tab 和品类的排序视图。服务端返回的版本用于保存时防止
+  /// 其他管理员或外部同步造成的覆盖。
+  Future<RankingViewOrder> getRankingViewOrder({
+    required String tab,
+    required String category,
+  }) async {
+    final payload = await _client.getJson(
+      '/api/v1/admin/ranking/views',
+      queryParameters: {
+        if (tab.isNotEmpty) 'tab': tab,
+        if (category.isNotEmpty) 'category': category,
+      },
     );
+    final view = payload['view'] is Map
+        ? Map<String, dynamic>.from(payload['view'] as Map)
+        : const <String, dynamic>{};
+    final rawItems = payload['items'];
+    final items = rawItems is List
+        ? rawItems.whereType<Map>().map((item) {
+            final value = Map<String, dynamic>.from(item);
+            return RankingViewOrderItem(
+              toyId: _string(value['toy_id']),
+              name: _string(value['name']),
+              sourceRank: _int(value['source_rank']),
+            );
+          }).toList()
+        : const <RankingViewOrderItem>[];
+    return RankingViewOrder(
+      tab: _string(view['tab']),
+      category: _string(view['category']),
+      version: _int(view['version']),
+      items: items,
+    );
+  }
+
+  /// 仅保存当前 [tab] + [category] 视图的人工顺序。
+  Future<int> saveRankingViewOrder({
+    required String tab,
+    required String category,
+    required List<String> orderedToyIds,
+    required int version,
+  }) async {
+    final payload = await _client.putJson(
+      '/api/v1/admin/ranking/views/order',
+      body: {
+        'tab': tab,
+        'category': category,
+        'mode': 'MANUAL',
+        'ordered_toy_ids': orderedToyIds,
+        'version': version,
+      },
+    );
+    return _int(payload['version']);
   }
 
   Future<List<RankingItem>> getRanking({

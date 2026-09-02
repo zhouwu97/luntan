@@ -411,6 +411,10 @@ class RankingRepository {
     return _int(payload['like_count']);
   }
 
+  Future<void> deleteComment(String commentId) async {
+    await _client.deleteJson('/api/v1/ranking/toy-comments/$commentId');
+  }
+
   String _newIdempotencyKey(String prefix) =>
       '$prefix-${DateTime.now().toUtc().microsecondsSinceEpoch}-${identityHashCode(this)}';
 }

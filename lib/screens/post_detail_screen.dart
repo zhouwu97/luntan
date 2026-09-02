@@ -412,6 +412,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         onToggleLike: (reply) => _likeComment(reply),
         onToggleDislike: (reply) => _dislikeComment(reply),
         onMore: (reply) => _showCommentMenu(reply),
+        onMoreAction: (target, onDeleted) =>
+            _showCommentMenu(target, onDeleted: onDeleted),
       ),
     );
   }
@@ -639,8 +641,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     // 评论区标题
                     SliverToBoxAdapter(
                       child: Container(
-                        color: const Color(0xFFF7FAFD),
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF7F9FC),
+                          border: Border(
+                            bottom: BorderSide(
+                              color: Color(0xFFEDF2F6),
+                              width: 1,
+                            ),
+                          ),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(15, 13, 15, 11),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -649,15 +659,32 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    '评论 ${post.comments}',
-                                    style: const TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.baseline,
+                                    textBaseline: TextBaseline.alphabetic,
+                                    children: [
+                                      Text(
+                                        '评论 ${post.comments}',
+                                        style: const TextStyle(
+                                          color: AppTheme.textPrimary,
+                                          fontSize: 17,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.15,
+                                        ),
+                                      ),
+                                      const Text(
+                                        '友善交流 · 按楼层展示',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF9AA9B7),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 10),
                                   Row(
                                     children: [
                                       _CommentSortChip(
@@ -674,9 +701,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         label: '顺序',
                                         selected:
                                             commentsController.sort ==
-                                            CommentSort.desc,
+                                            CommentSort.asc,
                                         onTap: () => commentsController.setSort(
-                                          CommentSort.desc,
+                                          CommentSort.asc,
                                         ),
                                       ),
                                       const SizedBox(width: 6),
@@ -684,15 +711,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         label: '倒序',
                                         selected:
                                             commentsController.sort ==
-                                            CommentSort.asc,
+                                            CommentSort.desc,
                                         onTap: () => commentsController.setSort(
-                                          CommentSort.asc,
+                                          CommentSort.desc,
                                         ),
                                       ),
                                       const Spacer(),
                                       if (post.authorId.isNotEmpty)
                                         _CommentSortChip(
                                           label: '只看楼主',
+                                          isOwnerChip: true,
                                           selected:
                                               commentsController.authorFilter !=
                                               null,
@@ -745,76 +773,48 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     // 一级评论列表
                     if (allComments.isNotEmpty)
                       SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        padding:
+                            const EdgeInsets.fromLTRB(12, 10, 12, 16),
                         sliver: SliverList.separated(
                           itemCount: allComments.length,
-                          separatorBuilder: (context, index) => const Divider(
-                            height: 1,
-                            thickness: 1,
-                            color: Color(0xFFEDF2F6),
-                          ),
+                          separatorBuilder: (context, index) =>
+                              const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final comment = allComments[index];
                             final isHighlighted =
                                 highlightedCommentId == comment.id;
-                            final isFirst = index == 0;
-                            final isLast = index == allComments.length - 1;
-                            final side = BorderSide(color: AppTheme.border);
 
-                            return Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                border: Border(
-                                  top: isFirst ? side : BorderSide.none,
-                                  left: side,
-                                  right: side,
-                                  bottom: isLast ? side : BorderSide.none,
-                                ),
-                                borderRadius: BorderRadius.vertical(
-                                  top: isFirst
-                                      ? const Radius.circular(
-                                          AppTheme.radiusMedium,
-                                        )
-                                      : Radius.zero,
-                                  bottom: isLast
-                                      ? const Radius.circular(
-                                          AppTheme.radiusMedium,
-                                        )
-                                      : Radius.zero,
-                                ),
-                              ),
-                              child: CommentItem(
-                                key: GlobalObjectKey('comment:${comment.id}'),
-                                comment: comment,
-                                floor: index + 2,
-                                replies: comment.replyPreview,
-                                isHighlighted: isHighlighted,
-                                isPostAuthor: post.authorId == comment.authorId,
-                                onAuthorTap: widget.onOpenUserId,
-                                onReply: () {
-                                  setState(() => replyTarget = comment);
-                                  _composerController.openReply(
-                                    parentCommentId: comment.id,
-                                    replyToUserId: comment.authorId,
-                                    replyToName: comment.author?.nickname,
-                                  );
-                                },
-                                onReplyTo: (target) {
-                                  setState(() => replyTarget = target);
-                                  _composerController.openReply(
-                                    parentCommentId: target.id,
-                                    replyToUserId: target.authorId,
-                                    replyToName: target.author?.nickname,
-                                  );
-                                },
-                                onLike: () => _likeComment(comment),
-                                onDislike: () => _dislikeComment(comment),
-                                onMore: () => _showCommentMenu(comment),
-                                onReplyMore: (reply) => _showCommentMenu(reply),
-                                onLongPress: () => _showCommentMenu(comment),
-                                onViewAllReplies: () =>
-                                    _openReplyThread(comment),
-                              ),
+                            return CommentItem(
+                              key: GlobalObjectKey('comment:${comment.id}'),
+                              comment: comment,
+                              floor: index + 2,
+                              replies: comment.replyPreview,
+                              isHighlighted: isHighlighted,
+                              isPostAuthor: post.authorId == comment.authorId,
+                              onAuthorTap: widget.onOpenUserId,
+                              onReply: () {
+                                setState(() => replyTarget = comment);
+                                _composerController.openReply(
+                                  parentCommentId: comment.id,
+                                  replyToUserId: comment.authorId,
+                                  replyToName: comment.author?.nickname,
+                                );
+                              },
+                              onReplyTo: (target) {
+                                setState(() => replyTarget = target);
+                                _composerController.openReply(
+                                  parentCommentId: target.id,
+                                  replyToUserId: target.authorId,
+                                  replyToName: target.author?.nickname,
+                                );
+                              },
+                              onLike: () => _likeComment(comment),
+                              onDislike: () => _dislikeComment(comment),
+                              onMore: () => _showCommentMenu(comment),
+                              onReplyMore: (reply) => _showCommentMenu(reply),
+                              onLongPress: () => _showCommentMenu(comment),
+                              onViewAllReplies: () =>
+                                  _openReplyThread(comment),
                             );
                           },
                         ),
@@ -1216,7 +1216,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
-  void _showCommentMenu(Comment comment) {
+  void _showCommentMenu(Comment comment, {VoidCallback? onDeleted}) {
     showCommentActionMenu(
       context,
       comment: comment,
@@ -1227,7 +1227,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ? null
           : () => _report('comment', comment.id),
       onEdit: () => _editComment(comment),
-      onDelete: () => _deleteComment(comment),
+      onDelete: () => _deleteComment(comment, onDeleted: onDeleted),
     );
   }
 
@@ -1298,7 +1298,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
-  Future<void> _deleteComment(Comment comment) async {
+  Future<void> _deleteComment(
+    Comment comment, {
+    VoidCallback? onDeleted,
+  }) async {
     final state = widget.controller.state;
     final post = state.detail?.post;
     if (post == null) return;
@@ -1308,6 +1311,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       if (post.commentCount == before && before > 0) {
         post.commentCount = before - 1;
       }
+      onDeleted?.call();
       if (mounted) setState(() {});
     } catch (error) {
       if (mounted) {
@@ -1564,35 +1568,62 @@ class _CommentSortChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.isOwnerChip = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool isOwnerChip;
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: AppMotion.duration(context, AppMotion.normal),
-      curve: AppMotion.standard,
-      height: 30,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: selected ? AppTheme.primary : const Color(0xFFF0F4F8),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-          color: selected ? Colors.white : const Color(0xFF71869B),
+  Widget build(BuildContext context) {
+    final bgColor = isOwnerChip
+        ? (selected ? const Color(0xFFEFF6FF) : Colors.white)
+        : (selected ? AppTheme.primary : const Color(0xFFEEF2F6));
+    final textColor = isOwnerChip
+        ? (selected ? AppTheme.primary : const Color(0xFF7790A7))
+        : (selected ? Colors.white : const Color(0xFF71869B));
+    final border = isOwnerChip
+        ? Border.all(
+            color: selected ? const Color(0xFFCFE1FF) : const Color(0xFFE4EBF3),
+            width: 0.8,
+          )
+        : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: AppMotion.duration(context, AppMotion.normal),
+        curve: AppMotion.standard,
+        height: 30,
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(10),
+          border: border,
+          boxShadow: (!isOwnerChip && selected)
+              ? [
+                  BoxShadow(
+                    color: AppTheme.primary.withValues(alpha: 0.22),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            color: textColor,
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _Tag extends StatelessWidget {

@@ -406,6 +406,10 @@ export async function setRankingToyCommentLike(
   return { active, likeCount: asNumber(payload.like_count) };
 }
 
+export async function deleteRankingToyComment(commentId: string): Promise<void> {
+  await apiFetch(`/ranking/toy-comments/${encodeURIComponent(commentId)}`, { method: "DELETE" });
+}
+
 export async function submitRankingToy(input: {
   name: string;
   category: string;

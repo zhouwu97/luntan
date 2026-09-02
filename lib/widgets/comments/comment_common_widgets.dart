@@ -160,13 +160,49 @@ class RatingBadge extends StatelessWidget {
   }
 }
 
-/// 统一的内嵌二级回复卡片底板（浅蓝灰背景、细边框与柔和圆角）。
+/// 统一“楼主”专属徽章。
+class PostAuthorBadge extends StatelessWidget {
+  const PostAuthorBadge({
+    super.key,
+    this.fontSize = 8.5,
+    this.padding = const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+  });
+
+  final double fontSize;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: const Color(0xFFEBF3FE),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: const Color(0xFFCFE2FA),
+          width: 0.6,
+        ),
+      ),
+      child: Text(
+        '楼主',
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.w800,
+          color: const Color(0xFF2672D6),
+          height: 1.1,
+        ),
+      ),
+    );
+  }
+}
+
+/// 统一的内嵌二级回复卡片底板（浅蓝灰背景 #F6F9FC、细边框与柔和圆角 10）。
 class ReplyPreviewSurface extends StatelessWidget {
   const ReplyPreviewSurface({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.fromLTRB(10, 8, 10, 8),
-    this.borderRadius = 8,
+    this.borderRadius = 10,
     this.onTap,
   });
 
@@ -181,9 +217,9 @@ class ReplyPreviewSurface extends StatelessWidget {
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F9FD),
+        color: const Color(0xFFF6FAFF),
         borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: const Color(0xFFE5EEF6), width: 0.8),
+        border: Border.all(color: const Color(0xFFE4EEF9), width: 0.8),
       ),
       child: child,
     );
@@ -196,6 +232,41 @@ class ReplyPreviewSurface extends StatelessWidget {
       );
     }
     return container;
+  }
+}
+
+/// 统一的楼中楼根评论摘要卡片底板（浅蓝底板 + 柔和细边框 + 12px 圆角）。
+class CommentThreadRootCard extends StatelessWidget {
+  const CommentThreadRootCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(12),
+    this.borderRadius = 12,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF7FBFF), Color(0xFFF3F8FF)],
+        ),
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          color: const Color(0xFFDCEAFB),
+          width: 1.0,
+        ),
+      ),
+      child: child,
+    );
   }
 }
 
@@ -263,3 +334,4 @@ class CommentActionButton extends StatelessWidget {
     );
   }
 }
+

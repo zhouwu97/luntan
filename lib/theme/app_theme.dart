@@ -14,6 +14,7 @@ class AppTheme {
   static const orange = Color(0xFFFF9C62);
   static const pink = Color(0xFFFF86A7);
   static const purple = Color(0xFF9A88E8);
+  static const danger = Color(0xFFE5484D);
 
   // 语义软背景色与阴影
   static const softBlue = Color(0xFFEAF2FF);

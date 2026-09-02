@@ -3,72 +3,77 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/data/api/platform_repository.dart';
-import 'package:luntan/data/api/ranking_repository.dart';
 import 'package:luntan/screens/ranking_reorder_screen.dart';
 
-class _FakeRankingRepository extends RankingRepository {
-  _FakeRankingRepository(this.toys)
-    : super(ApiClient(baseUri: Uri.parse('https://example.com')));
-
-  List<RankingToy> toys;
-  int listCalls = 0;
-
-  @override
-  Future<RankingList> list({String? tab, String? category}) async {
-    listCalls++;
-    return RankingList(items: List<RankingToy>.of(toys));
-  }
-}
-
 class _FakePlatformRepository extends PlatformRepository {
-  _FakePlatformRepository()
+  _FakePlatformRepository(this.items)
     : super(ApiClient(baseUri: Uri.parse('https://example.com')));
 
-  List<String>? reorderedIds;
+  List<RankingViewOrderItem> items;
+  List<String>? orderedIds;
+  String? savedTab;
+  String? savedCategory;
+  int? savedVersion;
   Object? reorderError;
+  int loadCalls = 0;
 
   @override
-  Future<void> reorderRankingToys(List<String> toyIds) async {
+  Future<RankingViewOrder> getRankingViewOrder({
+    required String tab,
+    required String category,
+  }) async {
+    loadCalls++;
+    return RankingViewOrder(
+      tab: tab,
+      category: category,
+      version: 7,
+      items: List<RankingViewOrderItem>.of(items),
+    );
+  }
+
+  @override
+  Future<int> saveRankingViewOrder({
+    required String tab,
+    required String category,
+    required List<String> orderedToyIds,
+    required int version,
+  }) async {
     if (reorderError != null) throw reorderError!;
-    reorderedIds = toyIds;
+    savedTab = tab;
+    savedCategory = category;
+    savedVersion = version;
+    orderedIds = orderedToyIds;
+    return version + 1;
   }
 }
 
-RankingToy _toy(String id, int rank) => RankingToy(
-  id: id,
-  rank: rank,
-  name: '玩具$id',
-  merchant: '品牌',
-  releaseYear: 2026,
-  description: '',
-  tags: const [],
-  assetKey: '',
-  wantCount: 0,
-  ratingCount: 0,
-  score: 0,
-  wanted: false,
-  owned: false,
+RankingViewOrderItem _toy(String id, int rank) =>
+    RankingViewOrderItem(toyId: id, name: '玩具$id', sourceRank: rank);
+
+Widget _wrap(
+  _FakePlatformRepository platform, {
+  String initialTab = '',
+  String initialCategory = '',
+  void Function(String)? onFeedback,
+}) => MaterialApp(
+  home: RankingReorderScreen(
+    platformRepository: platform,
+    initialTab: initialTab,
+    initialCategory: initialCategory,
+    onFeedback: onFeedback,
+  ),
 );
 
-Widget _wrap(_FakeRankingRepository ranking, _FakePlatformRepository platform,
-        {void Function(String)? onFeedback}) =>
-    MaterialApp(
-      home: RankingReorderScreen(
-        rankingRepository: ranking,
-        platformRepository: platform,
-        onFeedback: onFeedback,
-      ),
-    );
-
 void main() {
-  testWidgets('拖拽后按新顺序提交 toy_ids', (tester) async {
-    final ranking = _FakeRankingRepository([
+  testWidgets('拖拽后仅提交当前榜单视图的新顺序', (tester) async {
+    final platform = _FakePlatformRepository([
       _toy('t1', 1),
       _toy('t2', 2),
       _toy('t3', 3),
     ]);
-    final platform = _FakePlatformRepository();
-    await tester.pumpWidget(_wrap(ranking, platform));
+    await tester.pumpWidget(
+      _wrap(platform, initialTab: 'HIGH', initialCategory: 'LUBE'),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('玩具t1'), findsOneWidget);
@@ -80,27 +85,28 @@ void main() {
     reorderable.onReorder!(0, 2);
     await tester.pumpAndSettle();
 
-    expect(platform.reorderedIds, ['t2', 't1', 't3']);
-    expect(find.text('综合热榜名次已保存'), findsNothing);
+    expect(platform.orderedIds, ['t2', 't1', 't3']);
+    expect(platform.savedTab, 'HIGH');
+    expect(platform.savedCategory, 'LUBE');
+    expect(platform.savedVersion, 7);
   });
 
-  testWidgets('409 STALE 提示并重新拉取榜单', (tester) async {
-    final ranking = _FakeRankingRepository([
+  testWidgets('409 STALE 提示并重新拉取当前榜单视图', (tester) async {
+    final platform = _FakePlatformRepository([
       _toy('t1', 1),
       _toy('t2', 2),
       _toy('t3', 3),
     ]);
-    final platform = _FakePlatformRepository();
     platform.reorderError = const ApiException(
       type: ApiErrorType.conflict,
       statusCode: 409,
-      code: 'RANKING_REORDER_STALE',
+      code: 'RANKING_VIEW_ORDER_STALE',
       message: '榜单有更新，请刷新后重试',
     );
     final feedback = <String>[];
-    await tester.pumpWidget(_wrap(ranking, platform, onFeedback: feedback.add));
+    await tester.pumpWidget(_wrap(platform, onFeedback: feedback.add));
     await tester.pumpAndSettle();
-    final listCallsBefore = ranking.listCalls;
+    final loadCallsBefore = platform.loadCalls;
 
     final reorderable = tester.widget<ReorderableListView>(
       find.byType(ReorderableListView),
@@ -109,9 +115,8 @@ void main() {
     reorderable.onReorder!(0, 2);
     await tester.pumpAndSettle();
 
-    expect(feedback, contains('榜单有更新，请刷新后重试'));
-    expect(ranking.listCalls, greaterThan(listCallsBefore));
-    // 重拉后顺序恢复
+    expect(feedback, contains('当前榜单有更新，请刷新后重试'));
+    expect(platform.loadCalls, greaterThan(loadCallsBefore));
     expect(find.text('玩具t1'), findsOneWidget);
   });
 }

@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../data/api/api_client.dart';
 import '../data/api/platform_repository.dart';
 import '../data/api/publish_repository.dart';
@@ -9,6 +13,7 @@ import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
 import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
+import '../theme/app_theme.dart';
 import '../widgets/app_network_image.dart';
 import '../widgets/comments/ranking_comment_thread_sheet.dart';
 import '../widgets/comments/comment_more_button.dart';
@@ -2820,6 +2825,10 @@ class _ReviewSection extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 22),
             child: Text(
+              '还没有评价，来留下第一条吧',
+              style: TextStyle(color: Color(0xFF8A96A9)),
+            ),
+          )
         else
           ..._buildServerCards(comments!),
         if (comments != null && comments!.isNotEmpty && hasMore)
@@ -3305,97 +3314,107 @@ class _ReviewCard extends StatelessWidget {
                       ),
                     );
                   }),
+                  if (onViewReplies != null && totalReplies > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: InkWell(
+                        onTap: onViewReplies,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '查看全部 $totalReplies 条回复 ›',
+                                style: const TextStyle(
+                                  color: AppTheme.primary,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ] else if (onViewReplies != null && totalReplies > 0) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: InkWell(
+                onTap: onViewReplies,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '查看 $totalReplies 条回复',
+                        style: const TextStyle(
+                          color: Color(0xFF3C70B7),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 16,
+                        color: Color(0xFF3C70B7),
+                      ),
                     ],
                   ),
                 ),
-              if (onReply != null)
-                TextButton(
-                  onPressed: onReply,
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(38, 28),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('回复'),
-                ),
-              if (onViewReplies != null &&
-                  (commentReplyCount > 0 || replies.isNotEmpty))
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: InkWell(
-                    onTap: onViewReplies,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 5,
-                        horizontal: 2,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '查看 ${commentReplyCount > 0 ? commentReplyCount : replies.length} 条回复',
-                            style: const TextStyle(
-                              color: Color(0xFF3C70B7),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(width: 3),
-                          const Icon(
-                            Icons.chevron_right_rounded,
-                            size: 16,
-                            color: Color(0xFF3C70B7),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              if (onMore != null)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: CommentMoreButton(onPressed: onMore!),
-                ),
-              if (reply != null) ...[
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF5F7FB),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Text.rich(
+              ),
+            ),
+          ],
+
+          // Mock 回复（演示数据）
+          if (reply != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF6F9FD),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE5EEF6), width: 0.8),
+              ),
+              child: Text.rich(
+                TextSpan(
+                  children: [
                     TextSpan(
-                      children: [
-                        TextSpan(
-                          text: reply,
-                          style: const TextStyle(
-                            color: Color(0xFF3C70B7),
-                            fontSize: 12,
-                            height: 1.65,
-                          ),
-                        ),
-                        TextSpan(
-                          text: '  $replyDate',
-                          style: const TextStyle(
-                            color: Color(0xFF9AA5B7),
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
+                      text: reply,
+                      style: const TextStyle(
+                        color: Color(0xFF3C70B7),
+                        fontSize: 12,
+                        height: 1.55,
+                      ),
                     ),
-                  ),
+                    if (replyDate != null)
+                      TextSpan(
+                        text: '  $replyDate',
+                        style: const TextStyle(
+                          color: Color(0xFF9AA5B7),
+                          fontSize: 10,
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _DetailCommentBar extends StatelessWidget {

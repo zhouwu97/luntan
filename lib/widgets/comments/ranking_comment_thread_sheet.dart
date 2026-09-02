@@ -227,47 +227,63 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     return comment.replyToUserNickname ?? '用户';
   }
 
+  Color _levelColor(int lvl) {
+    if (lvl >= 8) return AppTheme.purple;
+    if (lvl >= 6) return AppTheme.primary;
+    if (lvl >= 4) return AppTheme.mint;
+    return const Color(0xFF38AD8B);
+  }
+
   Widget _rating(int? rating) {
     if (rating == null) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ...List.generate(
-          5,
-          (index) => Icon(
-            index < ((rating + 1) ~/ 2)
-                ? Icons.favorite
-                : Icons.favorite_border_rounded,
-            size: 11,
-            color: AppTheme.pink,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF0F4),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...List.generate(
+            5,
+            (index) => Icon(
+              index < ((rating + 1) ~/ 2)
+                  ? Icons.favorite_rounded
+                  : Icons.favorite_border_rounded,
+              size: 11,
+              color: const Color(0xFFF76591),
+            ),
           ),
-        ),
-        const SizedBox(width: 3),
-        Text(
-          '$rating分',
-          style: const TextStyle(
-            color: AppTheme.pink,
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
+          const SizedBox(width: 4),
+          Text(
+            '$rating分',
+            style: const TextStyle(
+              color: Color(0xFFF76591),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final rootName = _name(widget.rootComment);
+    final lvlColor = _levelColor(widget.rootComment.level);
+
     return Material(
       color: Colors.white,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.82,
+          height: MediaQuery.of(context).size.height * 0.84,
           child: Column(
             children: [
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Container(
                 width: 38,
                 height: 4,
@@ -277,128 +293,170 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 12, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+                child: Row(
                   children: [
-                    Row(
-                      children: [
-                        Text(
-                          _replyTitle(),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          tooltip: '关闭',
-                          onPressed: () => Navigator.of(context).pop(),
-                          icon: const Icon(Icons.close_rounded, size: 20),
-                        ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF7FAFD),
-                        borderRadius: BorderRadius.circular(12),
+                    Text(
+                      _replyTitle(),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textPrimary,
                       ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          InkWell(
-                            onTap: () {
-                              if (widget.rootComment.authorId.isNotEmpty &&
-                                  !widget.rootComment.authorId.startsWith(
-                                    'guest',
-                                  )) {
-                                widget.onAuthorTap?.call(
-                                  widget.rootComment.authorId,
-                                );
-                              }
-                            },
-                            borderRadius: BorderRadius.circular(15),
-                            child: CircleAvatar(
-                              radius: 15,
-                              backgroundColor: AppTheme.surfaceBlue,
-                              child: Text(
-                                rootName.isEmpty
-                                    ? '友'
-                                    : rootName.characters.first,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 9),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    InkWell(
-                                      onTap: () {
-                                        if (widget
-                                                .rootComment
-                                                .authorId
-                                                .isNotEmpty &&
-                                            !widget.rootComment.authorId
-                                                .startsWith('guest')) {
-                                          widget.onAuthorTap?.call(
-                                            widget.rootComment.authorId,
-                                          );
-                                        }
-                                      },
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: Text(
-                                        rootName,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'LV${widget.rootComment.level}',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: AppTheme.levelText,
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    _rating(widget.rootComment.authorRating),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                LinkText(
-                                  widget.rootComment.content,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF62788D),
-                                    height: 1.45,
-                                  ),
-                                ),
-                                _buildMedia(widget.rootComment.media),
-                              ],
-                            ),
-                          ),
-                        ],
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '关闭',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        size: 20,
+                        color: AppTheme.textSecondary,
                       ),
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1, color: AppTheme.border),
-              Expanded(child: _buildReplyList()),
+              const Divider(height: 1, color: Color(0xFFEDF2F7)),
+              Expanded(
+                child: CustomScrollView(
+                  controller: scrollController,
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF6FAFD),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFFE2EDF7),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              InkWell(
+                                onTap: () {
+                                  if (widget.rootComment.authorId.isNotEmpty &&
+                                      !widget.rootComment.authorId.startsWith('guest')) {
+                                    widget.onAuthorTap?.call(widget.rootComment.authorId);
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.surfaceBlue,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: const Color(0xFFE2EBF5),
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    rootName.isEmpty ? '友' : rootName.characters.first,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        InkWell(
+                                          onTap: () {
+                                            if (widget.rootComment.authorId.isNotEmpty &&
+                                                !widget.rootComment.authorId.startsWith('guest')) {
+                                              widget.onAuthorTap?.call(widget.rootComment.authorId);
+                                            }
+                                          },
+                                          borderRadius: BorderRadius.circular(4),
+                                          child: Text(
+                                            rootName,
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppTheme.textPrimary,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 1,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: lvlColor.withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            'LV${widget.rootComment.level}',
+                                            style: TextStyle(
+                                              fontSize: 8.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: lvlColor,
+                                            ),
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        _rating(widget.rootComment.authorRating),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    LinkText(
+                                      widget.rootComment.content,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF243647),
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                    _buildMedia(widget.rootComment.media),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: Row(
+                          children: [
+                            Text(
+                              '全部回复',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    _buildReplySlivers(),
+                  ],
+                ),
+              ),
               _buildReplyBar(),
             ],
           ),
@@ -407,59 +465,70 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     );
   }
 
-  Widget _buildReplyList() {
+  Widget _buildReplySlivers() {
     if (loadState == _ReplyLoadState.loading && replies.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16),
-        child: CommentSkeleton(itemCount: 3),
+      return const SliverPadding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        sliver: SliverToBoxAdapter(child: CommentSkeleton(itemCount: 3)),
       );
     }
     if (loadState == _ReplyLoadState.error && replies.isEmpty) {
-      return Center(
-        child: TextButton(
-          onPressed: _loadFirstPage,
-          child: Text(errorMessage!),
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 40),
+          child: Center(
+            child: TextButton(
+              onPressed: _loadFirstPage,
+              child: Text(errorMessage!),
+            ),
+          ),
         ),
       );
     }
     if (replies.isEmpty) {
-      return const Center(
-        child: Text(
-          '暂无二级回复，来发第一条吧',
-          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 40),
+          child: Center(
+            child: Text(
+              '暂无二级回复，来发第一条吧',
+              style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+            ),
+          ),
         ),
       );
     }
-    return ListView.separated(
-      controller: scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      itemCount: replies.length + 1,
-      separatorBuilder: (_, _) =>
-          const Divider(height: 16, thickness: 1, color: Color(0xFFEFF3F6)),
-      itemBuilder: (context, index) {
-        if (index == replies.length) {
-          if (loadingMore) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 14),
-              child: Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      sliver: SliverList.separated(
+        itemCount: replies.length + 1,
+        separatorBuilder: (_, _) =>
+            const Divider(height: 16, thickness: 1, color: Color(0xFFEFF3F6)),
+        itemBuilder: (context, index) {
+          if (index == replies.length) {
+            if (loadingMore) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
                 ),
-              ),
-            );
+              );
+            }
+            if (loadMoreError != null) {
+              return TextButton(
+                onPressed: _loadMore,
+                child: Text(loadMoreError!),
+              );
+            }
+            return const SizedBox(height: 16);
           }
-          if (loadMoreError != null) {
-            return TextButton(
-              onPressed: _loadMore,
-              child: Text(loadMoreError!),
-            );
-          }
-          return const SizedBox(height: 16);
-        }
-        return _buildReplyItem(replies[index]);
-      },
+          return _buildReplyItem(replies[index]);
+        },
+      ),
     );
   }
 
@@ -473,6 +542,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     final name = _name(reply);
     final replyTo = _replyToName(reply);
     final isLiked = reply.isLiked;
+    final lvlColor = _levelColor(reply.level);
+
     return Container(
       key: GlobalObjectKey('ranking-reply:${reply.id}'),
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -486,10 +557,16 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                 widget.onAuthorTap?.call(reply.authorId);
               }
             },
-            borderRadius: BorderRadius.circular(15),
-            child: CircleAvatar(
-              radius: 15,
-              backgroundColor: AppTheme.surfaceBlue,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceBlue,
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFE2EBF5), width: 1.0),
+              ),
+              alignment: Alignment.center,
               child: Text(
                 name.isEmpty ? '友' : name.characters.first,
                 style: const TextStyle(
@@ -518,18 +595,29 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                       child: Text(
                         name,
                         style: const TextStyle(
-                          fontSize: 12,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w700,
                           color: AppTheme.textPrimary,
                         ),
                       ),
                     ),
                     const SizedBox(width: 5),
-                    Text(
-                      'LV${reply.level}',
-                      style: const TextStyle(
-                        fontSize: 9.5,
-                        color: AppTheme.levelText,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: lvlColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'LV${reply.level}',
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                          color: lvlColor,
+                        ),
                       ),
                     ),
                     const Spacer(),
@@ -544,11 +632,22 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                 ),
                 if (replyTo != null) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    '回复 @$replyTo',
-                    style: const TextStyle(
-                      fontSize: 10.5,
-                      color: Color(0xFF7990A5),
+                  Text.rich(
+                    TextSpan(
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF7990A5),
+                      ),
+                      children: [
+                        const TextSpan(text: '回复 '),
+                        TextSpan(
+                          text: '@$replyTo',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -566,43 +665,69 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    GestureDetector(
+                    InkWell(
                       onTap: () => setState(() => replyTarget = reply),
-                      child: const Text(
-                        '回复',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textSecondary,
+                      borderRadius: BorderRadius.circular(4),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.reply_rounded,
+                              size: 14,
+                              color: AppTheme.textSecondary,
+                            ),
+                            SizedBox(width: 2),
+                            Text(
+                              '回复',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    GestureDetector(
+                    const SizedBox(width: 14),
+                    InkWell(
                       onTap: () => _toggleLike(reply),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isLiked
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            size: 13,
-                            color: isLiked
-                                ? AppTheme.pink
-                                : AppTheme.textSecondary,
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            '${reply.likeCount}',
-                            style: TextStyle(
-                              fontSize: 11,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isLiked
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 13.5,
                               color: isLiked
-                                  ? AppTheme.pink
+                                  ? const Color(0xFFF76591)
                                   : AppTheme.textSecondary,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 3),
+                            Text(
+                              '${reply.likeCount}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isLiked
+                                    ? const Color(0xFFF76591)
+                                    : AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -636,15 +761,24 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: AppNetworkImage(
-                  url: imageUrls[index],
-                  width: 96,
-                  height: 96,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_) => const SizedBox(
-                    width: 96,
-                    height: 96,
-                    child: Icon(Icons.broken_image_outlined),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xFFDCE7F2),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: AppNetworkImage(
+                    url: imageUrls[index],
+                    width: 88,
+                    height: 88,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_) => const SizedBox(
+                      width: 88,
+                      height: 88,
+                      child: Icon(Icons.broken_image_outlined),
+                    ),
                   ),
                 ),
               ),

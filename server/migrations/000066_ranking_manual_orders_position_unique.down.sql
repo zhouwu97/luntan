@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS ranking_manual_orders_position_unique;

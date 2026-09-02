@@ -198,7 +198,12 @@ func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 			writeInternalError(w, r, scanErr)
 			return
 		}
-		items = append(items, item.response())
+		payload := item.response()
+		// 用户看到的 rank 是当前视图的展示序号（含人工覆盖）；源榜单名次
+		// 永不修改，单独经 source_rank 下发供后台与排查使用。
+		payload["rank"] = len(items) + 1
+		payload["source_rank"] = item.Rank
+		items = append(items, payload)
 	}
 	if err := rows.Err(); err != nil {
 		writeInternalError(w, r, err)
@@ -206,7 +211,9 @@ func (s *Server) listRankingToys(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]any{"items": items}
 	if weeklyTop := s.loadWeeklyTopToy(r.Context(), viewerID, tabKey, categoryKey); weeklyTop != nil {
-		response["weekly_top"] = weeklyTop.response()
+		weeklyPayload := weeklyTop.response()
+		weeklyPayload["source_rank"] = weeklyTop.Rank
+		response["weekly_top"] = weeklyPayload
 	}
 	httpserver.WriteJSON(w, http.StatusOK, response)
 }
@@ -295,6 +302,8 @@ func (s *Server) getRankingToy(w http.ResponseWriter, r *http.Request, toyID str
 	}
 
 	response := item.response()
+	// 详情页无视图上下文，rank 保持源榜单名次语义，并同步暴露 source_rank。
+	response["source_rank"] = item.Rank
 	response["comments"] = comments.Items
 	response["comment_sort"] = sort
 	response["comments_next_cursor"] = comments.NextCursor

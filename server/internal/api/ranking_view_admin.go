@@ -206,6 +206,17 @@ func (s *Server) adminRankingView(w http.ResponseWriter, r *http.Request) {
 	if syncedAt.Valid {
 		syncedAtValue = syncedAt.Time
 	}
+	// 本周推荐位独立于人工排序（始终置顶展示），后台单独呈现避免管理员
+	// 误以为拖到列表第一就是首页大卡。
+	var weeklyTopPayload any
+	if top := s.loadWeeklyTopToy(r.Context(), "", tabKey, categoryKey); top != nil {
+		weeklyTopPayload = map[string]any{
+			"toy_id":      top.ID,
+			"name":        top.Name,
+			"cover_url":   mediaVariantURL(top.CoverMediaID, top.CoverObjectKey, "thumb"),
+			"source_rank": top.Rank,
+		}
+	}
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"view": map[string]any{
 			"tab":        tabKey,
@@ -215,8 +226,9 @@ func (s *Server) adminRankingView(w http.ResponseWriter, r *http.Request) {
 			"updated_by": settings.UpdatedBy,
 			"updated_at": updatedAt,
 		},
-		"items":     itemPayloads,
-		"synced_at": syncedAtValue,
+		"items":      itemPayloads,
+		"synced_at":  syncedAtValue,
+		"weekly_top": weeklyTopPayload,
 	})
 }
 
@@ -295,21 +307,31 @@ func (s *Server) reorderRankingView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if input.Mode == "MANUAL" {
-		// 只要求商品存在，不要求覆盖视图内全部商品：外部同步新增、尚未
-		// 指定位次的商品仍按源榜单顺序排在人工项之后（position NULLS LAST）。
-		placeholders := make([]string, 0, len(orderedIDs))
-		args := make([]any, 0, len(orderedIDs))
-		for i, id := range orderedIDs {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
-			args = append(args, id)
+		// 归属校验：提交的顺序必须是当前视图商品的子集（允许只排部分商品，
+		// 未覆盖的新品按源榜单顺序追加）。细分榜以源快照视图为准，综合榜
+		// 则是全部 active 商品；否则会产生永远不会展示的幽灵人工排序记录。
+		var membershipQuery string
+		var membershipArgs []any
+		if tabKey != "" || categoryKey != "" {
+			membershipQuery = `SELECT COUNT(*) FROM ranking_toy_rankings
+				WHERE source_provider = 'beiyoujiang' AND tab_key = $1 AND category_key = $2 AND toy_id IN (`
+			membershipArgs = append(membershipArgs, tabKey, categoryKey)
+		} else {
+			membershipQuery = `SELECT COUNT(*) FROM ranking_toys WHERE active = true AND id IN (`
 		}
-		var existingCount int
-		if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM ranking_toys WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...).Scan(&existingCount); err != nil {
+		placeholders := make([]string, 0, len(orderedIDs))
+		for i, id := range orderedIDs {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(membershipArgs)+i+1))
+			membershipArgs = append(membershipArgs, id)
+		}
+		membershipQuery += strings.Join(placeholders, ",") + ")"
+		var memberCount int
+		if err := tx.QueryRowContext(r.Context(), membershipQuery, membershipArgs...).Scan(&memberCount); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		if existingCount != len(orderedIDs) {
-			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusConflict, Code: "RANKING_VIEW_ORDER_STALE", Message: "榜单有更新，请刷新后重试"})
+		if memberCount != len(orderedIDs) {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusConflict, Code: "RANKING_VIEW_ORDER_STALE", Message: "部分商品不属于当前榜单视图，请刷新后重试"})
 			return
 		}
 	}

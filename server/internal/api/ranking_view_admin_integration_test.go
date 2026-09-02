@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func rankingViewSeedToy(t *testing.T, s *Server, tag string, seq, viewRank int) string {
+func rankingViewSeedToyIn(t *testing.T, s *Server, tag string, seq int, tabKey, categoryKey string, viewRank int) string {
 	t.Helper()
 	toyID := fmt.Sprintf("itest-viewtoy-%s-%d-%d", tag, time.Now().UnixNano(), seq)
 	if _, err := s.db.Exec(`INSERT INTO ranking_toys (id, rank, name) VALUES ($1, $2, $3)`,
@@ -18,15 +18,21 @@ func rankingViewSeedToy(t *testing.T, s *Server, tag string, seq, viewRank int) 
 	}
 	if _, err := s.db.Exec(`
 		INSERT INTO ranking_toy_rankings (source_provider, view_key, tab_key, category_key, toy_id, rank, snapshot_fetched_at)
-		VALUES ('beiyoujiang', 'HIGH|LUBE', 'HIGH', 'LUBE', $1, $2, now())`, toyID, viewRank); err != nil {
+		VALUES ('beiyoujiang', $2 || '|' || $3, $2, $3, $1, $4, now())`, toyID, tabKey, categoryKey, viewRank); err != nil {
 		t.Fatal(err)
 	}
 	return toyID
 }
 
+func rankingViewSeedToy(t *testing.T, s *Server, tag string, seq, viewRank int) string {
+	t.Helper()
+	return rankingViewSeedToyIn(t, s, tag, seq, "HIGH", "LUBE", viewRank)
+}
+
 type rankingViewPublicOrder struct {
-	IDs   []string
-	Ranks map[string]int
+	IDs         []string
+	Ranks       map[string]int
+	SourceRanks map[string]int
 }
 
 func rankingViewFetchPublicOrder(t *testing.T, handler http.Handler, path string) rankingViewPublicOrder {
@@ -37,17 +43,19 @@ func rankingViewFetchPublicOrder(t *testing.T, handler http.Handler, path string
 	}
 	var payload struct {
 		Items []struct {
-			ID   string `json:"id"`
-			Rank int    `json:"rank"`
+			ID         string `json:"id"`
+			Rank       int    `json:"rank"`
+			SourceRank int    `json:"source_rank"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	order := rankingViewPublicOrder{Ranks: map[string]int{}}
+	order := rankingViewPublicOrder{Ranks: map[string]int{}, SourceRanks: map[string]int{}}
 	for _, item := range payload.Items {
 		order.IDs = append(order.IDs, item.ID)
 		order.Ranks[item.ID] = item.Rank
+		order.SourceRanks[item.ID] = item.SourceRank
 	}
 	return order
 }

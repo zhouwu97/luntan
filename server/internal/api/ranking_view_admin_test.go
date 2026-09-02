@@ -65,9 +65,12 @@ func TestListRankingToysAppliesManualOrderOverlayToTabView(t *testing.T) {
 	if body.Items[0]["id"] != "toy-c" || body.Items[1]["id"] != "toy-a" {
 		t.Fatalf("顺序应与查询结果一致：%#v", body.Items)
 	}
-	// rank 字段仍暴露源榜单名次，人工覆盖只影响展示顺序。
-	if body.Items[0]["rank"] != float64(3) || body.Items[1]["rank"] != float64(1) {
-		t.Fatalf("rank 必须保留源名次：%#v", body.Items)
+	// rank 是当前视图的展示序号（1..N），源榜单名次经 source_rank 保留。
+	if body.Items[0]["rank"] != float64(1) || body.Items[0]["source_rank"] != float64(3) {
+		t.Fatalf("展示序号与源名次必须拆分：%#v", body.Items[0])
+	}
+	if body.Items[1]["rank"] != float64(2) || body.Items[1]["source_rank"] != float64(1) {
+		t.Fatalf("展示序号与源名次必须拆分：%#v", body.Items[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -104,6 +107,9 @@ func TestListRankingToysAppliesManualOrderOverlayToOverallView(t *testing.T) {
 	}
 	if len(body.Items) != 2 || body.Items[0]["id"] != "toy-manual" {
 		t.Fatalf("综合榜应应用覆盖层顺序：%#v", body.Items)
+	}
+	if body.Items[0]["rank"] != float64(1) || body.Items[0]["source_rank"] != float64(9) {
+		t.Fatalf("综合榜展示序号与源名次必须拆分：%#v", body.Items[0])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

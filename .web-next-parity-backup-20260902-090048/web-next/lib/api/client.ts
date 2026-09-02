@@ -31,55 +31,28 @@ async function readPayload(response: Response): Promise<Record<string, unknown>>
   }
 }
 
-function errorFields(payload: Record<string, unknown>): { message: string; code?: string } {
-  const nested = payload.error && typeof payload.error === "object"
-    ? payload.error as Record<string, unknown>
-    : {};
-  const message = typeof payload.message === "string"
-    ? payload.message
-    : typeof nested.message === "string"
-      ? nested.message
-      : "请求失败";
-  const code = typeof payload.code === "string"
-    ? payload.code
-    : typeof nested.code === "string"
-      ? nested.code
-      : undefined;
-  return { message, code };
-}
-
-async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8_000): Promise<Response> {
-  const controller = new AbortController();
-  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
-  const externalSignal = init.signal;
-  const abortFromExternal = () => controller.abort();
-  if (externalSignal) {
-    if (externalSignal.aborted) controller.abort();
-    else externalSignal.addEventListener("abort", abortFromExternal, { once: true });
-  }
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    globalThis.clearTimeout(timer);
-    externalSignal?.removeEventListener("abort", abortFromExternal);
-  }
-}
-
 async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  return fetchWithTimeout(requestUrl(path), {
-    ...init,
-    headers,
-    credentials: "include",
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8_000);
+  try {
+    return await fetch(requestUrl(path), {
+      ...init,
+      headers,
+      credentials: "include",
+      cache: "no-store",
+      signal: init.signal ?? controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 async function refreshSessionInternal(): Promise<boolean> {
-  const response = await fetchWithTimeout(requestUrl("/auth/refresh"), {
+  const response = await fetch(requestUrl("/auth/refresh"), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({}),
@@ -92,10 +65,7 @@ async function refreshSessionInternal(): Promise<boolean> {
   }
   const payload = await readPayload(response);
   const nextToken = typeof payload.access_token === "string" ? payload.access_token : "";
-  if (!nextToken) {
-    accessToken = null;
-    return false;
-  }
+  if (!nextToken) return false;
   accessToken = nextToken;
   return true;
 }
@@ -125,7 +95,8 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   }
   if (!response.ok) {
     const payload = await readPayload(response);
-    const { message, code } = errorFields(payload);
+    const message = typeof payload.message === "string" ? payload.message : "请求失败";
+    const code = typeof payload.code === "string" ? payload.code : undefined;
     throw new ApiError(message, response.status, code);
   }
   return response;

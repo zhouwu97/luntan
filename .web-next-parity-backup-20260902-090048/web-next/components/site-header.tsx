@@ -30,7 +30,7 @@ export function SiteHeader() {
     event.preventDefault();
     const value = query.trim();
     if (!value) return;
-    router.push(`/search?q=${encodeURIComponent(value)}`);
+    router.push(`/?q=${encodeURIComponent(value)}`);
   }
 
   async function handleSignOut() {
@@ -82,7 +82,12 @@ export function SiteHeader() {
           </button>
           {ready && user ? (
             <div className="profile-menu-wrap">
-              <button type="button" className="avatar avatar-header" aria-label="打开个人菜单" onClick={() => setMenuOpen((value) => !value)}>
+              <button
+                type="button"
+                className="avatar avatar-header"
+                aria-label="打开个人菜单"
+                onClick={() => setMenuOpen((value) => !value)}
+              >
                 {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials(user.nickname)}
               </button>
               {menuOpen && (

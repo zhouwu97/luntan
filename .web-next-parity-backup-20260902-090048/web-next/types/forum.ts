@@ -50,10 +50,6 @@ export interface Community {
   postCount: number;
   sortOrder: number;
   canPublish?: boolean;
-  canUploadMedia?: boolean;
-  canCreatePoll?: boolean;
-  isFollowing?: boolean;
-  isMember?: boolean;
 }
 
 export interface Post {
@@ -150,12 +146,6 @@ export interface ActivityItem {
   authorName: string;
 }
 
-export interface RankingToyViewerState {
-  wanted: boolean;
-  owned: boolean;
-  rating?: number;
-}
-
 export interface RankingToy {
   id: string;
   rank: number;
@@ -168,9 +158,6 @@ export interface RankingToy {
   ratingCount: number;
   coverUrl?: string;
   heroUrl?: string;
-  category?: string;
-  segments?: string[];
-  viewerState?: RankingToyViewerState;
 }
 
 export interface ForumNotification {
@@ -182,20 +169,4 @@ export interface ForumNotification {
   targetData: Record<string, unknown>;
   isRead: boolean;
   createdAt: string;
-}
-
-export interface SearchPostResult {
-  id: string;
-  title: string;
-  contentPreview: string;
-  author?: UserSummary;
-  community?: Community;
-  createdAt?: string;
-}
-
-export interface SearchResults {
-  posts: SearchPostResult[];
-  users: UserSummary[];
-  communities: Community[];
-  toys: RankingToy[];
 }

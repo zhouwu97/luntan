@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { SiteHeader } from "../../components/site-header";
 import { Icon } from "../../components/icons";
 import { useSession } from "../../components/session-provider";
 import { getNotifications, markAllNotificationsRead, markNotificationRead } from "../../lib/api/forum";
 import { formatError, relativeTime } from "../../lib/format";
 import type { ForumNotification } from "../../types/forum";
+import { useRouter } from "next/navigation";
 
 const tabs = [
   { label: "全部", value: "all" },
@@ -22,10 +22,7 @@ export default function NotificationsPage() {
   const { user, ready, refreshUnreadCount } = useSession();
   const [category, setCategory] = useState("all");
   const [items, setItems] = useState<ForumNotification[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | undefined>();
-  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,13 +31,9 @@ export default function NotificationsPage() {
     let active = true;
     setLoading(true);
     setError("");
-    setNextCursor(undefined);
     void getNotifications({ category: category === "all" ? undefined : category })
       .then((page) => {
-        if (!active) return;
-        setItems(page.items);
-        setNextCursor(page.nextCursor);
-        setHasMore(page.hasMore);
+        if (active) setItems(page.items);
       })
       .catch((requestError: unknown) => {
         if (active) setError(formatError(requestError, "通知暂时无法加载，请稍后再试"));
@@ -56,28 +49,6 @@ export default function NotificationsPage() {
   useEffect(() => {
     if (ready && !user) router.replace("/login");
   }, [ready, router, user]);
-
-  async function loadMore() {
-    if (!hasMore || !nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    setError("");
-    try {
-      const page = await getNotifications({
-        category: category === "all" ? undefined : category,
-        cursor: nextCursor,
-      });
-      setItems((current) => {
-        const known = new Set(current.map((item) => item.id));
-        return [...current, ...page.items.filter((item) => !known.has(item.id))];
-      });
-      setNextCursor(page.nextCursor);
-      setHasMore(page.hasMore);
-    } catch (requestError) {
-      setError(formatError(requestError, "加载更多通知失败"));
-    } finally {
-      setLoadingMore(false);
-    }
-  }
 
   async function readAll() {
     if (busy) return;
@@ -99,7 +70,7 @@ export default function NotificationsPage() {
       setItems((current) => current.map((item) => item.id === id ? { ...item, isRead: true } : item));
       await refreshUnreadCount();
     } catch {
-      // 单条已读失败不阻断通知浏览，等待下一次刷新重试。
+      // 单条已读失败不阻断通知浏览，保留当前状态等待下次刷新。
     }
   }
 
@@ -120,7 +91,7 @@ export default function NotificationsPage() {
             {tabs.map((tab) => <button key={tab.value} type="button" role="tab" aria-selected={category === tab.value} className={category === tab.value ? "active" : ""} onClick={() => setCategory(tab.value)}>{tab.label}</button>)}
           </div>
           {error && <div className="data-note" role="status">{error}</div>}
-          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>有新的互动时，会在这里告诉你。</p></div>}
+          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <div className="notification-list">{items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</div> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>有新的互动时，会在这里告诉你。</p></div>}
         </section>
       </main>
     </>

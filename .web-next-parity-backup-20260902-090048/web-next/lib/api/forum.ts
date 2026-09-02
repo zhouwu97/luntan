@@ -1,19 +1,18 @@
 import { resolveAssetUrl } from "../config";
 import type {
-  ActivityItem,
   AuthSession,
   Comment,
   Community,
   EmailCodeChallenge,
   FeedPage,
-  ForumNotification,
   MediaAsset,
   Post,
+  ActivityItem,
+  ForumNotification,
+  SessionUser,
   ProfilePost,
   ProfileSummary,
   RankingToy,
-  SearchResults,
-  SessionUser,
   UserSummary,
 } from "../../types/forum";
 import { apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
@@ -28,14 +27,6 @@ const asNumber = (value: unknown, fallback = 0) =>
 const asBoolean = (value: unknown, fallback = false) =>
   typeof value === "boolean" ? value : fallback;
 
-function parseCapabilities(raw: unknown): Record<string, boolean> | undefined {
-  const item = asRecord(raw);
-  const entries = Object.entries(item)
-    .filter(([, value]) => typeof value === "boolean")
-    .map(([key, value]) => [key, value as boolean] as const);
-  return entries.length ? Object.fromEntries(entries) : undefined;
-}
-
 function parseUser(raw: unknown): UserSummary {
   const item = asRecord(raw);
   const nickname = asString(item.nickname, asString(item.username, "杯友"));
@@ -48,20 +39,8 @@ function parseUser(raw: unknown): UserSummary {
   };
 }
 
-function parseSessionUser(raw: unknown): SessionUser {
-  const item = asRecord(raw);
-  return {
-    ...parseUser(item),
-    accountType: asString(item.account_type) || undefined,
-    email: asString(item.email) || undefined,
-    status: asString(item.status) || undefined,
-    capabilities: parseCapabilities(item.capabilities),
-  };
-}
-
 function parseCommunity(raw: unknown): Community {
   const item = asRecord(raw);
-  const viewer = asRecord(item.viewer_state);
   return {
     id: asString(item.id),
     slug: asString(item.slug),
@@ -71,11 +50,7 @@ function parseCommunity(raw: unknown): Community {
     followerCount: asNumber(item.follower_count),
     postCount: asNumber(item.post_count),
     sortOrder: asNumber(item.sort_order),
-    canPublish: asBoolean(item.can_publish),
-    canUploadMedia: asBoolean(item.can_upload_media),
-    canCreatePoll: asBoolean(item.can_create_poll),
-    isFollowing: asBoolean(viewer.is_following),
-    isMember: asBoolean(viewer.is_member),
+    canPublish: item.can_publish !== false,
   };
 }
 
@@ -155,51 +130,22 @@ export function parseComment(raw: unknown): Comment {
   };
 }
 
-function parseRankingToy(raw: unknown, index = 0): RankingToy {
-  const item = asRecord(raw);
-  const viewer = asRecord(item.viewer_state);
-  return {
-    id: asString(item.id),
-    rank: asNumber(item.rank, index + 1),
-    name: asString(item.name, "未命名产品"),
-    merchant: asString(item.merchant),
-    description: asString(item.description),
-    tags: Array.isArray(item.tags) ? item.tags.map(String).filter(Boolean) : [],
-    score: asNumber(item.score),
-    wantCount: asNumber(item.want_count),
-    ratingCount: asNumber(item.rating_count),
-    coverUrl: resolveAssetUrl(asString(item.cover_url)),
-    heroUrl: resolveAssetUrl(asString(item.hero_url)),
-    category: asString(item.category) || undefined,
-    segments: Array.isArray(item.segments) ? item.segments.map(String).filter(Boolean) : undefined,
-    viewerState: Object.keys(viewer).length
-      ? {
-          wanted: asBoolean(viewer.wanted),
-          owned: asBoolean(viewer.owned),
-          rating: viewer.rating == null ? undefined : asNumber(viewer.rating),
-        }
-      : undefined,
-  };
-}
-
-export async function getCommunities(options: { canPublish?: boolean; status?: string } = {}): Promise<Community[]> {
-  const params = new URLSearchParams();
-  if (options.canPublish) params.set("can_publish", "true");
-  if (options.status) params.set("status", options.status);
-  const query = params.size ? `?${params.toString()}` : "";
-  const payload = await apiJson<{ items?: unknown[] }>(`/communities${query}`);
+const uniqueNamedCommunities = (items: Community[]) => {
+  const desired = new Set(["酱紫社区", "大型拆箱", "杂鱼日常"]);
   const seen = new Set<string>();
-  return (Array.isArray(payload.items) ? payload.items.map(parseCommunity) : [])
+  return items
+    .filter((item) => desired.has(item.name))
     .sort((a, b) => a.sortOrder - b.sortOrder || b.postCount - a.postCount)
     .filter((item) => {
-      if (!item.id || seen.has(item.id)) return false;
-      seen.add(item.id);
+      if (seen.has(item.name)) return false;
+      seen.add(item.name);
       return true;
     });
-}
+};
 
-export async function getCommunity(id: string): Promise<Community> {
-  return parseCommunity(await apiJson<JsonRecord>(`/communities/${encodeURIComponent(id)}`));
+export async function getCommunities(): Promise<Community[]> {
+  const payload = await apiJson<{ items?: unknown[] }>("/communities");
+  return uniqueNamedCommunities(Array.isArray(payload.items) ? payload.items.map(parseCommunity) : []);
 }
 
 export async function getFeed(options: {
@@ -253,23 +199,27 @@ export async function getActivities(): Promise<ActivityItem[]> {
 export async function getRankingToys(tab = ""): Promise<RankingToy[]> {
   const query = tab ? `?tab=${encodeURIComponent(tab)}` : "";
   const payload = await apiJson<{ items?: unknown[] }>(`/ranking/toys${query}`);
-  return Array.isArray(payload.items) ? payload.items.map(parseRankingToy) : [];
-}
-
-export async function getRankingToy(id: string): Promise<RankingToy> {
-  return parseRankingToy(await apiJson<JsonRecord>(`/ranking/toys/${encodeURIComponent(id)}`));
-}
-
-export async function setRankingToyWant(id: string, active: boolean): Promise<void> {
-  await apiFetch(`/ranking/toys/${encodeURIComponent(id)}/want`, { method: active ? "PUT" : "DELETE" });
-}
-
-export async function setRankingToyOwned(id: string, active: boolean): Promise<void> {
-  await apiFetch(`/ranking/toys/${encodeURIComponent(id)}/owned`, { method: active ? "PUT" : "DELETE" });
-}
-
-export async function rateRankingToy(id: string, score: number): Promise<void> {
-  await apiPost(`/ranking/toys/${encodeURIComponent(id)}/rating`, { score });
+  return Array.isArray(payload.items)
+    ? payload.items.map((raw, index) => {
+        const item = asRecord(raw);
+        const tags = Array.isArray(item.tags)
+          ? item.tags.map((tag) => String(tag)).filter(Boolean)
+          : [];
+        return {
+          id: asString(item.id),
+          rank: asNumber(item.rank, index + 1),
+          name: asString(item.name, "未命名产品"),
+          merchant: asString(item.merchant),
+          description: asString(item.description),
+          tags,
+          score: asNumber(item.score),
+          wantCount: asNumber(item.want_count),
+          ratingCount: asNumber(item.rating_count),
+          coverUrl: resolveAssetUrl(asString(item.cover_url)),
+          heroUrl: resolveAssetUrl(asString(item.hero_url)),
+        } satisfies RankingToy;
+      })
+    : [];
 }
 
 export async function getPost(id: string): Promise<Post> {
@@ -281,19 +231,6 @@ export async function getComments(postId: string): Promise<Comment[]> {
     `/posts/${encodeURIComponent(postId)}/comments?limit=30&offset=0&sort=asc`,
   );
   return Array.isArray(payload.items) ? payload.items.map(parseComment) : [];
-}
-
-export async function getCommentReplies(commentId: string, cursor?: string): Promise<{ items: Comment[]; nextCursor?: string; hasMore: boolean }> {
-  const params = new URLSearchParams({ limit: "30" });
-  if (cursor) params.set("cursor", cursor);
-  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
-    `/comments/${encodeURIComponent(commentId)}/replies?${params.toString()}`,
-  );
-  return {
-    items: Array.isArray(payload.items) ? payload.items.map(parseComment) : [],
-    nextCursor: asString(payload.next_cursor) || undefined,
-    hasMore: payload.has_more === true,
-  };
 }
 
 export async function recordHistory(postId: string): Promise<void> {
@@ -314,108 +251,30 @@ export async function setCommentLike(commentId: string, active: boolean): Promis
   });
 }
 
-function newIdempotencyKey(prefix: string): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 export async function createComment(postId: string, content: string): Promise<Comment> {
+  const idempotencyKey =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `web-comment-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return parseComment(
     await apiPost(`/posts/${encodeURIComponent(postId)}/comments`, { content }, {
-      "Idempotency-Key": newIdempotencyKey("web-comment"),
+      "Idempotency-Key": idempotencyKey,
     }),
   );
 }
 
-export async function createReply(commentId: string, content: string, replyToUserId?: string): Promise<Comment> {
-  return parseComment(
-    await apiPost(`/comments/${encodeURIComponent(commentId)}/replies`, {
-      content,
-      reply_to_user_id: replyToUserId || undefined,
-    }, {
-      "Idempotency-Key": newIdempotencyKey("web-reply"),
-    }),
+export async function createPost(communityId: string, title: string, content: string): Promise<Post> {
+  const idempotencyKey =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `web-post-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return parsePost(
+    await apiPost(
+      "/posts",
+      { community_id: communityId, type: "normal", title, content },
+      { "Idempotency-Key": idempotencyKey },
+    ),
   );
-}
-
-export async function createPost(
-  communityId: string,
-  title: string,
-  content: string,
-  mediaIds: string[] = [],
-): Promise<Post> {
-  const result = await apiPost<JsonRecord>(
-    "/posts",
-    { community_id: communityId, type: "normal", title, content, media_ids: mediaIds },
-    { "Idempotency-Key": newIdempotencyKey("web-post") },
-  );
-  const id = asString(result.id);
-  if (!id) throw new Error("发布成功，但后端没有返回帖子 ID");
-  return getPost(id);
-}
-
-async function imageDimensions(file: File): Promise<{ width: number; height: number }> {
-  if (typeof createImageBitmap === "function") {
-    const bitmap = await createImageBitmap(file);
-    try {
-      return { width: bitmap.width, height: bitmap.height };
-    } finally {
-      bitmap.close();
-    }
-  }
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const url = URL.createObjectURL(file);
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("无法读取图片尺寸"));
-    };
-    image.src = url;
-  });
-}
-
-async function sha256(file: File): Promise<string> {
-  const bytes = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-export async function uploadImage(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) throw new Error("只能上传图片文件");
-  const [{ width, height }, hash] = await Promise.all([imageDimensions(file), sha256(file)]);
-  const token = await apiPost<JsonRecord>("/media/upload-token", {
-    file_name: file.name,
-    mime_type: file.type,
-    width,
-    height,
-    size: file.size,
-    sha256: hash,
-  });
-  const mediaId = asString(token.media_id);
-  const uploadUrl = asString(token.upload_url);
-  const uploadMethod = asString(token.upload_method, "PUT");
-  if (!mediaId || !uploadUrl) throw new Error("媒体上传凭证格式错误");
-
-  const target = /^https?:\/\//i.test(uploadUrl)
-    ? uploadUrl
-    : new URL(uploadUrl, window.location.origin).toString();
-  const uploadResponse = await fetch(target, {
-    method: uploadMethod,
-    body: file,
-    headers: file.type ? { "Content-Type": file.type } : undefined,
-  });
-  if (!uploadResponse.ok) throw new Error(`图片上传失败（HTTP ${uploadResponse.status}）`);
-
-  await apiPost(`/media/${encodeURIComponent(mediaId)}/complete`, {
-    size: file.size,
-    sha256: hash,
-  });
-  return mediaId;
 }
 
 export async function requestEmailCode(email: string): Promise<EmailCodeChallenge> {
@@ -435,7 +294,7 @@ function parseSession(payload: JsonRecord): AuthSession {
   return {
     accessToken: token,
     expiresIn: asNumber(payload.expires_in) || undefined,
-    user: parseSessionUser(payload.user),
+    user: parseUser(payload.user) as SessionUser,
   };
 }
 
@@ -448,7 +307,7 @@ export async function loginAsGuest(): Promise<AuthSession> {
 }
 
 export async function getMe(): Promise<SessionUser> {
-  return parseSessionUser(await apiJson<JsonRecord>("/me"));
+  return parseUser(await apiJson<JsonRecord>("/me")) as SessionUser;
 }
 
 export async function getUserProfile(id: string): Promise<ProfileSummary> {
@@ -492,29 +351,6 @@ export async function getUserPosts(id: string): Promise<ProfilePost[]> {
 
 export async function setUserFollow(id: string, active: boolean): Promise<void> {
   await apiFetch(`/users/${encodeURIComponent(id)}/follow`, { method: active ? "PUT" : "DELETE" });
-}
-
-export async function searchForum(query: string): Promise<SearchResults> {
-  const payload = await apiJson<JsonRecord>(`/search?q=${encodeURIComponent(query)}&type=all`);
-  const posts = Array.isArray(payload.posts)
-    ? payload.posts.map((raw) => {
-        const item = asRecord(raw);
-        return {
-          id: asString(item.id),
-          title: asString(item.title, "未命名帖子"),
-          contentPreview: asString(item.content_preview, asString(item.content)),
-          author: item.author ? parseUser(item.author) : undefined,
-          community: item.community ? parseCommunity(item.community) : undefined,
-          createdAt: asString(item.created_at) || undefined,
-        };
-      })
-    : [];
-  return {
-    posts,
-    users: Array.isArray(payload.users) ? payload.users.map(parseUser) : [],
-    communities: Array.isArray(payload.communities) ? payload.communities.map(parseCommunity) : [],
-    toys: Array.isArray(payload.toys) ? payload.toys.map(parseRankingToy) : [],
-  };
 }
 
 export async function getNotifications(options: {

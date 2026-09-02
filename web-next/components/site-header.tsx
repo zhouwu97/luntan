@@ -4,8 +4,9 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
-import { compactCount, initials } from "../lib/format";
+import { compactCount } from "../lib/format";
 import { useSession } from "./session-provider";
+import { UserAvatar } from "./user-avatar";
 
 const navItems = [
   { label: "首页", href: "/" },
@@ -14,7 +15,7 @@ const navItems = [
   { label: "活动", href: "/activities" },
 ];
 
-export function SiteHeader() {
+export function SiteHeader({ home = false }: { home?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -39,10 +40,10 @@ export function SiteHeader() {
   }
 
   return (
-    <header className="site-header">
+    <header className={`site-header${home ? " home-site-header" : ""}`}>
       <div className="header-inner">
         <Link href="/" className="brand" aria-label="圣杯酱首页">
-          <span className="brand-mark"><Icon name="user" size={22} /></span>
+          <span className="brand-mark"><Icon name="trophy" size={22} /></span>
           <span className="brand-word">圣杯酱</span>
         </Link>
 
@@ -66,8 +67,8 @@ export function SiteHeader() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索帖子 / 用户 / 板块"
-            aria-label="搜索帖子、用户或板块"
+            placeholder="搜索帖子 / 用户 / 板块 / 榜单"
+            aria-label="搜索帖子、用户、板块或榜单"
           />
         </form>
 
@@ -82,8 +83,8 @@ export function SiteHeader() {
           </button>
           {ready && user ? (
             <div className="profile-menu-wrap">
-              <button type="button" className="avatar avatar-header" aria-label="打开个人菜单" onClick={() => setMenuOpen((value) => !value)}>
-                {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials(user.nickname)}
+              <button type="button" className="profile-avatar-button" aria-label="打开个人菜单" onClick={() => setMenuOpen((value) => !value)}>
+                <UserAvatar userId={user.id} name={user.nickname} url={user.avatarUrl} size="header" />
               </button>
               {menuOpen && (
                 <div className="profile-menu">

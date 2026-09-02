@@ -21,8 +21,8 @@ export function relativeTime(value?: string): string {
 }
 
 export function initials(value: string): string {
-  const clean = value.trim();
-  return clean.slice(-2) || "友";
+  const chars = Array.from(value.trim());
+  return chars[0] || "友";
 }
 
 export function formatError(error: unknown, fallback = "操作失败，请稍后重试"): string {

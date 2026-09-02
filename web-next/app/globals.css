@@ -538,3 +538,79 @@ img { display: block; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* 首页产品适配层：移动端复刻 Flutter 首页的导航层级，桌面继续保留三栏增强布局。 */
+.profile-avatar-button { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; background: transparent; border-radius: 50%; }
+.profile-avatar-button:hover { background: var(--surface-blue); }
+.feed-toolbar-right { display: flex; align-items: center; gap: 8px; }
+.latest-order { display: inline-flex; align-items: center; gap: 2px; padding: 3px; background: #f4f8fc; border: 1px solid #e3edf6; border-radius: 9px; }
+.latest-order button { height: 25px; padding: 0 8px; color: var(--text-faint); background: transparent; border-radius: 6px; font-size: 11px; font-weight: 700; }
+.latest-order button.active { color: var(--primary-deep); background: #fff; box-shadow: 0 2px 7px rgba(63, 113, 166, .1); }
+.mobile-feed-publish { display: none; align-items: center; gap: 3px; color: var(--primary); font-size: 12px; font-weight: 700; }
+.home-mobile-navigation, .mobile-home-header, .mobile-refresh { display: none; }
+.media-image { width: 100%; height: 100%; object-fit: cover; }
+.media-image-placeholder { width: 100%; height: 100%; min-height: 48px; display: grid; place-items: center; color: #8aa6bd; background: #edf3f7; }
+.detail-media-image { width: 100%; max-height: 610px; object-fit: cover; background: #eaf1f7; }
+.detail-gallery .media-image-placeholder { min-height: 180px; }
+.related-media-image { width: 72px; height: 58px; flex: 0 0 72px; object-fit: cover; background: #eaf1f7; border-radius: 9px; }
+.post-badges { display: flex; gap: 6px; margin-top: 10px; }
+.post-badge { display: inline-flex; align-items: center; height: 19px; padding: 0 7px; border-radius: 6px; font-size: 10px; font-weight: 750; }
+.post-badge.featured { color: #ed8c50; background: #fff1e8; }
+.post-context-meta { width: fit-content; margin-bottom: 9px; padding: 5px 8px; display: inline-flex; align-items: center; gap: 4px; color: var(--text-soft); background: #f4f8fc; border-radius: 7px; font-size: 11px; line-height: 1.35; }
+.notification-group { display: grid; gap: 10px; }
+.notification-group + .notification-group { margin-top: 14px; }
+.notification-group h2 { margin: 2px 4px 0; color: var(--text-faint); font-size: 12px; font-weight: 750; }
+.notification-icon { width: 38px; height: 38px; flex-basis: 38px; }
+.community-directory-list { display: grid; gap: 11px; margin-top: 18px; }
+.community-directory-row { min-width: 0; padding: 15px 17px; display: flex; align-items: center; gap: 12px; background: #fff; border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow); transition: border-color .2s var(--ease), transform .2s var(--ease); }
+.community-directory-row:hover { border-color: #b8d6f7; transform: translateY(-1px); }
+.community-directory-copy { min-width: 0; flex: 1; display: grid; gap: 5px; }
+.community-directory-copy strong { overflow: hidden; color: var(--text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.community-directory-copy small { overflow: hidden; color: var(--text-soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.community-directory-meta { display: flex; gap: 11px; color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+.community-directory-row > svg { flex: 0 0 auto; color: #99afc4; }
+.community-directory-skeleton { height: 74px; background: linear-gradient(110deg, #fff 8%, #f3f7fb 18%, #fff 33%); background-size: 200% 100%; border: 1px solid var(--line); border-radius: 15px; animation: shimmer 1.45s linear infinite; }
+
+@media (max-width: 760px) {
+  .home-site-header { display: none; }
+  .mobile-home-header { width: calc(100% - 24px); height: 64px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+  .mobile-home-search { min-width: 0; height: 41px; flex: 1; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: #7691aa; background: #fff; border: 1px solid #dce8f3; border-radius: 22px; }
+  .mobile-home-search input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 12px; }
+  .mobile-home-search input::placeholder { color: #8aa0b4; }
+  .mobile-home-bell { position: relative; width: 38px; height: 40px; display: grid; place-items: center; color: #38536e; background: transparent; }
+  .mobile-home-bell .notification-dot { top: 0; right: -1px; }
+  .home-page-frame { padding-top: 5px; }
+  .home-mobile-navigation { display: grid; gap: 14px; margin-bottom: 13px; }
+  .home-community-tabs { width: 100%; min-height: 46px; padding: 3px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; background: #edf5fc; border: 1px solid #dbe8f4; border-radius: 15px; }
+  .home-community-tab { min-width: 0; height: 38px; padding: 0 6px; display: flex; align-items: center; justify-content: center; gap: 5px; color: #607c96; background: transparent; border-radius: 11px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .home-community-tab.active { color: #fff; background: #192e43; box-shadow: 0 4px 10px rgba(25, 46, 67, .12); }
+  .home-community-tab .community-icon { display: none; }
+  .home-community-tabs-empty { height: 46px; display: grid; place-items: center; color: var(--text-faint); background: #edf5fc; border: 1px solid #dbe8f4; border-radius: 15px; font-size: 12px; }
+  .home-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+  .home-shortcut { min-width: 0; display: grid; justify-items: center; gap: 6px; color: #627d96; font-size: 10px; font-weight: 650; white-space: nowrap; }
+  .shortcut-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; }
+  .shortcut-icon.blue { color: var(--primary); background: #e6f1ff; }
+  .shortcut-icon.orange { color: #ff9055; background: #fff0e7; }
+  .shortcut-icon.pink { color: #ee83ac; background: #ffedf4; }
+  .shortcut-icon.mint { color: #46bfae; background: #e5f8f4; }
+  .home-grid { display: block; }
+  .community-rail, .discovery-rail { display: none; }
+  .feed-toolbar { min-height: 47px; padding: 0 1px 0 0; border-bottom-color: #d8e5f0; }
+  .feed-tabs { gap: 22px; }
+  .feed-tab { font-size: 14px; }
+  .feed-toolbar-right { gap: 5px; }
+  .latest-order { gap: 1px; padding: 2px; }
+  .latest-order button { height: 26px; padding: 0 7px; font-size: 10px; }
+  .feed-tools { display: none; }
+  .mobile-feed-publish { display: inline-flex; }
+  .post-list { gap: 11px; padding-top: 11px; }
+  .post-card { padding: 15px 14px 11px; border-radius: 16px; }
+  .post-card-link h3 { font-size: 17px; }
+  .post-badges { margin-top: 8px; }
+  .mobile-refresh { position: fixed; right: 14px; bottom: 80px; z-index: 18; width: 47px; height: 47px; display: grid; place-items: center; color: var(--primary); background: rgba(255,255,255,.96); border: 1px solid #dbe8f4; border-radius: 15px; box-shadow: 0 7px 18px rgba(50, 100, 145, .16); }
+  .mobile-refresh:active { transform: scale(.96); }
+  .community-directory-row { padding: 13px 12px; }
+  .community-directory-meta { display: none; }
+  .community-directory-row > svg { width: 16px; }
+  .notification-group h2 { margin-top: 0; }
+}

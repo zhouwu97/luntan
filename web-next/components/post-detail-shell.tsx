@@ -5,15 +5,12 @@ import { FormEvent, MouseEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "./site-header";
 import { Icon } from "./icons";
+import { MediaImage } from "./media-image";
+import { UserAvatar } from "./user-avatar";
 import { useSession } from "./session-provider";
 import { createComment, getComments, getFeed, getPost, recordHistory, setCommentLike, setPostBookmark, setPostLike } from "../lib/api/forum";
-import { fallbackComments, fallbackPosts } from "../lib/fallback-data";
-import { compactCount, formatError, initials, relativeTime } from "../lib/format";
+import { compactCount, formatError, relativeTime } from "../lib/format";
 import type { Comment, Post, SessionUser } from "../types/forum";
-
-function Avatar({ name, url, className = "" }: { name: string; url?: string; className?: string }) {
-  return <span className={`avatar avatar-blue ${className}`}>{url ? <img src={url} alt="" /> : initials(name)}</span>;
-}
 
 export function PostDetailShell({ id }: { id: string }) {
   const router = useRouter();
@@ -37,11 +34,10 @@ export function PostDetailShell({ id }: { id: string }) {
       })
       .catch((requestError: unknown) => {
         if (!mounted) return;
-        const localPost = fallbackPosts.find((item) => item.id === id) || fallbackPosts[0];
-        setPost(localPost);
-        setComments(id === "post-import-8134" ? fallbackComments : []);
-        setRelated(fallbackPosts.filter((item) => item.id !== localPost.id));
-        setError(formatError(requestError, "暂时展示最近缓存的公开内容"));
+        setPost(null);
+        setComments([]);
+        setRelated([]);
+        setError(formatError(requestError, "帖子暂时无法加载，请稍后再试"));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -117,9 +113,9 @@ function PostArticle({ post, user, onRequireAuth }: { post: Post; user: SessionU
     <article className="detail-article">
       <div className="detail-community"><span className="community-icon lilac"><Icon name="trophy" size={18} /></span><span>{post.community.name}</span><button type="button" className="more-button" aria-label="更多操作"><Icon name="more" size={18} /></button></div>
       <h1>{post.title}</h1>
-      <div className="detail-author-row"><Avatar name={post.author.nickname} url={post.author.avatarUrl} /><div><strong>{post.author.nickname}</strong><div className="post-meta">{post.community.name} <span>·</span> {relativeTime(post.createdAt)}</div></div><span className="level-label">Lv.{post.author.level || 1}</span></div>
+      <div className="detail-author-row"><UserAvatar userId={post.author.id} name={post.author.nickname} url={post.author.avatarUrl} /><div><strong>{post.author.nickname}</strong><div className="post-meta">{post.community.name} <span>·</span> {relativeTime(post.createdAt)}</div></div><span className="level-label">Lv.{post.author.level || 1}</span></div>
       <p className="detail-content">{post.content}</p>
-      {post.media.length > 0 && <div className="detail-gallery">{post.media.map((media) => <img key={media.id} src={media.detailUrl || media.url} alt={media.altText || "帖子图片"} />)}</div>}
+      {post.media.length > 0 && <div className="detail-gallery">{post.media.map((media) => <MediaImage key={media.id} asset={media} alt={media.altText || "帖子图片"} className="detail-media-image" />)}</div>}
       <div className="detail-engagement">
         <div className="detail-engagement-left">
           <button type="button" className={`engagement-button${liked ? " selected-like" : ""}`} onClick={toggleLike}><Icon name="heart" size={19} />{compactCount(likeCount)} 赞</button>
@@ -159,7 +155,7 @@ function CommentsSection({ post, comments, setComments, user, onRequireAuth }: {
     <section className="comments-section" id="comments">
       <div className="comments-heading"><h2>全部回复 <span>（{post.commentCount}）</span></h2><button type="button" className="sort-comments">按时间 <Icon name="chevron-right" size={15} /></button></div>
       <form className="comment-composer" onSubmit={submit}>
-        <Avatar name={user?.nickname || "我"} url={user?.avatarUrl} className="avatar-comment" />
+        <UserAvatar userId={user?.id} name={user?.nickname || "我"} url={user?.avatarUrl} className="avatar-comment" />
         <div className="composer-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder={user ? "说点什么吧…" : "登录后参与回复"} rows={2} onFocus={() => { if (!user) onRequireAuth(); }} /><div className="composer-footer"><div className="composer-tools"><button type="button" aria-label="添加图片"><Icon name="image" size={19} /></button><button type="button" aria-label="添加表情"><Icon name="sparkle" size={19} /></button><button type="button" aria-label="提及用户"><Icon name="at" size={19} /></button></div><button type="submit" className="reply-submit" disabled={busy}>{busy ? "发送中…" : "发布回复"}</button></div></div>
       </form>
       {message && <div className="form-error">{message}</div>}
@@ -186,9 +182,9 @@ function CommentRow({ comment, user, onRequireAuth }: { comment: Comment; user: 
     }
   }
 
-  return <article className={`comment-row${liked ? " liked" : ""}`}><Avatar name={comment.author.nickname} url={comment.author.avatarUrl} className="avatar-comment" /><div className="comment-body"><div className="comment-author-line"><strong>{comment.author.nickname}</strong><span className="level-label">Lv.{comment.author.level || 1}</span><span className="comment-time">{relativeTime(comment.createdAt)}</span><span className="comment-floor">#{comment.floor || ""}</span></div><p>{comment.content}</p><div className="comment-actions"><button type="button" onClick={like}><Icon name="heart" size={16} />{count}</button><button type="button"><Icon name="message" size={16} />回复</button></div>{comment.replyPreview?.map((reply) => <div className="reply-preview" key={reply.id}><strong>{reply.author.nickname}</strong><span>{reply.content}</span></div>)}</div><button type="button" className="comment-more" aria-label="评论更多操作"><Icon name="more" size={18} /></button></article>;
+  return <article className={`comment-row${liked ? " liked" : ""}`}><UserAvatar userId={comment.author.id} name={comment.author.nickname} url={comment.author.avatarUrl} className="avatar-comment" /><div className="comment-body"><div className="comment-author-line"><strong>{comment.author.nickname}</strong><span className="level-label">Lv.{comment.author.level || 1}</span><span className="comment-time">{relativeTime(comment.createdAt)}</span><span className="comment-floor">#{comment.floor || ""}</span></div><p>{comment.content}</p><div className="comment-actions"><button type="button" onClick={like}><Icon name="heart" size={16} />{count}</button><button type="button"><Icon name="message" size={16} />回复</button></div>{comment.replyPreview?.map((reply) => <div className="reply-preview" key={reply.id}><strong>{reply.author.nickname}</strong><span>{reply.content}</span></div>)}</div><button type="button" className="comment-more" aria-label="评论更多操作"><Icon name="more" size={18} /></button></article>;
 }
 
 function DetailAside({ post, related }: { post: Post; related: Post[] }) {
-  return <aside className="detail-aside"><section className="aside-panel author-panel"><h2>作者信息</h2><div className="aside-author"><Avatar name={post.author.nickname} url={post.author.avatarUrl} className="avatar-large" /><div><strong>{post.author.nickname}</strong><span className="level-label">Lv.{post.author.level || 1}</span><p>热爱拆箱和分享真实使用体验。</p></div></div><button type="button" className="outline-button">+ 关注</button></section><section className="aside-panel community-panel"><h2>来自社区</h2><div className="aside-community"><span className="community-icon lilac"><Icon name="trophy" size={19} /></span><div><strong>{post.community.name}</strong><p>{post.community.description || "和同好聊聊最近的新发现"}</p></div><Icon name="chevron-right" size={18} /></div><button type="button" className="outline-button">进入社区</button></section><section className="aside-panel related-panel"><div className="discovery-heading"><h2>相关帖子</h2><button type="button">更多 <Icon name="chevron-right" size={15} /></button></div>{related.length ? related.map((item) => <Link href={`/post/${encodeURIComponent(item.id)}`} className="related-post" key={item.id}>{item.media[0] ? <img src={item.media[0].thumbUrl || item.media[0].url} alt="" /> : <span className="related-placeholder"><Icon name="box" size={19} /></span>}<span><strong>{item.title}</strong><small>{item.author.nickname}</small></span></Link>) : <p className="empty-rail">暂无相关帖子</p>}</section></aside>;
+  return <aside className="detail-aside"><section className="aside-panel author-panel"><h2>作者信息</h2><div className="aside-author"><UserAvatar userId={post.author.id} name={post.author.nickname} url={post.author.avatarUrl} size="large" /><div><strong>{post.author.nickname}</strong><span className="level-label">Lv.{post.author.level || 1}</span><p>热爱拆箱和分享真实使用体验。</p></div></div><button type="button" className="outline-button">+ 关注</button></section><section className="aside-panel community-panel"><h2>来自社区</h2><div className="aside-community"><span className="community-icon lilac"><Icon name="trophy" size={19} /></span><div><strong>{post.community.name}</strong><p>{post.community.description || "和同好聊聊最近的新发现"}</p></div><Icon name="chevron-right" size={18} /></div><button type="button" className="outline-button">进入社区</button></section><section className="aside-panel related-panel"><div className="discovery-heading"><h2>相关帖子</h2><button type="button">更多 <Icon name="chevron-right" size={15} /></button></div>{related.length ? related.map((item) => <Link href={`/post/${encodeURIComponent(item.id)}`} className="related-post" key={item.id}>{item.media[0] ? <MediaImage asset={item.media[0]} alt="" className="related-media-image" /> : <span className="related-placeholder"><Icon name="box" size={19} /></span>}<span><strong>{item.title}</strong><small>{item.author.nickname}</small></span></Link>) : <p className="empty-rail">暂无相关帖子</p>}</section></aside>;
 }

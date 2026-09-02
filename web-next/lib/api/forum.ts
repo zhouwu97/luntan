@@ -1,4 +1,4 @@
-import { resolveAssetUrl } from "../config";
+import { resolveMediaUrl } from "../media-url";
 import type {
   ActivityItem,
   AuthSession,
@@ -44,7 +44,7 @@ function parseUser(raw: unknown): UserSummary {
     username: asString(item.username, nickname),
     nickname,
     level: asNumber(item.level, 1),
-    avatarUrl: resolveAssetUrl(asString(item.avatar_url, asString(item.avatar))),
+    avatarUrl: resolveMediaUrl(asString(item.avatar_url, asString(item.avatar)), "original"),
   };
 }
 
@@ -67,6 +67,7 @@ function parseCommunity(raw: unknown): Community {
     slug: asString(item.slug),
     name: asString(item.name, "未命名板块"),
     description: asString(item.description),
+    status: asString(item.status) || undefined,
     memberCount: asNumber(item.member_count),
     followerCount: asNumber(item.follower_count),
     postCount: asNumber(item.post_count),
@@ -87,10 +88,10 @@ function parseMedia(raw: unknown): MediaAsset {
   return {
     id: asString(item.id),
     type: item.type === "video" ? "video" : "image",
-    url: resolveAssetUrl(asString(item.url)) || resolveAssetUrl(asString(detail.url)),
-    thumbUrl: resolveAssetUrl(asString(thumb.url)),
-    detailUrl: resolveAssetUrl(asString(detail.url)),
-    originalUrl: resolveAssetUrl(asString(original.url)),
+    url: resolveMediaUrl(asString(item.url)) || resolveMediaUrl(asString(detail.url)),
+    thumbUrl: resolveMediaUrl(asString(thumb.url), "thumb"),
+    detailUrl: resolveMediaUrl(asString(detail.url), "detail"),
+    originalUrl: resolveMediaUrl(asString(original.url), "original"),
     width: asNumber(item.width, asNumber(detail.width)),
     height: asNumber(item.height, asNumber(detail.height)),
     altText: asString(item.alt_text, "社区图片"),
@@ -121,6 +122,9 @@ export function parsePost(raw: unknown): Post {
     publishedAt: asString(item.published_at) || undefined,
     activityAt: asString(item.activity_at) || undefined,
     media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
+    isFeatured: item.is_featured === true,
+    isRecommended: item.is_recommended === true,
+    recommendationPosition: item.recommendation_position == null ? undefined : asNumber(item.recommendation_position),
     viewerState: {
       hasLiked: asBoolean(viewer.has_liked),
       hasBookmarked: asBoolean(viewer.has_bookmarked),
@@ -168,8 +172,8 @@ function parseRankingToy(raw: unknown, index = 0): RankingToy {
     score: asNumber(item.score),
     wantCount: asNumber(item.want_count),
     ratingCount: asNumber(item.rating_count),
-    coverUrl: resolveAssetUrl(asString(item.cover_url)),
-    heroUrl: resolveAssetUrl(asString(item.hero_url)),
+    coverUrl: resolveMediaUrl(asString(item.cover_url), "detail"),
+    heroUrl: resolveMediaUrl(asString(item.hero_url), "detail"),
     category: asString(item.category) || undefined,
     segments: Array.isArray(item.segments) ? item.segments.map(String).filter(Boolean) : undefined,
     viewerState: Object.keys(viewer).length
@@ -203,20 +207,23 @@ export async function getCommunity(id: string): Promise<Community> {
 }
 
 export async function getFeed(options: {
-  sort: "recommended" | "latest" | "featured" | "hot";
+  sort: "recommended" | "latest" | "hot";
   communityId?: string;
   hasMedia?: boolean;
+  latestOrder?: "comment" | "post";
+  topic?: string;
   limit?: number;
   cursor?: string;
 }): Promise<FeedPage> {
   const params = new URLSearchParams({
     limit: String(options.limit ?? 20),
     sort: options.sort,
-    latest_by: options.sort === "latest" ? "post" : "comment",
+    latest_by: options.latestOrder ?? "comment",
     include_details: "1",
   });
   if (options.communityId) params.set("community_id", options.communityId);
   if (options.hasMedia) params.set("has_media", "true");
+  if (options.topic) params.set("topic", options.topic);
   if (options.cursor) params.set("cursor", options.cursor);
   const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
     `/feed/latest?${params.toString()}`,
@@ -238,7 +245,7 @@ export async function getActivities(): Promise<ActivityItem[]> {
           id: asString(item.id),
           title: asString(item.title, "未命名活动"),
           description: asString(item.description),
-          coverUrl: resolveAssetUrl(asString(item.cover_url)),
+          coverUrl: resolveMediaUrl(asString(item.cover_url), "detail"),
           startAt: asString(item.start_at) || undefined,
           endAt: asString(item.end_at) || undefined,
           location: asString(item.location),

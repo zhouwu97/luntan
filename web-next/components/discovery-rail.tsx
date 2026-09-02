@@ -2,6 +2,7 @@ import { Icon } from "./icons";
 import type { Post, SessionUser } from "../types/forum";
 import { compactCount } from "../lib/format";
 import Link from "next/link";
+import { UserAvatar } from "./user-avatar";
 
 export function DiscoveryRail({ posts, user, onLogin }: { posts: Post[]; user: SessionUser | null; onLogin: () => void }) {
   const topics = posts.slice(0, 5);
@@ -31,7 +32,7 @@ export function DiscoveryRail({ posts, user, onLogin }: { posts: Post[]; user: S
           {ranking.length ? ranking.map((post, index) => (
             <Link className="ranking-row" key={post.id} href={`/user/${encodeURIComponent(post.author.id)}`}>
               <span className={`rank-number rank-${index + 1}`}>{index + 1}</span>
-              <span className="ranking-avatar"><span>{post.author.nickname.slice(-1)}</span></span>
+              <UserAvatar userId={post.author.id} name={post.author.nickname} url={post.author.avatarUrl} size="small" className="ranking-avatar" />
               <span className="ranking-name">{post.author.nickname}</span>
               <span className="level-label">Lv.{post.author.level || 1}</span>
             </Link>

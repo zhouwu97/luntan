@@ -1,5 +1,6 @@
 import { Icon, type IconName } from "./icons";
 import type { Community } from "../types/forum";
+import Link from "next/link";
 
 const communityStyle: Record<string, { icon: IconName; tone: string }> = {
   酱紫社区: { icon: "trophy", tone: "lilac" },
@@ -19,8 +20,7 @@ export function CommunityRail({
   return (
     <aside className="community-rail rail-panel" aria-label="社区导航">
       <div className="rail-heading">
-        <h2>社区</h2>
-        <button type="button" className="text-button" onClick={() => onSelect(undefined)}>全部</button>
+        <h2>首页板块</h2>
       </div>
       <div className="community-list">
         {communities.map((community) => {
@@ -31,7 +31,7 @@ export function CommunityRail({
               type="button"
               key={community.id}
               className={`community-item${active ? " active" : ""}`}
-              onClick={() => onSelect(active ? undefined : community)}
+              onClick={() => onSelect(community)}
             >
               <span className={`community-icon ${style.tone}`}><Icon name={style.icon} size={20} /></span>
               <span className="community-copy">
@@ -43,9 +43,9 @@ export function CommunityRail({
           );
         })}
       </div>
-      <button type="button" className="browse-all" onClick={() => onSelect(undefined)}>
+      <Link href="/communities" className="browse-all">
         浏览全部社区 <Icon name="arrow-up-right" size={16} />
-      </button>
+      </Link>
     </aside>
   );
 }

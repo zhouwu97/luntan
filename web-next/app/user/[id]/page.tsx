@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { SiteHeader } from "../../../components/site-header";
 import { Icon } from "../../../components/icons";
+import { UserAvatar } from "../../../components/user-avatar";
 import { useSession } from "../../../components/session-provider";
 import { getUserPosts, getUserProfile, setUserFollow } from "../../../lib/api/forum";
-import { compactCount, formatError, initials, relativeTime } from "../../../lib/format";
+import { compactCount, formatError, relativeTime } from "../../../lib/format";
 import type { ProfilePost, ProfileSummary } from "../../../types/forum";
 
 export default function UserPage() {
@@ -78,7 +79,7 @@ export default function UserPage() {
 function ProfileView({ profile, posts, isSelf, onFollow, followBusy }: { profile: ProfileSummary; posts: ProfilePost[]; isSelf: boolean; onFollow: () => void; followBusy: boolean }) {
   return (
     <section className="profile-page">
-      <div className="profile-hero"><span className="avatar avatar-profile">{profile.avatarUrl ? <img src={profile.avatarUrl} alt="" /> : initials(profile.nickname)}</span><div className="profile-copy"><div className="profile-title"><h1>{profile.nickname}</h1><span className="level-label">Lv.{profile.level || 1}</span></div><p>{profile.bio || "这个人还没有写简介。"}</p><span className="profile-handle">{profile.publicId ? `ID ${profile.publicId}` : profile.username}</span></div>{!isSelf && <button type="button" className={`outline-button profile-follow${profile.isFollowing ? " following" : ""}`} disabled={followBusy} onClick={onFollow}>{followBusy ? "处理中…" : profile.isFollowing ? "已关注" : "+ 关注"}</button>}</div>
+      <div className="profile-hero"><UserAvatar userId={profile.id} name={profile.nickname} url={profile.avatarUrl} size="profile" /><div className="profile-copy"><div className="profile-title"><h1>{profile.nickname}</h1><span className="level-label">Lv.{profile.level || 1}</span></div><p>{profile.bio || "这个人还没有写简介。"}</p><span className="profile-handle">{profile.publicId ? `ID ${profile.publicId}` : profile.username}</span></div>{!isSelf && <button type="button" className={`outline-button profile-follow${profile.isFollowing ? " following" : ""}`} disabled={followBusy} onClick={onFollow}>{followBusy ? "处理中…" : profile.isFollowing ? "已关注" : "+ 关注"}</button>}</div>
       <div className="profile-stats"><span><strong>{compactCount(profile.postCount)}</strong><small>发帖</small></span><span><strong>{compactCount(profile.commentCount)}</strong><small>评论</small></span><span><strong>{compactCount(profile.followerCount)}</strong><small>粉丝</small></span><span><strong>{compactCount(profile.followingCount)}</strong><small>关注</small></span></div>
       <div className="profile-section-heading"><h2>TA 的帖子</h2><span>{posts.length ? `${posts.length} 条` : "暂无内容"}</span></div>
       {posts.length ? <div className="profile-post-list">{posts.map((post) => <ProfilePostRow key={post.id} post={post} />)}</div> : <div className="profile-empty"><Icon name="sparkle" size={21} /><p>还没有公开帖子。</p></div>}

@@ -49,6 +49,7 @@ export interface Community {
   followerCount: number;
   postCount: number;
   sortOrder: number;
+  status?: string;
   canPublish?: boolean;
   canUploadMedia?: boolean;
   canCreatePoll?: boolean;
@@ -75,6 +76,9 @@ export interface Post {
   publishedAt?: string;
   activityAt?: string;
   media: MediaAsset[];
+  isFeatured?: boolean;
+  isRecommended?: boolean;
+  recommendationPosition?: number;
   viewerState: ViewerPostState;
 }
 

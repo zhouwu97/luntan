@@ -6,7 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { SiteHeader } from "./site-header";
 import { Icon } from "./icons";
 import { searchForum } from "../lib/api/forum";
-import { formatError, initials } from "../lib/format";
+import { UserAvatar } from "./user-avatar";
+import { formatError } from "../lib/format";
 import type { SearchResults } from "../types/forum";
 
 const emptyResults: SearchResults = { posts: [], users: [], communities: [], toys: [] };
@@ -65,7 +66,7 @@ export function SearchShell() {
           </ResultSection>}
 
           {!loading && results.users.length > 0 && <ResultSection title={`用户 ${results.users.length}`}>
-            {results.users.map((user) => <Link key={user.id} href={`/user/${encodeURIComponent(user.id)}`} className="profile-post-row"><div style={{ display: "flex", alignItems: "center", gap: 12 }}><span className="avatar avatar-small">{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials(user.nickname)}</span><div><h3>{user.nickname}</h3><p>@{user.username} · Lv.{user.level || 1}</p></div></div></Link>)}
+            {results.users.map((user) => <Link key={user.id} href={`/user/${encodeURIComponent(user.id)}`} className="profile-post-row"><div style={{ display: "flex", alignItems: "center", gap: 12 }}><UserAvatar userId={user.id} name={user.nickname} url={user.avatarUrl} size="small" /><div><h3>{user.nickname}</h3><p>@{user.username} · Lv.{user.level || 1}</p></div></div></Link>)}
           </ResultSection>}
 
           {!loading && results.communities.length > 0 && <ResultSection title={`板块 ${results.communities.length}`}>

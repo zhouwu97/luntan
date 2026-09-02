@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "../../components/site-header";
-import { Icon } from "../../components/icons";
+import { Icon, type IconName } from "../../components/icons";
 import { useSession } from "../../components/session-provider";
 import { getNotifications, markAllNotificationsRead, markNotificationRead } from "../../lib/api/forum";
 import { formatError, relativeTime } from "../../lib/format";
@@ -120,7 +120,7 @@ export default function NotificationsPage() {
             {tabs.map((tab) => <button key={tab.value} type="button" role="tab" aria-selected={category === tab.value} className={category === tab.value ? "active" : ""} onClick={() => setCategory(tab.value)}>{tab.label}</button>)}
           </div>
           {error && <div className="data-note" role="status">{error}</div>}
-          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>有新的互动时，会在这里告诉你。</p></div>}
+          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{groupNotifications(items).map((group) => <section className="notification-group" key={group.label}><h2>{group.label}</h2>{group.items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</section>)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>有新的互动时，会在这里告诉你。</p></div>}
         </section>
       </main>
     </>
@@ -130,14 +130,37 @@ export default function NotificationsPage() {
 function NotificationRow({ item, onRead }: { item: ForumNotification; onRead: (id: string) => void }) {
   const href = item.targetType === "post" && item.targetId ? `/post/${encodeURIComponent(item.targetId)}` : undefined;
   const body = notificationBody(item);
-  const content = <><span className={`notification-icon notification-icon-${notificationKind(item)}`}><Icon name={notificationKind(item) === "community" ? "sparkle" : notificationKind(item) === "moderation" ? "filter" : "heart"} size={18} /></span><span className="notification-copy"><strong>{body.title}</strong>{body.content && <span>{body.content}</span>}<time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time></span>{!item.isRead && <span className="notification-unread" aria-label="未读" />}</>;
+  const kind = notificationKind(item);
+  const content = <><span className={`notification-icon notification-icon-${kind}`}><Icon name={notificationIconName(item)} size={18} /></span><span className="notification-copy"><strong>{body.title}</strong>{body.content && <span>{body.content}</span>}<time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time></span>{!item.isRead && <span className="notification-unread" aria-label="未读" />}</>;
   return href ? <Link href={href} className={`notification-row${item.isRead ? "" : " unread"}`} onClick={() => { if (!item.isRead) void onRead(item.id); }}>{content}</Link> : <div className={`notification-row${item.isRead ? "" : " unread"}`} onClick={() => { if (!item.isRead) void onRead(item.id); }}>{content}</div>;
+}
+
+function groupNotifications(items: ForumNotification[]): Array<{ label: string; items: ForumNotification[] }> {
+  const today = new Date();
+  const groups = new Map<string, ForumNotification[]>();
+  for (const item of items) {
+    const date = new Date(item.createdAt);
+    const isToday = Number.isFinite(date.getTime()) && date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+    const label = isToday ? "今天" : "更早";
+    groups.set(label, [...(groups.get(label) || []), item]);
+  }
+  return ["今天", "更早"].flatMap((label) => groups.has(label) ? [{ label, items: groups.get(label)! }] : []);
 }
 
 function notificationKind(item: ForumNotification): string {
   if (item.type.startsWith("moderation.") || item.type.startsWith("appeal.")) return "moderation";
   if (item.type.startsWith("community.") || item.type === "announcement" || item.type === "event") return "community";
   return "interaction";
+}
+
+function notificationIconName(item: ForumNotification): IconName {
+  const kind = notificationKind(item);
+  if (kind === "moderation") return "filter";
+  if (kind === "community") return "sparkle";
+  if (item.type === "comment.created" || item.type === "comment.replied" || item.type === "reply") return "message";
+  if (item.type === "bookmark" || item.type === "post.bookmarked") return "bookmark";
+  if (item.type === "follow" || item.type === "user.followed") return "user";
+  return "heart";
 }
 
 function notificationBody(item: ForumNotification): { title: string; content: string } {

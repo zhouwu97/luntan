@@ -1878,17 +1878,54 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
+  Future<void> _deleteRankingComment(RankingToyComment comment) async {
+    final repository = widget.repository;
+    if (repository == null) return;
+    try {
+      await repository.deleteComment(comment.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('评价已删除')));
+      if (_remoteDetail != null) {
+        final updatedComments = _remoteDetail!.comments
+            .where((c) => c.id != comment.id)
+            .toList();
+        setState(() {
+          _remoteDetail = _remoteDetail!.copyWith(
+            comments: updatedComments,
+          );
+        });
+      }
+      await _loadRemoteDetail();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              userFacingApiMessage(error, fallback: '删除评价失败，请重试'),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   void _showRankingCommentMenu(RankingToyComment comment) {
     showRankingCommentActionMenu(
       context,
       comment: comment,
       canManageRanking: widget.canManageRanking,
+      isReply: false,
       onCopy: () {
         Clipboard.setData(ClipboardData(text: comment.content));
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('已复制到剪贴板')));
       },
+      onDelete: widget.repository != null
+          ? () => _deleteRankingComment(comment)
+          : null,
     );
   }
 

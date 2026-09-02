@@ -159,6 +159,28 @@ class _FakeApiClient extends ApiClient {
 
     return {};
   }
+
+  final List<String> deletedPaths = [];
+
+  @override
+  Future<Map<String, dynamic>> deleteJson(
+    String path, {
+    Map<String, String>? headers,
+    Object? body,
+  }) async {
+    deletedPaths.add(path);
+    return {};
+  }
+
+  @override
+  Future<Map<String, dynamic>> delete(
+    String path, {
+    Map<String, String>? headers,
+    Object? body,
+  }) async {
+    deletedPaths.add(path);
+    return {};
+  }
 }
 
 class _FailingRankingRepository extends RankingRepository {
@@ -459,6 +481,89 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('黄油小姐 二代'), findsOneWidget);
+    });
+
+    testWidgets('RankingItemDetailPage 管理员点击一级评价展示删除评价并可删除', (tester) async {
+      final fakeClient = _FakeApiClient();
+      final rankingRepo = RankingRepository(fakeClient);
+      const item = RankingItem(
+        id: 'toy-butter-2',
+        rank: 1,
+        name: '黄油小姐 二代',
+        hot: '401人想冲',
+        tags: ['奶香'],
+        ratings: '17人评分',
+        score: '8.7',
+        asset: 'assets/ranking/hero.webp',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingItemDetailPage(
+            item: item,
+            repository: rankingRepo,
+            isAuthenticated: true,
+            canManageRanking: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('手感极佳，软糯适中'), findsOneWidget);
+
+      final moreBtn = find.byTooltip('更多操作');
+      await tester.ensureVisible(moreBtn);
+      await tester.tap(moreBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('复制内容'), findsOneWidget);
+      expect(find.text('删除评价'), findsOneWidget);
+
+      await tester.tap(find.text('删除评价'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('确定要删除这条评价吗？此操作无法撤销。'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '删除'));
+      await tester.pumpAndSettle();
+
+      expect(fakeClient.deletedPaths, contains('/api/v1/ranking/toy-comments/c-1'));
+    });
+
+    testWidgets('RankingItemDetailPage 普通用户点击一级评价仅展示复制内容', (tester) async {
+      final fakeClient = _FakeApiClient();
+      final rankingRepo = RankingRepository(fakeClient);
+      const item = RankingItem(
+        id: 'toy-butter-2',
+        rank: 1,
+        name: '黄油小姐 二代',
+        hot: '401人想冲',
+        tags: ['奶香'],
+        ratings: '17人评分',
+        score: '8.7',
+        asset: 'assets/ranking/hero.webp',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingItemDetailPage(
+            item: item,
+            repository: rankingRepo,
+            isAuthenticated: true,
+            canManageRanking: false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('手感极佳，软糯适中'), findsOneWidget);
+
+      final moreBtn = find.byTooltip('更多操作');
+      await tester.ensureVisible(moreBtn);
+      await tester.tap(moreBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('复制内容'), findsOneWidget);
+      expect(find.text('删除评价'), findsNothing);
     });
   });
 }

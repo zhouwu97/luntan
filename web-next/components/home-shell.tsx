@@ -233,18 +233,18 @@ export function HomeShell() {
         </div>
       </main>
       <button type="button" className="mobile-refresh" aria-label="刷新首页内容" onClick={refreshFeed}><Icon name="refresh" size={21} /></button>
-      <MobileNav user={Boolean(user)} onPublish={() => router.push(user ? "/publish" : "/login")} />
+      <MobileNav onPublish={() => router.push(user ? "/publish" : "/login")} />
     </>
   );
 }
 
-function MobileNav({ user, onPublish }: { user: boolean; onPublish: () => void }) {
+function MobileNav({ onPublish }: { onPublish: () => void }) {
   const router = useRouter();
   return (
     <nav className="mobile-nav" aria-label="移动端导航">
       <button type="button" className="mobile-nav-item active" onClick={() => router.push("/")}><Icon name="home" size={22} /><span>首页</span></button>
       <button type="button" className="mobile-publish" aria-label="发布帖子" onClick={onPublish}><Icon name="plus" size={28} /></button>
-      <button type="button" className="mobile-nav-item" onClick={() => router.push(user ? "/user/me" : "/login")}><Icon name="user" size={22} /><span>我的</span></button>
+      <button type="button" className="mobile-nav-item" onClick={() => router.push("/user/me")}><Icon name="user" size={22} /><span>我的</span></button>
     </nav>
   );
 }

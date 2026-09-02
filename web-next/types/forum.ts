@@ -8,6 +8,7 @@ export interface UserSummary {
 
 export interface SessionUser extends UserSummary {
   accountType?: string;
+  experience?: number;
   email?: string;
   status?: string;
   capabilities?: Record<string, boolean>;
@@ -186,10 +187,20 @@ export interface RankingToyComment {
   content: string;
   likeCount: number;
   replyCount: number;
+  rootId?: string;
+  parentId?: string;
+  replyToUserId?: string;
+  replyToUser?: UserSummary;
   createdAt: string;
   rating?: number;
   media: MediaAsset[];
   viewerState: { hasLiked: boolean };
+}
+
+export interface RankingToyCommentPage {
+  items: RankingToyComment[];
+  nextCursor?: string;
+  hasMore: boolean;
 }
 
 export interface RankingToyDetail extends RankingToy {

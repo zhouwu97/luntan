@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SiteHeader } from "../../components/site-header";
 import { Icon, type IconName } from "../../components/icons";
 import { MediaImage } from "../../components/media-image";
 import { getRankingView } from "../../lib/api/forum";
 import { compactCount, formatError } from "../../lib/format";
+import { useSession } from "../../components/session-provider";
 import type { RankingToy } from "../../types/forum";
 
 const rankingTabs = [
@@ -32,10 +33,13 @@ function scoreText(score: number) {
 
 export default function RankingPage() {
   const router = useRouter();
-  const [selectedTab, setSelectedTab] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState("");
-  const [query, setQuery] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { user } = useSession();
+  const selectedTab = Math.max(0, rankingTabs.findIndex((tab) => tab.key === (searchParams.get("tab") || "")));
+  const selectedCategory = searchParams.get("category") || "";
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") || "");
   const [items, setItems] = useState<RankingToy[]>([]);
   const [weeklyTop, setWeeklyTop] = useState<RankingToy>();
   const [loading, setLoading] = useState(true);
@@ -75,30 +79,51 @@ export default function RankingPage() {
 
   const listItems = featuredItem ? filteredItems.filter((item) => item.id !== featuredItem.id) : filteredItems;
 
+  function rankingUrl(tabKey = rankingTabs[selectedTab].key, category = selectedCategory, text = searchQuery) {
+    const params = new URLSearchParams();
+    if (tabKey) params.set("tab", tabKey);
+    if (category) params.set("category", category);
+    if (text.trim()) params.set("q", text.trim());
+    const queryString = params.toString();
+    return `${pathname}${queryString ? `?${queryString}` : ""}`;
+  }
+
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSearchQuery(query);
+    router.replace(rankingUrl(undefined, undefined, query), { scroll: false });
   }
 
   function selectTab(index: number) {
-    setSelectedTab(index);
-    if (index > 0 && !selectedCategory) setSelectedCategory("CUP");
+    const nextCategory = index > 0 && !selectedCategory ? "CUP" : selectedCategory;
+    router.replace(rankingUrl(rankingTabs[index].key, nextCategory), { scroll: false });
   }
 
   function selectCategory(key: string) {
-    setSelectedCategory((current) => selectedTab === 0 && current === key ? "" : key);
+    const nextCategory = selectedTab === 0 && selectedCategory === key ? "" : key;
+    router.replace(rankingUrl(undefined, nextCategory), { scroll: false });
   }
+
+  function openSubmission() {
+    if (user) {
+      router.push("/ranking/submit");
+      return;
+    }
+    router.push(`/login?next=${encodeURIComponent("/ranking/submit")}`);
+  }
+
+  const returnPath = rankingUrl();
 
   return (
     <>
       <SiteHeader className="ranking-site-header" />
       <div className="ranking-mobile-header">
-        <button type="button" className="ranking-mobile-back" aria-label="返回" onClick={() => router.back()}><Icon name="chevron-left" size={21} /></button>
+        <button type="button" className="ranking-mobile-back" aria-label="返回首页" onClick={() => router.push("/")}><Icon name="chevron-left" size={21} /></button>
         <form className="ranking-mobile-search" onSubmit={submitSearch} role="search">
           <Icon name="search" size={15} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索：魅魔、大雕王、慢玩..." aria-label="搜索榜单商品" />
         </form>
-        <button type="button" className="ranking-mobile-add" aria-label="提交榜单商品" onClick={() => router.push("/login")}><Icon name="plus" size={17} /></button>
+        <button type="button" className="ranking-mobile-add" aria-label="提交榜单商品" onClick={openSubmission}><Icon name="plus" size={17} /></button>
       </div>
       <main className="page-frame ranking-page-frame">
         <section className="feature-page ranking-page">
@@ -125,10 +150,10 @@ export default function RankingPage() {
             <div className="ranking-grid" aria-label="榜单加载中"><div className="ranking-skeleton" /><div className="ranking-skeleton" /><div className="ranking-skeleton" /></div>
           ) : items.length ? (
             <>
-              {featuredItem && <div className="ranking-desktop-featured"><RankingCard item={featuredItem} /></div>}
-              {featuredItem && <RankingFeatured item={featuredItem} />}
+              {featuredItem && <div className="ranking-desktop-featured"><RankingCard item={featuredItem} returnPath={returnPath} /></div>}
+              {featuredItem && <RankingFeatured item={featuredItem} returnPath={returnPath} />}
               <div className="ranking-grid">
-                {listItems.map((item) => <RankingCard key={item.id} item={item} />)}
+                {listItems.map((item) => <RankingCard key={item.id} item={item} returnPath={returnPath} />)}
               </div>
             </>
           ) : (
@@ -140,9 +165,9 @@ export default function RankingPage() {
   );
 }
 
-function RankingFeatured({ item }: { item: RankingToy }) {
+function RankingFeatured({ item, returnPath }: { item: RankingToy; returnPath: string }) {
   return (
-    <Link href={`/ranking/${encodeURIComponent(item.id)}`} className="ranking-featured-link">
+    <Link href={`/ranking/${encodeURIComponent(item.id)}?from=${encodeURIComponent(returnPath)}`} className="ranking-featured-link">
       <article className="ranking-featured">
         <div className="ranking-featured-cover">
           <MediaImage sources={[item.heroUrl, item.coverUrl]} alt={item.name} loading="eager" />
@@ -157,9 +182,9 @@ function RankingFeatured({ item }: { item: RankingToy }) {
   );
 }
 
-function RankingCard({ item }: { item: RankingToy }) {
+function RankingCard({ item, returnPath }: { item: RankingToy; returnPath: string }) {
   return (
-    <Link href={`/ranking/${encodeURIComponent(item.id)}`} className="ranking-card-link">
+    <Link href={`/ranking/${encodeURIComponent(item.id)}?from=${encodeURIComponent(returnPath)}`} className="ranking-card-link">
       <article className="ranking-card">
         <div className={`ranking-card-rank rank-${item.rank}`}>{item.rank}</div>
         <div className="ranking-cover"><MediaImage sources={[item.coverUrl, item.heroUrl]} alt={item.name} /></div>

@@ -1,5 +1,6 @@
 import { Icon, type IconName } from "./icons";
 import type { Community } from "../types/forum";
+import { appBasePath } from "../lib/config";
 
 const communityStyle: Record<string, { icon: IconName; tone: string }> = {
   酱紫社区: { icon: "trophy", tone: "lilac" },
@@ -22,14 +23,13 @@ export function HomeCommunityTabs({
       {communities.map((community) => {
         const style = communityStyle[community.name] ?? { icon: "sparkle" as IconName, tone: "blue" };
         const active = community.id === activeId;
+        const isCampus = community.name.trim() === "酱紫社区";
         return (
-          <button key={community.id} type="button" role="tab" aria-selected={active} className={`home-community-tab${active ? " active" : ""}`} onClick={() => onSelect(community)}>
-            <span className={`community-icon ${style.tone}`}><Icon name={style.icon} size={18} /></span>
-            <span>{community.name}</span>
+          <button key={community.id} type="button" role="tab" aria-selected={active} aria-label={community.name} className={`home-community-tab${active ? " active" : ""}${isCampus ? " campus-art-tab" : ""}`} onClick={() => onSelect(community)}>
+            {isCampus ? <img src={`${appBasePath}/home/${active ? "tab_community_active.webp" : "tab_community_inactive.webp"}`} alt="" /> : <><span className={`community-icon ${style.tone}`}><Icon name={style.icon} size={18} /></span><span>{community.name}</span></>}
           </button>
         );
       })}
     </div>
   );
 }
-

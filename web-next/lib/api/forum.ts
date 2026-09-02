@@ -13,6 +13,7 @@ import type {
   ProfileSummary,
   RankingToy,
   RankingToyComment,
+  RankingToyCommentPage,
   RankingToyDetail,
   SearchResults,
   SessionUser,
@@ -55,6 +56,7 @@ function parseSessionUser(raw: unknown): SessionUser {
   return {
     ...parseUser(item),
     accountType: asString(item.account_type) || undefined,
+    experience: asNumber(item.experience),
     email: asString(item.email) || undefined,
     status: asString(item.status) || undefined,
     capabilities: parseCapabilities(item.capabilities),
@@ -195,12 +197,19 @@ function parseRankingToyComment(raw: unknown): RankingToyComment {
   const item = asRecord(raw);
   const viewer = asRecord(item.viewer_state);
   const author = parseUser(item.author);
+  const replyToUser = item.reply_to_user && typeof item.reply_to_user === "object"
+    ? parseUser(item.reply_to_user)
+    : undefined;
   return {
     id: asString(item.id),
     author,
     content: asString(item.content),
     likeCount: asNumber(item.like_count),
     replyCount: asNumber(item.reply_count),
+    rootId: asString(item.root_id) || undefined,
+    parentId: asString(item.parent_id) || undefined,
+    replyToUserId: asString(item.reply_to_user_id) || undefined,
+    replyToUser,
     createdAt: asString(item.created_at),
     rating: item.author_rating == null ? undefined : asNumber(item.author_rating),
     media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
@@ -323,6 +332,41 @@ export async function getRankingToyDetail(id: string, sort: "weight" | "latest" 
   return parseRankingToyDetail(await apiJson<JsonRecord>(`/ranking/toys/${encodeURIComponent(id)}?comment_sort=${sort}`));
 }
 
+export async function getRankingToyComments(
+  toyId: string,
+  sort: "weight" | "latest" = "weight",
+  cursor?: string,
+  limit = 20,
+): Promise<RankingToyCommentPage> {
+  const params = new URLSearchParams({ sort, limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
+    `/ranking/toys/${encodeURIComponent(toyId)}/comments?${params.toString()}`,
+  );
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseRankingToyComment) : [],
+    nextCursor: asString(payload.next_cursor) || undefined,
+    hasMore: payload.has_more === true,
+  };
+}
+
+export async function getRankingToyCommentReplies(
+  commentId: string,
+  cursor?: string,
+  limit = 20,
+): Promise<RankingToyCommentPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
+    `/ranking/toy-comments/${encodeURIComponent(commentId)}/replies?${params.toString()}`,
+  );
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseRankingToyComment) : [],
+    nextCursor: asString(payload.next_cursor) || undefined,
+    hasMore: payload.has_more === true,
+  };
+}
+
 export async function setRankingToyWant(id: string, active: boolean): Promise<void> {
   await apiFetch(`/ranking/toys/${encodeURIComponent(id)}/want`, { method: active ? "PUT" : "DELETE" });
 }
@@ -331,15 +375,55 @@ export async function setRankingToyOwned(id: string, active: boolean): Promise<v
   await apiFetch(`/ranking/toys/${encodeURIComponent(id)}/owned`, { method: active ? "PUT" : "DELETE" });
 }
 
-export async function rateRankingToy(id: string, score: number): Promise<void> {
-  await apiPost(`/ranking/toys/${encodeURIComponent(id)}/rating`, { score });
+export async function rateRankingToy(id: string, score: number): Promise<RankingToy> {
+  return parseRankingToy(await apiPost(`/ranking/toys/${encodeURIComponent(id)}/rating`, { score }));
 }
 
-export async function createRankingToyComment(toyId: string, content: string, parentId?: string): Promise<RankingToyComment> {
+export async function createRankingToyComment(
+  toyId: string,
+  content: string,
+  parentId?: string,
+  replyToUserId?: string,
+): Promise<RankingToyComment> {
   return parseRankingToyComment(await apiPost(`/ranking/toys/${encodeURIComponent(toyId)}/comments`, {
     content,
     ...(parentId ? { parent_id: parentId } : {}),
+    ...(replyToUserId ? { reply_to_user_id: replyToUserId } : {}),
   }, { "Idempotency-Key": newIdempotencyKey("web-toy-comment") }));
+}
+
+export async function setRankingToyCommentLike(
+  commentId: string,
+  active: boolean,
+): Promise<{ active: boolean; likeCount: number }> {
+  const payload = await apiJson<JsonRecord>(
+    `/ranking/toy-comments/${encodeURIComponent(commentId)}/like`,
+    { method: active ? "PUT" : "DELETE" },
+  );
+  return { active, likeCount: asNumber(payload.like_count) };
+}
+
+export async function submitRankingToy(input: {
+  name: string;
+  category: string;
+  merchant?: string;
+  releaseYear?: number;
+  description?: string;
+  coverMediaId?: string;
+  intensity?: string;
+  tags?: string[];
+}): Promise<{ id: string; status: string }> {
+  const payload = await apiPost<JsonRecord>("/ranking/submissions", {
+    name: input.name,
+    category: input.category,
+    ...(input.merchant ? { merchant: input.merchant } : {}),
+    ...(input.releaseYear ? { release_year: input.releaseYear } : {}),
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.coverMediaId ? { cover_media_id: input.coverMediaId } : {}),
+    ...(input.intensity ? { intensity: input.intensity } : {}),
+    ...(input.tags?.length ? { tags: input.tags } : {}),
+  });
+  return { id: asString(payload.id), status: asString(payload.status, "pending") };
 }
 
 export async function getPost(id: string): Promise<Post> {

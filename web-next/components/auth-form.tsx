@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
 import { useSession } from "./session-provider";
 import { formatError } from "../lib/format";
@@ -12,8 +12,14 @@ type LoginMethod = "code" | "password";
 
 const domainSuggestions = ["@qq.com", "@163.com", "@gmail.com", "@stu..."];
 
+function safeNext(value: string | null) {
+  if (!value || value.startsWith("//") || !value.startsWith("/")) return "/";
+  return value;
+}
+
 export function AuthForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     user,
     signInWithCode,
@@ -37,6 +43,7 @@ export function AuthForm() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [permissionOpen, setPermissionOpen] = useState(false);
+  const destination = safeNext(searchParams.get("next"));
 
   useEffect(() => {
     if (seconds <= 0) return;
@@ -45,8 +52,8 @@ export function AuthForm() {
   }, [seconds]);
 
   useEffect(() => {
-    if (user) router.replace("/");
-  }, [router, user]);
+    if (user) router.replace(destination);
+  }, [destination, router, user]);
 
   function clearFeedback() {
     setError("");
@@ -130,7 +137,7 @@ export function AuthForm() {
       } else {
         await signInWithCode(value, code.trim());
       }
-      router.replace("/");
+      router.replace(destination);
     } catch (requestError) {
       setError(formatError(requestError, mode === "register" ? "注册失败，请检查后重试" : "登录失败，请检查后重试"));
     } finally {
@@ -143,7 +150,7 @@ export function AuthForm() {
     setError("");
     try {
       await signInAsGuest();
-      router.replace("/");
+      router.replace(destination);
     } catch (requestError) {
       setError(formatError(requestError, "游客进入失败，请稍后重试"));
     } finally {

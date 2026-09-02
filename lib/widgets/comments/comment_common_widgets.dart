@@ -212,7 +212,7 @@ class CommentActionButton extends StatelessWidget {
     this.iconSize = 14,
     this.fontSize = 11.5,
     this.minTouchWidth = 36,
-    this.minTouchHeight = 34,
+    this.minTouchHeight = 36,
   });
 
   final IconData icon;

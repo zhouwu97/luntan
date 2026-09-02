@@ -2820,10 +2820,6 @@ class _ReviewSection extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 22),
             child: Text(
-              '还没有评价，来留下第一条吧',
-              style: TextStyle(color: Color(0xFF8A96A9)),
-            ),
-          )
         else
           ..._buildServerCards(comments!),
         if (comments != null && comments!.isNotEmpty && hasMore)
@@ -2939,174 +2935,376 @@ class _ReviewCard extends StatelessWidget {
   final VoidCallback? onViewReplies;
   final VoidCallback? onMore;
 
+  Color _levelColor(int lvl) {
+    if (lvl >= 8) return AppTheme.purple;
+    if (lvl >= 6) return AppTheme.primary;
+    if (lvl >= 4) return AppTheme.mint;
+    return const Color(0xFF38AD8B);
+  }
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 22),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: avatarColor,
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFFE8ECF2)),
+  Widget build(BuildContext context) {
+    final lvlColor = _levelColor(level);
+    final totalReplies = commentReplyCount > 0 ? commentReplyCount : replies.length;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE8EEF5), width: 0.8),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x06182A3D),
+            blurRadius: 8,
+            offset: Offset(0, 2),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: avatarUrl != null && avatarUrl!.isNotEmpty
-              ? AppNetworkImage(
-                  url: avatarUrl,
-                  width: 40,
-                  height: 40,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_) => const Icon(
-                    Icons.person_outline_rounded,
-                    size: 22,
-                    color: Color(0xFF7D8BA3),
-                  ),
-                )
-              : const Icon(
-                  Icons.person_outline_rounded,
-                  size: 22,
-                  color: Color(0xFF7D8BA3),
-                ),
-        ),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Text(
-                    user,
-                    style: const TextStyle(
-                      color: Color(0xFF102844),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE4F8F1),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'LV$level',
-                      style: const TextStyle(
-                        color: Color(0xFF38AD8B),
-                        fontSize: 8,
-                        fontWeight: FontWeight.w800,
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: avatarColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFE2EBF5), width: 1.0),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: avatarUrl != null && avatarUrl!.isNotEmpty
+                    ? AppNetworkImage(
+                        url: avatarUrl!,
+                        width: 38,
+                        height: 38,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_) => const Icon(
+                          Icons.person_outline_rounded,
+                          size: 20,
+                          color: Color(0xFF7D8BA3),
+                        ),
+                      )
+                    : Center(
+                        child: Text(
+                          user.isNotEmpty ? user.characters.first : '友',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.primary,
+                          ),
+                        ),
                       ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            user,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF102844),
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: lvlColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'LV$level',
+                            style: TextStyle(
+                              color: lvlColor,
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        if (authorRating != null) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF0F4),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.favorite_rounded,
+                                  size: 11,
+                                  color: Color(0xFFF76591),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  '$authorRating分',
+                                  style: const TextStyle(
+                                    color: Color(0xFFF76591),
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                  const Spacer(),
-                  if (onLike == null)
-                    Icon(
-                      Icons.thumb_up_alt_outlined,
-                      size: 18,
-                      color: liked
-                          ? const Color(0xFFF76591)
-                          : const Color(0xFFAAB2C0),
-                    )
-                  else
-                    InkWell(
-                      onTap: onLike,
-                      borderRadius: BorderRadius.circular(16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(3),
-                        child: Icon(
-                          liked
-                              ? Icons.thumb_up_alt_rounded
-                              : Icons.thumb_up_alt_outlined,
-                          size: 18,
-                          color: liked
-                              ? const Color(0xFFF76591)
-                              : const Color(0xFFAAB2C0),
+                    if (authorRating != null) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: List.generate(5, (index) {
+                          final filled = index < ((authorRating! + 1) ~/ 2);
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 2),
+                            child: Icon(
+                              filled
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 11.5,
+                              color: const Color(0xFFF76591),
+                            ),
+                          );
+                        }),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: onReply,
+            child: Text(
+              content,
+              style: const TextStyle(
+                color: Color(0xFF203C60),
+                fontSize: 14,
+                height: 1.58,
+              ),
+            ),
+          ),
+          if (media.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (var index = 0; index < media.length; index++)
+                    GestureDetector(
+                      onTap: () => CommentImageViewer.open(
+                        context,
+                        imageUrls: media.map((item) => item.url).toList(),
+                        initialIndex: index,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: const Color(0xFFE2EAF2),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: AppNetworkImage(
+                            url: media[index].url,
+                            width: 88,
+                            height: 88,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_) => const SizedBox.shrink(),
+                          ),
                         ),
                       ),
                     ),
-                  const SizedBox(width: 5),
-                  Text(
-                    likes,
-                    style: const TextStyle(
-                      color: Color(0xFF7D899D),
-                      fontSize: 12,
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Row(
+            ),
+
+          // 操作栏（回复、点赞、更多）
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Row(
+              children: [
+                if (onReply != null)
+                  InkWell(
+                    onTap: onReply,
+                    borderRadius: BorderRadius.circular(4),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.reply_rounded,
+                            size: 14,
+                            color: AppTheme.textSecondary,
+                          ),
+                          SizedBox(width: 3),
+                          Text(
+                            '回复',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 14),
+                if (onLike != null)
+                  InkWell(
+                    onTap: onLike,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            liked
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 13.5,
+                            color: liked
+                                ? const Color(0xFFF76591)
+                                : const Color(0xFFAAB2C0),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            likes,
+                            style: TextStyle(
+                              color: liked
+                                  ? const Color(0xFFF76591)
+                                  : const Color(0xFF7D899D),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        liked
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        size: 13.5,
+                        color: liked
+                            ? const Color(0xFFF76591)
+                            : const Color(0xFFAAB2C0),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        likes,
+                        style: TextStyle(
+                          color: liked
+                              ? const Color(0xFFF76591)
+                              : const Color(0xFF7D899D),
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                const Spacer(),
+                if (onMore != null)
+                  CommentMoreButton(onPressed: onMore!),
+              ],
+            ),
+          ),
+
+          // 内嵌二级回复预览（服务端评论）
+          if (replies.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF6F9FD),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE5EEF6), width: 0.8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...List.generate(5, (index) {
-                    final filled =
-                        authorRating == null ||
-                        index < ((authorRating! + 1) ~/ 2);
+                  ...replies.take(2).map((r) {
+                    final rAuthor = r.nickname.isEmpty ? r.username : r.nickname;
+                    final rReplyTo = r.replyToUserNickname;
                     return Padding(
-                      padding: const EdgeInsets.only(right: 2),
-                      child: Icon(
-                        filled ? Icons.favorite : Icons.favorite_border_rounded,
-                        size: 13,
-                        color: const Color(0xFFF76591),
+                      padding: const EdgeInsets.symmetric(vertical: 2.5),
+                      child: Text.rich(
+                        TextSpan(
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF5F7488),
+                            height: 1.45,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: rAuthor,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF2C4D73),
+                              ),
+                            ),
+                            if (rReplyTo != null && rReplyTo.isNotEmpty) ...[
+                              const TextSpan(text: ' 回复 '),
+                              TextSpan(
+                                text: '@$rReplyTo',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ],
+                            const TextSpan(
+                              text: '：',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF2C4D73),
+                              ),
+                            ),
+                            TextSpan(text: r.content),
+                          ],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     );
                   }),
-                  if (authorRating != null) ...[
-                    const SizedBox(width: 4),
-                    Text(
-                      '$authorRating分',
-                      style: const TextStyle(
-                        color: Color(0xFFF76591),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 7),
-              GestureDetector(
-                onTap: onReply,
-                child: Text(
-                  content,
-                  style: const TextStyle(
-                    color: Color(0xFF203C60),
-                    fontSize: 14,
-                    height: 1.6,
-                  ),
-                ),
-              ),
-              if (media.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (var index = 0; index < media.length; index++)
-                        GestureDetector(
-                          onTap: () => CommentImageViewer.open(
-                            context,
-                            imageUrls: media.map((item) => item.url).toList(),
-                            initialIndex: index,
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: AppNetworkImage(
-                              url: media[index].url,
-                              width: 96,
-                              height: 96,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_) => const SizedBox.shrink(),
-                            ),
-                          ),
                         ),
                     ],
                   ),

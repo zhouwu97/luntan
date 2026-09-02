@@ -124,6 +124,13 @@ class _CommentItemState extends State<CommentItem>
     );
   }
 
+  Color _levelColor(int level) {
+    if (level >= 8) return AppTheme.purple;
+    if (level >= 6) return AppTheme.primary;
+    if (level >= 4) return AppTheme.mint;
+    return AppTheme.textSecondary;
+  }
+
   @override
   Widget build(BuildContext context) {
     final comment = widget.comment;
@@ -143,6 +150,8 @@ class _CommentItemState extends State<CommentItem>
     } else {
       UserAvatarCache.set(comment.authorId, avatar);
     }
+
+    final lvlColor = _levelColor(level);
 
     return AnimatedBuilder(
       animation: _highlightAnimation,
@@ -186,28 +195,30 @@ class _CommentItemState extends State<CommentItem>
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    fontSize: 13,
+                                    fontSize: 13.5,
                                     fontWeight: FontWeight.w700,
                                     color: AppTheme.textPrimary,
+                                    height: 1.2,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 5),
+                              const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 5,
-                                  vertical: 1,
+                                  vertical: 1.5,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: AppTheme.levelBg,
+                                  color: lvlColor.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   'Lv.$level',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.w800,
-                                    color: AppTheme.levelText,
+                                    color: lvlColor,
+                                    height: 1.15,
                                   ),
                                 ),
                               ),
@@ -215,41 +226,58 @@ class _CommentItemState extends State<CommentItem>
                                 const SizedBox(width: 5),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 5,
-                                    vertical: 1,
+                                    horizontal: 6,
+                                    vertical: 1.5,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFE8F1FD),
+                                    color: const Color(0xFFEBF3FE),
                                     borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: const Color(0xFFCFE2FA),
+                                      width: 0.6,
+                                    ),
                                   ),
                                   child: const Text(
                                     '楼主',
                                     style: TextStyle(
                                       fontSize: 9,
                                       fontWeight: FontWeight.w800,
-                                      color: Color(0xFF2F7FE0),
+                                      color: Color(0xFF2672D6),
+                                      height: 1.1,
                                     ),
                                   ),
                                 ),
                               ],
                             ],
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 3),
                           Row(
                             children: [
                               Text(
                                 relativeTimeLabel(comment.createdAt),
                                 style: const TextStyle(
-                                  fontSize: 10,
-                                  color: Color(0xFF99A8B7),
+                                  fontSize: 10.5,
+                                  color: Color(0xFF94A5B7),
                                 ),
                               ),
                               const Spacer(),
-                              Text(
-                                '${comment.floor ?? widget.floor} 楼',
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  color: Color(0xFFA0AFBD),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  '${comment.floor ?? widget.floor} 楼',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF8C9EAF),
+                                    height: 1.15,
+                                  ),
                                 ),
                               ),
                             ],
@@ -265,7 +293,7 @@ class _CommentItemState extends State<CommentItem>
           // 评论正文
           if (!deleted && comment.content.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 44, top: 4, right: 4),
+              padding: const EdgeInsets.only(left: 46, top: 4, right: 4),
               child: LinkText(
                 comment.content,
                 selectable: true,
@@ -280,43 +308,8 @@ class _CommentItemState extends State<CommentItem>
           // 评论图片展示
           if (!deleted && comment.media.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 44, top: 8),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: comment.media.map((media) {
-                  final imageUrl = media.previewUrl ?? '';
-                  if (imageUrl.isEmpty) return const SizedBox.shrink();
-
-                  return GestureDetector(
-                    onTap: () => _openImagePreview(
-                      context,
-                      media.originalUrl ?? imageUrl,
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        constraints: const BoxConstraints(
-                          maxWidth: 195,
-                          maxHeight: 195,
-                        ),
-                        color: const Color(0xFFEAF0F6),
-                        child: AppNetworkImage(
-                          url: imageUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_) => const Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Icon(
-                              Icons.broken_image_outlined,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
+              padding: const EdgeInsets.only(left: 46, top: 8),
+              child: _buildMediaGrid(context, comment.media),
             ),
 
           // 评论贴纸展示
@@ -324,96 +317,114 @@ class _CommentItemState extends State<CommentItem>
               comment.stickerId != null &&
               comment.stickerId!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 44, top: 8),
+              padding: const EdgeInsets.only(left: 46, top: 8),
               child: _buildStickerView(comment.stickerId!),
             ),
 
           // 操作栏（回复、点赞、更多）
           if (!deleted)
             Padding(
-              padding: const EdgeInsets.only(left: 44, top: 8),
+              padding: const EdgeInsets.only(left: 46, top: 8),
               child: Row(
                 children: [
-                  GestureDetector(
+                  InkWell(
                     onTap: widget.onReply,
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.reply_rounded,
-                          size: 14,
-                          color: AppTheme.textSecondary,
-                        ),
-                        SizedBox(width: 3),
-                        Text(
-                          '回复',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
+                    borderRadius: BorderRadius.circular(6),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.reply_rounded,
+                            size: 14.5,
                             color: AppTheme.textSecondary,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 18),
-                  GestureDetector(
-                    onTap: widget.onDislike,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          comment.isDisliked
-                              ? Icons.thumb_down_rounded
-                              : Icons.thumb_down_off_alt_rounded,
-                          size: 14,
-                          color: comment.isDisliked
-                              ? const Color(0xFF5A7B9C)
-                              : AppTheme.textSecondary,
-                        ),
-                        if (comment.dislikeCount > 0) ...[
-                          const SizedBox(width: 3),
+                          SizedBox(width: 3),
                           Text(
-                            '${comment.dislikeCount}',
+                            '回复',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
-                              color: comment.isDisliked
-                                  ? const Color(0xFF5A7B9C)
-                                  : AppTheme.textSecondary,
+                              color: AppTheme.textSecondary,
                             ),
                           ),
                         ],
-                      ],
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 18),
-                  GestureDetector(
+                  const SizedBox(width: 14),
+                  InkWell(
+                    onTap: widget.onDislike,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 3,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            comment.isDisliked
+                                ? Icons.thumb_down_rounded
+                                : Icons.thumb_down_off_alt_rounded,
+                            size: 14,
+                            color: comment.isDisliked
+                                ? const Color(0xFF5A7B9C)
+                                : AppTheme.textSecondary,
+                          ),
+                          if (comment.dislikeCount > 0) ...[
+                            const SizedBox(width: 3),
+                            Text(
+                              '${comment.dislikeCount}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: comment.isDisliked
+                                    ? const Color(0xFF5A7B9C)
+                                    : AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  InkWell(
                     onTap: widget.onLike,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          comment.isLiked
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          size: 14,
-                          color: comment.isLiked
-                              ? AppTheme.pink
-                              : AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          '${comment.likeCount}',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 3,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            comment.isLiked
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 14,
                             color: comment.isLiked
                                 ? AppTheme.pink
                                 : AppTheme.textSecondary,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 3),
+                          Text(
+                            '${comment.likeCount}',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: comment.isLiked
+                                  ? AppTheme.pink
+                                  : AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -469,19 +480,88 @@ class _CommentItemState extends State<CommentItem>
     );
   }
 
+  Widget _buildMediaGrid(BuildContext context, List<MediaAsset> mediaList) {
+    if (mediaList.isEmpty) return const SizedBox.shrink();
+
+    if (mediaList.length == 1) {
+      final media = mediaList.first;
+      final imageUrl = media.previewUrl ?? '';
+      if (imageUrl.isEmpty) return const SizedBox.shrink();
+      return GestureDetector(
+        onTap: () => _openImagePreview(context, media.originalUrl ?? imageUrl),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 210, maxHeight: 210),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF0F6),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2EAF2), width: 0.8),
+            ),
+            child: AppNetworkImage(
+              url: imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_) => const Padding(
+                padding: EdgeInsets.all(16),
+                child: Icon(Icons.broken_image_outlined, color: Colors.grey),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: mediaList.map((media) {
+        final imageUrl = media.previewUrl ?? '';
+        if (imageUrl.isEmpty) return const SizedBox.shrink();
+
+        return GestureDetector(
+          onTap: () => _openImagePreview(
+            context,
+            media.originalUrl ?? imageUrl,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 86,
+              height: 86,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF0F6),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE2EAF2), width: 0.8),
+              ),
+              child: AppNetworkImage(
+                url: imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_) => const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.grey,
+                  size: 24,
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildStickerView(String stickerId) {
     final sticker = appStickerById(stickerId);
     if (sticker != null) {
       return Image.asset(
         sticker.thumbnailAsset,
-        width: 100,
-        height: 100,
+        width: 96,
+        height: 96,
         fit: BoxFit.contain,
       );
     }
     return Container(
-      width: 80,
-      height: 80,
+      width: 76,
+      height: 76,
       decoration: BoxDecoration(
         color: const Color(0xFFF0F4F8),
         borderRadius: BorderRadius.circular(8),
@@ -490,7 +570,7 @@ class _CommentItemState extends State<CommentItem>
       child: const Icon(
         Icons.sticky_note_2_outlined,
         color: Colors.grey,
-        size: 36,
+        size: 32,
       ),
     );
   }
@@ -500,20 +580,21 @@ class _CommentItemState extends State<CommentItem>
     String? avatarUrl,
     String author,
   ) {
-    const diameter = 34.0;
+    const diameter = 36.0;
     final initial = author.isNotEmpty ? author.characters.first : '友';
     final placeholder = Container(
       width: diameter,
       height: diameter,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: AppTheme.surfaceBlue,
         shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFE2EBF5), width: 1.0),
       ),
       alignment: Alignment.center,
       child: Text(
         initial,
         style: const TextStyle(
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: FontWeight.w800,
           color: AppTheme.primary,
         ),
@@ -524,10 +605,14 @@ class _CommentItemState extends State<CommentItem>
       return placeholder;
     }
 
-    return ClipOval(
-      child: SizedBox(
-        width: diameter,
-        height: diameter,
+    return Container(
+      width: diameter,
+      height: diameter,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFE2EBF5), width: 1.0),
+      ),
+      child: ClipOval(
         child: AppNetworkImage(
           url: avatarUrl,
           fit: BoxFit.cover,

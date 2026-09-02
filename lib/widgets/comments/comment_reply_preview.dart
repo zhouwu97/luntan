@@ -33,22 +33,17 @@ class CommentReplyPreview extends StatelessWidget {
     final previewItems = replies.take(3).toList();
 
     return Padding(
-      padding: const EdgeInsets.only(left: 44, top: 8, bottom: 4),
+      padding: const EdgeInsets.only(left: 46, top: 8, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (previewItems.isNotEmpty)
             Container(
-              padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF8FBFE),
-                borderRadius: BorderRadius.only(
-                  topRight: Radius.circular(10),
-                  bottomRight: Radius.circular(10),
-                ),
-                border: Border(
-                  left: BorderSide(color: Color(0xFFDBE9F8), width: 2.5),
-                ),
+              padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF6F9FD),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE5EEF6), width: 0.8),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -68,15 +63,27 @@ class CommentReplyPreview extends StatelessWidget {
             ),
           if (totalReplyCount > 0)
             Padding(
-              padding: const EdgeInsets.only(top: 5, left: 10),
-              child: GestureDetector(
+              padding: const EdgeInsets.only(top: 6, left: 4),
+              child: InkWell(
                 onTap: onOpenThread,
-                child: Text(
-                  '展开 $totalReplyCount 条回复 ›',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.primary,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '展开 $totalReplyCount 条回复 ›',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

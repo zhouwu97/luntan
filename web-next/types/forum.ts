@@ -175,6 +175,30 @@ export interface RankingToy {
   category?: string;
   segments?: string[];
   viewerState?: RankingToyViewerState;
+  releaseYear?: number;
+  couponUrl?: string;
+  sourceUrl?: string;
+}
+
+export interface RankingToyComment {
+  id: string;
+  author: UserSummary;
+  content: string;
+  likeCount: number;
+  replyCount: number;
+  createdAt: string;
+  rating?: number;
+  media: MediaAsset[];
+  viewerState: { hasLiked: boolean };
+}
+
+export interface RankingToyDetail extends RankingToy {
+  releaseYear: number;
+  ratingDistribution: Record<string, number>;
+  comments: RankingToyComment[];
+  commentsNextCursor?: string;
+  commentsHasMore: boolean;
+  commentSort: "weight" | "latest" | string;
 }
 
 export interface ForumNotification {

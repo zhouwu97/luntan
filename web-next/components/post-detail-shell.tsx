@@ -8,7 +8,7 @@ import { Icon } from "./icons";
 import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
 import { useSession } from "./session-provider";
-import { createComment, getComments, getFeed, getPost, recordHistory, setCommentLike, setPostBookmark, setPostLike } from "../lib/api/forum";
+import { createComment, createReply, getCommentReplies, getComments, getFeed, getPost, recordHistory, setCommentLike, setPostBookmark, setPostLike } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
 import type { Comment, Post, SessionUser } from "../types/forum";
 
@@ -61,7 +61,8 @@ export function PostDetailShell({ id }: { id: string }) {
 
   return (
     <>
-      <SiteHeader />
+      <SiteHeader className="post-detail-site-header" />
+      <div className="post-mobile-header"><Link href="/" aria-label="返回首页"><Icon name="chevron-left" size={22} /></Link><strong>{post.community.name}</strong><button type="button" aria-label="更多操作"><Icon name="more" size={19} /></button></div>
       <main className="page-frame">
         <div className="detail-grid">
           <section className="detail-main">
@@ -132,6 +133,7 @@ function CommentsSection({ post, comments, setComments, user, onRequireAuth }: {
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [replyTarget, setReplyTarget] = useState<Comment | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -159,12 +161,13 @@ function CommentsSection({ post, comments, setComments, user, onRequireAuth }: {
         <div className="composer-box"><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder={user ? "说点什么吧…" : "登录后参与回复"} rows={2} onFocus={() => { if (!user) onRequireAuth(); }} /><div className="composer-footer"><div className="composer-tools"><button type="button" aria-label="添加图片"><Icon name="image" size={19} /></button><button type="button" aria-label="添加表情"><Icon name="sparkle" size={19} /></button><button type="button" aria-label="提及用户"><Icon name="at" size={19} /></button></div><button type="submit" className="reply-submit" disabled={busy}>{busy ? "发送中…" : "发布回复"}</button></div></div>
       </form>
       {message && <div className="form-error">{message}</div>}
-      <div className="comment-list">{comments.length ? comments.map((comment) => <CommentRow key={comment.id} comment={comment} user={user} onRequireAuth={onRequireAuth} />) : <div className="comment-empty">还没有回复，来做第一个分享的人吧。</div>}</div>
+      <div className="comment-list">{comments.length ? comments.map((comment) => <CommentRow key={comment.id} comment={comment} user={user} onRequireAuth={onRequireAuth} onReply={() => setReplyTarget(comment)} />) : <div className="comment-empty">还没有回复，来做第一个分享的人吧。</div>}</div>
+      {replyTarget && <CommentReplyModal root={replyTarget} user={user} onRequireAuth={onRequireAuth} onClose={() => setReplyTarget(null)} />}
     </section>
   );
 }
 
-function CommentRow({ comment, user, onRequireAuth }: { comment: Comment; user: SessionUser | null; onRequireAuth: () => void }) {
+function CommentRow({ comment, user, onRequireAuth, onReply }: { comment: Comment; user: SessionUser | null; onRequireAuth: () => void; onReply: () => void }) {
   const [liked, setLiked] = useState(comment.viewerState.hasLiked);
   const [count, setCount] = useState(comment.likeCount);
 
@@ -182,7 +185,39 @@ function CommentRow({ comment, user, onRequireAuth }: { comment: Comment; user: 
     }
   }
 
-  return <article className={`comment-row${liked ? " liked" : ""}`}><UserAvatar userId={comment.author.id} name={comment.author.nickname} url={comment.author.avatarUrl} className="avatar-comment" /><div className="comment-body"><div className="comment-author-line"><strong>{comment.author.nickname}</strong><span className="level-label">Lv.{comment.author.level || 1}</span><span className="comment-time">{relativeTime(comment.createdAt)}</span><span className="comment-floor">#{comment.floor || ""}</span></div><p>{comment.content}</p><div className="comment-actions"><button type="button" onClick={like}><Icon name="heart" size={16} />{count}</button><button type="button"><Icon name="message" size={16} />回复</button></div>{comment.replyPreview?.map((reply) => <div className="reply-preview" key={reply.id}><strong>{reply.author.nickname}</strong><span>{reply.content}</span></div>)}</div><button type="button" className="comment-more" aria-label="评论更多操作"><Icon name="more" size={18} /></button></article>;
+  return <article className={`comment-row${liked ? " liked" : ""}`}><UserAvatar userId={comment.author.id} name={comment.author.nickname} url={comment.author.avatarUrl} className="avatar-comment" /><div className="comment-body"><div className="comment-author-line"><strong>{comment.author.nickname}</strong><span className="level-label">Lv.{comment.author.level || 1}</span><span className="comment-time">{relativeTime(comment.createdAt)}</span><span className="comment-floor">#{comment.floor || ""}</span></div><p>{comment.content}</p><div className="comment-actions"><button type="button" onClick={like}><Icon name="heart" size={16} />{count}</button><button type="button" onClick={onReply}><Icon name="message" size={16} />回复</button></div>{comment.replyPreview?.map((reply) => <div className="reply-preview" key={reply.id}><strong>{reply.author.nickname}</strong><span>{reply.content}</span></div>)}</div><button type="button" className="comment-more" aria-label="评论更多操作"><Icon name="more" size={18} /></button></article>;
+}
+
+function CommentReplyModal({ root, user, onRequireAuth, onClose }: { root: Comment; user: SessionUser | null; onRequireAuth: () => void; onClose: () => void }) {
+  const [replies, setReplies] = useState<Comment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [content, setContent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void getCommentReplies(root.id).then((page) => { if (active) setReplies(page.items); }).catch(() => { if (active) setMessage("回复加载失败，请重试"); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [root.id]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user) return onRequireAuth();
+    if (!content.trim() || busy) return;
+    setBusy(true);
+    try {
+      const next = await createReply(root.id, content.trim());
+      setReplies((current) => [...current, next]);
+      setContent("");
+    } catch (requestError) {
+      setMessage(formatError(requestError, "回复发送失败，请稍后重试"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="comment-reply-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="comment-reply-modal" role="dialog" aria-modal="true" aria-label="评论回复"><div className="comment-reply-grabber" /><header><h2>{replies.length || root.replyCount} 条回复</h2><button type="button" aria-label="关闭回复" onClick={onClose}><Icon name="close" size={19} /></button></header><div className="comment-reply-scroll"><div className="comment-reply-root"><UserAvatar userId={root.author.id} name={root.author.nickname} url={root.author.avatarUrl} className="avatar-comment" /><div><strong>{root.author.nickname}</strong><p>{root.content}</p></div></div>{loading ? <div className="comment-empty">正在加载回复…</div> : replies.map((reply) => <div className="comment-reply-item" key={reply.id}><UserAvatar userId={reply.author.id} name={reply.author.nickname} url={reply.author.avatarUrl} className="avatar-comment" /><div><div><strong>{reply.author.nickname}</strong><span className="comment-time">{relativeTime(reply.createdAt)}</span></div><p>{reply.content}</p><div className="comment-actions"><button type="button">回复</button><button type="button"><Icon name="heart" size={15} />{reply.likeCount}</button></div></div></div>)}</div><form className="comment-reply-composer" onSubmit={submit}><input value={content} onChange={(event) => setContent(event.target.value)} placeholder="友善地回复一句…" /><button type="submit" disabled={busy}>{busy ? "发送中" : "发送"}</button></form>{message && <div className="form-error">{message}</div>}</section></div>;
 }
 
 function DetailAside({ post, related }: { post: Post; related: Post[] }) {

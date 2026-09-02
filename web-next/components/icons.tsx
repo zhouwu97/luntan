@@ -4,6 +4,13 @@ export type IconName =
   | "trophy"
   | "home"
   | "search"
+  | "mail"
+  | "lock"
+  | "eye-off"
+  | "info"
+  | "close"
+  | "tag"
+  | "copy"
   | "bell"
   | "plus"
   | "chevron-right"
@@ -29,6 +36,13 @@ const paths: Record<IconName, React.ReactNode> = {
   trophy: <><path d="M8 4h8v4.5a4 4 0 0 1-8 0V4Z" /><path d="M8 6H5a2 2 0 0 0 2 3M16 6h3a2 2 0 0 1-2 3M12 13v4M9 20h6M10 17h4" /></>,
   home: <><path d="m4 11 8-7 8 7" /><path d="M6.5 10v9.5h11V10M10 19.5v-5h4v5" /></>,
   search: <><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></>,
+  mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m4 7 8 6 8-6" /></>,
+  lock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,
+  "eye-off": <><path d="m3 3 18 18" /><path d="M10.6 6.2A10.7 10.7 0 0 1 12 6c6.2 0 9.5 6 9.5 6a16.3 16.3 0 0 1-3.3 3.8M6.2 6.8C3.8 8.2 2.5 12 2.5 12s3.3 6 9.5 6c1.2 0 2.2-.2 3.1-.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 10.5v5M12 7.5h.01" /></>,
+  close: <><path d="m6 6 12 12M18 6 6 18" /></>,
+  tag: <><path d="M4 5.5V11l8 8 7-7-8-8H5.5A1.5 1.5 0 0 0 4 5.5Z" /><circle cx="8" cy="8" r="1" /></>,
+  copy: <><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
   bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" /></>,
   plus: <><path d="M12 5v14M5 12h14" /></>,
   "chevron-right": <path d="m9 5 7 7-7 7" />,

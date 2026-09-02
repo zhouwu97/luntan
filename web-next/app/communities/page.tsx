@@ -6,6 +6,7 @@ import { SiteHeader } from "../../components/site-header";
 import { Icon, type IconName } from "../../components/icons";
 import { getCommunities } from "../../lib/api/forum";
 import { formatError } from "../../lib/format";
+import { normalizeCommunityDirectory } from "../../lib/home-communities";
 import type { Community } from "../../types/forum";
 
 const tones: Array<{ icon: IconName; tone: string }> = [
@@ -23,7 +24,7 @@ export default function CommunitiesPage() {
   useEffect(() => {
     let active = true;
     void getCommunities({ status: "active" })
-      .then((next) => { if (active) setItems(next); })
+      .then((next) => { if (active) setItems(normalizeCommunityDirectory(next)); })
       .catch((requestError: unknown) => { if (active) setError(formatError(requestError, "社区暂时无法加载，请稍后再试")); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -45,6 +46,5 @@ export default function CommunitiesPage() {
 
 function CommunityDirectoryRow({ community, index }: { community: Community; index: number }) {
   const style = tones[index % tones.length];
-  return <Link href={`/?community=${encodeURIComponent(community.id)}`} className="community-directory-row"><span className={`community-icon ${style.tone}`}><Icon name={style.icon} size={20} /></span><span className="community-directory-copy"><strong>{community.name}</strong><small>{community.description || "和同好聊聊最近的新发现"}</small></span><span className="community-directory-meta"><span>{community.postCount} 帖子</span><span>{community.followerCount} 关注</span></span><Icon name="chevron-right" size={18} /></Link>;
+  return <Link href={`/community/${encodeURIComponent(community.id)}`} className="community-directory-row"><span className={`community-icon ${style.tone}`}><Icon name={style.icon} size={20} /></span><span className="community-directory-copy"><strong>{community.name}</strong><small>{community.description || "和同好聊聊最近的新发现"}</small></span><span className="community-directory-meta"><span>{community.postCount} 帖子</span><span>{community.followerCount} 关注</span></span><Icon name="chevron-right" size={18} /></Link>;
 }
-

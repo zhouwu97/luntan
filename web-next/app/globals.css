@@ -570,6 +570,19 @@ img { display: block; max-width: 100%; }
 .community-directory-meta { display: flex; gap: 11px; color: var(--text-faint); font-size: 11px; white-space: nowrap; }
 .community-directory-row > svg { flex: 0 0 auto; color: #99afc4; }
 .community-directory-skeleton { height: 74px; background: linear-gradient(110deg, #fff 8%, #f3f7fb 18%, #fff 33%); background-size: 200% 100%; border: 1px solid var(--line); border-radius: 15px; animation: shimmer 1.45s linear infinite; }
+.community-detail-page { width: min(100%, 980px); margin: 20px auto 0; }
+.community-detail-page > .back-link { margin-bottom: 12px; }
+.community-detail-hero { min-height: 145px; }
+.community-detail-heading { display: flex; align-items: center; gap: 16px; }
+.community-detail-icon { width: 58px; height: 58px; display: grid; place-items: center; color: var(--primary-deep); background: #eaf4ff; border-radius: 18px; }
+.community-detail-hero h1 { margin-top: 7px; }
+.community-detail-stats { display: flex; gap: 12px; margin-top: 12px; color: var(--text-faint); font-size: 12px; }
+.community-detail-feed { margin-top: 18px; }
+.community-detail-post-list { padding-top: 16px; }
+.community-detail-empty { margin-top: 16px; }
+.community-detail-loading { margin-top: 16px; }
+.community-detail-more { margin-bottom: 20px; }
+.community-detail-refresh { display: none; }
 
 @media (max-width: 760px) {
   .home-site-header { display: none; }
@@ -613,4 +626,283 @@ img { display: block; max-width: 100%; }
   .community-directory-meta { display: none; }
   .community-directory-row > svg { width: 16px; }
   .notification-group h2 { margin-top: 0; }
+  .community-detail-page { margin-top: 4px; }
+  .community-detail-hero { padding: 18px 16px; }
+  .community-detail-heading { align-items: flex-start; gap: 12px; }
+  .community-detail-icon { width: 46px; height: 46px; border-radius: 14px; }
+  .community-detail-hero h1 { margin-top: 5px; font-size: 22px; }
+  .community-detail-stats { margin-top: 9px; }
+  .community-detail-feed { margin-top: 12px; }
+  .community-detail-refresh { display: grid; }
+}
+
+/* 登录页适配层：桌面保留网页入口，移动端对齐 Flutter 的登录卡片结构。 */
+.auth-mobile-top, .auth-mobile-flow, .auth-mobile-extra { display: none; }
+.auth-desktop-flow { display: block; }
+.auth-input-shell { position: relative; }
+.auth-input-clear, .auth-input-toggle { display: none; }
+
+@media (max-width: 760px) {
+  .auth-page { min-height: 100dvh; padding: 105px 14px 32px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; background: #f2f7fc; }
+  .auth-glow { width: 300px; height: 300px; opacity: .42; }
+  .auth-glow-one { top: -125px; right: -105px; background: #d7ecff; }
+  .auth-glow-two { bottom: -120px; left: -125px; background: #e4f7f4; }
+  .auth-mobile-top { position: relative; z-index: 1; width: min(100%, 389px); min-height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; color: #6d87a1; }
+  .auth-mobile-top > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: inherit; background: transparent; }
+  .auth-mobile-top > button:first-child { width: 32px; height: 32px; }
+  .auth-permission-button { padding: 8px 0; font-size: 12px; }
+  .auth-permission-note { position: absolute; top: 37px; right: 0; max-width: 245px; padding: 9px 11px; color: #55708c; background: #fff; border: 1px solid #dce9f4; border-radius: 10px; box-shadow: 0 10px 28px rgba(65, 108, 148, .12); font-size: 11px; line-height: 1.45; }
+  .auth-card { z-index: 1; width: min(100%, 389px); margin-top: 31px; padding: 0; overflow: hidden; background: #fff; border: 0; border-radius: 24px; box-shadow: 0 15px 38px rgba(62, 108, 150, .09); }
+  .auth-desktop-flow { display: none; }
+  .auth-mobile-flow { display: block; padding: 29px 28px 27px; }
+  .auth-mobile-card-header { display: flex; align-items: center; gap: 13px; }
+  .auth-mobile-app-mark { width: 49px; height: 49px; flex: 0 0 49px; display: grid; place-items: center; color: #fff; background: linear-gradient(145deg, #62adff, #4d9bf8); border-radius: 14px; box-shadow: 0 9px 18px rgba(75, 156, 249, .28); }
+  .auth-mobile-card-header h1 { margin: 0; color: #233b52; text-align: left; font-size: 19px; font-weight: 800; letter-spacing: -.03em; }
+  .auth-mobile-card-header p { margin: 4px 0 0; color: #7c94ab; font-size: 12px; }
+  .auth-mode-tabs { height: 44px; margin-top: 20px; padding: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: #f1f7fc; border-radius: 12px; }
+  .auth-mode-tabs button { color: #738ba2; background: transparent; border-radius: 9px; font-size: 14px; font-weight: 700; }
+  .auth-mode-tabs button.active { color: #4f98f8; background: #fff; box-shadow: 0 3px 8px rgba(72, 137, 202, .12); }
+  .auth-method-tabs { min-height: 34px; margin: 17px 0 2px; display: flex; align-items: center; gap: 6px; }
+  .auth-method-tabs button { padding: 7px 11px; color: #7991a7; background: transparent; border-radius: 16px; font-size: 11px; font-weight: 650; }
+  .auth-method-tabs button.active { color: #4c95f5; background: #edf6ff; }
+  .auth-mobile-form { gap: 8px; }
+  .auth-mobile-form .field-label { margin-top: 7px; color: #334c63; font-size: 12px; }
+  .auth-mobile-input { height: 50px; padding: 0 13px; display: flex; align-items: center; gap: 9px; color: #4c97fa; background: #eef6ff; border: 1px solid transparent; border-radius: 14px; }
+  .auth-mobile-input:focus-within { border-color: #5b9fff; box-shadow: 0 0 0 3px rgba(91, 159, 255, .1); }
+  .auth-mobile-input .text-input { height: 48px; min-width: 0; flex: 1; padding: 0; color: #203950; background: transparent; border: 0; border-radius: 0; box-shadow: none; font-size: 14px; }
+  .auth-mobile-input .text-input:focus { background: transparent; border: 0; box-shadow: none; }
+  .auth-mobile-input .text-input::placeholder { color: #8da5bb; }
+  .auth-input-clear, .auth-input-toggle { width: 25px; height: 28px; padding: 0; display: grid; flex: 0 0 25px; place-items: center; color: #718aa2; background: transparent; }
+  .auth-mobile-code-field { min-height: 50px; padding-left: 13px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; color: #4c97fa; background: #eef6ff; border-radius: 14px; }
+  .auth-mobile-code-field .text-input { height: 48px; min-width: 0; padding: 0; background: transparent; border: 0; box-shadow: none; }
+  .auth-mobile-code-field .text-input:focus { background: transparent; border: 0; box-shadow: none; }
+  .auth-mobile-code-field .code-button { align-self: stretch; min-width: 94px; padding: 0 8px; border: 0; border-left: 1px solid #d7e9fa; border-radius: 0 14px 14px 0; font-size: 11px; }
+  .email-suggestions { display: flex; gap: 6px; margin: 3px 0 0; overflow: hidden; }
+  .email-suggestions button { max-width: 92px; padding: 7px 10px; overflow: hidden; color: #438de9; background: #eef6ff; border-radius: 14px; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .auth-forgot { justify-self: end; margin-top: 7px; color: #6f89a2; background: transparent; font-size: 11px; }
+  .auth-mobile-form .primary-submit { height: 50px; margin-top: 13px; border-radius: 14px; box-shadow: 0 7px 13px rgba(77, 153, 248, .2); }
+  .auth-mobile-form .dev-code-hint, .auth-mobile-form .form-message, .auth-mobile-form .form-error { margin-top: 4px; }
+  .auth-mobile-extra { z-index: 1; width: min(100%, 389px); display: grid; gap: 18px; margin-top: 23px; }
+  .auth-mobile-extra .guest-button { height: 47px; display: flex; align-items: center; justify-content: center; gap: 7px; color: #223a51; background: rgba(255,255,255,.82); border-color: #dce8f2; border-radius: 14px; font-size: 12px; }
+  .auth-browse-link { justify-self: center; color: #6f89a2; background: transparent; font-size: 12px; }
+}
+
+/* 榜单移动端适配层：筛选和主推卡片遵循 Flutter 的浏览顺序，桌面仍使用完整介绍卡。 */
+.ranking-mobile-header, .ranking-mobile-navigation, .ranking-featured { display: none; }
+.ranking-mobile-score { display: none; }
+.ranking-card-link, .ranking-featured-link { display: block; color: inherit; text-decoration: none; }
+.ranking-desktop-featured { display: block; margin-top: 18px; }
+@media (min-width: 761px) {
+  .auth-card { width: min(100%, 505px); }
+  .auth-desktop-flow .back-link { margin-bottom: 36px; }
+  .auth-desktop-flow .auth-mark { width: 64px; height: 64px; margin-bottom: 25px; }
+  .auth-desktop-flow .auth-lead { margin-bottom: 43px; }
+  .auth-desktop-flow .auth-form { gap: 14px; }
+  .auth-desktop-flow .auth-divider { margin-top: 32px; }
+  .auth-desktop-flow .auth-footnote { margin-bottom: 9px; }
+}
+.ranking-page .ranking-grid { grid-template-columns: 1fr; }
+.ranking-page .ranking-card { grid-template-columns: 104px minmax(0, 1fr); }
+.ranking-page .ranking-cover { width: 104px; }
+
+/* 榜单详情与想冲清单：补齐 Flutter 端商品链路，数据仍来自榜单详情接口。 */
+.ranking-detail-mobile-header, .wishlist-mobile-header { display: none; }
+.ranking-detail-frame, .wishlist-page { width: min(100%, 980px); }
+.ranking-detail-card, .ranking-reviews-section, .wishlist-card { background: #fff; border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); }
+.ranking-detail-card { padding: 28px 32px 30px; }
+.ranking-detail-product { display: flex; align-items: center; gap: 18px; }
+.ranking-detail-cover { width: 150px; height: 112px; flex: 0 0 150px; overflow: hidden; background: #eff3f7; border-radius: 14px; }
+.ranking-detail-cover img, .ranking-detail-cover .media-image-placeholder { width: 100%; height: 100%; object-fit: contain; }
+.ranking-detail-product-copy { min-width: 0; }
+.ranking-detail-product-copy h1 { margin: 0; color: var(--text); font-size: 27px; letter-spacing: -.04em; }
+.ranking-detail-product-copy p { margin: 6px 0 0; color: var(--text-faint); font-size: 12px; }
+.ranking-detail-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.ranking-detail-tags span { padding: 4px 7px; color: #ef7199; background: #fff0f5; border-radius: 5px; font-size: 10px; }
+.ranking-detail-description { max-width: 760px; margin: 24px 0 20px; color: var(--text-soft); font-size: 14px; line-height: 1.8; }
+.ranking-rating-summary { min-height: 145px; padding: 22px 26px; display: flex; align-items: center; gap: 34px; background: #fff0f5; border-radius: 18px; }
+.ranking-rating-score { width: 125px; flex: 0 0 125px; text-align: center; }
+.ranking-rating-score span { display: block; color: #8c7890; font-size: 12px; }
+.ranking-rating-score strong { display: block; margin-top: 2px; color: #f45b91; font-size: 52px; line-height: 1; }
+.ranking-rating-score div { margin-top: 5px; color: #f45b91; font-size: 12px; letter-spacing: 2px; }
+.ranking-rating-bars { width: min(100%, 380px); display: grid; gap: 7px; }
+.ranking-rating-bars > div { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 8px; color: #907f94; font-size: 11px; }
+.ranking-rating-bars i { height: 6px; display: block; overflow: hidden; background: #fff; border-radius: 5px; }
+.ranking-rating-bars b { height: 100%; display: block; background: #f15b91; border-radius: inherit; }
+.ranking-detail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+.ranking-detail-actions button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; color: #f25c91; background: #fff0f5; border-radius: 14px; font-size: 13px; font-weight: 750; }
+.ranking-detail-actions button.active { color: #fff; background: #f25d91; }
+.ranking-detail-actions button small { color: inherit; opacity: .72; font-size: 10px; font-weight: 500; }
+.ranking-reviews-section { margin-top: 18px; padding: 24px 32px 28px; }
+.ranking-reviews-heading { display: flex; align-items: center; justify-content: space-between; }
+.ranking-reviews-heading h2 { margin: 0; color: var(--text); font-size: 21px; }
+.ranking-reviews-heading h2 span { margin-left: 4px; color: var(--text-faint); font-size: 13px; font-weight: 500; }
+.ranking-reviews-heading button { padding: 5px 8px; color: var(--text-faint); background: transparent; font-size: 12px; }
+.ranking-reviews-heading button.active { color: var(--primary-deep); font-weight: 700; }
+.ranking-review-list { display: grid; gap: 22px; margin-top: 20px; }
+.ranking-review { display: flex; gap: 11px; }
+.ranking-review-copy { min-width: 0; flex: 1; }
+.ranking-review-author { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ranking-review-author strong { color: var(--text); font-size: 13px; }
+.ranking-review-author span { padding: 2px 4px; color: var(--mint); background: #e8f8f4; border-radius: 3px; font-size: 9px; }
+.ranking-review-author em { color: #f25c91; font-size: 10px; font-style: normal; }
+.ranking-review-author time { margin-left: auto; color: var(--text-faint); font-size: 10px; }
+.ranking-review p { margin: 8px 0 7px; color: var(--text-soft); font-size: 13px; line-height: 1.7; }
+.ranking-review-actions { display: flex; gap: 15px; }
+.ranking-review-actions button { display: inline-flex; align-items: center; gap: 4px; color: var(--text-faint); background: transparent; font-size: 11px; }
+.ranking-detail-composer { position: relative; max-width: 640px; margin: 16px auto 0; display: flex; align-items: center; gap: 8px; padding: 7px 9px 7px 15px; background: #f4f6f9; border-radius: 25px; }
+.ranking-detail-composer input { min-width: 0; flex: 1; height: 35px; color: var(--text); background: transparent; border: 0; outline: 0; font-size: 13px; }
+.ranking-detail-composer input::placeholder { color: #a0aabb; }
+.ranking-detail-composer span { color: var(--text-faint); font-size: 11px; }
+.ranking-detail-composer > button { width: 33px; height: 33px; display: grid; place-items: center; color: var(--text-soft); background: #fff; border-radius: 50%; }
+.ranking-detail-composer .form-error { position: absolute; top: 45px; left: 15px; }
+.wishlist-page { margin-top: 20px; }
+.wishlist-card { min-height: 610px; padding: 68px 24px 40px; display: flex; flex-direction: column; align-items: center; text-align: center; background: #f5f9fd; border: 0; box-shadow: none; }
+.wishlist-image { width: 190px; height: 190px; overflow: hidden; border-radius: 18px; }
+.wishlist-image img, .wishlist-image .media-image-placeholder { width: 100%; height: 100%; object-fit: contain; }
+.wishlist-card h2 { margin: 22px 0 7px; color: var(--text); font-size: 24px; }
+.wishlist-card > p { margin: 0; color: var(--text-soft); font-size: 13px; }
+.wishlist-coupon-url, .wishlist-no-coupon { margin-top: 27px; color: #6f7e92; font-size: 12px; }
+.wishlist-open-button, .wishlist-copy-button { width: min(100%, 460px); min-height: 43px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 22px; font-size: 13px; font-weight: 700; }
+.wishlist-open-button { margin-top: 14px; color: #fff; background: #46699f; }
+.wishlist-copy-button { margin-top: 9px; color: #9ca5af; background: transparent; }
+.wishlist-copy-button:disabled { cursor: not-allowed; opacity: .65; }
+
+@media (max-width: 760px) {
+  .ranking-detail-site-header, .wishlist-site-header { display: none; }
+  .ranking-detail-mobile-header, .wishlist-mobile-header { height: 58px; padding: 10px 17px; display: flex; align-items: center; justify-content: space-between; color: #21364d; background: #fff; }
+  .wishlist-mobile-header { justify-content: flex-start; gap: 12px; }
+  .wishlist-mobile-header h1 { margin: 0; font-size: 18px; letter-spacing: -0.03em; }
+  .ranking-detail-mobile-header button, .wishlist-mobile-header button { width: 30px; height: 34px; display: grid; place-items: center; color: inherit; background: transparent; }
+  .ranking-detail-frame, .wishlist-page { width: 100%; padding: 0 0 78px; }
+  .ranking-detail-desktop-back, .wishlist-desktop-back { display: none; }
+  .ranking-detail-card, .ranking-reviews-section { border: 0; border-radius: 0; box-shadow: none; }
+  .ranking-detail-card { padding: 93px 24px 18px; }
+  .ranking-detail-product { align-items: flex-start; gap: 14px; }
+  .ranking-detail-cover { width: 112px; height: 68px; flex-basis: 112px; border-radius: 3px; }
+  .ranking-detail-product-copy h1 { font-size: 20px; line-height: 1.25; }
+  .ranking-detail-product-copy p { margin-top: 4px; font-size: 11px; }
+  .ranking-detail-tags { gap: 5px; margin-top: 9px; }
+  .ranking-detail-tags span { padding: 3px 6px; font-size: 9px; }
+  .ranking-detail-description { margin: 53px 0 15px; font-size: 14px; line-height: 1.7; }
+  .ranking-rating-summary { min-height: 156px; padding: 20px 13px; gap: 10px; border-radius: 17px; }
+  .ranking-rating-score { width: 112px; flex-basis: 112px; }
+  .ranking-rating-score strong { font-size: 48px; }
+  .ranking-rating-score div { font-size: 10px; }
+  .ranking-rating-bars { gap: 8px; }
+  .ranking-rating-bars > div { grid-template-columns: 12px minmax(0, 1fr); gap: 6px; font-size: 10px; }
+  .ranking-rating-bars i { height: 6px; }
+  .ranking-detail-actions { gap: 16px; margin-top: 13px; }
+  .ranking-detail-actions button { min-height: 45px; gap: 5px; font-size: 12px; }
+  .ranking-detail-actions button small { font-size: 8px; }
+  .ranking-reviews-section { margin-top: 0; padding: 22px 24px 25px; background: #fff; }
+  .ranking-reviews-heading h2 { font-size: 18px; }
+  .ranking-review-list { gap: 19px; margin-top: 18px; }
+  .ranking-review-author strong { font-size: 12px; }
+  .ranking-review p { font-size: 12px; }
+  .ranking-detail-composer { position: fixed; right: 10px; bottom: 10px; left: 10px; z-index: 18; max-width: none; margin: 0; box-shadow: 0 4px 15px rgba(58, 88, 118, .11); }
+  .wishlist-page { margin: 0; padding: 0 0 30px; background: #f5f9fd; }
+  .wishlist-card { min-height: calc(100dvh - 58px); padding: 94px 24px 40px; border-radius: 0; }
+  .wishlist-image { width: 150px; height: 150px; border-radius: 12px; }
+  .wishlist-card h2 { margin-top: 51px; font-size: 21px; }
+  .wishlist-card > p { font-size: 12px; }
+  .wishlist-coupon-url, .wishlist-no-coupon { margin-top: 27px; font-size: 11px; }
+  .wishlist-open-button { margin-top: 15px; }
+}
+
+/* 社区和帖子详情的移动端顶栏与 Flutter 的评论回复底部弹层。 */
+.community-mobile-header, .post-mobile-header { display: none; }
+.comment-reply-overlay { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(20, 31, 43, .52); }
+.comment-reply-modal { width: min(100% - 40px, 640px); max-height: min(78vh, 700px); display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 20px; box-shadow: 0 24px 80px rgba(22, 35, 50, .25); }
+.comment-reply-grabber { display: none; }
+.comment-reply-modal > header { min-height: 62px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.comment-reply-modal > header h2 { margin: 0; color: var(--text); font-size: 18px; }
+.comment-reply-modal > header button { width: 32px; height: 32px; display: grid; place-items: center; color: var(--text-soft); background: transparent; }
+.comment-reply-scroll { min-height: 180px; overflow: auto; padding: 16px 22px; }
+.comment-reply-root { padding: 13px; display: flex; gap: 10px; color: var(--text-soft); background: #f3f8fd; border-radius: 12px; }
+.comment-reply-root strong, .comment-reply-item strong { color: var(--text); font-size: 13px; }
+.comment-reply-root p, .comment-reply-item p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; }
+.comment-reply-item { padding: 16px 0; display: flex; gap: 10px; border-bottom: 1px solid #edf2f7; }
+.comment-reply-item > div { min-width: 0; flex: 1; }
+.comment-reply-item .comment-time { margin-left: 8px; }
+.comment-reply-composer { min-height: 62px; padding: 10px 16px; display: flex; gap: 9px; border-top: 1px solid var(--line); }
+.comment-reply-composer input { min-width: 0; flex: 1; padding: 0 13px; color: var(--text); background: #f3f6f9; border: 0; border-radius: 22px; outline: 0; font-size: 13px; }
+.comment-reply-composer button { width: 66px; color: #fff; background: var(--primary); border-radius: 21px; font-size: 12px; font-weight: 700; }
+.comment-reply-modal > .form-error { margin: 0 16px 12px; }
+
+@media (max-width: 760px) {
+  .community-detail-site-header, .post-detail-site-header { display: none; }
+  .community-mobile-header, .post-mobile-header { height: 58px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; color: #263c53; background: #fff; }
+  .community-mobile-header a, .community-mobile-header button, .post-mobile-header a, .post-mobile-header button { width: 31px; height: 34px; display: grid; place-items: center; color: inherit; background: transparent; }
+  .community-mobile-header strong, .post-mobile-header strong { font-size: 16px; }
+  .community-detail-page { width: 100%; margin: 0; padding: 0 0 78px; }
+  .community-detail-page > .back-link, .community-detail-hero { display: none; }
+  .community-detail-feed { margin-top: 0; }
+  .community-detail-feed .feed-toolbar { display: none; }
+  .community-detail-post-list { padding: 0; display: grid; gap: 9px; }
+  .community-detail-post-list .post-card { border-radius: 0; box-shadow: none; }
+  .post-detail-page { padding-top: 0; }
+  .post-mobile-header + .page-frame { padding-top: 0; }
+  .post-mobile-header + .page-frame .detail-back { display: none; }
+  .post-mobile-header + .page-frame .detail-grid { margin-top: 0; }
+  .post-mobile-header + .page-frame .detail-article { border-radius: 0; box-shadow: none; }
+  .comment-reply-overlay { align-items: end; }
+  .comment-reply-modal { width: 100%; max-height: 72vh; border-radius: 18px 18px 0 0; }
+  .comment-reply-grabber { width: 38px; height: 4px; display: block; flex: 0 0 4px; margin: 8px auto 0; background: #dce5ed; border-radius: 3px; }
+  .comment-reply-modal > header { min-height: 56px; padding: 0 18px; border-bottom: 0; }
+  .comment-reply-modal > header h2 { font-size: 17px; }
+  .comment-reply-scroll { padding: 13px 16px; }
+  .comment-reply-root { padding: 12px; }
+  .comment-reply-root p, .comment-reply-item p { font-size: 12px; }
+  .comment-reply-composer { min-height: 67px; padding: 10px 16px; }
+}
+
+@media (max-width: 760px) {
+  .ranking-site-header { display: none; }
+  .ranking-page-frame { width: 100%; padding: 0 0 26px; }
+  .ranking-mobile-header { height: 58px; padding: 11px 16px 8px; display: flex; align-items: center; gap: 7px; background: #f9f9fc; }
+  .ranking-mobile-back { width: 28px; height: 38px; display: grid; place-items: center; color: #344a60; background: transparent; }
+  .ranking-mobile-search { min-width: 0; height: 38px; flex: 1; display: flex; align-items: center; gap: 7px; padding: 0 11px; color: #9baabd; background: #f1f2f5; border-radius: 20px; }
+  .ranking-mobile-search input { min-width: 0; width: 100%; color: #304860; background: transparent; border: 0; outline: 0; font-size: 12px; }
+  .ranking-mobile-search input::placeholder { color: #98a6b7; }
+  .ranking-mobile-add { width: 29px; height: 29px; display: grid; place-items: center; color: #fa5f96; background: transparent; border: 1.5px solid #fa5f96; border-radius: 50%; }
+  .ranking-page { width: 100%; margin: 0; }
+  .ranking-page .feature-hero { display: none; }
+  .ranking-mobile-navigation { display: block; background: #fff; }
+  .ranking-tabs-mobile { height: 46px; padding: 0 16px; display: flex; align-items: stretch; gap: 18px; overflow-x: auto; border-bottom: 1px solid #f0f1f4; scrollbar-width: none; }
+  .ranking-tabs-mobile::-webkit-scrollbar { display: none; }
+  .ranking-tabs-mobile button { position: relative; flex: 0 0 auto; color: #6f7885; background: transparent; font-size: 13px; font-weight: 550; white-space: nowrap; }
+  .ranking-tabs-mobile button.active { color: #30353b; font-weight: 750; }
+  .ranking-tabs-mobile button.active::after { position: absolute; right: 4px; bottom: 0; left: 4px; height: 2px; background: #23272b; border-radius: 2px; content: ""; }
+  .ranking-categories-mobile { padding: 16px 16px 15px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; overflow-x: auto; scrollbar-width: none; }
+  .ranking-categories-mobile::-webkit-scrollbar { display: none; }
+  .ranking-category-mobile { min-width: 61px; height: 64px; display: grid; place-items: center; align-content: center; gap: 7px; color: #7c8088; background: #fff; border: 1px solid #e8e9ed; border-radius: 11px; box-shadow: 0 2px 5px rgba(40, 51, 64, .03); font-size: 10px; white-space: nowrap; }
+  .ranking-category-mobile.active { color: #53667a; background: #f8fbff; border-color: #cfe2f7; }
+  .ranking-category-mobile svg { color: #a2a4a8; }
+  .ranking-featured { display: block; margin: 0 16px 10px; overflow: hidden; background: #fff; border-radius: 0 0 14px 14px; box-shadow: 0 2px 7px rgba(37, 47, 59, .05); }
+  .ranking-desktop-featured { display: none; }
+  .ranking-featured-cover { position: relative; height: 143px; overflow: hidden; background: #f1f2f3; }
+  .ranking-featured-cover img, .ranking-featured-cover .media-image-placeholder { width: 100%; height: 100%; object-fit: cover; }
+  .ranking-featured-label { position: absolute; top: 0; left: 0; padding: 7px 12px; color: #fff; background: #ec5072; font-size: 11px; font-weight: 750; }
+  .ranking-featured-copy { padding: 9px 12px 12px; }
+  .ranking-featured-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .ranking-featured-title h2 { min-width: 0; margin: 0; overflow: hidden; color: #252b32; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+  .ranking-featured-title strong { color: #fa5d91; font-size: 18px; }
+  .ranking-featured-title strong small { margin-left: 2px; color: #a3a8b0; font-size: 10px; font-weight: 500; }
+  .ranking-featured-tags, .ranking-mobile-tags { display: flex; gap: 5px; overflow: hidden; margin-top: 6px; }
+  .ranking-featured-tags span, .ranking-mobile-tags span { flex: 0 0 auto; padding: 3px 6px; color: #ef7399; background: #fff0f5; border-radius: 4px; font-size: 9px; white-space: nowrap; }
+  .ranking-page .ranking-grid { display: grid; gap: 10px; margin: 0; padding: 0 16px; }
+  .ranking-page .ranking-card { min-height: 91px; padding: 11px 11px 10px 42px; display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 9px; border: 0; border-radius: 13px; box-shadow: 0 2px 8px rgba(40, 50, 63, .06); }
+  .ranking-page .ranking-card-rank { top: 33px; left: 11px; width: 22px; color: #73849a; font-size: 16px; font-weight: 500; }
+  .ranking-page .ranking-cover { width: 62px; height: 62px; border-radius: 7px; }
+  .ranking-page .ranking-card-copy { min-width: 0; }
+  .ranking-page .ranking-card-title { display: block; }
+  .ranking-page .ranking-card-title h2 { padding-top: 1px; color: #2c333b; font-size: 13px; line-height: 1.35; }
+  .ranking-page .ranking-card-title strong { display: none; }
+  .ranking-page .ranking-merchant, .ranking-page .ranking-description { display: none; }
+  .ranking-page .ranking-card-meta { gap: 7px; margin-top: 9px; color: #a5a9b1; font-size: 9px; }
+  .ranking-page .ranking-tags { margin-top: 5px; }
+  .ranking-page .ranking-tags span { padding: 3px 5px; color: #ef7399; background: #fff0f5; border-radius: 4px; font-size: 9px; }
+  .ranking-mobile-score { display: block; align-self: center; color: #fa5d91; font-size: 15px; font-weight: 700; white-space: nowrap; }
+  .ranking-mobile-score small { margin-left: 2px; color: #a3a8b0; font-size: 9px; font-weight: 500; }
+  .ranking-skeleton { min-height: 92px; }
 }

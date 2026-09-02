@@ -1,0 +1,23 @@
+[Unit]
+Description=Shengbeijiang Next.js web frontend
+After=network-online.target luntan-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nginx
+Group=nginx
+WorkingDirectory=/opt/luntan-next/current
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+Environment=API_PROXY_TARGET=http://127.0.0.1:18080
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node /opt/luntan-next/current/server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

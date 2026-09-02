@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { AuthSession, SessionUser } from "../types/forum";
-import { getMe, getUnreadNotificationCount, loginAsGuest, loginWithEmailCode, logout } from "../lib/api/forum";
+import { getMe, getUnreadNotificationCount, loginAsGuest, loginWithEmailCode, loginWithPassword, logout, registerWithEmail } from "../lib/api/forum";
 import { refreshSession } from "../lib/api/client";
 
 interface SessionContextValue {
@@ -11,6 +11,8 @@ interface SessionContextValue {
   unreadCount: number;
   refreshUnreadCount: () => Promise<void>;
   signInWithCode: (email: string, code: string) => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  registerWithEmail: (email: string, code: string, password: string, nickname?: string) => Promise<void>;
   signInAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -57,6 +59,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       signInWithCode: async (email, code) => {
         const session: AuthSession = await loginWithEmailCode(email, code);
+        setUser(session.user);
+        void getUnreadNotificationCount().then(setUnreadCount).catch(() => setUnreadCount(0));
+      },
+      signInWithPassword: async (email, password) => {
+        const session: AuthSession = await loginWithPassword(email, password);
+        setUser(session.user);
+        void getUnreadNotificationCount().then(setUnreadCount).catch(() => setUnreadCount(0));
+      },
+      registerWithEmail: async (email, code, password, nickname) => {
+        const session: AuthSession = await registerWithEmail(email, code, password, nickname);
         setUser(session.user);
         void getUnreadNotificationCount().then(setUnreadCount).catch(() => setUnreadCount(0));
       },

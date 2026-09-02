@@ -15,7 +15,7 @@ const navItems = [
   { label: "活动", href: "/activities" },
 ];
 
-export function SiteHeader({ home = false }: { home?: boolean }) {
+export function SiteHeader({ home = false, className = "" }: { home?: boolean; className?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -40,7 +40,7 @@ export function SiteHeader({ home = false }: { home?: boolean }) {
   }
 
   return (
-    <header className={`site-header${home ? " home-site-header" : ""}`}>
+    <header className={`site-header${home ? " home-site-header" : ""}${className ? ` ${className}` : ""}`}>
       <div className="header-inner">
         <Link href="/" className="brand" aria-label="圣杯酱首页">
           <span className="brand-mark"><Icon name="trophy" size={22} /></span>

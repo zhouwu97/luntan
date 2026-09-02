@@ -12,6 +12,8 @@ import type {
   ProfilePost,
   ProfileSummary,
   RankingToy,
+  RankingToyComment,
+  RankingToyDetail,
   SearchResults,
   SessionUser,
   UserSummary,
@@ -176,6 +178,9 @@ function parseRankingToy(raw: unknown, index = 0): RankingToy {
     heroUrl: resolveMediaUrl(asString(item.hero_url), "detail"),
     category: asString(item.category) || undefined,
     segments: Array.isArray(item.segments) ? item.segments.map(String).filter(Boolean) : undefined,
+    releaseYear: item.release_year == null ? undefined : asNumber(item.release_year),
+    couponUrl: asString(item.coupon_url) || undefined,
+    sourceUrl: asString(item.source_url) || undefined,
     viewerState: Object.keys(viewer).length
       ? {
           wanted: asBoolean(viewer.wanted),
@@ -183,6 +188,38 @@ function parseRankingToy(raw: unknown, index = 0): RankingToy {
           rating: viewer.rating == null ? undefined : asNumber(viewer.rating),
         }
       : undefined,
+  };
+}
+
+function parseRankingToyComment(raw: unknown): RankingToyComment {
+  const item = asRecord(raw);
+  const viewer = asRecord(item.viewer_state);
+  const author = parseUser(item.author);
+  return {
+    id: asString(item.id),
+    author,
+    content: asString(item.content),
+    likeCount: asNumber(item.like_count),
+    replyCount: asNumber(item.reply_count),
+    createdAt: asString(item.created_at),
+    rating: item.author_rating == null ? undefined : asNumber(item.author_rating),
+    media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
+    viewerState: { hasLiked: asBoolean(viewer.has_liked) },
+  };
+}
+
+function parseRankingToyDetail(raw: unknown): RankingToyDetail {
+  const item = asRecord(raw);
+  const toy = parseRankingToy(item);
+  const rawDistribution = asRecord(item.rating_distribution);
+  return {
+    ...toy,
+    releaseYear: asNumber(item.release_year),
+    ratingDistribution: Object.fromEntries(Object.entries(rawDistribution).map(([key, value]) => [key, asNumber(value)])),
+    comments: Array.isArray(item.comments) ? item.comments.map(parseRankingToyComment) : [],
+    commentsNextCursor: asString(item.comments_next_cursor) || undefined,
+    commentsHasMore: asBoolean(item.comments_has_more),
+    commentSort: asString(item.comment_sort, "weight"),
   };
 }
 
@@ -257,14 +294,33 @@ export async function getActivities(): Promise<ActivityItem[]> {
     : [];
 }
 
-export async function getRankingToys(tab = ""): Promise<RankingToy[]> {
-  const query = tab ? `?tab=${encodeURIComponent(tab)}` : "";
+export async function getRankingToys(tab = "", category = ""): Promise<RankingToy[]> {
+  const params = new URLSearchParams();
+  if (tab) params.set("tab", tab);
+  if (category) params.set("category", category);
+  const query = params.size ? `?${params.toString()}` : "";
   const payload = await apiJson<{ items?: unknown[] }>(`/ranking/toys${query}`);
   return Array.isArray(payload.items) ? payload.items.map(parseRankingToy) : [];
 }
 
+export async function getRankingView(tab = "", category = ""): Promise<{ items: RankingToy[]; weeklyTop?: RankingToy }> {
+  const params = new URLSearchParams();
+  if (tab) params.set("tab", tab);
+  if (category) params.set("category", category);
+  const query = params.size ? `?${params.toString()}` : "";
+  const payload = await apiJson<{ items?: unknown[]; weekly_top?: unknown }>(`/ranking/toys${query}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseRankingToy) : [],
+    weeklyTop: payload.weekly_top ? parseRankingToy(payload.weekly_top) : undefined,
+  };
+}
+
 export async function getRankingToy(id: string): Promise<RankingToy> {
   return parseRankingToy(await apiJson<JsonRecord>(`/ranking/toys/${encodeURIComponent(id)}`));
+}
+
+export async function getRankingToyDetail(id: string, sort: "weight" | "latest" = "weight"): Promise<RankingToyDetail> {
+  return parseRankingToyDetail(await apiJson<JsonRecord>(`/ranking/toys/${encodeURIComponent(id)}?comment_sort=${sort}`));
 }
 
 export async function setRankingToyWant(id: string, active: boolean): Promise<void> {
@@ -277,6 +333,13 @@ export async function setRankingToyOwned(id: string, active: boolean): Promise<v
 
 export async function rateRankingToy(id: string, score: number): Promise<void> {
   await apiPost(`/ranking/toys/${encodeURIComponent(id)}/rating`, { score });
+}
+
+export async function createRankingToyComment(toyId: string, content: string, parentId?: string): Promise<RankingToyComment> {
+  return parseRankingToyComment(await apiPost(`/ranking/toys/${encodeURIComponent(toyId)}/comments`, {
+    content,
+    ...(parentId ? { parent_id: parentId } : {}),
+  }, { "Idempotency-Key": newIdempotencyKey("web-toy-comment") }));
 }
 
 export async function getPost(id: string): Promise<Post> {
@@ -425,8 +488,8 @@ export async function uploadImage(file: File): Promise<string> {
   return mediaId;
 }
 
-export async function requestEmailCode(email: string): Promise<EmailCodeChallenge> {
-  const payload = await apiPost<JsonRecord>("/auth/email/request", { email, scene: "login" });
+export async function requestEmailCode(email: string, scene: "login" | "register" = "login"): Promise<EmailCodeChallenge> {
+  const payload = await apiPost<JsonRecord>("/auth/email/request", { email, scene });
   return {
     expiresIn: asNumber(payload.expires_in, 600),
     retryAfter: asNumber(payload.retry_after, 60),
@@ -448,6 +511,14 @@ function parseSession(payload: JsonRecord): AuthSession {
 
 export async function loginWithEmailCode(email: string, code: string): Promise<AuthSession> {
   return parseSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
+}
+
+export async function loginWithPassword(email: string, password: string): Promise<AuthSession> {
+  return parseSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
+}
+
+export async function registerWithEmail(email: string, code: string, password: string, nickname = ""): Promise<AuthSession> {
+  return parseSession(await apiPost<JsonRecord>("/auth/register", { email, code, password, nickname }));
 }
 
 export async function loginAsGuest(): Promise<AuthSession> {

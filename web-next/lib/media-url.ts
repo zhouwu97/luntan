@@ -22,6 +22,7 @@ export function resolveMediaUrl(value?: string, variant: "thumb" | "detail" | "o
   const clean = value.trim();
   if (!clean) return undefined;
   if (/^https?:\/\//i.test(clean)) return normalizeHttpUrl(clean);
+  if (appBasePath && (clean === appBasePath || clean.startsWith(`${appBasePath}/`))) return clean;
   if (clean.startsWith("/imported-media/")) return `${appBasePath}${clean}`;
   if (clean.startsWith("/api/v1/")) return resolveApiPath(clean);
   if (/^media(?:[-_]|$)/i.test(clean)) {

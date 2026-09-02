@@ -164,6 +164,8 @@ export interface RankingToyViewerState {
 export interface RankingToy {
   id: string;
   rank: number;
+  /** 源榜单名次；列表接口的 rank 是含人工覆盖的展示序号，两者并存。 */
+  sourceRank?: number;
   name: string;
   merchant: string;
   description: string;
@@ -248,6 +250,13 @@ export interface RankingAdminViewItem {
   displayPosition: number;
 }
 
+export interface RankingAdminWeeklyTop {
+  toyId: string;
+  name: string;
+  coverUrl: string;
+  sourceRank: number;
+}
+
 export interface RankingAdminView {
   tab: string;
   category: string;
@@ -257,4 +266,5 @@ export interface RankingAdminView {
   updatedAt?: string;
   items: RankingAdminViewItem[];
   syncedAt?: string;
+  weeklyTop?: RankingAdminWeeklyTop;
 }

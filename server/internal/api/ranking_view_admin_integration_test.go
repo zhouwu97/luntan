@@ -156,13 +156,16 @@ func TestRankingViewManualOrderLifecycle(t *testing.T) {
 		t.Fatalf("源名次必须保留，实际 %v（期望 %d）", items[0]["source_rank"], base+3)
 	}
 
-	// 5) 公开榜单：人工顺序生效，rank 字段仍是源名次。
+	// 5) 公开榜单：人工顺序生效，rank 为展示序号，source_rank 保留源名次。
 	publicOrder = rankingViewFetchPublicOrder(t, handler, publicPath)
 	if len(publicOrder.IDs) < 3 || publicOrder.IDs[0] != toyC || publicOrder.IDs[1] != toyB || publicOrder.IDs[2] != toyA {
 		t.Fatalf("公开榜单应为 C,B,A：%v", publicOrder.IDs)
 	}
-	if publicOrder.Ranks[toyC] != base+3 {
-		t.Fatalf("公开接口 rank 应回源名次，实际 %d", publicOrder.Ranks[toyC])
+	if publicOrder.Ranks[toyC] != 1 || publicOrder.Ranks[toyB] != 2 || publicOrder.Ranks[toyA] != 3 {
+		t.Fatalf("rank 应为展示序号 1,2,3，实际 %d,%d,%d", publicOrder.Ranks[toyC], publicOrder.Ranks[toyB], publicOrder.Ranks[toyA])
+	}
+	if publicOrder.SourceRanks[toyC] != base+3 || publicOrder.SourceRanks[toyA] != base+1 {
+		t.Fatalf("source_rank 应保留源名次，实际 C=%d A=%d", publicOrder.SourceRanks[toyC], publicOrder.SourceRanks[toyA])
 	}
 
 	// 6) version 过期 → 409。
@@ -183,7 +186,18 @@ func TestRankingViewManualOrderLifecycle(t *testing.T) {
 		t.Fatalf("未知商品应返回 409，实际 %d：%s", code, body)
 	}
 
-	// 8) 普通管理员 403，匿名 401。
+	// 8) 跨视图商品 → 409：HIGH|CUP 的商品不能进 HIGH|LUBE 的人工顺序。
+	toyForeign := rankingViewSeedToyIn(t, s, "lo", 9, "HIGH", "CUP", base+9)
+	viewToys = append(viewToys, toyForeign)
+	code, body = callBusinessAPI(handler, http.MethodPut, orderPath, superToken, map[string]any{
+		"tab": "HIGH", "category": "LUBE", "mode": "MANUAL",
+		"ordered_toy_ids": []string{toyC, toyForeign}, "version": 1,
+	}, nil)
+	if code != http.StatusConflict || !strings.Contains(string(body), "RANKING_VIEW_ORDER_STALE") {
+		t.Fatalf("跨视图商品应返回 409，实际 %d：%s", code, body)
+	}
+
+	// 9) 普通管理员 403，匿名 401。
 	moderatorEmail, _, moderatorToken := rankingSubmissionTestUser(t, s, handler, "viewmod")
 	promoteRoleByEmail(t, s, moderatorEmail, "platform_moderator")
 	moderatorToken = loginUser(t, handler, moderatorEmail, "password123")
@@ -202,7 +216,7 @@ func TestRankingViewManualOrderLifecycle(t *testing.T) {
 		t.Fatalf("匿名应返回 401，实际 %d", code)
 	}
 
-	// 9) 模拟外部同步新增 D：无人工位次，排在人工项之后（NEW 待排序）。
+	// 10) 模拟外部同步新增 D：无人工位次，排在人工项之后（NEW 待排序）。
 	toyD := rankingViewSeedToy(t, s, "lo", 4, base+4)
 	viewToys = append(viewToys, toyD)
 	publicOrder = rankingViewFetchPublicOrder(t, handler, publicPath)
@@ -214,7 +228,7 @@ func TestRankingViewManualOrderLifecycle(t *testing.T) {
 		t.Fatalf("新同步商品应无人工位次（NEW 待排序）：%v", items[3])
 	}
 
-	// 10) 把 D 纳入人工顺序。
+	// 11) 把 D 纳入人工顺序。
 	code, body = callBusinessAPI(handler, http.MethodPut, orderPath, superToken, map[string]any{
 		"tab": "HIGH", "category": "LUBE", "mode": "MANUAL",
 		"ordered_toy_ids": []string{toyC, toyD, toyB, toyA}, "version": 1,
@@ -227,7 +241,7 @@ func TestRankingViewManualOrderLifecycle(t *testing.T) {
 		t.Fatalf("人工顺序应为 C,D,B,A：%v", publicOrder.IDs)
 	}
 
-	// 11) 恢复自动排序：覆盖层清空，回到源顺序。
+	// 12) 恢复自动排序：覆盖层清空，回到源顺序。
 	code, body = callBusinessAPI(handler, http.MethodPut, orderPath, superToken, map[string]any{
 		"tab": "HIGH", "category": "LUBE", "mode": "AUTO", "ordered_toy_ids": []string{}, "version": 2,
 	}, nil)
@@ -292,6 +306,12 @@ func TestRankingViewManualOrderOverallView(t *testing.T) {
 	order = rankingViewFetchPublicOrder(t, handler, publicPath)
 	if order.IDs[0] != toyX {
 		t.Fatalf("综合榜第一应为人工置顶商品：%v", order.IDs)
+	}
+	if order.Ranks[toyX] != 1 {
+		t.Fatalf("综合榜 rank 应为展示序号 1，实际 %d", order.Ranks[toyX])
+	}
+	if order.SourceRanks[toyX] != base+1 {
+		t.Fatalf("综合榜 source_rank 应保留源名次 %d，实际 %d", base+1, order.SourceRanks[toyX])
 	}
 	sortMode, _, _ = rankingViewAdminGet(t, handler, superToken, adminPath)
 	if sortMode != "MANUAL" {

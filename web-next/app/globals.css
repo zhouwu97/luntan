@@ -1186,15 +1186,25 @@ img { display: block; max-width: 100%; }
 .admin-ranking-move { flex: none; display: flex; gap: 5px; }
 .admin-ranking-move button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); font-size: 13px; cursor: pointer; }
 .admin-ranking-move button:disabled { opacity: .4; cursor: not-allowed; }
-.admin-ranking-actions { display: flex; gap: 10px; margin-top: 18px; }
+.admin-ranking-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
 .admin-ranking-actions button { min-height: 46px; flex: 1; border: 0; border-radius: 13px; font-size: 14px; font-weight: 800; cursor: pointer; }
 .admin-ranking-save { background: linear-gradient(135deg, var(--primary), var(--sky)); color: #fff; box-shadow: 0 12px 26px rgba(50, 100, 145, .2); }
-.admin-ranking-restore { border: 1px solid var(--line) !important; background: #fff; color: var(--ink); }
+.admin-ranking-hint { flex: none; color: var(--muted); font-size: 11px; }
 .admin-ranking-actions button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+
+.admin-ranking-weekly { position: relative; display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 14px; border: 1px solid #f0d9a8; border-radius: 15px; background: #fffaf0; }
+.admin-ranking-weekly-badge { position: absolute; top: -9px; left: 12px; padding: 2px 9px; border-radius: 8px; background: #f5b301; color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
+.admin-ranking-weekly-info { display: grid; gap: 3px; min-width: 0; }
+.admin-ranking-weekly-info strong { font-size: 14px; }
+.admin-ranking-weekly-info span { color: var(--muted); font-size: 11px; }
+.admin-ranking-weekly-note { margin: 0; flex: 1; color: #8a6d1f; font-size: 11px; line-height: 1.6; }
 
 @media (max-width: 760px) {
   .admin-ranking-head { padding-top: 12px; }
   .admin-ranking-filters { padding: 12px; border-radius: 15px; }
   .admin-ranking-source { display: none; }
-  .admin-ranking-actions { flex-direction: column; }
+  .admin-ranking-hint { display: none; }
+  .admin-ranking-weekly { flex-wrap: wrap; }
+  .admin-ranking-weekly-note { flex-basis: 100%; }
+  .admin-ranking-actions { flex-direction: column; align-items: stretch; }
 }

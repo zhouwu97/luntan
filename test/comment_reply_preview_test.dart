@@ -56,9 +56,9 @@ void main() {
 
     expect(find.textContaining('软萌研究员', findRichText: true), findsOneWidget);
     expect(find.textContaining('新手用普通版就行', findRichText: true), findsOneWidget);
-    expect(find.text('展开 5 条回复 ›'), findsOneWidget);
+    expect(find.text('查看全部 5 条回复 ›'), findsOneWidget);
 
-    await tester.tap(find.text('展开 5 条回复 ›'));
+    await tester.tap(find.text('查看全部 5 条回复 ›'));
     expect(openedThread, isTrue);
   });
 

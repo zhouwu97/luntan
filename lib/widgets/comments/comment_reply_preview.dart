@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../domain/models.dart';
 import '../../theme/app_theme.dart';
 import '../link_text.dart';
+import 'comment_common_widgets.dart';
 import 'comment_more_button.dart';
 
 class CommentReplyPreview extends StatelessWidget {
@@ -31,59 +32,76 @@ class CommentReplyPreview extends StatelessWidget {
     }
 
     final previewItems = replies.take(3).toList();
+    final hasPreview = previewItems.isNotEmpty;
+    final copyText = hasPreview
+        ? '查看全部 $totalReplyCount 条回复 ›'
+        : '查看 $totalReplyCount 条回复 ›';
 
     return Padding(
-      padding: const EdgeInsets.only(left: 46, top: 8, bottom: 4),
+      padding: const EdgeInsets.only(left: 46, top: 6, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (previewItems.isNotEmpty)
-            Container(
+          if (hasPreview)
+            ReplyPreviewSurface(
+              borderRadius: 10,
               padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF6F9FD),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE5EEF6), width: 0.8),
-              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: previewItems
-                    .map(
-                      (reply) => _ReplyPreviewLine(
-                        key: ValueKey('reply-preview:${reply.id}'),
-                        reply: reply,
-                        onOpenThread: onOpenThread,
-                        onReplyTo: onReplyTo,
-                        onAuthorTap: onAuthorTap,
-                        onMore: onMore,
+                children: [
+                  ...previewItems.map(
+                    (reply) => _ReplyPreviewLine(
+                      key: ValueKey('reply-preview:${reply.id}'),
+                      reply: reply,
+                      onOpenThread: onOpenThread,
+                      onReplyTo: onReplyTo,
+                      onAuthorTap: onAuthorTap,
+                      onMore: onMore,
+                    ),
+                  ),
+                  if (totalReplyCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: InkWell(
+                        onTap: onOpenThread,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 2,
+                            vertical: 3,
+                          ),
+                          child: Text(
+                            copyText,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ),
                       ),
-                    )
-                    .toList(),
+                    ),
+                ],
               ),
-            ),
-          if (totalReplyCount > 0)
+            )
+          else if (totalReplyCount > 0)
             Padding(
-              padding: const EdgeInsets.only(top: 6, left: 4),
+              padding: const EdgeInsets.only(top: 2, left: 2),
               child: InkWell(
                 onTap: onOpenThread,
                 borderRadius: BorderRadius.circular(6),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
+                    horizontal: 4,
                     vertical: 3,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '展开 $totalReplyCount 条回复 ›',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    copyText,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primary,
+                    ),
                   ),
                 ),
               ),

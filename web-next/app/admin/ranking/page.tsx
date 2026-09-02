@@ -8,7 +8,7 @@ import { useSession } from "../../../components/session-provider";
 import { ApiError } from "../../../lib/api/client";
 import { getRankingAdminView, saveRankingAdminViewOrder } from "../../../lib/api/forum";
 import { formatError } from "../../../lib/format";
-import type { RankingAdminViewItem } from "../../../types/forum";
+import type { RankingAdminView, RankingAdminViewItem } from "../../../types/forum";
 
 const adminTabs = [
   { label: "综合榜", key: "" },
@@ -39,8 +39,9 @@ export default function AdminRankingPage() {
   const { user, ready } = useSession();
   const isSuperAdmin = user?.capabilities?.can_manage_admins === true;
   const [tab, setTab] = useState("");
-  const [category, setCategory] = useState("CUP");
+  const [category, setCategory] = useState("");
   const [items, setItems] = useState<RankingAdminViewItem[]>([]);
+  const [weeklyTop, setWeeklyTop] = useState<RankingAdminView["weeklyTop"]>();
   const [mode, setMode] = useState<"AUTO" | "MANUAL">("AUTO");
   const [version, setVersion] = useState(0);
   const [syncedAt, setSyncedAt] = useState<string>();
@@ -65,6 +66,7 @@ export default function AdminRankingPage() {
         setMode(view.sortMode);
         setVersion(view.version);
         setSyncedAt(view.syncedAt);
+        setWeeklyTop(view.weeklyTop);
       })
       .catch((requestError: unknown) => {
         if (active) setError(formatError(requestError, "榜单视图暂时无法加载"));
@@ -77,25 +79,37 @@ export default function AdminRankingPage() {
     };
   }, [category, isSuperAdmin, tab]);
 
+  const confirmDiscardDirty = (): boolean => {
+    if (!dirty) return true;
+    return window.confirm("当前有未保存的排序调整，切换后将丢失。确定继续吗？");
+  };
+
   const chooseTab = (key: string) => {
-    // 刺激度视图必须绑定品类：切换到细分榜时补默认品类，回到综合榜保留当前品类。
+    if (key === tab) return;
+    if (!confirmDiscardDirty()) return;
+    // 综合榜没有品类维度；细分榜必须绑定品类，未选过时补默认品类。
     setTab(key);
-    setCategory(key !== "" && category === "" ? "CUP" : category);
+    setCategory(key === "" ? "" : category === "" ? "CUP" : category);
   };
 
   const chooseCategory = (key: string) => {
-    if (tab === "" && category === key) {
-      setCategory("");
-      return;
-    }
-    setCategory(key === "" && tab !== "" ? "CUP" : key);
+    const next = key === "" && tab !== "" ? "CUP" : key;
+    if (next === category) return;
+    if (!confirmDiscardDirty()) return;
+    setCategory(next);
   };
 
   const switchMode = (nextMode: "AUTO" | "MANUAL") => {
-    if (nextMode === mode) return;
-    // 切到 MANUAL 时以当前展示顺序（AUTO 顺序）作为人工排序初值。
-    setMode(nextMode);
-    setDirty(nextMode === "MANUAL");
+    if (nextMode === mode || saving) return;
+    if (nextMode === "AUTO") {
+      // 恢复自动必须真实落库：确认后直接 PUT mode=AUTO，成功后才切换 UI。
+      if (!window.confirm("确认恢复自动排序？将清除当前视图的人工排序。")) return;
+      void persist("AUTO", []);
+      return;
+    }
+    // 切到 MANUAL 时以当前展示顺序（AUTO 顺序）作为人工排序初值，确认后再保存。
+    setMode("MANUAL");
+    setDirty(true);
     setNotice("");
     setError("");
   };
@@ -133,16 +147,19 @@ export default function AdminRankingPage() {
       setVersion(refreshed.version);
       setMode(refreshed.sortMode);
       setSyncedAt(refreshed.syncedAt);
+      setWeeklyTop(refreshed.weeklyTop);
       setNotice(nextMode === "MANUAL" ? "排序已保存" : "已恢复自动排序");
     } catch (requestError: unknown) {
       if (requestError instanceof ApiError && (requestError.status === 409 || requestError.code === "RANKING_VIEW_ORDER_STALE")) {
-        setError("榜单已被其他管理员修改，请刷新后重试");
+        // 乐观锁冲突与“商品不属于当前视图”共用 409，透出服务端的具体原因。
+        setError(requestError.message || "榜单已被其他管理员修改，请刷新后重试");
         try {
           const refreshed = await getRankingAdminView(tab, category);
           setItems(refreshed.items);
           setVersion(refreshed.version);
           setMode(refreshed.sortMode);
           setSyncedAt(refreshed.syncedAt);
+          setWeeklyTop(refreshed.weeklyTop);
           setDirty(false);
         } catch {
           // 刷新失败时保留错误提示
@@ -192,11 +209,13 @@ export default function AdminRankingPage() {
               <button key={item.key} type="button" className={tab === item.key ? "active" : ""} onClick={() => chooseTab(item.key)}>{item.label}</button>
             ))}
           </div>
-          <div className="admin-ranking-filter" role="tablist" aria-label="品类">
-            {adminCategories.map((item) => (
-              <button key={item.key} type="button" className={category === item.key ? "active" : ""} onClick={() => chooseCategory(item.key)}>{item.label}</button>
-            ))}
-          </div>
+          {tab !== "" && (
+            <div className="admin-ranking-filter" role="tablist" aria-label="品类">
+              {adminCategories.map((item) => (
+                <button key={item.key} type="button" className={category === item.key ? "active" : ""} onClick={() => chooseCategory(item.key)}>{item.label}</button>
+              ))}
+            </div>
+          )}
           <div className="admin-ranking-modes">
             <button type="button" className={mode === "AUTO" ? "active" : ""} disabled={saving} onClick={() => switchMode("AUTO")}>自动排序</button>
             <button type="button" className={mode === "MANUAL" ? "active" : ""} disabled={saving} onClick={() => switchMode("MANUAL")}>人工排序</button>
@@ -212,6 +231,19 @@ export default function AdminRankingPage() {
           <div className="admin-ranking-state" role="status">该视图暂无商品。</div>
         ) : (
           <>
+            {weeklyTop && (
+              <aside className="admin-ranking-weekly">
+                <div className="admin-ranking-weekly-badge">本周推荐</div>
+                {weeklyTop.coverUrl
+                  ? <img className="admin-ranking-cover" src={weeklyTop.coverUrl} alt="" loading="lazy" />
+                  : <span className="admin-ranking-cover placeholder" aria-hidden="true"><Icon name="box" size={18} /></span>}
+                <div className="admin-ranking-weekly-info">
+                  <strong>{weeklyTop.name}</strong>
+                  <span>源名次 {weeklyTop.sourceRank || "—"}</span>
+                </div>
+                <p className="admin-ranking-weekly-note">首页置顶大卡随源站数据同步产生，与这里的拖拽排序无关；把商品拖到第一位不会改变首页推荐。</p>
+              </aside>
+            )}
             <ol className="admin-ranking-list">
               {items.map((item, index) => (
                 <li
@@ -240,10 +272,15 @@ export default function AdminRankingPage() {
               ))}
             </ol>
             <div className="admin-ranking-actions">
-              <button type="button" className="admin-ranking-save" disabled={saving || loading || (mode === "AUTO" && !dirty)} onClick={() => void persist("MANUAL", items.map((item) => item.toyId))}>
+              <button
+                type="button"
+                className="admin-ranking-save"
+                disabled={saving || loading || mode !== "MANUAL"}
+                onClick={() => void persist("MANUAL", items.map((item) => item.toyId))}
+              >
                 {saving ? "正在保存…" : "保存排序"}
               </button>
-              <button type="button" className="admin-ranking-restore" disabled={saving || loading} onClick={() => void persist("AUTO", [])}>恢复自动排序</button>
+              {mode === "MANUAL" && <span className="admin-ranking-hint">调整为人工排序后需点击保存才会生效。</span>}
             </div>
           </>
         )}

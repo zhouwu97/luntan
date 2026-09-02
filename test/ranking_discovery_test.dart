@@ -352,7 +352,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final repliesLink = find.text('查看 1 条回复');
+      final repliesLink = find.text('查看 1 条回复 ›');
       await tester.ensureVisible(repliesLink);
       await tester.tap(repliesLink);
       await tester.pumpAndSettle();

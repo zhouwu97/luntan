@@ -171,6 +171,7 @@ function parseRankingToy(raw: unknown, index = 0): RankingToy {
   return {
     id: asString(item.id),
     rank: asNumber(item.rank, index + 1),
+    sourceRank: item.source_rank == null ? undefined : asNumber(item.source_rank),
     name: asString(item.name, "未命名产品"),
     merchant: asString(item.merchant),
     description: asString(item.description),
@@ -739,6 +740,7 @@ export async function getRankingAdminView(tab = "", category = ""): Promise<Rank
   const query = params.size ? `?${params.toString()}` : "";
   const payload = await apiJson<JsonRecord>(`/admin/ranking/views${query}`);
   const view = asRecord(payload.view);
+  const weeklyTop = payload.weekly_top && typeof payload.weekly_top === "object" ? asRecord(payload.weekly_top) : null;
   return {
     tab: asString(view.tab),
     category: asString(view.category),
@@ -748,6 +750,14 @@ export async function getRankingAdminView(tab = "", category = ""): Promise<Rank
     updatedAt: asString(view.updated_at) || undefined,
     items: Array.isArray(payload.items) ? payload.items.map(parseRankingAdminViewItem) : [],
     syncedAt: asString(payload.synced_at) || undefined,
+    weeklyTop: weeklyTop
+      ? {
+          toyId: asString(weeklyTop.toy_id),
+          name: asString(weeklyTop.name, "未命名产品"),
+          coverUrl: resolveMediaUrl(asString(weeklyTop.cover_url), "thumb") ?? "",
+          sourceRank: asNumber(weeklyTop.source_rank),
+        }
+      : undefined,
   };
 }
 

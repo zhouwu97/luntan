@@ -482,7 +482,7 @@ void main() {
       expect(find.text('3 楼'), findsOneWidget);
       // 回复预览继续可见。
       expect(find.text('回复者'), findsOneWidget);
-      expect(find.text('展开 2 条回复 ›'), findsOneWidget);
+      expect(find.text('查看全部 2 条回复 ›'), findsOneWidget);
       // 原作者信息与操作栏不再渲染。
       expect(find.text('测试达人'), findsNothing);
       expect(find.text('回复'), findsNothing);

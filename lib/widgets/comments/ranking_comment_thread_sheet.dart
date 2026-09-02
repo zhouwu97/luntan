@@ -7,9 +7,10 @@ import '../../domain/models.dart' show relativeTimeLabel;
 import '../../theme/app_motion.dart';
 import '../../theme/app_theme.dart';
 import '../app_network_image.dart';
-import 'comment_skeleton.dart';
-import 'comment_image_viewer.dart';
 import '../link_text.dart';
+import 'comment_common_widgets.dart';
+import 'comment_image_viewer.dart';
+import 'comment_skeleton.dart';
 
 enum _ReplyLoadState { loading, loadedEmpty, loaded, error }
 
@@ -339,35 +340,16 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              InkWell(
+                              CommentAvatar(
+                                name: rootName,
+                                avatarUrl: widget.rootComment.avatarUrl,
+                                size: 34,
                                 onTap: () {
                                   if (widget.rootComment.authorId.isNotEmpty &&
                                       !widget.rootComment.authorId.startsWith('guest')) {
                                     widget.onAuthorTap?.call(widget.rootComment.authorId);
                                   }
                                 },
-                                borderRadius: BorderRadius.circular(16),
-                                child: Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.surfaceBlue,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: const Color(0xFFE2EBF5),
-                                      width: 1.0,
-                                    ),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: Text(
-                                    rootName.isEmpty ? '友' : rootName.characters.first,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
-                                ),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -394,27 +376,21 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                                           ),
                                         ),
                                         const SizedBox(width: 5),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 1,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: lvlColor.withValues(alpha: 0.1),
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            'LV${widget.rootComment.level}',
-                                            style: TextStyle(
-                                              fontSize: 8.5,
-                                              fontWeight: FontWeight.w800,
-                                              color: lvlColor,
-                                            ),
-                                          ),
+                                        UserLevelBadge(
+                                          level: widget.rootComment.level,
+                                          fontSize: 8.5,
                                         ),
                                         const Spacer(),
-                                        _rating(widget.rootComment.authorRating),
+                                        RatingBadge(widget.rootComment.authorRating),
                                       ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      relativeTimeLabel(widget.rootComment.createdAt),
+                                      style: const TextStyle(
+                                        fontSize: 9.5,
+                                        color: Color(0xFF9AA9B8),
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     LinkText(
@@ -542,7 +518,6 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     final name = _name(reply);
     final replyTo = _replyToName(reply);
     final isLiked = reply.isLiked;
-    final lvlColor = _levelColor(reply.level);
 
     return Container(
       key: GlobalObjectKey('ranking-reply:${reply.id}'),
@@ -550,32 +525,16 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
+          CommentAvatar(
+            name: name,
+            avatarUrl: reply.avatarUrl,
+            size: 32,
             onTap: () {
               if (reply.authorId.isNotEmpty &&
                   !reply.authorId.startsWith('guest')) {
                 widget.onAuthorTap?.call(reply.authorId);
               }
             },
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceBlue,
-                shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFFE2EBF5), width: 1.0),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                name.isEmpty ? '友' : name.characters.first,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.primary,
-                ),
-              ),
-            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -602,24 +561,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                       ),
                     ),
                     const SizedBox(width: 5),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: lvlColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'LV${reply.level}',
-                        style: TextStyle(
-                          fontSize: 8.5,
-                          fontWeight: FontWeight.w800,
-                          color: lvlColor,
-                        ),
-                      ),
-                    ),
+                    UserLevelBadge(level: reply.level, fontSize: 8.5),
                     const Spacer(),
                     Text(
                       relativeTimeLabel(reply.createdAt),
@@ -665,70 +607,20 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    InkWell(
+                    CommentActionButton(
+                      icon: Icons.reply_rounded,
+                      label: '回复',
                       onTap: () => setState(() => replyTarget = reply),
-                      borderRadius: BorderRadius.circular(4),
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 2,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.reply_rounded,
-                              size: 14,
-                              color: AppTheme.textSecondary,
-                            ),
-                            SizedBox(width: 2),
-                            Text(
-                              '回复',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                     ),
-                    const SizedBox(width: 14),
-                    InkWell(
+                    const SizedBox(width: 8),
+                    CommentActionButton(
+                      icon: isLiked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      label: '${reply.likeCount}',
                       onTap: () => _toggleLike(reply),
-                      borderRadius: BorderRadius.circular(4),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 2,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isLiked
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              size: 13.5,
-                              color: isLiked
-                                  ? const Color(0xFFF76591)
-                                  : AppTheme.textSecondary,
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              '${reply.likeCount}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: isLiked
-                                    ? const Color(0xFFF76591)
-                                    : AppTheme.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      isActive: isLiked,
+                      activeColor: AppTheme.pink,
                     ),
                   ],
                 ),

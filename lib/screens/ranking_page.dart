@@ -13,13 +13,15 @@ import '../data/api/ranking_repository.dart';
 import '../data/app_links.dart';
 import '../data/ranking_cache.dart';
 import 'package:share_plus/share_plus.dart';
+import '../domain/models.dart' show relativeTimeLabel;
 import '../theme/app_theme.dart';
 import '../widgets/app_network_image.dart';
-import '../widgets/comments/ranking_comment_thread_sheet.dart';
-import '../widgets/comments/comment_more_button.dart';
-import '../widgets/comments/comment_image_viewer.dart';
 import '../widgets/comments/comment_action_menu.dart';
+import '../widgets/comments/comment_common_widgets.dart';
+import '../widgets/comments/comment_image_viewer.dart';
+import '../widgets/comments/comment_more_button.dart';
 import '../widgets/comments/comment_skeleton.dart';
+import '../widgets/comments/ranking_comment_thread_sheet.dart';
 import 'ranking_reorder_screen.dart';
 import 'ranking_toy_submission_screen.dart';
 
@@ -2893,6 +2895,7 @@ class _ReviewCard extends StatelessWidget {
     required this.avatarColor,
     this.level = 1,
     this.authorRating,
+    this.createdAt,
   }) : liked = false,
        media = const [],
        avatarUrl = null,
@@ -2917,6 +2920,7 @@ class _ReviewCard extends StatelessWidget {
        content = comment.content,
        media = comment.media,
        avatarUrl = comment.avatarUrl,
+       createdAt = comment.createdAt,
        reply = null,
        replyDate = null,
        avatarColor = const Color(0xFFE3EEFF),
@@ -2930,6 +2934,7 @@ class _ReviewCard extends StatelessWidget {
   final String content;
   final List<RankingToyCommentMedia> media;
   final String? avatarUrl;
+  final DateTime? createdAt;
   final String? reply;
   final String? replyDate;
   final Color avatarColor;
@@ -2944,16 +2949,8 @@ class _ReviewCard extends StatelessWidget {
   final VoidCallback? onViewReplies;
   final VoidCallback? onMore;
 
-  Color _levelColor(int lvl) {
-    if (lvl >= 8) return AppTheme.purple;
-    if (lvl >= 6) return AppTheme.primary;
-    if (lvl >= 4) return AppTheme.mint;
-    return const Color(0xFF38AD8B);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final lvlColor = _levelColor(level);
     final totalReplies = commentReplyCount > 0 ? commentReplyCount : replies.length;
 
     return Container(
@@ -2977,37 +2974,10 @@ class _ReviewCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: avatarColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFE2EBF5), width: 1.0),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: avatarUrl != null && avatarUrl!.isNotEmpty
-                    ? AppNetworkImage(
-                        url: avatarUrl!,
-                        width: 38,
-                        height: 38,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_) => const Icon(
-                          Icons.person_outline_rounded,
-                          size: 20,
-                          color: Color(0xFF7D8BA3),
-                        ),
-                      )
-                    : Center(
-                        child: Text(
-                          user.isNotEmpty ? user.characters.first : '友',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ),
+              CommentAvatar(
+                name: user,
+                avatarUrl: avatarUrl,
+                size: 38,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -3029,74 +2999,19 @@ class _ReviewCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 5),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 1.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: lvlColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'LV$level',
-                            style: TextStyle(
-                              color: lvlColor,
-                              fontSize: 8.5,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
+                        UserLevelBadge(level: level, fontSize: 8.5),
                         const Spacer(),
-                        if (authorRating != null) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFF0F4),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.favorite_rounded,
-                                  size: 11,
-                                  color: Color(0xFFF76591),
-                                ),
-                                const SizedBox(width: 3),
-                                Text(
-                                  '$authorRating分',
-                                  style: const TextStyle(
-                                    color: Color(0xFFF76591),
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                        RatingBadge(authorRating),
                       ],
                     ),
-                    if (authorRating != null) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: List.generate(5, (index) {
-                          final filled = index < ((authorRating! + 1) ~/ 2);
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 2),
-                            child: Icon(
-                              filled
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              size: 11.5,
-                              color: const Color(0xFFF76591),
-                            ),
-                          );
-                        }),
+                    if (createdAt != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        relativeTimeLabel(createdAt!),
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          color: Color(0xFF9AA9B8),
+                        ),
                       ),
                     ],
                   ],
@@ -3154,100 +3069,27 @@ class _ReviewCard extends StatelessWidget {
               ),
             ),
 
-          // 操作栏（回复、点赞、更多）
+          // 操作栏（回复、点赞、更多，触控热区 >= 36dp）
           Padding(
-            padding: const EdgeInsets.only(top: 10),
+            padding: const EdgeInsets.only(top: 8),
             child: Row(
               children: [
                 if (onReply != null)
-                  InkWell(
+                  CommentActionButton(
+                    icon: Icons.reply_rounded,
+                    label: '回复',
                     onTap: onReply,
-                    borderRadius: BorderRadius.circular(4),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.reply_rounded,
-                            size: 14,
-                            color: AppTheme.textSecondary,
-                          ),
-                          SizedBox(width: 3),
-                          Text(
-                            '回复',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
-                const SizedBox(width: 14),
-                if (onLike != null)
-                  InkWell(
-                    onTap: onLike,
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 2,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            liked
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            size: 13.5,
-                            color: liked
-                                ? const Color(0xFFF76591)
-                                : const Color(0xFFAAB2C0),
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            likes,
-                            style: TextStyle(
-                              color: liked
-                                  ? const Color(0xFFF76591)
-                                  : const Color(0xFF7D899D),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        liked
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        size: 13.5,
-                        color: liked
-                            ? const Color(0xFFF76591)
-                            : const Color(0xFFAAB2C0),
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        likes,
-                        style: TextStyle(
-                          color: liked
-                              ? const Color(0xFFF76591)
-                              : const Color(0xFF7D899D),
-                          fontSize: 11.5,
-                        ),
-                      ),
-                    ],
-                  ),
+                const SizedBox(width: 8),
+                CommentActionButton(
+                  icon: liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  label: likes,
+                  onTap: onLike,
+                  isActive: liked,
+                  activeColor: AppTheme.pink,
+                ),
                 const Spacer(),
                 if (onMore != null)
                   CommentMoreButton(onPressed: onMore!),
@@ -3258,14 +3100,9 @@ class _ReviewCard extends StatelessWidget {
           // 内嵌二级回复预览（服务端评论）
           if (replies.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
+            ReplyPreviewSurface(
+              borderRadius: 8,
               padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF6F9FD),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE5EEF6), width: 0.8),
-              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -3322,18 +3159,13 @@ class _ReviewCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                '查看全部 $totalReplies 条回复 ›',
-                                style: const TextStyle(
-                                  color: AppTheme.primary,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            '查看全部 $totalReplies 条回复 ›',
+                            style: const TextStyle(
+                              color: AppTheme.primary,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ),
@@ -3352,24 +3184,13 @@ class _ReviewCard extends StatelessWidget {
                     vertical: 4,
                     horizontal: 2,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '查看 $totalReplies 条回复',
-                        style: const TextStyle(
-                          color: Color(0xFF3C70B7),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(width: 3),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        size: 16,
-                        color: Color(0xFF3C70B7),
-                      ),
-                    ],
+                  child: Text(
+                    '查看 $totalReplies 条回复 ›',
+                    style: const TextStyle(
+                      color: AppTheme.primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),

@@ -9,10 +9,11 @@ import '../domain/models.dart';
 import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_network_image.dart';
+import '../widgets/comments/comment_common_widgets.dart';
 import '../widgets/comments/comment_composer_controller.dart';
+import '../widgets/comments/comment_more_button.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
-import '../widgets/comments/comment_more_button.dart';
 import '../widgets/comments/emoji/sticker_catalog.dart';
 import '../widgets/link_text.dart';
 
@@ -95,7 +96,8 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
   }
 
   void _onScroll() {
-    if (scrollController.position.extentAfter < 200) {
+    if (scrollController.hasClients &&
+        scrollController.position.extentAfter < 200) {
       _loadMore();
     }
   }
@@ -267,9 +269,10 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
       comment.authorId == widget.postAuthorId;
 
   void _openImagePreview(BuildContext context, String imageUrl) {
+    if (imageUrl.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => Scaffold(
+        builder: (_) => Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(
             backgroundColor: Colors.black,
@@ -294,12 +297,12 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
     );
   }
 
-  Color _levelColor(int level) {
-    if (level >= 8) return AppTheme.purple;
-    if (level >= 6) return AppTheme.primary;
-    if (level >= 4) return AppTheme.mint;
-    return AppTheme.textSecondary;
-  }
+  String _replyTitle() => switch (loadState) {
+    _ReplyLoadState.loading || _ReplyLoadState.error => '回复',
+    _ReplyLoadState.loadedEmpty => '0 条回复',
+    _ReplyLoadState.loaded =>
+      '${widget.rootComment.replyCount ?? replies.length} 条回复',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -310,7 +313,6 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
     final rootLevel =
         root.author?.level ??
         (root.authorId.startsWith('guest') || root.authorId.isEmpty ? 0 : 1);
-    final lvlColor = _levelColor(rootLevel);
 
     return Material(
       color: Colors.white,
@@ -335,7 +337,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                 child: Row(
                   children: [
                     Text(
-                      _replyTitle(root),
+                      _replyTitle(),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -380,14 +382,11 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                InkWell(
+                                CommentAvatar(
+                                  name: rootAuthor,
+                                  avatarUrl: root.author?.avatar?.trim(),
+                                  size: 34,
                                   onTap: () => _handleAuthorTap(root.authorId),
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: _buildSmallAvatar(
-                                    root.author?.avatar?.trim(),
-                                    rootAuthor,
-                                    size: 32,
-                                  ),
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
@@ -414,27 +413,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                               ),
                                             ),
                                             const SizedBox(width: 5),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 5,
-                                                    vertical: 1,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: lvlColor.withValues(
-                                                  alpha: 0.1,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                'Lv.$rootLevel',
-                                                style: TextStyle(
-                                                  fontSize: 9,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: lvlColor,
-                                                ),
-                                              ),
+                                            UserLevelBadge(
+                                              level: rootLevel,
+                                              fontSize: 8.5,
                                             ),
                                             if (_isPostAuthor(root)) ...[
                                               const SizedBox(width: 5),
@@ -445,22 +426,20 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                                       vertical: 1,
                                                     ),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(
-                                                    0xFFEBF3FE,
-                                                  ),
+                                                  color:
+                                                      const Color(0xFFEBF3FE),
                                                   borderRadius:
                                                       BorderRadius.circular(4),
                                                   border: Border.all(
-                                                    color: const Color(
-                                                      0xFFCFE2FA,
-                                                    ),
+                                                    color:
+                                                        const Color(0xFFCFE2FA),
                                                     width: 0.6,
                                                   ),
                                                 ),
                                                 child: const Text(
                                                   '楼主',
                                                   style: TextStyle(
-                                                    fontSize: 9,
+                                                    fontSize: 8.5,
                                                     fontWeight: FontWeight.w800,
                                                     color: Color(0xFF2672D6),
                                                   ),
@@ -509,7 +488,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                       if (root.media.isNotEmpty)
                                         Padding(
                                           padding: const EdgeInsets.only(
-                                            top: 8,
+                                            top: 6,
                                           ),
                                           child: Wrap(
                                             spacing: 6,
@@ -526,12 +505,12 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                                 ),
                                                 child: ClipRRect(
                                                   borderRadius:
-                                                      BorderRadius.circular(8),
+                                                      BorderRadius.circular(6),
                                                   child: Container(
                                                     decoration: BoxDecoration(
                                                       borderRadius:
                                                           BorderRadius.circular(
-                                                            8,
+                                                            6,
                                                           ),
                                                       border: Border.all(
                                                         color: const Color(
@@ -542,8 +521,8 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                                     ),
                                                     child: AppNetworkImage(
                                                       url: url,
-                                                      width: 76,
-                                                      height: 76,
+                                                      width: 80,
+                                                      height: 80,
                                                       fit: BoxFit.cover,
                                                     ),
                                                   ),
@@ -556,11 +535,11 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                           root.stickerId!.isNotEmpty)
                                         Padding(
                                           padding: const EdgeInsets.only(
-                                            top: 8,
+                                            top: 6,
                                           ),
                                           child: _buildStickerThumbnail(
                                             root.stickerId!,
-                                            size: 64,
+                                            size: 60,
                                           ),
                                         ),
                                     ],
@@ -661,7 +640,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
       return [
         const SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 40),
+            padding: const EdgeInsets.symmetric(vertical: 40),
             child: Center(
               child: Text(
                 '暂无二级回复，来发第一条吧',
@@ -721,7 +700,6 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                 (reply.authorId.startsWith('guest') || reply.authorId.isEmpty
                     ? 0
                     : 1);
-            final lvlColor = _levelColor(replyLevel);
             final replyTo = reply.replyToUserId == null
                 ? null
                 : (reply.replyToUser?.nickname ??
@@ -740,14 +718,11 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  InkWell(
+                  CommentAvatar(
+                    name: author,
+                    avatarUrl: reply.author?.avatar?.trim(),
+                    size: 32,
                     onTap: () => _handleAuthorTap(reply.authorId),
-                    borderRadius: BorderRadius.circular(16),
-                    child: _buildSmallAvatar(
-                      reply.author?.avatar?.trim(),
-                      author,
-                      size: 32,
-                    ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -772,24 +747,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                 ),
                               ),
                               const SizedBox(width: 5),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: lvlColor.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  'Lv.$replyLevel',
-                                  style: TextStyle(
-                                    fontSize: 8.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: lvlColor,
-                                  ),
-                                ),
-                              ),
+                              UserLevelBadge(level: replyLevel, fontSize: 8.5),
                               if (_isPostAuthor(reply)) ...[
                                 const SizedBox(width: 4),
                                 Container(
@@ -914,7 +872,9 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                         const SizedBox(height: 6),
                         Row(
                           children: [
-                            InkWell(
+                            CommentActionButton(
+                              icon: Icons.reply_rounded,
+                              label: '回复',
                               onTap: () {
                                 setState(() => currentReplyTarget = reply);
                                 _composer.openReply(
@@ -923,110 +883,33 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                   replyToName: author,
                                 );
                               },
-                              borderRadius: BorderRadius.circular(4),
-                              child: const Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 2,
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.reply_rounded,
-                                      size: 14,
-                                      color: AppTheme.textSecondary,
-                                    ),
-                                    SizedBox(width: 2),
-                                    Text(
-                                      '回复',
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
                             ),
-                            const SizedBox(width: 14),
-                            InkWell(
+                            const SizedBox(width: 8),
+                            CommentActionButton(
+                              icon: reply.isLiked
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              label: '${reply.likeCount}',
                               onTap: widget.onToggleLike != null
                                   ? () => widget.onToggleLike!(reply)
                                   : null,
-                              borderRadius: BorderRadius.circular(4),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 2,
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      reply.isLiked
-                                          ? Icons.favorite_rounded
-                                          : Icons.favorite_border_rounded,
-                                      size: 13.5,
-                                      color: reply.isLiked
-                                          ? AppTheme.pink
-                                          : AppTheme.textSecondary,
-                                    ),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      '${reply.likeCount}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: reply.isLiked
-                                            ? AppTheme.pink
-                                            : AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                              isActive: reply.isLiked,
+                              activeColor: AppTheme.pink,
                             ),
-                            const SizedBox(width: 14),
-                            if (widget.onToggleDislike != null)
-                              InkWell(
+                            if (widget.onToggleDislike != null) ...[
+                              const SizedBox(width: 8),
+                              CommentActionButton(
+                                icon: reply.isDisliked
+                                    ? Icons.thumb_down_rounded
+                                    : Icons.thumb_down_off_alt_rounded,
+                                label: reply.dislikeCount > 0
+                                    ? '${reply.dislikeCount}'
+                                    : null,
                                 onTap: () => widget.onToggleDislike!(reply),
-                                borderRadius: BorderRadius.circular(4),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 2,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        reply.isDisliked
-                                            ? Icons.thumb_down_rounded
-                                            : Icons.thumb_down_off_alt_rounded,
-                                        size: 13.5,
-                                        color: reply.isDisliked
-                                            ? const Color(0xFF5A7B9C)
-                                            : AppTheme.textSecondary,
-                                      ),
-                                      if (reply.dislikeCount > 0) ...[
-                                        const SizedBox(width: 3),
-                                        Text(
-                                          '${reply.dislikeCount}',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w700,
-                                            color: reply.isDisliked
-                                                ? const Color(0xFF5A7B9C)
-                                                : AppTheme.textSecondary,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
+                                isActive: reply.isDisliked,
+                                activeColor: const Color(0xFF5A7B9C),
                               ),
+                            ],
                             const Spacer(),
                             if (widget.onMore != null)
                               CommentMoreButton(
@@ -1068,56 +951,6 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
         Icons.sticky_note_2_outlined,
         color: Colors.grey,
         size: 24,
-      ),
-    );
-  }
-
-  String _replyTitle(Comment root) => switch (loadState) {
-    _ReplyLoadState.loading || _ReplyLoadState.error => '回复详情',
-    _ReplyLoadState.loadedEmpty => '0 条回复',
-    _ReplyLoadState.loaded => '${root.replyCount} 条回复',
-  };
-
-  Widget _buildSmallAvatar(
-    String? avatarUrl,
-    String author, {
-    required double size,
-  }) {
-    final initial = author.isNotEmpty ? author.characters.first : '友';
-    final placeholder = Container(
-      width: size,
-      height: size,
-      decoration: const BoxDecoration(
-        color: AppTheme.surfaceBlue,
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        initial,
-        style: TextStyle(
-          fontSize: size * 0.42,
-          fontWeight: FontWeight.w800,
-          color: AppTheme.primary,
-        ),
-      ),
-    );
-
-    if (avatarUrl == null || avatarUrl.isEmpty) {
-      return placeholder;
-    }
-
-    return ClipOval(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: AppNetworkImage(
-          url: avatarUrl,
-          fit: BoxFit.cover,
-          width: size,
-          height: size,
-          placeholder: (_) => placeholder,
-          errorBuilder: (_) => placeholder,
-        ),
       ),
     );
   }

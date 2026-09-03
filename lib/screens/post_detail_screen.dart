@@ -135,32 +135,46 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Future<List<String>> _uploadCommentImages(List<XFile> files) async {
     if (files.isEmpty) return const [];
     final List<String> mediaIds = [];
-    for (final file in files) {
-      final bytes = await file.readAsBytes();
-      final lower = file.name.toLowerCase();
-      final mimeType = lower.endsWith('.png')
-          ? 'image/png'
-          : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-      final digest = sha256.convert(bytes).toString();
-      if (widget.publishRepository != null) {
-        final ticket = await widget.publishRepository!.requestMediaUpload(
-          fileName: file.name,
-          mimeType: mimeType,
-          size: bytes.length,
-          sha256: digest,
-        );
-        await widget.publishRepository!.uploadMedia(
-          ticket: ticket,
-          bytes: bytes,
-          size: bytes.length,
-          sha256: digest,
-        );
-        mediaIds.add(ticket.mediaId);
-      } else {
-        mediaIds.add(file.path);
+    try {
+      for (final file in files) {
+        final bytes = await file.readAsBytes();
+        final lower = file.name.toLowerCase();
+        final mimeType = lower.endsWith('.png')
+            ? 'image/png'
+            : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+        final digest = sha256.convert(bytes).toString();
+        if (widget.publishRepository != null) {
+          final ticket = await widget.publishRepository!.requestMediaUpload(
+            fileName: file.name,
+            mimeType: mimeType,
+            size: bytes.length,
+            sha256: digest,
+          );
+          await widget.publishRepository!.uploadMedia(
+            ticket: ticket,
+            bytes: bytes,
+            size: bytes.length,
+            sha256: digest,
+          );
+          mediaIds.add(ticket.mediaId);
+        } else {
+          mediaIds.add(file.path);
+        }
       }
+      return mediaIds;
+    } catch (uploadError) {
+      // 若中途第 N 张上传失败，主动清理已上传的前 N-1 张孤儿媒体，避免占用存储配额
+      if (widget.publishRepository != null) {
+        for (final mid in mediaIds) {
+          try {
+            await widget.publishRepository!.deleteMedia(mid);
+          } catch (_) {
+            // 忽略回滚阶段单个媒体删除异常，优先向上抛出原始上传错误
+          }
+        }
+      }
+      rethrow;
     }
-    return mediaIds;
   }
 
   Future<void> _submitReply(Post post) async {

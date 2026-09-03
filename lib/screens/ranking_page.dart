@@ -1768,6 +1768,32 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
+  static String _ratingEvaluationText(int score) {
+    switch (score) {
+      case 10:
+        return '力荐 · 5 星满分';
+      case 9:
+        return '超赞 · 4.5 星';
+      case 8:
+        return '推荐 · 4 星';
+      case 7:
+        return '不错 · 3.5 星';
+      case 6:
+        return '还行 · 3 星及格';
+      case 5:
+        return '一般 · 2.5 星';
+      case 4:
+        return '较差 · 2 星';
+      case 3:
+        return '偏弱 · 1.5 星';
+      case 2:
+        return '很差 · 1 星';
+      case 1:
+      default:
+        return '极差 · 0.5 星';
+    }
+  }
+
   Future<void> _openRatingDialog({bool justMarkedOwned = false}) async {
     if (!_hasServer) {
       ScaffoldMessenger.of(
@@ -1790,27 +1816,56 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                 Text(
                   '$selected 分',
                   style: const TextStyle(
-                    fontSize: 28,
+                    fontSize: 32,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFFF7618E),
+                    height: 1.1,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
+                Text(
+                  _ratingEvaluationText(selected),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF59667A),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(5, (index) {
                     final filled = index < heartCount;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      child: Icon(
-                        filled ? Icons.favorite : Icons.favorite_border_rounded,
-                        size: 22,
-                        color: filled
-                            ? const Color(0xFFF7618E)
-                            : const Color(0xFFCBD5E1),
+                    return InkResponse(
+                      onTap: () => setDialogState(
+                        () => selected = (index + 1) * 2,
+                      ),
+                      radius: 20,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Icon(
+                          filled
+                              ? Icons.favorite
+                              : Icons.favorite_border_rounded,
+                          size: 26,
+                          color: filled
+                              ? const Color(0xFFF7618E)
+                              : const Color(0xFFCBD5E1),
+                        ),
                       ),
                     );
                   }),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '10 分满分制 · 点击爱心或拖动滑块打分',
+                  style: TextStyle(
+                    color: Color(0xFF8A96A9),
+                    fontSize: 11,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 SliderTheme(

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
 import { compactCount } from "../lib/format";
@@ -22,10 +22,22 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
   const { user, ready, unreadCount, signOut } = useSession();
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setQuery(searchParams.get("q") || "");
   }, [searchParams]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,8 +55,11 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
     <header className={`site-header${home ? " home-site-header" : ""}${className ? ` ${className}` : ""}`}>
       <div className="header-inner">
         <Link href="/" className="brand" aria-label="圣杯酱首页">
-          <span className="brand-mark"><Icon name="trophy" size={22} /></span>
+          <span className="brand-mark">
+            <img src="/app-icon.png" alt="圣杯酱" className="brand-icon-img" />
+          </span>
           <span className="brand-word">圣杯酱</span>
+          <span className="brand-dot" aria-hidden="true" />
         </Link>
 
         <nav className="desktop-nav" aria-label="主导航">
@@ -63,22 +78,24 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
         </nav>
 
         <form className="header-search" onSubmit={submitSearch} role="search">
-          <button type="submit" className="search-submit" aria-label="搜索"><Icon name="search" size={19} /></button>
+          <button type="submit" className="search-submit" aria-label="搜索"><Icon name="search" size={18} /></button>
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索帖子 / 用户 / 板块 / 榜单"
             aria-label="搜索帖子、用户、板块或榜单"
           />
+          <kbd className="header-search-kbd">Ctrl K</kbd>
         </form>
 
         <div className="header-actions">
           <button className="publish-button" type="button" aria-label="发布帖子" onClick={() => router.push(user ? "/publish" : "/login")}>
-            <Icon name="plus" size={19} />
+            <Icon name="plus" size={18} />
             <span>发布帖子</span>
           </button>
           <button className="icon-button notification-button" type="button" aria-label="通知" onClick={() => router.push(user ? "/notifications" : "/login")}>
-            <Icon name="bell" size={21} />
+            <Icon name="bell" size={20} />
             {user && unreadCount > 0 && <span className="notification-dot">{unreadCount > 99 ? "99+" : compactCount(unreadCount)}</span>}
           </button>
           {ready && user ? (
@@ -90,7 +107,7 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
                 <div className="profile-menu">
                   <div className="profile-menu-name">{user.nickname}</div>
                   <div className="profile-menu-meta">Lv.{user.level || 1} · {user.accountType === "guest" ? "游客" : "已登录"}</div>
-                  <button type="button" onClick={() => router.push(`/user/${user.id}`)}>个人主页</button>
+                  <button type="button" onClick={() => { setMenuOpen(false); router.push(`/user/${user.id}`); }}>个人主页</button>
                   <button type="button" onClick={handleSignOut}>退出登录</button>
                 </div>
               )}

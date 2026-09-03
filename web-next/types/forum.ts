@@ -197,6 +197,7 @@ export interface RankingToyComment {
   rating?: number;
   media: MediaAsset[];
   viewerState: { hasLiked: boolean };
+  replyPreview?: RankingToyComment[];
 }
 
 export interface RankingToyCommentPage {

@@ -31,9 +31,17 @@ export type IconName =
   | "at"
   | "arrow-up-right"
   | "refresh"
-  | "download";
+  | "download"
+  | "grid"
+  | "edit"
+  | "star"
+  | "compass";
 
 const paths: Record<IconName, React.ReactNode> = {
+  grid: <><rect x="4" y="4" width="6" height="6" rx="1.5" /><rect x="14" y="4" width="6" height="6" rx="1.5" /><rect x="4" y="14" width="6" height="6" rx="1.5" /><rect x="14" y="14" width="6" height="6" rx="1.5" /></>,
+  edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></>,
+  star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
+  compass: <><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" /></>,
   trophy: <><path d="M8 4h8v4.5a4 4 0 0 1-8 0V4Z" /><path d="M8 6H5a2 2 0 0 0 2 3M16 6h3a2 2 0 0 1-2 3M12 13v4M9 20h6M10 17h4" /></>,
   home: <><path d="m4 11 8-7 8 7" /><path d="M6.5 10v9.5h11V10M10 19.5v-5h4v5" /></>,
   search: <><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></>,

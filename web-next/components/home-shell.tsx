@@ -168,7 +168,14 @@ export function HomeShell() {
       .includes(normalizedQuery));
   }, [hasMedia, posts, query]);
 
-  function chooseCommunity(community: Community) {
+  function chooseCommunity(community?: Community) {
+    if (!community) {
+      setActiveCommunityId("");
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.delete("community");
+      router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
+      return;
+    }
     setActiveCommunityId(community.id);
     const nextParams = new URLSearchParams(searchParams.toString());
     if (community.id === DEFAULT_HOME_COMMUNITY_ID) nextParams.delete("community");
@@ -214,7 +221,9 @@ export function HomeShell() {
           <HomeShortcuts />
         </div>
         <div className="home-grid">
-          <CommunityRail communities={communities} activeId={activeCommunityId} onSelect={(community) => { if (community) chooseCommunity(community); }} />
+          <div className="home-left-col">
+            <CommunityRail communities={communities} activeId={activeCommunityId} onSelect={chooseCommunity} />
+          </div>
           <section className="feed-column" aria-label={`${activeCommunity?.name || "首页"}帖子流`}>
             {communityError && <div className="data-note" role="status">{communityError}</div>}
             <FeedToolbar sort={sort} latestOrder={latestOrder} hasMedia={hasMedia} filterOpen={filterOpen} onSortChange={chooseSort} onLatestOrderChange={setLatestOrder} onFilterToggle={() => setFilterOpen((value) => !value)} onMediaChange={chooseMedia} canPublish={Boolean(user)} />
@@ -230,7 +239,9 @@ export function HomeShell() {
             )}
             {hasMore && <button type="button" className="load-more-button" onClick={loadMore} disabled={loadingMore}>{loadingMore ? "正在加载…" : "加载更多"}</button>}
           </section>
-          <DiscoveryRail posts={visiblePosts} user={user} onLogin={() => router.push(user ? "/" : "/login")} />
+          <div className="home-right-col">
+            <DiscoveryRail posts={visiblePosts} user={user} onLogin={() => router.push(user ? "/" : "/login")} />
+          </div>
         </div>
       </main>
       <button type="button" className="mobile-refresh" aria-label="刷新首页内容" onClick={refreshFeed}><Icon name="refresh" size={21} /></button>

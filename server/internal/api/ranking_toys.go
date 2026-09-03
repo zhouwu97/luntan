@@ -585,6 +585,34 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	if hasMore {
 		items = items[:limit]
 	}
+
+	var rootIDs []string
+	for _, itm := range items {
+		if count, ok := itm["reply_count"].(int); ok && count > 0 {
+			if id, ok := itm["id"].(string); ok && id != "" {
+				rootIDs = append(rootIDs, id)
+			}
+		}
+	}
+	if len(rootIDs) > 0 {
+		previews, err := s.loadRankingToyReplyPreviews(ctx, toyID, viewerID, rootIDs)
+		if err != nil {
+			return rankingToyCommentPage{}, err
+		}
+		for _, itm := range items {
+			id, _ := itm["id"].(string)
+			if p, ok := previews[id]; ok {
+				itm["reply_preview"] = p
+			} else {
+				itm["reply_preview"] = []map[string]any{}
+			}
+		}
+	} else {
+		for _, itm := range items {
+			itm["reply_preview"] = []map[string]any{}
+		}
+	}
+
 	var nextCursor any
 	if hasMore && len(items) > 0 {
 		encoded, err := encodeRankingToyCommentCursor(rankingToyCommentCursor{
@@ -596,6 +624,80 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 		nextCursor = encoded
 	}
 	return rankingToyCommentPage{Items: items, NextCursor: nextCursor, HasMore: hasMore}, nil
+}
+
+func (s *Server) loadRankingToyReplyPreviews(ctx context.Context, toyID, viewerID string, rootIDs []string) (map[string][]map[string]any, error) {
+	if len(rootIDs) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(rootIDs)+2)
+	args = append(args, toyID, viewerID)
+	placeholders := make([]string, len(rootIDs))
+	for i, id := range rootIDs {
+		args = append(args, id)
+		placeholders[i] = fmt.Sprintf("$%d", len(args))
+	}
+	query := `SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
+	                 COALESCE(up.level, 1), c.content, c.like_count,
+	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
+	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
+	                 aus.rating, ` + rankingToyCommentMediaSelect + `, ` + rankingToyCommentAvatarSelect + `
+	          FROM (
+	              SELECT c.*, ROW_NUMBER() OVER (PARTITION BY COALESCE(c.root_id, c.id) ORDER BY c.like_count DESC, c.created_at ASC, c.id ASC) AS rn
+	              FROM ranking_toy_comments c
+	              WHERE c.toy_id = $1 AND c.deleted_at IS NULL AND c.parent_id IS NOT NULL
+	                AND COALESCE(c.root_id, c.id) IN (` + strings.Join(placeholders, ", ") + `)
+	          ) c
+	          JOIN users u ON u.id = c.author_id
+	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
+	          LEFT JOIN media_assets am ON am.id = up.avatar_media_id
+	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
+	          WHERE c.rn <= 4
+	          ORDER BY c.root_id ASC, c.rn ASC`
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string][]map[string]any, len(rootIDs))
+	for rows.Next() {
+		var item rankingToyComment
+		var mediaRaw []byte
+		var avatarMediaID, avatarKey string
+		if err := rows.Scan(
+			&item.ID, &item.AuthorID, &item.Username, &item.Nickname, &item.Level,
+			&item.Content, &item.LikeCount, &item.ViewerHasLiked, &item.CreatedAt,
+			&item.RootID, &item.ParentID, &item.ReplyToUserID, &item.ReplyCount,
+			&item.AuthorRating,
+			&mediaRaw,
+			&avatarMediaID,
+			&avatarKey,
+		); err != nil {
+			return nil, err
+		}
+		scanRankingToyCommentAvatar(&item, avatarMediaID, avatarKey)
+		item.Media, err = parseRankingToyCommentMedia(mediaRaw)
+		if err != nil {
+			return nil, err
+		}
+		if item.ReplyToUserID.Valid && item.ReplyToUserID.String != "" {
+			item.ReplyToUser, err = loadUserSummary(ctx, s.db, item.ReplyToUserID.String)
+			if err != nil {
+				return nil, err
+			}
+		}
+		rootKey := ""
+		if item.RootID.Valid && item.RootID.String != "" {
+			rootKey = item.RootID.String
+		}
+		if rootKey != "" {
+			result[rootKey] = append(result[rootKey], item.response())
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Server) listRankingToyReplies(w http.ResponseWriter, r *http.Request, commentID string) {

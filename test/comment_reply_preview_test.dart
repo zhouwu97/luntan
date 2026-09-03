@@ -124,6 +124,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(tappedReply?.id, 'r1');
   });
+
+  testWidgets('CommentReplyPreview 按点赞数展示前4条二级回复，多余折叠，点击回复项触发 onReplyTap', (
+    tester,
+  ) async {
+    Comment? tappedReply;
+    final replies = List.generate(
+      6,
+      (i) => Comment(
+        id: 'reply-$i',
+        postId: 'p1',
+        authorId: 'u$i',
+        author: User(
+          id: 'u$i',
+          username: 'user_$i',
+          nickname: '用户$i',
+          level: 1,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        ),
+        likeCount: i * 10,
+        content: '回复内容_$i',
+        createdAt: DateTime.now().add(Duration(minutes: i)),
+        updatedAt: DateTime.now(),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CommentReplyPreview(
+            replies: replies,
+            totalReplyCount: 11,
+            onOpenThread: () {},
+            onReplyTap: (r) => tappedReply = r,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 应该只展示点赞数最高的 4 条（reply-5, reply-4, reply-3, reply-2）
+    expect(find.textContaining('用户5', findRichText: true), findsOneWidget);
+    expect(find.textContaining('用户4', findRichText: true), findsOneWidget);
+    expect(find.textContaining('用户3', findRichText: true), findsOneWidget);
+    expect(find.textContaining('用户2', findRichText: true), findsOneWidget);
+    expect(find.textContaining('用户1', findRichText: true), findsNothing);
+    expect(find.textContaining('用户0', findRichText: true), findsNothing);
+
+    // 折叠按钮展示全部总数
+    expect(find.text('查看全部 11 条回复 ›'), findsOneWidget);
+
+    // 点击某一条回复预览，触发 onReplyTap
+    final inkWellRect = tester.getRect(find.byType(InkWell).first);
+    await tester.tapAt(inkWellRect.centerRight - const Offset(10, 0));
+    await tester.pumpAndSettle();
+    expect(tappedReply?.id, 'reply-5');
+  });
 }
 
 

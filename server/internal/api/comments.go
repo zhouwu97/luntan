@@ -263,7 +263,7 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 	})
 }
 
-// loadCommentReplyPreviews 为每个楼层取前 3 条回复（按时间正序），
+// loadCommentReplyPreviews 为每个楼层取前 4 条高赞回复（点赞相同时按时间正序），
 // 同样应用观看者拉黑过滤。
 func (s *Server) loadCommentReplyPreviews(ctx context.Context, items []commentResponse, viewer auth.User, hasViewer bool) ([]commentResponse, error) {
 	if len(items) == 0 {
@@ -289,13 +289,13 @@ func (s *Server) loadCommentReplyPreviews(ctx context.Context, items []commentRe
 	query := fmt.Sprintf(`
 		SELECT %s, %s, %s
 		FROM (
-			SELECT c.*, NULL::bigint AS floor_no, ROW_NUMBER() OVER (PARTITION BY c.root_id ORDER BY c.created_at ASC, c.id ASC) AS rn
+			SELECT c.*, NULL::bigint AS floor_no, ROW_NUMBER() OVER (PARTITION BY c.root_id ORDER BY c.like_count DESC, c.created_at ASC, c.id ASC) AS rn
 			FROM comments c
 			WHERE c.root_id IN (%s) AND c.id <> c.root_id AND c.deleted_at IS NULL
 			  AND c.publication_status = 'published' AND c.moderation_status = 'normal'%s
 		) t
 		%s
-		WHERE t.rn <= 3
+		WHERE t.rn <= 4
 		ORDER BY t.root_id ASC, t.rn ASC`, commentFloorColumns, likedExpr, dislikedExpr, strings.Join(placeholders, ", "), blockSQL, commentFloorJoins)
 	rows, err := s.db.QueryContext(ctx, query, replyArgs...)
 	if err != nil {

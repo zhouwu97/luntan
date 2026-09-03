@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,12 +41,14 @@ class RankingCommentThreadSheet extends StatefulWidget {
     this.canManageRanking = false,
     this.onRequireAuth,
     this.blockedMessage = '当前身份暂不能评论，请登录邮箱账号后重试',
+    this.focusReplyId,
     this.onAuthorTap,
     this.onChanged,
   });
 
   final RankingToyComment rootComment;
   final RankingRepository repository;
+  final String? focusReplyId;
   final Future<RankingToyComment> Function(
     RankingToyComment target,
     String content,
@@ -81,6 +85,9 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   bool sending = false;
   bool hasMore = true;
   _ReplyLoadState loadState = _ReplyLoadState.loading;
+  bool _hasFocusedTarget = false;
+  String? highlightedReplyId;
+  Timer? _highlightTimer;
 
   @override
   void initState() {
@@ -91,6 +98,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -130,6 +138,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
             ? _ReplyLoadState.loadedEmpty
             : _ReplyLoadState.loaded;
       });
+      _checkAndFocusTarget();
     } catch (error) {
       if (kDebugMode) {
         debugPrint(
@@ -166,6 +175,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         loadingMore = false;
         loadMoreError = null;
       });
+      _checkAndFocusTarget();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -173,6 +183,34 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         loadMoreError = '加载更多失败，点击重试';
       });
     }
+  }
+
+  final _replyKeys = <String, GlobalKey>{};
+  GlobalKey _getKey(String id) => _replyKeys.putIfAbsent(id, () => GlobalKey());
+
+  void _checkAndFocusTarget() {
+    if (_hasFocusedTarget || widget.focusReplyId == null) return;
+    final index = replies.indexWhere((r) => r.id == widget.focusReplyId);
+    if (index == -1) return;
+
+    _hasFocusedTarget = true;
+    setState(() => highlightedReplyId = widget.focusReplyId);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _getKey(widget.focusReplyId!).currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          duration: AppMotion.normal,
+          curve: AppMotion.standard,
+          alignment: 0.3,
+        );
+      }
+      _highlightTimer?.cancel();
+      _highlightTimer = Timer(AppMotion.highlightFade, () {
+        if (mounted) setState(() => highlightedReplyId = null);
+      });
+    });
   }
 
   Future<void> _sendReply() async {
@@ -557,10 +595,17 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
     final name = _name(reply);
     final replyTo = _replyToName(reply);
     final isLiked = reply.isLiked;
+    final isHighlighted = highlightedReplyId == reply.id;
 
-    return Container(
-      key: GlobalObjectKey('ranking-reply:${reply.id}'),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      curve: AppMotion.standard,
+      key: _getKey(reply.id),
+      decoration: BoxDecoration(
+        color: isHighlighted ? const Color(0xFFEDF6FF) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

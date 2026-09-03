@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -812,6 +813,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               onMore: () => _showCommentMenu(comment),
                               onReplyMore: (reply) => _showCommentMenu(reply),
                               onLongPress: () => _showCommentMenu(comment),
+                              onReplyTap: (reply) =>
+                                  _openReplyThread(comment, focusReplyId: reply.id),
                               onViewAllReplies: () =>
                                   _openReplyThread(comment),
                             );
@@ -978,153 +981,169 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         post.viewerState.canDelete || canEdit || widget.canModerate;
 
     // 在 BottomSheet Route 创建前取得真实系统导航栏高度
-    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final view = View.maybeOf(context);
+    final bottomInset = view != null
+        ? MediaQueryData.fromView(view).viewPadding.bottom
+        : MediaQuery.viewPaddingOf(context).bottom;
 
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       backgroundColor: Colors.white,
       useSafeArea: true,
-      builder: (sheetContext) => Padding(
-        // 底部必须自己处理
-        padding: EdgeInsets.only(bottom: bottomInset + 8),
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: Icon(
-                post.isLiked
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-                color: post.isLiked ? AppTheme.pink : AppTheme.textSecondary,
-              ),
-              title: Text(post.isLiked ? '取消点赞' : '点赞帖子'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _runInteraction(() => _toggleLike(post));
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                post.isBookmarked
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-                color: post.isBookmarked
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-              ),
-              title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _runInteraction(() => _toggleBookmark(post));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.share_outlined),
-              title: const Text('分享帖子'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                final shareUrl = AppLinks.post(post.id);
-                try {
-                  await Share.share(shareUrl, subject: '分享帖子');
-                } catch (_) {
-                  await Clipboard.setData(ClipboardData(text: shareUrl));
-                  widget.onFeedback('系统分享不可用，帖子链接已复制');
-                }
-              },
-            ),
-            if (widget.platformRepository != null && widget.canModerate)
-              ListTile(
-                leading: Icon(
-                  post.isRecommended
-                      ? Icons.remove_circle_outline
-                      : Icons.push_pin_outlined,
-                  color: AppTheme.primary,
-                ),
-                title: Text(post.isRecommended ? '移出首页推荐' : '加入首页推荐'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  try {
-                    if (post.isRecommended) {
-                      await widget.platformRepository!.removeHomeRecommendation(
-                        post.id,
-                      );
-                    } else {
-                      await widget.platformRepository!.setHomeRecommendation(
-                        postId: post.id,
-                      );
-                    }
-                    if (!mounted) return;
-                    widget.onFeedback(
-                      post.isRecommended ? '已移出首页推荐' : '已加入首页推荐',
-                    );
-                    await widget.controller.load();
-                  } catch (error) {
-                    if (mounted) {
-                      widget.onFeedback(
-                        userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
-                      );
-                    }
-                  }
-                },
-              ),
-            if (widget.canModerate &&
-                widget.platformRepository != null &&
-                post.images.isNotEmpty)
-              ListTile(
-                leading: const Icon(Icons.blur_on_rounded),
-                title: const Text('图片打码'),
-                subtitle: const Text('对帖子图片进行马赛克或模糊处理'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final mediaQuery = MediaQuery.of(sheetContext);
 
-                  final changed = await Navigator.of(context).push<bool>(
-                    MaterialPageRoute(
-                      builder: (_) => ImageModerationScreen(
-                        post: post,
-                        platformRepository: widget.platformRepository,
-                        canRestoreCensored: widget.canRestoreCensored,
-                      ),
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: mediaQuery.size.height * 0.85,
+          ),
+          child: SafeArea(
+            top: false,
+            minimum: EdgeInsets.only(bottom: math.max(bottomInset, 8)),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      post.isLiked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: post.isLiked ? AppTheme.pink : AppTheme.textSecondary,
                     ),
-                  );
+                    title: Text(post.isLiked ? '取消点赞' : '点赞帖子'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _runInteraction(() => _toggleLike(post));
+                    },
+                  ),
+                  ListTile(
+                    leading: Icon(
+                      post.isBookmarked
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_border_rounded,
+                      color: post.isBookmarked
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                    ),
+                    title: Text(post.isBookmarked ? '取消收藏' : '收藏帖子'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _runInteraction(() => _toggleBookmark(post));
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.share_outlined),
+                    title: const Text('分享帖子'),
+                    onTap: () async {
+                      Navigator.pop(sheetContext);
+                      final shareUrl = AppLinks.post(post.id);
+                      try {
+                        await Share.share(shareUrl, subject: '分享帖子');
+                      } catch (_) {
+                        await Clipboard.setData(ClipboardData(text: shareUrl));
+                        widget.onFeedback('系统分享不可用，帖子链接已复制');
+                      }
+                    },
+                  ),
+                  if (widget.platformRepository != null && widget.canModerate)
+                    ListTile(
+                      leading: Icon(
+                        post.isRecommended
+                            ? Icons.remove_circle_outline
+                            : Icons.push_pin_outlined,
+                        color: AppTheme.primary,
+                      ),
+                      title: Text(post.isRecommended ? '移出首页推荐' : '加入首页推荐'),
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
+                        try {
+                          if (post.isRecommended) {
+                            await widget.platformRepository!.removeHomeRecommendation(
+                              post.id,
+                            );
+                          } else {
+                            await widget.platformRepository!.setHomeRecommendation(
+                              postId: post.id,
+                            );
+                          }
+                          if (!mounted) return;
+                          widget.onFeedback(
+                            post.isRecommended ? '已移出首页推荐' : '已加入首页推荐',
+                          );
+                          await widget.controller.load();
+                        } catch (error) {
+                          if (mounted) {
+                            widget.onFeedback(
+                              userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  if (widget.canModerate &&
+                      widget.platformRepository != null &&
+                      post.images.isNotEmpty)
+                    ListTile(
+                      leading: const Icon(Icons.blur_on_rounded),
+                      title: const Text('图片打码'),
+                      subtitle: const Text('对帖子图片进行马赛克或模糊处理'),
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
 
-                  if (changed == true && mounted) {
-                    await widget.controller.load();
-                  }
-                },
+                        final changed = await Navigator.of(context).push<bool>(
+                          MaterialPageRoute(
+                            builder: (_) => ImageModerationScreen(
+                              post: post,
+                              platformRepository: widget.platformRepository,
+                              canRestoreCensored: widget.canRestoreCensored,
+                            ),
+                          ),
+                        );
+
+                        if (changed == true && mounted) {
+                          await widget.controller.load();
+                        }
+                      },
+                    ),
+                  if (widget.onReport != null)
+                    ListTile(
+                      leading: const Icon(
+                        Icons.flag_outlined,
+                        color: AppTheme.orange,
+                      ),
+                      title: const Text('举报帖子'),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _report('post', post.id);
+                      },
+                    ),
+                  if (canEdit)
+                    ListTile(
+                      leading: const Icon(Icons.edit_outlined),
+                      title: const Text('编辑帖子'),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _editPost(post);
+                      },
+                    ),
+                  if (canDelete)
+                    ListTile(
+                      leading: const Icon(Icons.delete_outline, color: AppTheme.pink),
+                      title: const Text('删除帖子'),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _deletePost(post);
+                      },
+                    ),
+                ],
               ),
-            if (widget.onReport != null)
-              ListTile(
-                leading: const Icon(
-                  Icons.flag_outlined,
-                  color: AppTheme.orange,
-                ),
-                title: const Text('举报帖子'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _report('post', post.id);
-                },
-              ),
-            if (canEdit)
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('编辑帖子'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _editPost(post);
-                },
-              ),
-            if (canDelete)
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: AppTheme.pink),
-                title: const Text('删除帖子'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _deletePost(post);
-                },
-              ),
-          ],
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 

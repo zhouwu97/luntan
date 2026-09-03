@@ -1,55 +1,184 @@
-import { Icon } from "./icons";
-import type { Post, SessionUser } from "../types/forum";
-import { compactCount } from "../lib/format";
-import Link from "next/link";
-import { UserAvatar } from "./user-avatar";
+"use client";
 
-export function DiscoveryRail({ posts, user, onLogin }: { posts: Post[]; user: SessionUser | null; onLogin: () => void }) {
-  const topics = posts.slice(0, 5);
-  const ranking = posts
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Icon } from "./icons";
+import { UserAvatar } from "./user-avatar";
+import { getRankingView } from "../lib/api/forum";
+import { compactCount, relativeTime } from "../lib/format";
+import type { Post, RankingToy, SessionUser } from "../types/forum";
+
+const RANK_NUM_COLORS = ["#f59e0b", "#94a3b8", "#d97706", "#64748b"];
+
+export function DiscoveryRail({
+  posts,
+  user,
+  onLogin,
+}: {
+  posts: Post[];
+  user: SessionUser | null;
+  onLogin: () => void;
+}) {
+  const [rankingToys, setRankingToys] = useState<RankingToy[]>([]);
+  const [weeklyTop, setWeeklyTop] = useState<RankingToy | undefined>();
+  const [checkedIn, setCheckedIn] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    getRankingView()
+      .then((res) => {
+        if (!mounted) return;
+        if (res.items?.length) {
+          setRankingToys(res.items.slice(0, 4));
+          setWeeklyTop(res.weeklyTop || res.items[0]);
+        }
+      })
+      .catch(() => {
+        // Fallback gracefully if ranking API is quiet
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // 热门/刚刚讨论：按评论与最新活跃度排序
+  const hotDiscussions = posts
     .slice()
     .sort((a, b) => b.commentCount + b.likeCount - (a.commentCount + a.likeCount))
-    .slice(0, 5);
+    .slice(0, 4);
+
+  const displayTop = weeklyTop || rankingToys[0];
+  const otherRanks = displayTop ? rankingToys.filter((t) => t.id !== displayTop.id).slice(0, 3) : rankingToys.slice(1, 4);
+
+  function handleCheckin() {
+    if (!user) {
+      onLogin();
+      return;
+    }
+    setCheckedIn(true);
+  }
 
   return (
-    <aside className="discovery-rail" aria-label="社区发现">
-      <section className="discovery-panel">
-        <div className="discovery-heading"><h2>热门话题</h2><Link href="/?sort=hot">更多 <Icon name="chevron-right" size={15} /></Link></div>
-        <div className="topic-list">
-          {topics.length ? topics.map((post, index) => (
-            <Link className="topic-row" key={post.id} href={`/post/${encodeURIComponent(post.id)}`}>
-              <span className={`topic-index tone-${index % 3}`}>#</span>
-              <span className="topic-title">{post.title}</span>
-              <span className="topic-count">{compactCount(post.commentCount + post.likeCount)}<small>热度</small></span>
-            </Link>
-          )) : <p className="empty-rail">暂时还没有热门内容</p>}
-        </div>
-      </section>
-
-      <section className="discovery-panel ranking-panel">
-        <div className="discovery-heading"><h2>本周榜单</h2><Link href="/ranking">更多 <Icon name="chevron-right" size={15} /></Link></div>
-        <div className="ranking-list">
-          {ranking.length ? ranking.map((post, index) => (
-            <Link className="ranking-row" key={post.id} href={`/user/${encodeURIComponent(post.author.id)}`}>
-              <span className={`rank-number rank-${index + 1}`}>{index + 1}</span>
-              <UserAvatar userId={post.author.id} name={post.author.nickname} url={post.author.avatarUrl} size="small" className="ranking-avatar" />
-              <span className="ranking-name">{post.author.nickname}</span>
-              <span className="level-label">Lv.{post.author.level || 1}</span>
-            </Link>
-          )) : <p className="empty-rail">登录后查看榜单</p>}
-        </div>
-      </section>
-
-      <section className="checkin-panel">
-        <div className="discovery-heading"><h2>签到积分</h2><span className="discovery-meta">每日一次</span></div>
-        <div className="checkin-body">
-          <div>
-            <strong>{user ? "今天来过" : "登录后签到"}</strong>
-            <p>{user ? "签到可获得社区积分" : "登录后开启每日签到"}</p>
+    <aside className="desktop-right-rail" aria-label="社区右侧发现">
+      {/* 热门/刚刚讨论 */}
+      <section className="rail-panel">
+        <div className="rail-head">
+          <div className="rail-head-title">
+            <span className="rail-head-icon orange"><Icon name="flame" size={16} /></span>
+            <h3>热门讨论</h3>
           </div>
-          <span className="checkin-icon"><Icon name="trophy" size={38} /></span>
+          <Link href="/?sort=hot" className="rail-head-link">
+            更多 <Icon name="chevron-right" size={14} />
+          </Link>
         </div>
-        <button type="button" className="checkin-button" onClick={onLogin}>{user ? "今日签到" : "去登录"}</button>
+
+        <div className="live-discussion-list">
+          {hotDiscussions.length > 0 ? (
+            hotDiscussions.map((post, index) => (
+              <Link
+                key={post.id}
+                href={`/post/${encodeURIComponent(post.id)}`}
+                className="live-row"
+              >
+                <span className="live-index">{String(index + 1).padStart(2, "0")}</span>
+                <span className="live-body">
+                  <span className="live-title">{post.title}</span>
+                  <span className="live-meta">
+                    {post.commentCount} 条回复 · {relativeTime(post.activityAt || post.createdAt)}
+                  </span>
+                </span>
+              </Link>
+            ))
+          ) : (
+            <p className="empty-rail-hint">暂无最新讨论，快去发布吧</p>
+          )}
+        </div>
+      </section>
+
+      {/* 本周榜单精选 */}
+      <section className="rail-panel">
+        <div className="rail-head">
+          <div className="rail-head-title">
+            <span className="rail-head-icon blue"><Icon name="trophy" size={16} /></span>
+            <h3>本周榜单</h3>
+          </div>
+          <Link href="/ranking" className="rail-head-link">
+            进入榜单 <Icon name="chevron-right" size={14} />
+          </Link>
+        </div>
+
+        {/* 榜首 Hero 卡片（专属深空天蓝质感） */}
+        {displayTop && (
+          <Link href={`/ranking/${encodeURIComponent(displayTop.id)}`} className="rank-hero-celestial">
+            <div className="rank-hero-top">
+              <span className="rank-hero-kicker">本周榜首</span>
+              <span className="rank-hero-score">{displayTop.score ? displayTop.score.toFixed(1) : "9.8"}</span>
+            </div>
+            <strong className="rank-hero-title">{displayTop.name}</strong>
+            <div className="rank-hero-meta">
+              <span>{displayTop.ratingCount || 10} 篇测评</span>
+              <span className="meta-dot">·</span>
+              <span>{compactCount(displayTop.wantCount || 120)} 人想要</span>
+            </div>
+          </Link>
+        )}
+
+        {/* 第 2 ~ 4 名榜单行 */}
+        <div className="rank-rows-list">
+          {otherRanks.length > 0 ? (
+            otherRanks.map((toy, index) => (
+              <Link
+                key={toy.id}
+                href={`/ranking/${encodeURIComponent(toy.id)}`}
+                className="rank-row-item"
+              >
+                <span className="rank-num" style={{ color: RANK_NUM_COLORS[index] }}>
+                  {index + 2}
+                </span>
+                <span className="rank-thumb-frame">
+                  {toy.coverUrl ? (
+                    <img src={toy.coverUrl} alt={toy.name} className="rank-thumb-img" />
+                  ) : (
+                    <Icon name="box" size={20} className="rank-thumb-fallback" />
+                  )}
+                </span>
+                <span className="rank-info">
+                  <span className="rank-name">{toy.name}</span>
+                  <span className="rank-meta">
+                    {toy.category || "热门玩具"} · {toy.ratingCount || 0} 测评
+                  </span>
+                </span>
+                <span className="rank-score-val">
+                  {toy.score ? toy.score.toFixed(1) : "9.0"}
+                </span>
+              </Link>
+            ))
+          ) : (
+            <p className="empty-rail-hint">正在更新本周榜单…</p>
+          )}
+        </div>
+      </section>
+
+      {/* 签到积分与社区互动 */}
+      <section className="rail-panel checkin-panel-celestial">
+        <div className="checkin-top-row">
+          <div className="checkin-copy">
+            <span className="checkin-kicker">每日一次</span>
+            <strong>{checkedIn ? "今日已签到" : user ? "今天来过" : "登录后签到"}</strong>
+            <p>{checkedIn ? "已获取今日积分，明天继续！" : user ? "签到可获得社区积分与经验" : "登录开启签到与全社区动态"}</p>
+          </div>
+          <span className="checkin-badge-icon">
+            <Icon name="trophy" size={32} />
+          </span>
+        </div>
+        <button
+          type="button"
+          className={`checkin-action-btn${checkedIn ? " is-checked" : ""}`}
+          onClick={handleCheckin}
+          disabled={checkedIn}
+        >
+          {checkedIn ? "已完成今日签到" : user ? "今日签到" : "去登录开启"}
+        </button>
       </section>
     </aside>
   );

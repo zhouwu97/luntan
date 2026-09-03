@@ -217,6 +217,9 @@ function parseRankingToyComment(raw: unknown): RankingToyComment {
     rating: item.author_rating == null ? undefined : asNumber(item.author_rating),
     media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
     viewerState: { hasLiked: asBoolean(viewer.has_liked) },
+    replyPreview: Array.isArray(item.reply_preview)
+      ? item.reply_preview.map(parseRankingToyComment)
+      : [],
   };
 }
 

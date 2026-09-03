@@ -31,6 +31,7 @@ class CommentItem extends StatefulWidget {
     this.onMore,
     this.onAuthorTap,
     this.onReplyTo,
+    this.onReplyTap,
     this.onViewAllReplies,
     this.onReplyMore,
     this.onLongPress,
@@ -47,6 +48,7 @@ class CommentItem extends StatefulWidget {
   final VoidCallback? onMore;
   final ValueChanged<String>? onAuthorTap;
   final ValueChanged<Comment>? onReplyTo;
+  final ValueChanged<Comment>? onReplyTap;
   final VoidCallback? onViewAllReplies;
   final ValueChanged<Comment>? onReplyMore;
   final VoidCallback? onLongPress;
@@ -363,6 +365,7 @@ class _CommentItemState extends State<CommentItem>
               totalReplyCount: comment.replyCount,
               onOpenThread: widget.onViewAllReplies ?? () {},
               onReplyTo: widget.onReplyTo,
+              onReplyTap: widget.onReplyTap,
               onAuthorTap: widget.onAuthorTap,
               onMore: widget.onReplyMore,
             ),

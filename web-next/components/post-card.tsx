@@ -15,6 +15,12 @@ function stop(event: MouseEvent) {
   event.stopPropagation();
 }
 
+const communityToneMap: Record<string, string> = {
+  酱紫社区: "lilac",
+  大型拆箱: "orange",
+  杂鱼日常: "mint",
+};
+
 function MediaGrid({ post }: { post: Post }) {
   if (!post.media.length) return null;
   const media = post.media.slice(0, 4);
@@ -37,6 +43,8 @@ export function PostCard({ post, user, contextMeta }: { post: Post; user: Sessio
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [bookmarkCount, setBookmarkCount] = useState(post.bookmarkCount);
   const [busy, setBusy] = useState(false);
+
+  const tone = communityToneMap[post.community.name] || "blue";
 
   async function handleLike(event: MouseEvent<HTMLButtonElement>) {
     stop(event);
@@ -80,32 +88,87 @@ export function PostCard({ post, user, contextMeta }: { post: Post; user: Sessio
     }
   }
 
+  const postNumber = post.id.replace(/\D/g, "").slice(-4) || post.id.slice(-4);
+
   return (
     <article className="post-card">
       <div className="post-card-head">
-        <UserAvatar userId={post.author.id} name={post.author.nickname} url={post.author.avatarUrl} />
+        <UserAvatar userId={post.author.id} name={post.author.nickname} url={post.author.avatarUrl} className="post-author-avatar" />
         <div className="post-author-copy">
-          <div className="post-author-name"><strong>{post.author.nickname}</strong><span className="level-label">Lv.{post.author.level || 1}</span></div>
-          <div className="post-meta">{post.community.name} <span>·</span> {relativeTime(post.activityAt || post.createdAt)}</div>
+          <div className="post-author-name">
+            <strong>{post.author.nickname}</strong>
+            <span className="level-label">Lv.{post.author.level || 1}</span>
+            <span className={`post-community-pill tone-${tone}`}>{post.community.name}</span>
+          </div>
+          <div className="post-meta">
+            <span>{relativeTime(post.activityAt || post.createdAt)}</span>
+            {postNumber && (
+              <>
+                <span className="meta-separator">·</span>
+                <span className="post-floor">#{postNumber}</span>
+              </>
+            )}
+          </div>
         </div>
-        <button type="button" className="more-button" aria-label="更多操作" onClick={stop}><Icon name="more" size={19} /></button>
+        <button type="button" className="more-button" aria-label="更多操作" onClick={stop}>
+          <Icon name="more" size={18} />
+        </button>
       </div>
-      {post.isFeatured && <div className="post-badges"><span className="post-badge featured">精华</span></div>}
+
+      {post.isFeatured && (
+        <div className="post-badges">
+          <span className="post-badge featured">精华</span>
+        </div>
+      )}
+
       <Link href={`/post/${encodeURIComponent(post.id)}`} className="post-card-link">
-        {contextMeta && <div className="post-context-meta"><Icon name="message" size={13} />{contextMeta}</div>}
-        <h3>{post.title}</h3>
+        {contextMeta && (
+          <div className="post-context-meta">
+            <Icon name="message" size={13} />
+            <span>{contextMeta}</span>
+          </div>
+        )}
+        <h3 className="post-title">{post.title}</h3>
         <p className="post-excerpt">{post.content}</p>
         <MediaGrid post={post} />
       </Link>
+
       <div className="post-actions">
         <div className="post-action-group">
-          <Link href={`/post/${encodeURIComponent(post.id)}#comments`} className="post-action"><Icon name="message" size={18} /> <span>{compactCount(post.commentCount)}</span></Link>
-          <button type="button" className={`post-action${liked ? " selected-like" : ""}`} onClick={handleLike} aria-label={liked ? "取消点赞" : "点赞"}><Icon name="heart" size={18} /> <span>{compactCount(likeCount)}</span></button>
-          <span className="post-action post-views"><Icon name="eye" size={18} /> <span>{compactCount(post.viewCount)}</span></span>
+          <Link href={`/post/${encodeURIComponent(post.id)}#comments`} className="post-action">
+            <Icon name="message" size={17} />
+            <span>{compactCount(post.commentCount)}</span>
+          </Link>
+          <button
+            type="button"
+            className={`post-action like-button${liked ? " selected-like" : ""}`}
+            onClick={handleLike}
+            aria-label={liked ? "取消点赞" : "点赞"}
+          >
+            <Icon name="heart" size={17} />
+            <span>{compactCount(likeCount)}</span>
+          </button>
+          <span className="post-action post-views" title={`浏览量 ${post.viewCount}`}>
+            <Icon name="eye" size={17} />
+            <span>{compactCount(post.viewCount)}</span>
+          </span>
         </div>
-        <button type="button" className={`post-action bookmark-action${bookmarked ? " selected-bookmark" : ""}`} onClick={handleBookmark} aria-label={bookmarked ? "取消收藏" : "收藏"}>
-          <Icon name="bookmark" size={18} /> <span>{bookmarkCount > 0 ? "收藏" : ""}</span>
-        </button>
+
+        <div className="post-actions-right">
+          <button
+            type="button"
+            className={`post-action bookmark-action${bookmarked ? " selected-bookmark" : ""}`}
+            onClick={handleBookmark}
+            aria-label={bookmarked ? "取消收藏" : "收藏"}
+          >
+            <Icon name="bookmark" size={17} />
+            <span>{bookmarkCount > 0 ? compactCount(bookmarkCount) : ""}</span>
+          </button>
+          <Link href={`/post/${encodeURIComponent(post.id)}`} className="post-view-discussion">
+            <span>查看讨论</span>
+            <Icon name="chevron-right" size={14} />
+          </Link>
+        </div>
       </div>
     </article>
   );

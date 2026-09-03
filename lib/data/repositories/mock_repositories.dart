@@ -635,12 +635,18 @@ class MockCommentRepository
       if (authorId != null && comment.authorId != authorId) continue;
       floorNo += 1;
       final replies = children[comment.id] ?? const <Comment>[];
+      final sortedReplies = List<Comment>.from(replies)
+        ..sort((a, b) {
+          final cmp = b.likeCount.compareTo(a.likeCount);
+          if (cmp != 0) return cmp;
+          return a.createdAt.compareTo(b.createdAt);
+        });
       floors.add(
         _copyComment(
           comment,
           floor: floorNo,
           replyCount: replies.length,
-          replyPreview: replies.take(3).toList(),
+          replyPreview: sortedReplies.take(4).toList(),
         ),
       );
     }

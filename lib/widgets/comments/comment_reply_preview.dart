@@ -14,6 +14,7 @@ class CommentReplyPreview extends StatelessWidget {
     required this.totalReplyCount,
     required this.onOpenThread,
     this.onReplyTo,
+    this.onReplyTap,
     this.onAuthorTap,
     this.onMore,
   });
@@ -22,6 +23,7 @@ class CommentReplyPreview extends StatelessWidget {
   final int totalReplyCount;
   final VoidCallback onOpenThread;
   final ValueChanged<Comment>? onReplyTo;
+  final ValueChanged<Comment>? onReplyTap;
   final ValueChanged<String>? onAuthorTap;
   final ValueChanged<Comment>? onMore;
 
@@ -31,7 +33,13 @@ class CommentReplyPreview extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final previewItems = replies.take(3).toList();
+    final sortedReplies = List<Comment>.from(replies)
+      ..sort((a, b) {
+        final cmp = b.likeCount.compareTo(a.likeCount);
+        if (cmp != 0) return cmp;
+        return a.createdAt.compareTo(b.createdAt);
+      });
+    final previewItems = sortedReplies.take(4).toList();
     final hasPreview = previewItems.isNotEmpty;
     final copyText = hasPreview
         ? '查看全部 $totalReplyCount 条回复 ›'
@@ -70,6 +78,7 @@ class CommentReplyPreview extends StatelessWidget {
                               reply: reply,
                               onOpenThread: onOpenThread,
                               onReplyTo: onReplyTo,
+                              onReplyTap: onReplyTap,
                               onAuthorTap: onAuthorTap,
                               onMore: onMore,
                             ),
@@ -138,6 +147,7 @@ class _ReplyPreviewLine extends StatefulWidget {
     required this.reply,
     required this.onOpenThread,
     this.onReplyTo,
+    this.onReplyTap,
     this.onAuthorTap,
     this.onMore,
   });
@@ -145,6 +155,7 @@ class _ReplyPreviewLine extends StatefulWidget {
   final Comment reply;
   final VoidCallback onOpenThread;
   final ValueChanged<Comment>? onReplyTo;
+  final ValueChanged<Comment>? onReplyTap;
   final ValueChanged<String>? onAuthorTap;
   final ValueChanged<Comment>? onMore;
 
@@ -241,7 +252,9 @@ class _ReplyPreviewLineState extends State<_ReplyPreviewLine> {
         Expanded(
           child: InkWell(
             onTap: () {
-              if (widget.onReplyTo != null) {
+              if (widget.onReplyTap != null) {
+                widget.onReplyTap!(reply);
+              } else if (widget.onReplyTo != null) {
                 widget.onReplyTo!(reply);
               } else {
                 widget.onOpenThread();

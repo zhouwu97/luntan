@@ -132,6 +132,72 @@ void main() {
     expect(find.byType(ImageModerationScreen), findsOneWidget);
   });
 
+  testWidgets('PostDetailScreen 管理员且帖子有图时，底部菜单可滚动展示删除帖子并支持点击删除', (tester) async {
+    final postRepo = _FakePostWithImageRepository();
+    final commentRepo = MockCommentRepository();
+    final interactionRepo = MockInteractionRepository();
+    final platformRepo = MockPlatformRepository();
+
+    final postDetailController = PostDetailController(
+      repository: postRepo,
+      postId: 'p-with-img',
+    );
+    final commentsController = CommentsController(
+      repository: commentRepo,
+      postId: 'p-with-img',
+    );
+    final interactionController = InteractionController(
+      repository: interactionRepo,
+    );
+
+    bool deleteInvoked = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostDetailScreen(
+          controller: postDetailController,
+          commentsController: commentsController,
+          interactionController: interactionController,
+          platformRepository: platformRepo,
+          canModerate: true,
+          onToggleLike: (_) async {},
+          onToggleBookmark: (_) async {},
+          onFeedback: (_) {},
+          onDeletePost: (_) async {
+            deleteInvoked = true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 打开右上角更多菜单
+    final appBarMoreButton = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.byIcon(Icons.more_horiz_rounded),
+    );
+    await tester.tap(appBarMoreButton);
+    await tester.pumpAndSettle();
+
+    // 确认菜单同时包含图片打码与删除帖子选项
+    expect(find.text('图片打码'), findsOneWidget);
+    final deletePostFinder = find.text('删除帖子');
+    expect(deletePostFinder, findsOneWidget);
+
+    // 确保可滚动到该元素并点击
+    await tester.ensureVisible(deletePostFinder);
+    await tester.pumpAndSettle();
+    await tester.tap(deletePostFinder);
+    await tester.pumpAndSettle();
+
+    // 弹出删除确认框
+    expect(find.text('删除帖子？'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await tester.pumpAndSettle();
+
+    expect(deleteInvoked, isTrue);
+  });
+
   testWidgets('PostDetailScreen 无管理员权限时不展示图片打码入口', (tester) async {
     final postRepo = _FakePostWithImageRepository();
     final commentRepo = MockCommentRepository();

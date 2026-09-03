@@ -61,6 +61,10 @@ server/*.exe
 *.tar.gz
 .release-*/
 .tmp-release-*/
+apk-publish-*/
+deploy-release-*/
+next-release-*/
+release-wrapper-*/
 server/server/.tmp-release-*/
 /server/luntan-api
 /server/luntan-worker

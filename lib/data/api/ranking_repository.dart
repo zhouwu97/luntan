@@ -113,6 +113,7 @@ class RankingToyComment {
     this.replyCount = 0,
     this.media = const [],
     this.avatarUrl,
+    this.replyPreview = const [],
   });
 
   final String id;
@@ -132,6 +133,7 @@ class RankingToyComment {
   int replyCount;
   final List<RankingToyCommentMedia> media;
   final String? avatarUrl;
+  final List<RankingToyComment> replyPreview;
 
   RankingToyComment copyWith({
     String? id,
@@ -151,6 +153,7 @@ class RankingToyComment {
     int? replyCount,
     List<RankingToyCommentMedia>? media,
     String? avatarUrl,
+    List<RankingToyComment>? replyPreview,
   }) {
     return RankingToyComment(
       id: id ?? this.id,
@@ -170,6 +173,7 @@ class RankingToyComment {
       replyCount: replyCount ?? this.replyCount,
       media: media ?? this.media,
       avatarUrl: avatarUrl ?? this.avatarUrl,
+      replyPreview: replyPreview ?? this.replyPreview,
     );
   }
 }
@@ -497,6 +501,13 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
             .where((item) => item.url.isNotEmpty)
             .toList()
       : const <RankingToyCommentMedia>[];
+  final rawReplies = json['reply_preview'];
+  final replyPreview = rawReplies is List
+      ? rawReplies
+            .whereType<Map>()
+            .map((item) => _commentFromJson(Map<String, dynamic>.from(item)))
+            .toList()
+      : const <RankingToyComment>[];
   return RankingToyComment(
     id: _string(json['id']),
     authorId: _string(author['id']),
@@ -519,6 +530,7 @@ RankingToyComment _commentFromJson(Map<String, dynamic> json) {
     replyCount: _int(json['reply_count']),
     media: media,
     avatarUrl: _nullableString(author['avatar_url']),
+    replyPreview: replyPreview,
   );
 }
 

@@ -149,4 +149,52 @@ void main() {
     expect(find.text('昵称_u2'), findsNothing);
     expect(find.text('0 条回复'), findsOneWidget);
   });
+
+  testWidgets('传入 focusReplyId 时，目标回复在打开弹层后高光展示', (tester) async {
+    final root = _createComment(id: 'root-1', authorId: 'u1', replyCount: 2);
+    final reply1 = _createComment(id: 'r-1', authorId: 'u2', content: '第一条回复', parentId: 'root-1');
+    final reply2 = _createComment(id: 'r-2', authorId: 'u3', content: '第二条回复', parentId: 'root-1');
+    final repo = _MockRankingRepository(replies: [reply1, reply2]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RankingCommentThreadSheet(
+            rootComment: root,
+            repository: repo,
+            focusReplyId: 'r-2',
+            onReply: (target, content) async => reply1,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    // 验证高光容器样式（AnimatedContainer 带有 0xFFEDF6FF 背景）
+    final containerFinder = find.ancestor(
+      of: find.text('第二条回复'),
+      matching: find.byType(AnimatedContainer),
+    );
+    expect(containerFinder, findsOneWidget);
+    final animatedContainer = tester.widget<AnimatedContainer>(containerFinder);
+    final decoration = animatedContainer.decoration as BoxDecoration?;
+    expect(decoration?.color, const Color(0xFFEDF6FF));
+
+    // 非高光项背景为透明
+    final normalFinder = find.ancestor(
+      of: find.text('第一条回复'),
+      matching: find.byType(AnimatedContainer),
+    );
+    final normalContainer = tester.widget<AnimatedContainer>(normalFinder);
+    final normalDecoration = normalContainer.decoration as BoxDecoration?;
+    expect(normalDecoration?.color, Colors.transparent);
+
+    // 1600ms 后高光淡出，恢复透明
+    await tester.pump(const Duration(milliseconds: 1600));
+    final fadedContainer = tester.widget<AnimatedContainer>(containerFinder);
+    final fadedDecoration = fadedContainer.decoration as BoxDecoration?;
+    expect(fadedDecoration?.color, Colors.transparent);
+  });
 }

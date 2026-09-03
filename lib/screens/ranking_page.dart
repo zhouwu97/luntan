@@ -2154,7 +2154,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
-  Future<void> _openRankingThread(RankingToyComment root) async {
+  Future<void> _openRankingThread(RankingToyComment root, {String? focusReplyId}) async {
     final repository = widget.repository;
     if (repository == null) return;
     var changed = false;
@@ -2163,6 +2163,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         builder: (_) => RankingCommentThreadSheet(
         rootComment: root,
         repository: repository,
+        focusReplyId: focusReplyId,
         isAuthenticated: widget.isAuthenticated,
         canComment: widget.canComment,
         canLike: widget.canLike,
@@ -2282,6 +2283,8 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                           onLike: _toggleServerCommentLike,
                           onReply: _openRankingThread,
                           onViewReplies: _openRankingThread,
+                          onReplyTap: (root, reply) =>
+                              _openRankingThread(root, focusReplyId: reply.id),
                           onMore: (comment) => _showRankingCommentMenu(comment),
                         ),
                       ],
@@ -2974,6 +2977,7 @@ class _ReviewSection extends StatelessWidget {
     this.onLike,
     this.onReply,
     this.onViewReplies,
+    this.onReplyTap,
     this.onMore,
   });
 
@@ -2990,6 +2994,7 @@ class _ReviewSection extends StatelessWidget {
   final ValueChanged<RankingToyComment>? onLike;
   final ValueChanged<RankingToyComment>? onReply;
   final ValueChanged<RankingToyComment>? onViewReplies;
+  final void Function(RankingToyComment root, RankingToyComment reply)? onReplyTap;
   final ValueChanged<RankingToyComment>? onMore;
 
   @override
@@ -3109,17 +3114,23 @@ class _ReviewSection extends StatelessWidget {
     final roots = items.where((item) => item.parentId == null).toList();
     return roots
         .map(
-          (comment) => _ReviewCard.server(
-            comment: comment,
-            replies: childrenByParent[comment.id] ?? const [],
-            onLike: onLike == null ? null : () => onLike!(comment),
-            onReply: onReply == null ? null : () => onReply!(comment),
-            onReplyTo: onReply,
-            onViewReplies: onViewReplies == null
-                ? null
-                : () => onViewReplies!(comment),
-            onMore: onMore == null ? null : () => onMore!(comment),
-          ),
+          (comment) {
+            final effectiveReplies = comment.replyPreview.isNotEmpty
+                ? comment.replyPreview
+                : (childrenByParent[comment.id] ?? const []);
+            return _ReviewCard.server(
+              comment: comment,
+              replies: effectiveReplies,
+              onLike: onLike == null ? null : () => onLike!(comment),
+              onReply: onReply == null ? null : () => onReply!(comment),
+              onReplyTo: onReply,
+              onReplyTap: onReplyTap,
+              onViewReplies: onViewReplies == null
+                  ? null
+                  : () => onViewReplies!(comment),
+              onMore: onMore == null ? null : () => onMore!(comment),
+            );
+          },
         )
         .toList();
   }
@@ -3143,9 +3154,11 @@ class _ReviewCard extends StatelessWidget {
        replies = const [],
        onReply = null,
        onReplyTo = null,
+       onReplyTap = null,
        onViewReplies = null,
        onMore = null,
-       commentReplyCount = 0;
+       commentReplyCount = 0,
+       serverComment = null;
 
   _ReviewCard.server({
     required RankingToyComment comment,
@@ -3153,9 +3166,11 @@ class _ReviewCard extends StatelessWidget {
     this.replies = const [],
     this.onReply,
     this.onReplyTo,
+    this.onReplyTap,
     this.onViewReplies,
     this.onMore,
-  }) : user = comment.nickname.isEmpty ? comment.username : comment.nickname,
+  }) : serverComment = comment,
+       user = comment.nickname.isEmpty ? comment.username : comment.nickname,
        likes = '${comment.likeCount}',
        content = comment.content,
        media = comment.media,
@@ -3169,6 +3184,7 @@ class _ReviewCard extends StatelessWidget {
        authorRating = comment.authorRating,
        commentReplyCount = comment.replyCount;
 
+  final RankingToyComment? serverComment;
   final String user;
   final String likes;
   final String content;
@@ -3186,6 +3202,7 @@ class _ReviewCard extends StatelessWidget {
   final List<RankingToyComment> replies;
   final VoidCallback? onReply;
   final ValueChanged<RankingToyComment>? onReplyTo;
+  final void Function(RankingToyComment root, RankingToyComment reply)? onReplyTap;
   final VoidCallback? onViewReplies;
   final VoidCallback? onMore;
 
@@ -3352,53 +3369,77 @@ class _ReviewCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...replies.take(2).map((r) {
-                    final rAuthor = r.nickname.isEmpty
-                        ? r.username
-                        : r.nickname;
-                    final rReplyTo = r.replyToUserNickname;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2.5),
-                      child: Text.rich(
-                        TextSpan(
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF5F7488),
-                            height: 1.45,
-                          ),
-                          children: [
-                            TextSpan(
-                              text: rAuthor,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF2C4D73),
-                              ),
+                  ...(() {
+                    final sorted = List<RankingToyComment>.from(replies)
+                      ..sort((a, b) {
+                        final cmp = b.likeCount.compareTo(a.likeCount);
+                        if (cmp != 0) return cmp;
+                        return a.createdAt.compareTo(b.createdAt);
+                      });
+                    return sorted.take(4).map((r) {
+                      final rAuthor = r.nickname.isEmpty
+                          ? r.username
+                          : r.nickname;
+                      final rReplyTo = r.replyToUserNickname;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2.5),
+                        child: InkWell(
+                          onTap: () {
+                            if (onReplyTap != null && serverComment != null) {
+                              onReplyTap!(serverComment!, r);
+                            } else if (onViewReplies != null) {
+                              onViewReplies!();
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 1.5,
+                              horizontal: 2,
                             ),
-                            if (rReplyTo != null && rReplyTo.isNotEmpty) ...[
-                              const TextSpan(text: ' 回复 '),
+                            child: Text.rich(
                               TextSpan(
-                                text: '@$rReplyTo',
                                 style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.primary,
+                                  fontSize: 12,
+                                  color: Color(0xFF5F7488),
+                                  height: 1.45,
                                 ),
+                                children: [
+                                  TextSpan(
+                                    text: rAuthor,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF2C4D73),
+                                    ),
+                                  ),
+                                  if (rReplyTo != null && rReplyTo.isNotEmpty) ...[
+                                    const TextSpan(text: ' 回复 '),
+                                    TextSpan(
+                                      text: '@$rReplyTo',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.primary,
+                                      ),
+                                    ),
+                                  ],
+                                  const TextSpan(
+                                    text: '：',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF2C4D73),
+                                    ),
+                                  ),
+                                  TextSpan(text: r.content),
+                                ],
                               ),
-                            ],
-                            const TextSpan(
-                              text: '：',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF2C4D73),
-                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            TextSpan(text: r.content),
-                          ],
+                          ),
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  }),
+                      );
+                    });
+                  })(),
                   if (onViewReplies != null && totalReplies > 0)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),

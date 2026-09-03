@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -37,6 +38,8 @@ type Server struct {
 	// moderationSem 限制同步图片打码处理的并发数；超时的处理 goroutine 会
 	// 持有名额直到真正结束，防止僵尸解码任务无限堆积。
 	moderationSem chan struct{}
+	logger        *slog.Logger
+	smtpHost      string
 }
 
 type authenticatedUserContextKey struct{}
@@ -114,7 +117,18 @@ func NewHandler(db *sql.DB, authServices ...*auth.Service) http.Handler {
 		mediaDeliveryMode:  mediaDeliveryModeFromEnv(),
 		mediaAccelPrefix:   mediaInternalAccelPrefixFromEnv(),
 		moderationSem:      make(chan struct{}, 2),
+		logger:             slog.Default(),
+		smtpHost:           strings.TrimSpace(os.Getenv("SMTP_HOST")),
 	}
+}
+
+// NewHandlerWithMailAndLogger 供正式服务注入邮件 sender 与统一结构化日志器。
+func NewHandlerWithMailAndLogger(db *sql.DB, sender mailSender, logger *slog.Logger, appEnvs ...string) http.Handler {
+	server := NewHandlerWithMail(db, sender, appEnvs...).(*Server)
+	if logger != nil {
+		server.logger = logger
+	}
+	return server
 }
 
 // NewHandlerWithMail 供正式服务注入 SMTP sender；保留 NewHandler 以兼容测试和本地无 SMTP 场景。

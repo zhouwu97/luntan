@@ -531,9 +531,9 @@ func restoreModerationTargetTx(ctx context.Context, tx *sql.Tx, targetType, targ
 			_, err := tx.ExecContext(ctx, `UPDATE comments SET moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`, targetID)
 			return err
 		}
-		var postID, parentID string
+		var postID, rootID string
 		var deletedAt sql.NullTime
-		if err := tx.QueryRowContext(ctx, `SELECT post_id, COALESCE(parent_id, ''), deleted_at FROM comments WHERE id = $1 FOR UPDATE`, targetID).Scan(&postID, &parentID, &deletedAt); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT post_id, COALESCE(root_id, id), deleted_at FROM comments WHERE id = $1 FOR UPDATE`, targetID).Scan(&postID, &rootID, &deletedAt); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE comments SET deleted_at = NULL, publication_status = 'published', deleted_by = NULL, delete_reason = '', moderation_status = 'normal', moderation_case_id = NULL, visibility_reason = '', updated_at = now() WHERE id = $1`, targetID); err != nil {
@@ -543,8 +543,8 @@ func restoreModerationTargetTx(ctx context.Context, tx *sql.Tx, targetType, targ
 			if _, err := tx.ExecContext(ctx, `UPDATE posts SET comment_count = comment_count + 1, updated_at = now() WHERE id = $1`, postID); err != nil {
 				return err
 			}
-			if parentID != "" {
-				if _, err := tx.ExecContext(ctx, `UPDATE comments SET reply_count = reply_count + 1, updated_at = now() WHERE id = $1`, parentID); err != nil {
+			if rootID != targetID {
+				if _, err := tx.ExecContext(ctx, `UPDATE comments SET reply_count = reply_count + 1, updated_at = now() WHERE id = $1`, rootID); err != nil {
 					return err
 				}
 			}

@@ -509,7 +509,11 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 	query := `SELECT c.id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 	                 COALESCE(up.level, 1), c.content, c.like_count,
 	                 EXISTS (SELECT 1 FROM ranking_toy_comment_likes l WHERE l.comment_id = c.id AND l.user_id = $2),
-	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
+	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id,
+	                 (SELECT COUNT(*) FROM ranking_toy_comments reply
+	                  WHERE reply.toy_id = c.toy_id
+	                    AND COALESCE(reply.root_id, reply.id) = c.id
+	                    AND reply.id <> c.id AND reply.deleted_at IS NULL) AS reply_count,
 	                 aus.rating, ` + rankingToyCommentMediaSelect + `, ` + rankingToyCommentAvatarSelect + `
 	          FROM ranking_toy_comments c
 	          JOIN users u ON u.id = c.author_id
@@ -1368,4 +1372,3 @@ func (s *Server) deleteRankingToyComment(w http.ResponseWriter, r *http.Request,
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-

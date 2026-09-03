@@ -1,12 +1,8 @@
-import { Icon, type IconName } from "./icons";
-import type { Community } from "../types/forum";
-import { appBasePath } from "../lib/config";
+"use client";
 
-const communityStyle: Record<string, { icon: IconName; tone: string }> = {
-  酱紫社区: { icon: "trophy", tone: "lilac" },
-  大型拆箱: { icon: "box", tone: "orange" },
-  杂鱼日常: { icon: "sparkle", tone: "mint" },
-};
+import type { Community } from "../types/forum";
+
+const preferredOrder = ["大型拆箱", "酱紫社区", "杂鱼日常"];
 
 export function HomeCommunityTabs({
   communities,
@@ -17,16 +13,46 @@ export function HomeCommunityTabs({
   activeId?: string;
   onSelect: (community: Community) => void;
 }) {
-  if (!communities.length) return <div className="home-community-tabs-empty" role="status">首页板块加载中…</div>;
+  if (!communities.length) {
+    return (
+      <div className="community-tabs" role="tablist" aria-label="首页社区">
+        {preferredOrder.map((name, index) => (
+          <button
+            key={name}
+            type="button"
+            className={`community-tab${index === 1 ? " active" : ""}`}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // Sort according to preferred order if matches
+  const sorted = [...communities].sort((a, b) => {
+    const idxA = preferredOrder.indexOf(a.name.trim());
+    const idxB = preferredOrder.indexOf(b.name.trim());
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return 0;
+  });
+
   return (
-    <div className="home-community-tabs" role="tablist" aria-label="首页社区">
-      {communities.map((community) => {
-        const style = communityStyle[community.name] ?? { icon: "sparkle" as IconName, tone: "blue" };
+    <div className="community-tabs" role="tablist" aria-label="首页社区">
+      {sorted.map((community) => {
         const active = community.id === activeId;
-        const isCampus = community.name.trim() === "酱紫社区";
         return (
-          <button key={community.id} type="button" role="tab" aria-selected={active} aria-label={community.name} className={`home-community-tab${active ? " active" : ""}${isCampus ? " campus-art-tab" : ""}`} onClick={() => onSelect(community)}>
-            {isCampus ? <img src={`${appBasePath}/home/${active ? "tab_community_active.webp" : "tab_community_inactive.webp"}`} alt="" /> : <><span className={`community-icon ${style.tone}`}><Icon name={style.icon} size={18} /></span><span>{community.name}</span></>}
+          <button
+            key={community.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            className={`community-tab${active ? " active" : ""}`}
+            onClick={() => onSelect(community)}
+          >
+            {community.name}
           </button>
         );
       })}

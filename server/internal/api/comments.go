@@ -192,7 +192,12 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		FROM (
 			SELECT c.id, c.post_id, c.author_id, c.root_id, c.parent_id, c.reply_to_user_id, c.sticker_id,
 			       CASE WHEN c.publication_status = 'deleted' THEN '' ELSE c.content END AS content,
-			       c.like_count, c.dislike_count, c.reply_count,
+			       c.like_count, c.dislike_count,
+			       (SELECT COUNT(*) FROM comments reply
+			        WHERE reply.root_id = c.id AND reply.id <> c.id
+			          AND reply.deleted_at IS NULL
+			          AND reply.publication_status = 'published'
+			          AND reply.moderation_status = 'normal') AS reply_count,
 			       c.created_at, c.updated_at, c.publication_status, %s AS floor_no
 			FROM comments c
 			WHERE c.post_id = $1 AND (
@@ -688,6 +693,11 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		}
 	}
 	if err := awardExperienceTx(r.Context(), tx, user.ID, "comment", "参与回复", "comment:create:"+commentID, s.experienceRewards.CommentCreate, s.experienceRewards.CommentCreateDailyLimit); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	// 评论奖励：+2 积分，不设上限，但受每日总上限 20 约束。
+	if err := awardPointsTx(r.Context(), tx, user.ID, "comment", "发表评论", "comment:create:"+commentID, s.pointRewards.CommentCreate, s.pointRewards.DailyEarnLimit); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

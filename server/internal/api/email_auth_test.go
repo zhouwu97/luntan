@@ -15,6 +15,17 @@ import (
 	"github.com/zhouwu97/luntan/server/internal/auth"
 )
 
+func TestMailFailureDetails(t *testing.T) {
+	stage, code := mailFailureDetails(fmt.Errorf(`smtp auth: 535 "Login failed"`))
+	if stage != "auth" || code != "535" {
+		t.Fatalf("mail failure details = (%q, %q), want (auth, 535)", stage, code)
+	}
+	stage, code = mailFailureDetails(fmt.Errorf("smtp connect: dial tcp: i/o timeout"))
+	if stage != "connect" || code != "" {
+		t.Fatalf("connect failure details = (%q, %q), want (connect, empty)", stage, code)
+	}
+}
+
 func TestRequestEmailCodeChecksScene(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

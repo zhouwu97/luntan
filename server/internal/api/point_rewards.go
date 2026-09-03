@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 )
 
 // PointRewardRules 集中管理积分奖励与每日获取上限。
@@ -100,14 +101,34 @@ func awardDailyPointTx(ctx context.Context, tx *sql.Tx, userID, source, reason s
 }
 
 // awardLikePointTx 为点赞发放积分，每天前 N 个点赞各奖励 delta 积分。
-// 通过统计当日已发放的点赞积分流水数量来判断是否还在配额内。
+// 并发安全：先锁用户、再幂等检查、再检查点赞次数、最后统一检查全局上限。
 // 幂等键由具体的点赞事件 ID 构成，每个点赞动作最多发放一次积分。
 func awardLikePointTx(ctx context.Context, tx *sql.Tx, userID, targetType, targetID string, delta int64, dailyLimit int, globalDailyLimit int64) error {
 	if delta == 0 || dailyLimit <= 0 {
 		return nil
 	}
 
-	// 统计今日已发放的点赞积分次数
+	// 构造幂等键：like:targetType:targetID:userID
+	idempotencyKey := "like:" + targetType + ":" + targetID + ":user:" + userID
+
+	// 1. 先锁用户，防止并发超发
+	var balance int64
+	if err := tx.QueryRowContext(ctx, `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&balance); err != nil {
+		return err
+	}
+
+	// 2. 幂等检查：此点赞事件是否已奖励过
+	var existingBalance int64
+	err := tx.QueryRowContext(ctx, `SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`, userID, idempotencyKey).Scan(&existingBalance)
+	if err == nil {
+		// 已发放过，幂等返回
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	// 3. 统计今日已发放的点赞积分次数（在锁内查询，确保并发安全）
 	var likeCountToday int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -125,8 +146,33 @@ func awardLikePointTx(ctx context.Context, tx *sql.Tx, userID, targetType, targe
 		return nil
 	}
 
-	// 构造幂等键：like:targetType:targetID:userID
-	idempotencyKey := "like:" + targetType + ":" + targetID + ":user:" + userID
-	return awardPointsTx(ctx, tx, userID, "like", "点赞", idempotencyKey, delta, globalDailyLimit)
+	// 4. 检查全局每日上限
+	if globalDailyLimit > 0 && delta > 0 {
+		var earnedToday int64
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COALESCE(SUM(delta), 0)
+			FROM point_transactions
+			WHERE user_id = $1
+			  AND delta > 0
+			  AND source IN ('post', 'like', 'comment')
+			  AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
+		`, userID).Scan(&earnedToday); err != nil {
+			return err
+		}
+		if earnedToday >= globalDailyLimit {
+			return nil
+		}
+		if remaining := globalDailyLimit - earnedToday; remaining < delta {
+			delta = remaining
+		}
+	}
+
+	// 5. 发放积分并记录流水
+	newBalance := balance + delta
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`, newBalance, userID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7)`, newPostID(), userID, "like", delta, newBalance, "点赞", idempotencyKey)
+	return err
 }
 

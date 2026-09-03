@@ -109,11 +109,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      widget.controller.load();
-      widget.commentsController.load();
-    });
+    // 帖子详情和评论首屏并行请求，减少进入页面后的评论空窗。
+    widget.controller.load();
+    widget.commentsController.load();
     commentsScrollController.addListener(_loadMoreComments);
   }
 
@@ -354,9 +352,28 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   void _openReplyThread(Comment comment, {String? focusReplyId}) {
     final post = widget.controller.state.detail?.post;
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => CommentThreadScreen(
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Material(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.82,
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD0D7DE),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(child: CommentThreadScreen(
           rootComment: comment,
           repository: widget.commentsController.repository,
           postAuthorId: post?.authorId,
@@ -413,8 +430,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         onMore: (reply) => _showCommentMenu(reply),
         onMoreAction: (target, onDeleted) =>
             _showCommentMenu(target, onDeleted: onDeleted),
+              )),
+            ],
+        ),
+        ),
       ),
-    ),
   );
 }
 

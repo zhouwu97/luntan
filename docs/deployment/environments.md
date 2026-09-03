@@ -21,3 +21,9 @@
 邮件发送通过 SMTP 环境变量注入。QQ 邮箱使用 `smtp.qq.com:465`、隐式 TLS 和邮箱授权码；
 `SMTP_PASSWORD` 只放在服务器密钥管理或运行时环境中，不得提交 Git。`production` 缺少 SMTP 配置时 API 拒绝启动，
 开发/测试环境只有显式开启 `ALLOW_DEV_AUTH_CODE=true` 才允许本地验证码回显，否则返回明确的 disabled 错误。
+
+邮件投递指标由 `/metrics` 暴露：`luntan_mail_delivery_total{status="sent|failed"}`。
+监控系统应按增量而非绝对值告警，例如 5 分钟内失败次数达到 3 次时告警：
+`increase(luntan_mail_delivery_total{status="failed"}[5m]) >= 3`。
+邮件失败日志事件为 `mail_delivery_failed`，包含 `purpose`、`smtp_host`、`error_stage`、
+`smtp_code` 和 `request_id`，不记录收件地址、验证码或 SMTP 凭据。

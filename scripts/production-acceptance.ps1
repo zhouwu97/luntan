@@ -8,7 +8,7 @@
 必须在生产环境部署后、正式上线前运行。
 
 .PARAMETER ServerHost
-生产服务器地址，例如 101.42.27.44 或 api.shengbeijiang.com
+生产服务器地址，例如 43.161.249.91 或 api.shengbeijiang.com
 
 .PARAMETER DatabaseUrl
 生产数据库连接串（仅用于验证查询）
@@ -21,7 +21,7 @@
 跳过媒体私有化验证（仅用于测试脚本本身）
 
 .EXAMPLE
-./scripts/production-acceptance.ps1 -ServerHost 101.42.27.44 -DatabaseUrl $env:DATABASE_URL
+./scripts/production-acceptance.ps1 -ServerHost 43.161.249.91 -DatabaseUrl $env:DATABASE_URL
 #>
 
 param(

@@ -15,11 +15,11 @@
 
 ```powershell
 # 设置数据库连接串
-$env:DATABASE_URL = "postgresql://user:password@101.42.27.44:5432/luntan"
+$env:DATABASE_URL = "postgresql://user:password@43.161.249.91:5432/luntan"
 
 # 运行完整验收（必须使用一个已验证的生产邮箱做真实 SMTP 探测）
 $env:PRODUCTION_ACCEPTANCE_EMAIL = "ops@example.com"
-./scripts/production-acceptance.ps1 -ServerHost 101.42.27.44 -SmtpProbeEmail $env:PRODUCTION_ACCEPTANCE_EMAIL
+./scripts/production-acceptance.ps1 -ServerHost 43.161.249.91 -SmtpProbeEmail $env:PRODUCTION_ACCEPTANCE_EMAIL
 ```
 
 **预期结果**：
@@ -563,7 +563,7 @@ docker run -d --name luntan-api-rollback ghcr.io/zhouwu97/luntan:{previous_versi
 
 ### A. 验收环境信息
 
-- 服务器地址: `101.42.27.44`
+- 服务器地址: `43.161.249.91`
 - API 域名: `https://api.shengbeijiang.com`
 - 数据库版本: PostgreSQL 14+
 - Go 版本: 1.22+

@@ -12,7 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,6 +178,13 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 
 	mailErr := s.mailSender.Send(r.Context(), email, subject, fmt.Sprintf(`<p>你的圣杯酱%s验证码是：</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">%s</p><p>验证码 10 分钟内有效。如非本人操作，请忽略此邮件。</p>`, actionText, html.EscapeString(code)))
 	if mailErr != nil {
+		httpserver.ObserveMailDelivery(false)
+		stage, smtpCode := mailFailureDetails(mailErr)
+		logger := s.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("mail_delivery_failed", "purpose", purpose, "smtp_host", s.smtpHost, "error_stage", stage, "smtp_code", smtpCode, "request_id", httpserver.RequestID(r.Context()))
 		_, _ = s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'delivery_failed', failure_reason = $1 WHERE id = $2`, mailErr.Error(), codeID)
 		if !s.devAuthCodeAllowed() {
 			writeAuthError(w, r, ErrMailUnavailable)
@@ -191,6 +200,7 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
+		httpserver.ObserveMailDelivery(true)
 		if _, err := s.db.ExecContext(r.Context(), `UPDATE email_codes SET status = 'sent', sent_at = now() WHERE id = $1`, codeID); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -202,6 +212,28 @@ func (s *Server) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 		response["delivery"] = "development"
 	}
 	httpserver.WriteJSON(w, http.StatusOK, response)
+}
+
+func mailFailureDetails(err error) (string, string) {
+	message := err.Error()
+	stage := "unknown"
+	for _, candidate := range []string{"connect", "auth", "MAIL FROM", "RCPT TO", "DATA", "message write", "message close", "QUIT"} {
+		if strings.Contains(message, "smtp "+candidate+":") {
+			stage = strings.ToLower(candidate)
+			break
+		}
+	}
+	code := ""
+	for _, field := range strings.Fields(message) {
+		if len(field) != 3 {
+			continue
+		}
+		if value, parseErr := strconv.Atoi(field); parseErr == nil && value >= 100 && value <= 599 {
+			code = field
+			break
+		}
+	}
+	return stage, code
 }
 
 func writeEmailCodeAccepted(w http.ResponseWriter) {

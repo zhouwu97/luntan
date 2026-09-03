@@ -44,6 +44,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
     this.focusReplyId,
     this.onAuthorTap,
     this.onChanged,
+    this.isBottomSheet = true,
   });
 
   final RankingToyComment rootComment;
@@ -65,6 +66,7 @@ class RankingCommentThreadSheet extends StatefulWidget {
   final ValueChanged<String>? onAuthorTap;
   // 写操作成功后立即通知父页面；弹层可通过任意系统路径关闭。
   final VoidCallback? onChanged;
+  final bool isBottomSheet;
 
   @override
   State<RankingCommentThreadSheet> createState() =>
@@ -92,6 +94,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   @override
   void initState() {
     super.initState();
+    // 榜单详情已返回的回复预览先行展示，完整回复列表后台合并。
+    replies.addAll(widget.rootComment.replyPreview);
     scrollController.addListener(_onScroll);
     _loadFirstPage();
   }
@@ -115,12 +119,17 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
 
   Future<void> _loadFirstPage() async {
     if (loading) return;
+    final preview = List<RankingToyComment>.from(replies);
     setState(() {
       loading = true;
-      loadState = _ReplyLoadState.loading;
+      loadState = preview.isEmpty
+          ? _ReplyLoadState.loading
+          : _ReplyLoadState.loaded;
       errorMessage = null;
       loadMoreError = null;
-      replies.clear();
+      replies
+        ..clear()
+        ..addAll(preview);
       nextCursor = null;
       hasMore = true;
     });
@@ -130,7 +139,10 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
       );
       if (!mounted) return;
       setState(() {
-        replies.addAll(page.items);
+        final ids = replies.map((item) => item.id).toSet();
+        for (final item in page.items) {
+          if (ids.add(item.id)) replies.add(item);
+        }
         nextCursor = page.nextCursor;
         hasMore = page.hasMore && page.nextCursor != null;
         loading = false;
@@ -360,50 +372,111 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   Widget build(BuildContext context) {
     final rootName = _name(widget.rootComment);
 
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0.5,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            size: 18,
-            color: AppTheme.textPrimary,
-          ),
-          tooltip: '返回',
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
-        title: Text(
-          _replyTitle(),
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.textPrimary,
-          ),
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.more_horiz_rounded,
-              size: 20,
-              color: Color(0xFF64748B),
+      appBar: widget.isBottomSheet
+          ? null
+          : AppBar(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              scrolledUnderElevation: 0.5,
+              leading: IconButton(
+                icon: const Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 18,
+                  color: AppTheme.textPrimary,
+                ),
+                tooltip: '返回',
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+              title: Text(
+                _replyTitle(),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              centerTitle: true,
+              actions: [
+                IconButton(
+                  icon: const Icon(
+                    Icons.more_horiz_rounded,
+                    size: 20,
+                    color: Color(0xFF64748B),
+                  ),
+                  tooltip: '更多',
+                  onPressed: _showRootMenu,
+                ),
+              ],
+              bottom: const PreferredSize(
+                preferredSize: Size.fromHeight(1),
+                child: Divider(height: 1, color: Color(0xFFEDF2F7)),
+              ),
             ),
-            tooltip: '更多',
-            onPressed: _showRootMenu,
-          ),
-        ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEDF2F7)),
-        ),
-      ),
       body: SafeArea(
         top: false,
         child: Column(
           children: [
+            if (widget.isBottomSheet) ...[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 8, bottom: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD0D7DE),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: 44,
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Text(
+                        _replyTitle(),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      right: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.more_horiz_rounded,
+                              size: 20,
+                              color: Color(0xFF64748B),
+                            ),
+                            tooltip: '更多',
+                            onPressed: _showRootMenu,
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              size: 22,
+                              color: Color(0xFF64748B),
+                            ),
+                            tooltip: '关闭',
+                            onPressed: () => Navigator.of(context).maybePop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFEDF2F7)),
+            ],
               Expanded(
                 child: CustomScrollView(
                   controller: scrollController,
@@ -517,6 +590,16 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
           ),
         ),
       );
+    if (!widget.isBottomSheet) return scaffold;
+    return Material(
+      color: Colors.white,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.82,
+        child: scaffold,
+      ),
+    );
   }
 
   Widget _buildReplySlivers() {

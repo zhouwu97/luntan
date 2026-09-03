@@ -18,6 +18,8 @@ type requestMetrics struct {
 	publish    businessMetric
 	comment    businessMetric
 	upload     businessMetric
+	mailSent   atomic.Uint64
+	mailFailed atomic.Uint64
 }
 
 type businessMetric struct {
@@ -99,6 +101,18 @@ func (m *requestMetrics) write(w http.ResponseWriter) {
 	fmt.Fprintf(w, "luntan_publish_success_rate %.4f\n", successRate(&m.publish))
 	fmt.Fprintf(w, "luntan_comment_success_rate %.4f\n", successRate(&m.comment))
 	fmt.Fprintf(w, "luntan_upload_success_rate %.4f\n", successRate(&m.upload))
+	fmt.Fprintln(w, "# TYPE luntan_mail_delivery_total counter")
+	fmt.Fprintf(w, "luntan_mail_delivery_total{status=\"sent\"} %d\n", m.mailSent.Load())
+	fmt.Fprintf(w, "luntan_mail_delivery_total{status=\"failed\"} %d\n", m.mailFailed.Load())
+}
+
+// ObserveMailDelivery 记录验证码邮件投递结果，供告警系统按失败速率监控。
+func ObserveMailDelivery(success bool) {
+	if success {
+		metrics.mailSent.Add(1)
+		return
+	}
+	metrics.mailFailed.Add(1)
 }
 
 func successRate(metric *businessMetric) float64 {

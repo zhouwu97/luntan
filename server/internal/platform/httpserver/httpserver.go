@@ -309,6 +309,9 @@ func requestID(ctx context.Context) string {
 	return value
 }
 
+// RequestID 返回当前请求的关联 ID，供业务日志与 HTTP 访问日志串联。
+func RequestID(ctx context.Context) string { return requestID(ctx) }
+
 func newRequestID() string {
 	var bytes [12]byte
 	if _, err := rand.Read(bytes[:]); err != nil {

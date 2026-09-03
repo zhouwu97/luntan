@@ -70,7 +70,7 @@ func main() {
 		logger.Error("mail_sender_failed", "error", senderErr.Error())
 		os.Exit(1)
 	}
-	apiHandler := api.NewHandlerWithMail(db, sender, cfg.AppEnv)
+	apiHandler := api.NewHandlerWithMailAndLogger(db, sender, logger, cfg.AppEnv)
 	appRelease, err := httpserver.LoadAppRelease(
 		cfg.AppReleaseManifestPath,
 		cfg.AppReleasePublicBaseURL,

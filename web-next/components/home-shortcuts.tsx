@@ -1,18 +1,65 @@
+"use client";
+
 import Link from "next/link";
-import { Icon, type IconName } from "./icons";
+import { Icon } from "./icons";
+import { useToast } from "./toast-context";
 
-const shortcuts: Array<{ label: string; href: string; icon: IconName; tone: string }> = [
-  { label: "玩具排行榜", href: "/ranking", icon: "trophy", tone: "blue" },
-  { label: "热门帖子", href: "/?sort=hot", icon: "flame", tone: "orange" },
-  { label: "穿搭分享", href: "/?topic=outfit", icon: "hanger", tone: "pink" },
-  { label: "活动", href: "/activities", icon: "calendar", tone: "mint" },
-];
+export function HomeShortcuts({ onFilterHot }: { onFilterHot?: () => void }) {
+  const { showToast } = useToast();
 
-export function HomeShortcuts() {
   return (
-    <nav className="home-shortcuts" aria-label="快捷入口">
-      {shortcuts.map((item) => <Link className="home-shortcut" href={item.href} key={item.label}><span className={`shortcut-icon ${item.tone}`}><Icon name={item.icon} size={19} /></span><span>{item.label}</span></Link>)}
-    </nav>
+    <div className="quick-grid home-shortcuts" aria-label="快捷入口">
+      <Link href="/ranking" className="quick" aria-label="玩具排行榜">
+        <span className="quick-icon">
+          <Icon name="trophy" size={21} />
+        </span>
+        <span>玩具排行榜</span>
+      </Link>
+
+      <button
+        type="button"
+        className="quick"
+        aria-label="热门帖子"
+        onClick={() => {
+          if (onFilterHot) {
+            onFilterHot();
+          }
+          showToast("已切换到热门帖子");
+        }}
+      >
+        <span className="quick-icon">
+          <Icon name="flame" size={21} />
+        </span>
+        <span>热门帖子</span>
+      </button>
+
+      <button
+        type="button"
+        className="quick"
+        aria-label="穿搭分享"
+        onClick={() => {
+          showToast("已切换到穿搭分享");
+        }}
+      >
+        <span className="quick-icon">
+          <Icon name="hanger" size={21} />
+        </span>
+        <span>穿搭分享</span>
+      </button>
+
+      <button
+        type="button"
+        className="quick"
+        aria-label="活动"
+        onClick={() => {
+          showToast("活动页入口已保留");
+        }}
+      >
+        <span className="quick-icon">
+          <Icon name="calendar" size={21} />
+        </span>
+        <span>活动</span>
+      </button>
+    </div>
   );
 }
-

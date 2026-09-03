@@ -35,9 +35,15 @@ export type IconName =
   | "grid"
   | "edit"
   | "star"
-  | "compass";
+  | "compass"
+  | "swap"
+  | "reply"
+  | "dislike";
 
 const paths: Record<IconName, React.ReactNode> = {
+  swap: <><path d="M7 7h11l-3-3M17 17H6l3 3M18 7l-3 3M6 17l3-3" /></>,
+  reply: <path d="m9 8-5 4 5 4v-3c7 0 9 2 11 5-1-6-4-9-11-9V8Z" />,
+  dislike: <path d="M7 3h10l2 8-6 1v6a2 2 0 0 1-2 2l-2-7H5V5a2 2 0 0 1 2-2Z" />,
   grid: <><rect x="4" y="4" width="6" height="6" rx="1.5" /><rect x="14" y="4" width="6" height="6" rx="1.5" /><rect x="4" y="14" width="6" height="6" rx="1.5" /><rect x="14" y="14" width="6" height="6" rx="1.5" /></>,
   edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></>,
   star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,

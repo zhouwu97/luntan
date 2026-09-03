@@ -2193,9 +2193,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     final repository = widget.repository;
     if (repository == null) return;
     var changed = false;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => RankingCommentThreadSheet(
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => RankingCommentThreadSheet(
         rootComment: root,
         repository: repository,
         focusReplyId: focusReplyId,
@@ -2214,7 +2216,6 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
             repository.setCommentLike(commentId: comment.id, active: active),
         onChanged: () => changed = true,
       ),
-    ),
   );
   if (changed && mounted) {
     _fallbackReplyPreviews.clear();

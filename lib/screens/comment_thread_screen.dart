@@ -84,6 +84,8 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
   @override
   void initState() {
     super.initState();
+    // 楼层接口携带的回复预览先行展示，完整分页结果随后合并。
+    replies.addAll(widget.rootComment.replyPreview);
     scrollController.addListener(_onScroll);
     _loadFirstPage();
   }
@@ -107,12 +109,17 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
 
   Future<void> _loadFirstPage() async {
     final generation = ++_generation;
+    final preview = List<Comment>.from(replies);
     setState(() {
       loading = true;
-      loadState = _ReplyLoadState.loading;
+      loadState = preview.isEmpty
+          ? _ReplyLoadState.loading
+          : _ReplyLoadState.loaded;
       errorMessage = null;
       loadMoreError = null;
-      replies.clear();
+      replies
+        ..clear()
+        ..addAll(preview);
       nextCursor = null;
       hasMore = true;
     });
@@ -123,9 +130,10 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
       );
       if (!mounted || generation != _generation) return;
       setState(() {
-        replies
-          ..clear()
-          ..addAll(page.items);
+        final ids = replies.map((item) => item.id).toSet();
+        for (final item in page.items) {
+          if (ids.add(item.id)) replies.add(item);
+        }
         nextCursor = page.nextCursor;
         hasMore = page.hasMore && page.nextCursor != null;
         loading = false;

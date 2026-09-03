@@ -18,13 +18,14 @@ func TestLikePointsWithDailyLimit(t *testing.T) {
 	defer db.Close()
 
 	// 第 1 个点赞：应该获得 +1 积分
+	// 新流程：先锁用户 → 幂等检查 → 统计点赞次数 → 全局上限检查 → 发放
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
-		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
 		WithArgs("u1", "like:post:p1:user:u1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like', 'comment') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(0))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
@@ -41,12 +42,12 @@ func TestLikePointsWithDailyLimit(t *testing.T) {
 
 	// 第 5 个点赞：应该获得 +1 积分
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
-		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(4))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(4))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
 		WithArgs("u1", "like:post:p5:user:u1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(4))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like', 'comment') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(4))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
@@ -63,6 +64,10 @@ func TestLikePointsWithDailyLimit(t *testing.T) {
 
 	// 第 6 个点赞：已达上限，不应获得积分
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(5))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
+		WithArgs("u1", "like:post:p6:user:u1").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
 	mock.ExpectCommit()
@@ -291,6 +296,69 @@ func TestRecommendationBonusDoesNotConsumeDailyActivityQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLikeConcurrentLimitEnforcement 验证点赞并发时第5次上限的正确性。
+// 场景：用户当天已有4次点赞积分，两个点赞并发到来，最终只应产生1条积分流水。
+func TestLikeConcurrentLimitEnforcement(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// 第一个并发点赞：锁用户 → 查幂等 → 查点赞次数=4 → 检查全局额度 → 发放 +1
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(14))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
+		WithArgs("u1", "like:post:post5:user:u1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(4))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like', 'comment') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(14))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
+		WithArgs(int64(15), "u1").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7)`)).
+		WithArgs(sqlmock.AnyArg(), "u1", "like", int64(1), int64(15), "点赞内容", "like:post:post5:user:u1").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	tx1, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := awardLikePointTx(context.Background(), tx1, "u1", "post", "post5", 1, 5, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx1.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 第二个并发点赞：锁用户 → 查幂等 → 查点赞次数=5 → 达到上限，不发放
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(15))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
+		WithArgs("u1", "like:post:post6:user:u1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM point_transactions WHERE user_id = $1 AND source = 'like' AND delta > 0 AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
+	mock.ExpectCommit()
+
+	tx2, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 第6个点赞应该不发放积分，函数应该正常返回 nil
+	if err := awardLikePointTx(context.Background(), tx2, "u1", "post", "post6", 1, 5, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx2.Commit(); err != nil {
 		t.Fatal(err)
 	}
 

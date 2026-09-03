@@ -10,7 +10,13 @@ import (
 
 func TestPointRewardRulesMatchPublishedPolicy(t *testing.T) {
 	rules := pointRewardRulesFromEnv()
-	if rules.PostCreate != 1 || rules.LikeCreate != 1 || rules.DailyEarnLimit != 1 || rules.RecommendationBonus != 20 {
+	// 验证新的积分规则：
+	// - 发帖 +10 积分
+	// - 评论 +2 积分
+	// - 点赞：每天前 5 个点赞各 +1 积分
+	// - 每日总上限 20 积分
+	// - 推荐奖励 +20 积分（不受每日上限限制）
+	if rules.PostCreate != 10 || rules.CommentCreate != 2 || rules.LikeCreate != 1 || rules.LikeDailyLimit != 5 || rules.DailyEarnLimit != 20 || rules.RecommendationBonus != 20 {
 		t.Fatalf("unexpected point policy: %+v", rules)
 	}
 }
@@ -78,7 +84,7 @@ func TestAwardPointsTxRespectsDailyEarnLimit(t *testing.T) {
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(18))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
 		WithArgs("u1", "post:create:p2").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like', 'comment') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(18))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
 		WithArgs(int64(20), "u1").WillReturnResult(sqlmock.NewResult(1, 1))
@@ -103,7 +109,7 @@ func TestAwardPointsTxRespectsDailyEarnLimit(t *testing.T) {
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(20))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`)).
 		WithArgs("u1", "post:create:p3").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like', 'comment') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`)).
 		WithArgs("u1").WillReturnRows(sqlmock.NewRows([]string{"coalesce"}).AddRow(20))
 	mock.ExpectCommit()
 

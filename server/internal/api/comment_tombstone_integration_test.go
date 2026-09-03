@@ -26,6 +26,13 @@ func TestDeleteRootCommentKeepsTombstoneAgainstPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err := s.db.Exec(`
+		INSERT INTO user_roles (id, user_id, role_id)
+		SELECT $1, $2, id FROM roles WHERE name = 'super_admin' LIMIT 1
+		ON CONFLICT DO NOTHING`, "tombstone-role-"+suffix, session.User.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	categoryID := "tombstone-cat-" + suffix
 	communityID := "tombstone-community-" + suffix
 	postID := "tombstone-post-" + suffix

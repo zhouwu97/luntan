@@ -1055,6 +1055,11 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID
 	if !ok {
 		return
 	}
+	// 评论删除收敛为仅管理人员权限；普通用户哪怕是评论作者本人也无权删除。
+	if !s.canModerate(r, user) {
+		writeAuthError(w, r, ErrForbidden)
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -1072,22 +1077,8 @@ func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request, commentID
 		writeInternalError(w, r, err)
 		return
 	}
-	adminDelete := false
-	if authorID != user.ID {
-		// 评论删除与帖子删除保持同一全局内容处置权限边界；客户端菜单
-		// 只是能力提示，最终授权必须在服务端重新校验。
-		adminDelete = s.canModerate(r, user)
-		if !adminDelete {
-			writeAuthError(w, r, ErrForbidden)
-			return
-		}
-	}
-	deletedBy := ""
-	deleteReason := ""
-	if adminDelete {
-		deletedBy = user.ID
-		deleteReason = "管理员手动删除评论"
-	}
+	deletedBy := user.ID
+	deleteReason := "管理员手动删除评论"
 	if !deletedAt.Valid {
 		if _, err := softDeleteCommentTx(r.Context(), tx, commentID, deletedBy, deleteReason, ""); err != nil {
 			writeInternalError(w, r, err)

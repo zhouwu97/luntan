@@ -353,16 +353,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   void _openReplyThread(Comment comment, {String? focusReplyId}) {
     final post = widget.controller.state.detail?.post;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => CommentThreadScreen(
-        rootComment: comment,
-        repository: widget.commentsController.repository,
-        postAuthorId: post?.authorId,
-        focusReplyId: focusReplyId,
-        isAuthenticated: widget.isAuthenticated,
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => CommentThreadScreen(
+          rootComment: comment,
+          repository: widget.commentsController.repository,
+          postAuthorId: post?.authorId,
+          focusReplyId: focusReplyId,
+          isAuthenticated: widget.isAuthenticated,
         onRequireAuth: widget.onRequireAuth,
         canComment: widget.canComment ?? widget.isAuthenticated,
         blockedMessage: _commentBlockedMessage,
@@ -415,8 +413,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         onMoreAction: (target, onDeleted) =>
             _showCommentMenu(target, onDeleted: onDeleted),
       ),
-    );
-  }
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {

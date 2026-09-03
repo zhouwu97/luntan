@@ -322,51 +322,50 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
   Widget build(BuildContext context) {
     final rootName = _name(widget.rootComment);
 
-    return Material(
-      color: Colors.white,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-      child: SafeArea(
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0.5,
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            size: 18,
+            color: AppTheme.textPrimary,
+          ),
+          tooltip: '返回',
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: Text(
+          _replyTitle(),
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.textPrimary,
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(
+              Icons.more_horiz_rounded,
+              size: 20,
+              color: Color(0xFF64748B),
+            ),
+            tooltip: '更多',
+            onPressed: _showRootMenu,
+          ),
+        ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: Color(0xFFEDF2F7)),
+        ),
+      ),
+      body: SafeArea(
         top: false,
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.84,
-          child: Column(
-            children: [
-              const SizedBox(height: 10),
-              Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD6E0E9),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
-                child: Row(
-                  children: [
-                    Text(
-                      _replyTitle(),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.textPrimary,
-                      ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: '关闭',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        size: 20,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, color: Color(0xFFEDF2F7)),
+        child: Column(
+          children: [
               Expanded(
                 child: CustomScrollView(
                   controller: scrollController,
@@ -479,8 +478,7 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildReplySlivers() {
@@ -776,7 +774,9 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         14,
         8,
         14,
-        8 + MediaQuery.of(context).viewInsets.bottom,
+        8 + (MediaQuery.of(context).viewInsets.bottom > 0
+            ? MediaQuery.of(context).viewInsets.bottom
+            : MediaQuery.viewPaddingOf(context).bottom),
       ),
       child: Row(
         children: [

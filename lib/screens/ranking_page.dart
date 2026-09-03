@@ -1659,6 +1659,50 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
+  Future<bool> _setOwnedState(bool active) async {
+    if (_ownedSaving) return false;
+    if (!_hasServer) {
+      setState(() => _owned = active);
+      return true;
+    }
+
+    final requestVersion = ++_ownedRequestVersion;
+    setState(() {
+      _owned = active;
+      _ownedSaving = true;
+    });
+    try {
+      final toy = await widget.repository!.setOwned(
+        toyId: item.id,
+        active: active,
+      );
+      if (mounted && requestVersion == _ownedRequestVersion) {
+        _replaceToy(toy, syncWanted: false);
+      }
+      return true;
+    } catch (error) {
+      if (!mounted || requestVersion != _ownedRequestVersion) return false;
+      if (_isAuthOrCapabilityDenied(error)) {
+        // 游客或当前身份无服务器写入权限时保留本机标记，继续走本地体验。
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RankingPurchasePage(item: item, owned: active),
+          ),
+        );
+        return false;
+      }
+      setState(() => _owned = !active);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
+      return false;
+    } finally {
+      if (mounted && requestVersion == _ownedRequestVersion) {
+        setState(() => _ownedSaving = false);
+      }
+    }
+  }
+
   Future<void> _setOwned() async {
     if (_ownedSaving) return;
     final nextOwned = !_owned;
@@ -1675,38 +1719,14 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       return;
     }
 
-    final requestVersion = ++_ownedRequestVersion;
-    setState(() {
-      _owned = nextOwned;
-      _ownedSaving = true;
-    });
-    try {
-      final toy = await widget.repository!.setOwned(
-        toyId: item.id,
-        active: nextOwned,
-      );
-      if (mounted && requestVersion == _ownedRequestVersion) {
-        _replaceToy(toy, syncWanted: false);
-      }
-    } catch (error) {
-      if (!mounted || requestVersion != _ownedRequestVersion) return;
-      if (_isAuthOrCapabilityDenied(error)) {
-        // 游客或当前身份无服务器写入权限时保留本机标记，继续走本地体验。
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => RankingPurchasePage(item: item, owned: nextOwned),
-          ),
-        );
-        return;
-      }
-      setState(() => _owned = !nextOwned);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(userFacingApiMessage(error))));
-    } finally {
-      if (mounted && requestVersion == _ownedRequestVersion) {
-        setState(() => _ownedSaving = false);
-      }
+    if (!_owned) {
+      // 首次点击“买过”：先标记为买过，然后立即弹出评分弹窗
+      final marked = await _setOwnedState(true);
+      if (!marked || !mounted) return;
+      await _openRatingDialog(justMarkedOwned: true);
+    } else {
+      // 之前已标记买过：点击后弹出评分弹窗（可修改评分或取消买过标记）
+      await _openRatingDialog(justMarkedOwned: false);
     }
   }
 
@@ -1748,64 +1768,173 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     }
   }
 
-  Future<void> _openRatingDialog() async {
+  Future<void> _openRatingDialog({bool justMarkedOwned = false}) async {
     if (!_hasServer) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('请连接服务器后评分')));
       return;
     }
+    final isEditing = _remoteDetail?.toy.rating != null;
     var selected = _remoteDetail?.toy.rating ?? 10;
-    final score = await showDialog<int>(
+    final result = await showDialog<_RatingDialogResult>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('给这款玩具评分'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$selected 分',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
+        builder: (context, setDialogState) {
+          final heartCount = (selected + 1) ~/ 2;
+          return AlertDialog(
+            title: Text(isEditing ? '修改评分' : '给这款玩具评分'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$selected 分',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFFF7618E),
+                  ),
                 ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (index) {
+                    final filled = index < heartCount;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Icon(
+                        filled ? Icons.favorite : Icons.favorite_border_rounded,
+                        size: 22,
+                        color: filled
+                            ? const Color(0xFFF7618E)
+                            : const Color(0xFFCBD5E1),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 12),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: const Color(0xFFF7618E),
+                    thumbColor: const Color(0xFFF7618E),
+                    inactiveTrackColor: const Color(0xFFFFD8E4),
+                    overlayColor: const Color(0x29F7618E),
+                  ),
+                  child: Slider(
+                    min: 1,
+                    max: 10,
+                    divisions: 9,
+                    value: selected.toDouble(),
+                    label: '$selected分',
+                    onChanged: (value) =>
+                        setDialogState(() => selected = value.round()),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '1 分',
+                        style: TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
+                      ),
+                      Text(
+                        '10 分',
+                        style: TextStyle(color: Color(0xFF8A96A9), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (_owned)
+                TextButton(
+                  onPressed: () => Navigator.pop(
+                    dialogContext,
+                    const _RatingUnmarkOwnedResult(),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFE53935),
+                  ),
+                  child: const Text('取消买过'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.pop(
+                  dialogContext,
+                  const _RatingCancelResult(),
+                ),
+                child: const Text('取消'),
               ),
-              Slider(
-                min: 1,
-                max: 10,
-                divisions: 9,
-                value: selected.toDouble(),
-                label: '$selected',
-                onChanged: (value) =>
-                    setDialogState(() => selected = value.round()),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  dialogContext,
+                  _RatingSubmitResult(selected),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF7618E),
+                ),
+                child: const Text('提交评分'),
               ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, selected),
-              child: const Text('提交评分'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
-    if (score == null) return;
-    try {
-      final toy = await widget.repository!.rate(toyId: item.id, score: score);
-      _replaceToy(toy);
+    if (!mounted) return;
+    if (result == null) {
+      if (justMarkedOwned) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已标记为买过')));
+      }
+      return;
+    }
+    if (result is _RatingUnmarkOwnedResult) {
+      await _setOwnedState(false);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('评分已保存')));
+        ).showSnackBar(const SnackBar(content: Text('已取消“买过”标记')));
       }
-    } catch (error) {
-      _handleWriteError(error, fallback: '评分保存失败');
+      return;
+    }
+    if (result is _RatingCancelResult) {
+      if (justMarkedOwned && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已标记为买过')));
+      }
+      return;
+    }
+    if (result is _RatingSubmitResult) {
+      try {
+        final toy = await widget.repository!.rate(
+          toyId: item.id,
+          score: result.score,
+        );
+        _replaceToy(toy);
+        if (!_owned) {
+          await _setOwnedState(true);
+        }
+        _loadRemoteDetail();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                justMarkedOwned
+                    ? '已标记买过，评分已保存'
+                    : isEditing
+                    ? '评分已更新'
+                    : '评分已保存',
+              ),
+            ),
+          );
+        }
+      } catch (error) {
+        _handleWriteError(error, fallback: '评分保存失败');
+      }
     }
   }
 
@@ -1975,11 +2104,9 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     final repository = widget.repository;
     if (repository == null) return;
     var changed = false;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => RankingCommentThreadSheet(
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => RankingCommentThreadSheet(
         rootComment: root,
         repository: repository,
         isAuthenticated: widget.isAuthenticated,
@@ -1997,11 +2124,12 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
             repository.setCommentLike(commentId: comment.id, active: active),
         onChanged: () => changed = true,
       ),
-    );
-    if (changed && mounted) {
-      await _loadRemoteDetail();
-    }
+    ),
+  );
+  if (changed && mounted) {
+    await _loadRemoteDetail();
   }
+}
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -2233,6 +2361,23 @@ class RankingCouponPage extends StatelessWidget {
       ),
     ),
   );
+}
+
+sealed class _RatingDialogResult {
+  const _RatingDialogResult();
+}
+
+class _RatingSubmitResult extends _RatingDialogResult {
+  const _RatingSubmitResult(this.score);
+  final int score;
+}
+
+class _RatingUnmarkOwnedResult extends _RatingDialogResult {
+  const _RatingUnmarkOwnedResult();
+}
+
+class _RatingCancelResult extends _RatingDialogResult {
+  const _RatingCancelResult();
 }
 
 /// 游客点击“买过”后展示的购买状态页。

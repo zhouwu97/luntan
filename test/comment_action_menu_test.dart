@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:luntan/data/api/api_client.dart';
+import 'package:luntan/data/api/comment_repository.dart';
 import 'package:luntan/data/api/ranking_repository.dart';
 import 'package:luntan/domain/models.dart';
+import 'package:luntan/screens/comment_thread_screen.dart';
 import 'package:luntan/widgets/comments/comment_action_menu.dart';
+import 'package:luntan/widgets/comments/ranking_comment_thread_sheet.dart';
 
 Comment _mockComment({
   required String id,
@@ -51,7 +55,58 @@ RankingToyComment _mockRankingComment({
   );
 }
 
+
+
+class _MockCommentRepo extends Fake implements CommentRepository {
+  final List<Comment> replies;
+  _MockCommentRepo({this.replies = const []});
+
+  @override
+  Future<CommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit = 20,
+  }) async => CommentPage(items: replies, total: replies.length);
+}
+
+class _MockApiClient extends ApiClient {
+  _MockApiClient() : super(baseUri: Uri.parse('https://example.com'));
+}
+
+class _MockRankingRepo extends RankingRepository {
+  final List<RankingToyComment> replies;
+  _MockRankingRepo({this.replies = const []}) : super(_MockApiClient());
+
+  @override
+  Future<RankingToyCommentPage> listComments({
+    required String toyId,
+    String? cursor,
+    int limit = 20,
+    String sort = 'hot',
+    String? rootId,
+  }) async => RankingToyCommentPage(
+        items: List.of(replies),
+        hasMore: false,
+        nextCursor: null,
+      );
+
+  @override
+  Future<RankingToyCommentPage> listReplies({
+    required String commentId,
+    String? cursor,
+    int limit = 20,
+  }) async => RankingToyCommentPage(
+        items: List.of(replies),
+        hasMore: false,
+        nextCursor: null,
+      );
+
+  @override
+  Future<void> deleteComment(String commentId) async {}
+}
+
 void main() {
+
   group('showCommentActionMenu 安全区避让与权限控制', () {
     testWidgets('普通用户即便为评论作者，也不显示“删除评论”按钮', (tester) async {
       final comment = _mockComment(id: 'c1', authorId: 'u1');
@@ -295,6 +350,125 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, '删除'));
       await tester.pumpAndSettle();
       expect(deleted, isTrue);
+    });
+  });
+
+  group('真实布局断言：Android 三键导航栏避让验证 (RenderBox 坐标断言)', () {
+    testWidgets('普通页面 -> 评论菜单: 最后一项底部位置严格高于系统导航安全区边界 (deleteButton.bottom < screenHeight - bottomInset)', (tester) async {
+      final comment = _mockComment(id: 'c1', authorId: 'u1');
+
+      tester.view.viewPadding = const FakeViewPadding(bottom: 48.0);
+      addTearDown(tester.view.resetViewPadding);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showCommentActionMenu(
+                  context,
+                  comment: comment,
+                  currentUserId: 'admin-1',
+                  canModerate: true,
+                  onCopy: () {},
+                  onDelete: () {},
+                ),
+                child: const Text('打开菜单'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开菜单'));
+      await tester.pumpAndSettle();
+
+      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      final bottomInset = tester.view.viewPadding.bottom / tester.view.devicePixelRatio;
+      final safeThreshold = screenHeight - bottomInset;
+
+      final deleteTileFinder = find.widgetWithText(ListTile, '删除评论');
+      expect(deleteTileFinder, findsOneWidget);
+      final deleteRect = tester.getRect(deleteTileFinder);
+      expect(deleteRect.bottom, lessThan(safeThreshold));
+    });
+
+    testWidgets('回复二级页 (CommentThreadScreen) -> 评论菜单: 最后一项底部位置严格高于系统导航安全区边界', (tester) async {
+      final root = _mockComment(id: 'root-1', authorId: 'u1');
+      final reply = _mockComment(id: 'reply-1', authorId: 'u2');
+      final repo = _MockCommentRepo(replies: [reply]);
+
+      tester.view.viewPadding = const FakeViewPadding(bottom: 48.0);
+      addTearDown(tester.view.resetViewPadding);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CommentThreadScreen(
+            rootComment: root,
+            repository: repo,
+            blockedMessage: '禁言中',
+            onReply: (target, content) async => reply,
+            onMore: (c) => showCommentActionMenu(
+              tester.element(find.byType(CommentThreadScreen)),
+              comment: c,
+              currentUserId: 'admin-1',
+              canModerate: true,
+              onCopy: () {},
+              onDelete: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 点击回复项的更多操作
+      final moreButtons = find.byTooltip('更多操作');
+      await tester.tap(moreButtons.last);
+      await tester.pumpAndSettle();
+
+      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      final bottomInset = tester.view.viewPadding.bottom / tester.view.devicePixelRatio;
+      final safeThreshold = screenHeight - bottomInset;
+
+      final deleteTileFinder = find.widgetWithText(ListTile, '删除评论');
+      expect(deleteTileFinder, findsOneWidget);
+      final deleteRect = tester.getRect(deleteTileFinder);
+      expect(deleteRect.bottom, lessThan(safeThreshold));
+    });
+
+    testWidgets('榜单楼中楼二级页 (RankingCommentThreadSheet) -> 评论菜单: 最后一项底部位置严格高于系统导航安全区边界', (tester) async {
+      final root = _mockRankingComment(id: 'rc1', authorId: 'u1');
+      final reply = _mockRankingComment(id: 'r1', authorId: 'u2', parentId: 'rc1');
+      final repo = _MockRankingRepo(replies: [reply]);
+
+      tester.view.viewPadding = const FakeViewPadding(bottom: 48.0);
+      addTearDown(tester.view.resetViewPadding);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingCommentThreadSheet(
+            rootComment: root,
+            repository: repo,
+            canManageRanking: true,
+            onReply: (target, content) async => reply,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 点击回复项的更多操作
+      final moreButtons = find.byTooltip('更多操作');
+      await tester.tap(moreButtons.last);
+      await tester.pumpAndSettle();
+
+      final screenHeight = tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      final bottomInset = tester.view.viewPadding.bottom / tester.view.devicePixelRatio;
+      final safeThreshold = screenHeight - bottomInset;
+
+      final deleteTileFinder = find.widgetWithText(ListTile, '删除回复');
+      expect(deleteTileFinder, findsOneWidget);
+      final deleteRect = tester.getRect(deleteTileFinder);
+      expect(deleteRect.bottom, lessThan(safeThreshold));
     });
   });
 }

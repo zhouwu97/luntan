@@ -177,6 +177,26 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  /// 当评论创建明确因客户端错误 (4xx) 失败时，安全清理已就绪但未关联的孤儿媒体；
+  /// 若为超时、网络不可达或 5xx 服务端错误，由于服务端事务可能已提交但响应丢失，
+  /// 禁止立即删除，交由服务端定期未引用媒体 GC 机制兜底。
+  Future<void> _cleanupUnattachedCommentMedia(List<String> mediaIds, Object error) async {
+    if (widget.publishRepository == null || mediaIds.isEmpty) return;
+    final isDeterministicClientError = error is ApiException &&
+        error.statusCode != null &&
+        error.statusCode! >= 400 &&
+        error.statusCode! < 500;
+    if (!isDeterministicClientError) return;
+
+    for (final mid in mediaIds) {
+      try {
+        await widget.publishRepository!.deleteMedia(mid);
+      } catch (_) {
+        // 忽略单张删除失败，后续由服务端 GC 回收
+      }
+    }
+  }
+
   Future<void> _submitReply(Post post) async {
     if (!widget.isAuthenticated) {
       widget.onRequireAuth?.call();
@@ -195,25 +215,34 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final target = replyTarget;
     final before = post.commentCount;
 
+    List<String> mediaIds = const [];
     try {
-      final mediaIds = await _uploadCommentImages(draft.localImages);
+      mediaIds = await _uploadCommentImages(draft.localImages);
       final stickerId = draft.sticker?.id;
 
-      if (target == null) {
-        await comments.addComment(
-          draft.text,
-          mediaIds: mediaIds,
-          stickerId: stickerId,
-        );
-      } else {
-        await comments.replyTo(
-          target,
-          draft.text,
-          replyToUserId: target.authorId,
-          mediaIds: mediaIds,
-          stickerId: stickerId,
-        );
+      try {
+        if (target == null) {
+          await comments.addComment(
+            draft.text,
+            mediaIds: mediaIds,
+            stickerId: stickerId,
+          );
+        } else {
+          await comments.replyTo(
+            target,
+            draft.text,
+            replyToUserId: target.authorId,
+            mediaIds: mediaIds,
+            stickerId: stickerId,
+          );
+        }
+      } catch (submitError) {
+        // 评论创建失败：若为确定性 4xx 客户端错误，清理已上传成功但未关联的孤儿媒体；
+        // 超时/5xx 则保留，由服务端 orphan-media GC 兜底。
+        await _cleanupUnattachedCommentMedia(mediaIds, submitError);
+        rethrow;
       }
+
       if (post.commentCount == before) post.commentCount = before + 1;
       if (!mounted) return;
       setState(() {
@@ -404,13 +433,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         onReplyDraft: (target, draft) async {
           final mediaIds = await _uploadCommentImages(draft.localImages);
           final stickerId = draft.sticker?.id;
-          return widget.commentsController.replyTo(
-            target,
-            draft.text,
-            replyToUserId: target.authorId,
-            mediaIds: mediaIds,
-            stickerId: stickerId,
-          );
+          try {
+            return await widget.commentsController.replyTo(
+              target,
+              draft.text,
+              replyToUserId: target.authorId,
+              mediaIds: mediaIds,
+              stickerId: stickerId,
+            );
+          } catch (replyError) {
+            await _cleanupUnattachedCommentMedia(mediaIds, replyError);
+            rethrow;
+          }
         },
         onReply: (target, content) => widget.commentsController.replyTo(
           target,

@@ -699,7 +699,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(input.Email) != "" {
 		email := normalizeEmailAddress(input.Email)
 		code := strings.TrimSpace(input.Code)
-		if !validEmailAddress(email) || len(code) != 6 {
+		if !validEmailAddress(email) {
 			writeAuthError(w, r, ErrInvalidEmailCode)
 			return
 		}
@@ -708,26 +708,36 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		tx, err := s.db.BeginTx(r.Context(), nil)
-		if err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		defer tx.Rollback()
+		requireCode := emailCodeRequiredForRegistration()
 
-		// 严格校验 purpose = 'register' 验证码
-		if err := s.verifyAndConsumeEmailCodeTx(r.Context(), tx, email, code, "register"); err != nil {
-			_ = tx.Commit()
-			writeAuthError(w, r, err)
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(), `INSERT INTO risk_events (id, event_type, severity, ip_address, metadata, created_at) VALUES ($1, 'email_register_verified', 'low', $2, $3::jsonb, now())`, newPostID(), httpserver.ClientIP(r), emailRiskMetadata(email)); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			writeInternalError(w, r, err)
-			return
+		// 验证码模式：严格校验 6 位验证码
+		if requireCode {
+			if len(code) != 6 {
+				writeAuthError(w, r, ErrInvalidEmailCode)
+				return
+			}
+
+			tx, err := s.db.BeginTx(r.Context(), nil)
+			if err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			defer tx.Rollback()
+
+			// 严格校验 purpose = 'register' 验证码
+			if err := s.verifyAndConsumeEmailCodeTx(r.Context(), tx, email, code, "register"); err != nil {
+				_ = tx.Commit()
+				writeAuthError(w, r, err)
+				return
+			}
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO risk_events (id, event_type, severity, ip_address, metadata, created_at) VALUES ($1, 'email_register_verified', 'low', $2, $3::jsonb, now())`, newPostID(), httpserver.ClientIP(r), emailRiskMetadata(email)); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
 
 		var guestUserID string
@@ -737,12 +747,24 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		response, err := s.authService.RegisterWithEmail(r.Context(), auth.EmailRegisterInput{
-			Email:       email,
-			Password:    input.Password,
-			Nickname:    input.Nickname,
-			GuestUserID: guestUserID,
-		}, requestMetadata(r))
+		// 验证码模式创建已验证邮箱账号，免验证码模式创建未验证邮箱账号
+		var response auth.AuthResponse
+		var err error
+		if requireCode {
+			response, err = s.authService.RegisterWithEmail(r.Context(), auth.EmailRegisterInput{
+				Email:       email,
+				Password:    input.Password,
+				Nickname:    input.Nickname,
+				GuestUserID: guestUserID,
+			}, requestMetadata(r))
+		} else {
+			response, err = s.authService.RegisterWithUnverifiedEmail(r.Context(), auth.EmailRegisterInput{
+				Email:       email,
+				Password:    input.Password,
+				Nickname:    input.Nickname,
+				GuestUserID: guestUserID,
+			}, requestMetadata(r))
+		}
 		if err != nil {
 			writeAuthError(w, r, err)
 			return
@@ -833,6 +855,19 @@ func legacyRegistrationEnabled(appEnv string) bool {
 		return false
 	}
 	return appEnv == "development" || appEnv == "test"
+}
+
+// emailCodeRequiredForRegistration 控制邮箱注册是否必须验证码。
+// 显式配置优先；未配置时默认要求验证码（true）。设为 false 启用临时
+// 免验证码注册模式，账号创建为 email_verified=false。
+func emailCodeRequiredForRegistration() bool {
+	switch strings.TrimSpace(strings.ToLower(os.Getenv("AUTH_REGISTER_REQUIRE_EMAIL_CODE"))) {
+	case "false":
+		return false
+	case "true":
+		return true
+	}
+	return true
 }
 
 func isAdministrativePath(path string) bool {

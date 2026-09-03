@@ -192,9 +192,9 @@ class AuthController extends ChangeNotifier {
 
   Future<bool> register({
     required String email,
-    required String code,
     required String password,
     String? nickname,
+    String? code,
   }) async {
     status = AuthStatus.authenticating;
     error = null;
@@ -202,9 +202,9 @@ class AuthController extends ChangeNotifier {
     try {
       final session = await _repository.register(
         email: email,
-        code: code,
         password: password,
         nickname: nickname,
+        code: code,
       );
       await _adoptSession(session);
       status = AuthStatus.authenticated;

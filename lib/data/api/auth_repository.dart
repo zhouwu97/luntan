@@ -188,16 +188,17 @@ class AuthRepository {
 
   Future<AuthSession> register({
     required String email,
-    required String code,
     required String password,
     String? nickname,
+    String? code,
   }) async {
     final payload = await _client.postJson(
       '/api/v1/auth/register',
       body: {
         'email': email.trim(),
-        'code': code.trim(),
         'password': password,
+        if (code != null && code.trim().isNotEmpty)
+          'code': code.trim(),
         if (nickname != null && nickname.trim().isNotEmpty)
           'nickname': nickname.trim(),
       },

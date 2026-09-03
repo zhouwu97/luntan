@@ -297,7 +297,6 @@ func (s *Service) EmailPasswordLogin(ctx context.Context, email, password string
 	}
 	user.Experience = exp
 	user.HasPassword = true
-	user.EmailVerified = true
 	user.Email = email
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -483,6 +482,16 @@ func revokeOtherSessionsTx(ctx context.Context, tx *sql.Tx, userID, currentAcces
 
 // RegisterWithEmail 为用户注册正式账号。若有 guestUserID 且为有效活跃游客，则原地升级并继承经验；否则新建用户。
 func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInput, metadata SessionMetadata) (AuthResponse, error) {
+	return s.registerWithEmail(ctx, input, metadata, true)
+}
+
+// RegisterWithUnverifiedEmail 创建免验证码的未验证邮箱账号。账号标记为
+// email_verified=false，用户可正常登录使用论坛，但后续需补充验证邮箱所有权。
+func (s *Service) RegisterWithUnverifiedEmail(ctx context.Context, input EmailRegisterInput, metadata SessionMetadata) (AuthResponse, error) {
+	return s.registerWithEmail(ctx, input, metadata, false)
+}
+
+func (s *Service) registerWithEmail(ctx context.Context, input EmailRegisterInput, metadata SessionMetadata, emailVerified bool) (AuthResponse, error) {
 	email := normalizeEmail(input.Email)
 	if !validEmail(email) {
 		return AuthResponse{}, ErrInvalidEmail
@@ -535,14 +544,24 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 			if targetNickname == "" || targetNickname == "游客" {
 				targetNickname = generatedNickname(guestID)
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE users SET account_type = 'email', email = $1, email_verified = true, email_verified_at = $2, updated_at = $2 WHERE id = $3`, email, now, guestID); err != nil {
-				return AuthResponse{}, err
+			if emailVerified {
+				if _, err := tx.ExecContext(ctx, `UPDATE users SET account_type = 'email', email = $1, email_verified = true, email_verified_at = $2, updated_at = $2 WHERE id = $3`, email, now, guestID); err != nil {
+					return AuthResponse{}, err
+				}
+			} else {
+				if _, err := tx.ExecContext(ctx, `UPDATE users SET account_type = 'email', email = $1, email_verified = false, email_verified_at = NULL, updated_at = $2 WHERE id = $3`, email, now, guestID); err != nil {
+					return AuthResponse{}, err
+				}
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE user_profiles SET nickname = $1, level = $2, updated_at = $3 WHERE user_id = $4`, targetNickname, targetLevel, now, guestID); err != nil {
 				return AuthResponse{}, err
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO user_auth_methods (id, user_id, provider, identifier, credential_hash, created_at) VALUES ($1, $2, 'password', $3, $4, $5)`, newID("uam"), guestID, email, hash, now); err != nil {
 				return AuthResponse{}, err
+			}
+			var verifiedAt *time.Time
+			if emailVerified {
+				verifiedAt = &now
 			}
 			user = User{
 				ID:              guestID,
@@ -553,8 +572,8 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 				Status:          "active",
 				AccountType:     "email",
 				Email:           email,
-				EmailVerified:   true,
-				EmailVerifiedAt: &now,
+				EmailVerified:   emailVerified,
+				EmailVerifiedAt: verifiedAt,
 				HasPassword:     true,
 			}
 			upgraded = true
@@ -568,6 +587,10 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 		if nickname == "" || strings.EqualFold(nickname, email) {
 			nickname = generatedNickname(userID)
 		}
+		var verifiedAt *time.Time
+		if emailVerified {
+			verifiedAt = &now
+		}
 		user = User{
 			ID:              userID,
 			Username:        username,
@@ -577,12 +600,18 @@ func (s *Service) RegisterWithEmail(ctx context.Context, input EmailRegisterInpu
 			Status:          "active",
 			AccountType:     "email",
 			Email:           email,
-			EmailVerified:   true,
-			EmailVerifiedAt: &now,
+			EmailVerified:   emailVerified,
+			EmailVerifiedAt: verifiedAt,
 			HasPassword:     true,
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
-			return AuthResponse{}, err
+		if emailVerified {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, true, $4, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
+				return AuthResponse{}, err
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, username, status, email, email_verified, email_verified_at, account_type, created_at, updated_at) VALUES ($1, $2, 'active', $3, false, NULL, 'email', $4, $4)`, user.ID, user.Username, email, now); err != nil {
+				return AuthResponse{}, err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO user_profiles (user_id, nickname, level, experience, created_at, updated_at) VALUES ($1, $2, 1, 0, $3, $3)`, user.ID, user.Nickname, now); err != nil {
 			return AuthResponse{}, err

@@ -32,7 +32,7 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   AuthMode _mode = AuthMode.login;
-  LoginMethod _loginMethod = LoginMethod.code;
+  LoginMethod _loginMethod = LoginMethod.password;
 
   final emailController = TextEditingController();
   final codeController = TextEditingController();
@@ -223,12 +223,6 @@ class _AuthScreenState extends State<AuthScreen> {
       }
     } else {
       // 注册流程
-      final code = codeController.text.trim();
-      if (code.length != 6) {
-        _feedback('请输入 6 位数字验证码');
-        codeFocusNode.requestFocus();
-        return;
-      }
       final password = passwordController.text;
       if (password.length < 8) {
         _feedback('密码长度不能少于 8 位');
@@ -246,7 +240,6 @@ class _AuthScreenState extends State<AuthScreen> {
       try {
         final success = await widget.controller.register(
           email: email,
-          code: code,
           password: password,
           nickname: nicknameController.text.trim(),
         );
@@ -1180,8 +1173,6 @@ class _AuthScreenState extends State<AuthScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildEmailField(busy),
-        const SizedBox(height: 14),
-        _buildCodeField(busy),
         const SizedBox(height: 14),
         const Text(
           '设置密码',

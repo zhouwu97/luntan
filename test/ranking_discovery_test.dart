@@ -436,7 +436,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final repliesLink = find.text('查看 1 条回复 ›');
+      expect(find.textContaining('这是楼中楼里的回复', findRichText: true), findsOneWidget);
+
+      final repliesLink = find.text('查看全部 1 条回复 ›');
       await tester.ensureVisible(repliesLink);
       await tester.tap(repliesLink);
       await tester.pumpAndSettle();

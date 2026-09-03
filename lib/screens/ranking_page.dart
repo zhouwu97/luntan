@@ -1436,6 +1436,38 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   String? _remoteError;
   bool _commentsLoadingMore = false;
   String? _commentsLoadMoreError;
+  final Map<String, List<RankingToyComment>> _fallbackReplyPreviews = {};
+
+  Future<void> _backfillFallbackReplyPreviews(List<RankingToyComment> comments) async {
+    final repo = widget.repository;
+    if (repo == null) return;
+    final toFetch = comments.where((c) =>
+      c.parentId == null &&
+      c.replyCount > 0 &&
+      c.replyPreview.isEmpty &&
+      !_fallbackReplyPreviews.containsKey(c.id)
+    ).toList();
+    if (toFetch.isEmpty) return;
+
+    for (final c in toFetch) {
+      try {
+        final page = await repo.listReplies(commentId: c.id, limit: 10);
+        final sorted = List<RankingToyComment>.from(page.items)
+          ..sort((a, b) {
+            final cmp = b.likeCount.compareTo(a.likeCount);
+            if (cmp != 0) return cmp;
+            return a.createdAt.compareTo(b.createdAt);
+          });
+        if (mounted) {
+          setState(() {
+            _fallbackReplyPreviews[c.id] = sorted.take(4).toList();
+          });
+        }
+      } catch (_) {
+        // 预加载异常静默处理
+      }
+    }
+  }
 
   RankingItem get item => widget.item;
 
@@ -1518,6 +1550,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         _commentsLoadingMore = false;
         _commentsLoadMoreError = null;
       });
+      _backfillFallbackReplyPreviews(detail.comments);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1755,6 +1788,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         _remoteDetail = detail;
         _commentsLoadMoreError = null;
       });
+      _backfillFallbackReplyPreviews(detail.comments);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2142,6 +2176,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
         );
         _commentsLoadingMore = false;
       });
+      _backfillFallbackReplyPreviews(page.items);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -2182,6 +2217,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
     ),
   );
   if (changed && mounted) {
+    _fallbackReplyPreviews.clear();
     await _loadRemoteDetail();
   }
 }
@@ -2268,6 +2304,7 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
                         _ReviewSection(
                           sortByWeight: _sortByWeight,
                           comments: _serverComments,
+                          fallbackReplies: _fallbackReplyPreviews,
                           useMock: !_hasServer,
                           loading: _remoteLoading,
                           errorMessage: _remoteError,
@@ -2967,6 +3004,7 @@ class _ReviewSection extends StatelessWidget {
     required this.sortByWeight,
     required this.onToggleSort,
     this.comments,
+    this.fallbackReplies = const {},
     this.useMock = false,
     this.loading = false,
     this.errorMessage,
@@ -2984,6 +3022,7 @@ class _ReviewSection extends StatelessWidget {
   final bool sortByWeight;
   final VoidCallback onToggleSort;
   final List<RankingToyComment>? comments;
+  final Map<String, List<RankingToyComment>> fallbackReplies;
   final bool useMock;
   final bool loading;
   final String? errorMessage;
@@ -3117,7 +3156,9 @@ class _ReviewSection extends StatelessWidget {
           (comment) {
             final effectiveReplies = comment.replyPreview.isNotEmpty
                 ? comment.replyPreview
-                : (childrenByParent[comment.id] ?? const []);
+                : (fallbackReplies[comment.id] ??
+                    childrenByParent[comment.id] ??
+                    const []);
             return _ReviewCard.server(
               comment: comment,
               replies: effectiveReplies,

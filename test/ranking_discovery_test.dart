@@ -212,6 +212,78 @@ class _SortFailureApiClient extends _FakeApiClient {
   }
 }
 
+class _FakeApiClientWithPreviews extends _FakeApiClient {
+  @override
+  Future<Map<String, dynamic>> getJson(
+    String path, {
+    Map<String, String>? headers,
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    final res = await super.getJson(
+      path,
+      headers: headers,
+      queryParameters: queryParameters,
+    );
+    if (path == '/api/v1/ranking/toys/toy-butter-2') {
+      final copy = Map<String, dynamic>.from(res);
+      copy['comments'] = [
+        {
+          'id': 'c-1',
+          'author': {
+            'id': 'u-1',
+            'username': 'tester',
+            'nickname': '测试酱',
+            'level': 4,
+            'author_rating': 9,
+          },
+          'content': '手感极佳，软糯适中',
+          'like_count': 12,
+          'created_at': '2026-08-22T10:00:00Z',
+          'viewer_state': {'has_liked': true},
+          'root_id': 'c-1',
+          'reply_count': 5,
+          'reply_preview': [
+            {
+              'id': 'r-1',
+              'author': {
+                'id': 'u-2',
+                'username': 'user2',
+                'nickname': '热心车手',
+                'level': 2,
+              },
+              'content': '二级热评一',
+              'like_count': 20,
+              'created_at': '2026-08-22T10:05:00Z',
+              'viewer_state': {'has_liked': false},
+              'root_id': 'c-1',
+              'parent_id': 'c-1',
+              'reply_count': 0,
+            },
+            {
+              'id': 'r-2',
+              'author': {
+                'id': 'u-3',
+                'username': 'user3',
+                'nickname': '资深玩家',
+                'level': 3,
+              },
+              'content': '二级热评二',
+              'like_count': 15,
+              'created_at': '2026-08-22T10:10:00Z',
+              'viewer_state': {'has_liked': false},
+              'root_id': 'c-1',
+              'parent_id': 'c-1',
+              'reply_count': 0,
+            },
+          ],
+        },
+      ];
+      return copy;
+    }
+    return res;
+  }
+}
+
 void main() {
   testWidgets('排行榜列表失败时不展示静态演示数据', (tester) async {
     await tester.pumpWidget(
@@ -372,6 +444,39 @@ void main() {
       expect(find.text('1 条回复'), findsOneWidget);
       expect(find.text('这是楼中楼里的回复'), findsOneWidget);
       expect(find.text('回复 @测试酱'), findsOneWidget);
+    });
+
+    testWidgets('榜单评价有 reply_preview 时正常外显高赞二级回复和折叠按钮', (tester) async {
+      final client = _FakeApiClientWithPreviews();
+      final rankingRepo = RankingRepository(client);
+      const item = RankingItem(
+        id: 'toy-butter-2',
+        rank: 1,
+        name: '黄油小姐 二代',
+        hot: '401人想冲',
+        tags: ['奶香'],
+        ratings: '17人评分',
+        score: '8.7',
+        asset: 'assets/ranking/hero.webp',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RankingItemDetailPage(
+            item: item,
+            repository: rankingRepo,
+            isAuthenticated: true,
+            canComment: true,
+            canLike: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 验证外显了前4条二级回复中的高赞回复
+      expect(find.textContaining('二级热评一', findRichText: true), findsOneWidget);
+      expect(find.textContaining('二级热评二', findRichText: true), findsOneWidget);
+      expect(find.text('查看全部 5 条回复 ›'), findsOneWidget);
     });
 
     testWidgets('榜单评价 API 失败时不展示 Mock 评价', (tester) async {

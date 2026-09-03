@@ -3363,102 +3363,120 @@ class _ReviewCard extends StatelessWidget {
           // 内嵌二级回复预览（服务端评论）
           if (replies.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ReplyPreviewSurface(
-              borderRadius: 8,
-              padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  ...(() {
-                    final sorted = List<RankingToyComment>.from(replies)
-                      ..sort((a, b) {
-                        final cmp = b.likeCount.compareTo(a.likeCount);
-                        if (cmp != 0) return cmp;
-                        return a.createdAt.compareTo(b.createdAt);
-                      });
-                    return sorted.take(4).map((r) {
-                      final rAuthor = r.nickname.isEmpty
-                          ? r.username
-                          : r.nickname;
-                      final rReplyTo = r.replyToUserNickname;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2.5),
-                        child: InkWell(
-                          onTap: () {
-                            if (onReplyTap != null && serverComment != null) {
-                              onReplyTap!(serverComment!, r);
-                            } else if (onViewReplies != null) {
-                              onViewReplies!();
-                            }
-                          },
-                          borderRadius: BorderRadius.circular(4),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 1.5,
-                              horizontal: 2,
-                            ),
-                            child: Text.rich(
-                              TextSpan(
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF5F7488),
-                                  height: 1.45,
-                                ),
-                                children: [
-                                  TextSpan(
-                                    text: rAuthor,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF2C4D73),
+                  Container(
+                    width: 3,
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFCFE1F8),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: ReplyPreviewSurface(
+                      borderRadius: 8,
+                      padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ...(() {
+                            final sorted = List<RankingToyComment>.from(replies)
+                              ..sort((a, b) {
+                                final cmp = b.likeCount.compareTo(a.likeCount);
+                                if (cmp != 0) return cmp;
+                                return a.createdAt.compareTo(b.createdAt);
+                              });
+                            return sorted.take(4).map((r) {
+                              final rAuthor = r.nickname.isEmpty
+                                  ? r.username
+                                  : r.nickname;
+                              final rReplyTo = r.replyToUserNickname;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2.5),
+                                child: InkWell(
+                                  onTap: () {
+                                    if (onReplyTap != null && serverComment != null) {
+                                      onReplyTap!(serverComment!, r);
+                                    } else if (onViewReplies != null) {
+                                      onViewReplies!();
+                                    }
+                                  },
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 1.5,
+                                      horizontal: 2,
                                     ),
-                                  ),
-                                  if (rReplyTo != null && rReplyTo.isNotEmpty) ...[
-                                    const TextSpan(text: ' 回复 '),
-                                    TextSpan(
-                                      text: '@$rReplyTo',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: AppTheme.primary,
+                                    child: Text.rich(
+                                      TextSpan(
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF5F7488),
+                                          height: 1.45,
+                                        ),
+                                        children: [
+                                          TextSpan(
+                                            text: rAuthor,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF2C4D73),
+                                            ),
+                                          ),
+                                          if (rReplyTo != null && rReplyTo.isNotEmpty) ...[
+                                            const TextSpan(text: ' 回复 '),
+                                            TextSpan(
+                                              text: '@$rReplyTo',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                color: AppTheme.primary,
+                                              ),
+                                            ),
+                                          ],
+                                          const TextSpan(
+                                            text: '：',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF2C4D73),
+                                            ),
+                                          ),
+                                          TextSpan(text: r.content),
+                                        ],
                                       ),
-                                    ),
-                                  ],
-                                  const TextSpan(
-                                    text: '：',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF2C4D73),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  TextSpan(text: r.content),
-                                ],
+                                ),
+                              );
+                            });
+                          })(),
+                          if (onViewReplies != null && totalReplies > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: InkWell(
+                                onTap: onViewReplies,
+                                borderRadius: BorderRadius.circular(4),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 2),
+                                  child: Text(
+                                    '查看全部 $totalReplies 条回复 ›',
+                                    style: const TextStyle(
+                                      color: AppTheme.primary,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
                               ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                        ),
-                      );
-                    });
-                  })(),
-                  if (onViewReplies != null && totalReplies > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: InkWell(
-                        onTap: onViewReplies,
-                        borderRadius: BorderRadius.circular(4),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Text(
-                            '查看全部 $totalReplies 条回复 ›',
-                            style: const TextStyle(
-                              color: AppTheme.primary,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
+                        ],
                       ),
                     ),
+                  ),
                 ],
               ),
             ),

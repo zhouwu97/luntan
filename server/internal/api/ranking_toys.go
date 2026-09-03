@@ -588,7 +588,14 @@ func (s *Server) listRankingToyCommentsPage(ctx context.Context, toyID, viewerID
 
 	var rootIDs []string
 	for _, itm := range items {
-		if count, ok := itm["reply_count"].(int); ok && count > 0 {
+		var replyCount int64
+		switch v := itm["reply_count"].(type) {
+		case int:
+			replyCount = int64(v)
+		case int64:
+			replyCount = v
+		}
+		if replyCount > 0 {
 			if id, ok := itm["id"].(string); ok && id != "" {
 				rootIDs = append(rootIDs, id)
 			}
@@ -643,17 +650,17 @@ func (s *Server) loadRankingToyReplyPreviews(ctx context.Context, toyID, viewerI
 	                 c.created_at, c.root_id, c.parent_id, c.reply_to_user_id, c.reply_count,
 	                 aus.rating, ` + rankingToyCommentMediaSelect + `, ` + rankingToyCommentAvatarSelect + `
 	          FROM (
-	              SELECT c.*, ROW_NUMBER() OVER (PARTITION BY COALESCE(c.root_id, c.id) ORDER BY c.like_count DESC, c.created_at ASC, c.id ASC) AS rn
+	              SELECT c.*, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(c.root_id, ''), c.parent_id) ORDER BY c.like_count DESC, c.created_at ASC, c.id ASC) AS rn
 	              FROM ranking_toy_comments c
 	              WHERE c.toy_id = $1 AND c.deleted_at IS NULL AND c.parent_id IS NOT NULL
-	                AND COALESCE(c.root_id, c.id) IN (` + strings.Join(placeholders, ", ") + `)
+	                AND COALESCE(NULLIF(c.root_id, ''), c.parent_id) IN (` + strings.Join(placeholders, ", ") + `)
 	          ) c
 	          JOIN users u ON u.id = c.author_id
 	          LEFT JOIN user_profiles up ON up.user_id = c.author_id
 	          LEFT JOIN media_assets am ON am.id = up.avatar_media_id
 	          LEFT JOIN ranking_toy_user_states aus ON aus.toy_id = c.toy_id AND aus.user_id = c.author_id
 	          WHERE c.rn <= 4
-	          ORDER BY c.root_id ASC, c.rn ASC`
+	          ORDER BY COALESCE(NULLIF(c.root_id, ''), c.parent_id) ASC, c.rn ASC`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -689,6 +696,8 @@ func (s *Server) loadRankingToyReplyPreviews(ctx context.Context, toyID, viewerI
 		rootKey := ""
 		if item.RootID.Valid && item.RootID.String != "" {
 			rootKey = item.RootID.String
+		} else if item.ParentID.Valid && item.ParentID.String != "" {
+			rootKey = item.ParentID.String
 		}
 		if rootKey != "" {
 			result[rootKey] = append(result[rootKey], item.response())

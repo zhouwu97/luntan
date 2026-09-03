@@ -184,6 +184,14 @@ func TestListRankingToyCommentsPaginatesRootsOnly(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*c.parent_id IS NULL.*LIMIT \$3`).
 		WithArgs("toy-1", "", 2).
 		WillReturnRows(commentRows)
+	previewRows := sqlmock.NewRows([]string{
+		"id", "author_id", "username", "nickname", "level", "content",
+		"like_count", "has_liked", "created_at", "root_id", "parent_id", "reply_to_user_id", "reply_count", "author_rating", "media",
+		"avatar_media_id", "avatar_object_key",
+	}).AddRow("reply-1", "u-2", "u2", "用户2", 2, "reply one", 5, false, time.Date(2026, 8, 27, 11, 0, 0, 0, time.UTC), "root-1", "root-1", nil, 0, 0, nil, "", "")
+	mock.ExpectQuery(`(?s)SELECT c.id, c.author_id.*FROM.*ranking_toy_comments c.*WHERE c.toy_id = \$1.*rn <= 4`).
+		WithArgs("toy-1", "", "root-1").
+		WillReturnRows(previewRows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ranking/toys/toy-1/comments?sort=latest&limit=1", nil)
 	res := httptest.NewRecorder()
@@ -201,6 +209,10 @@ func TestListRankingToyCommentsPaginatesRootsOnly(t *testing.T) {
 	}
 	if len(body.Items) != 1 || body.Items[0]["id"] != "root-1" || !body.HasMore || body.NextCursor == "" {
 		t.Fatalf("unexpected root page: %#v", body)
+	}
+	previews, ok := body.Items[0]["reply_preview"].([]any)
+	if !ok || len(previews) != 1 {
+		t.Fatalf("expected 1 reply_preview in root-1, got %#v", body.Items[0]["reply_preview"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

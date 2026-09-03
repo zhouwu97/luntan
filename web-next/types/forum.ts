@@ -11,6 +11,7 @@ export interface SessionUser extends UserSummary {
   experience?: number;
   email?: string;
   status?: string;
+  role?: string;
   capabilities?: Record<string, boolean>;
 }
 
@@ -88,6 +89,7 @@ export interface Comment {
   postId: string;
   author: UserSummary;
   content: string;
+  media?: MediaAsset[];
   likeCount: number;
   dislikeCount: number;
   replyCount: number;
@@ -96,6 +98,33 @@ export interface Comment {
   updatedAt: string;
   viewerState: ViewerCommentState;
   replyPreview?: Comment[];
+}
+
+export interface CommentPage {
+  items: Comment[];
+  total: number;
+  hasMore: boolean;
+}
+
+export interface ProfilePostPage {
+  items: ProfilePost[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
+export interface ProfileCommentItem {
+  id: string;
+  postId: string;
+  postTitle?: string;
+  content: string;
+  createdAt: string;
+  likeCount: number;
+}
+
+export interface ProfileCommentPage {
+  items: ProfileCommentItem[];
+  nextCursor?: string;
+  hasMore: boolean;
 }
 
 export interface FeedPage {

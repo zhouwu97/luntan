@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$VersionName,
 
     [long]$VersionCode = 0,
@@ -57,7 +57,7 @@ Set-Location -LiteralPath (Join-Path $PSScriptRoot '..')
 # 版本以 pubspec.yaml 为唯一来源；命令行参数仅作为兼容入口，并且必须匹配，
 # 避免 APK、PackageInfo 与 release.json 生成出三套版本事实。
 $pubspecPath = Join-Path (Get-Location) 'pubspec.yaml'
-$pubspecVersionLine = Get-Content -LiteralPath $pubspecPath |
+$pubspecVersionLine = Get-Content -LiteralPath $pubspecPath -Encoding utf8 |
     Where-Object { $_ -match '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$' } |
     Select-Object -First 1
 if ($null -eq $pubspecVersionLine -or $pubspecVersionLine -notmatch '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$') {

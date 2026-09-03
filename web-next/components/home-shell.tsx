@@ -225,17 +225,30 @@ export function HomeShell() {
     router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
   }
 
-  function handleFloatingRefresh() {
+  async function handleFloatingRefresh() {
     if (refreshing) return;
     setRefreshing(true);
-    showToast("已刷新到最新内容");
-    setRefreshVersion((v) => v + 1);
     if (typeof window !== "undefined" && window.scrollY > 120) {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
-    setTimeout(() => {
+    try {
+      const page = await getFeed({
+        sort,
+        communityId: activeCommunityId,
+        hasMedia,
+        latestOrder,
+        topic: topic || undefined,
+      });
+      setPosts(page.items);
+      setNextCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+      writeFeedCache(currentCacheOptions, page);
+      showToast("已刷新到最新内容");
+    } catch {
+      showToast("刷新失败，请稍后重试");
+    } finally {
       setRefreshing(false);
-    }, 600);
+    }
   }
 
   const emptyTitle = query

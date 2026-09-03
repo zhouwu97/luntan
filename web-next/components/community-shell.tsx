@@ -8,6 +8,7 @@ import { Icon } from "./icons";
 import { PostCard } from "./post-card";
 import { SiteHeader } from "./site-header";
 import { useSession } from "./session-provider";
+import { useToast } from "./toast-context";
 import { getCommunity, getFeed } from "../lib/api/forum";
 import { readFeedCache, writeFeedCache } from "../lib/feed-cache";
 import { relativeTime } from "../lib/format";
@@ -21,6 +22,7 @@ export function CommunityShell({ communityId }: { communityId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useSession();
+  const { showToast } = useToast();
   const query = (searchParams.get("q") || "").trim();
   const [community, setCommunity] = useState<Community | null>(null);
   const [sort, setSort] = useState<FeedSort>(() => normalizeSort(searchParams.get("sort")));
@@ -127,7 +129,22 @@ export function CommunityShell({ communityId }: { communityId: string }) {
   return (
     <>
       <SiteHeader className="community-detail-site-header" />
-      <div className="community-mobile-header"><Link href="/" aria-label="返回首页"><Icon name="chevron-left" size={22} /></Link><strong>{title}</strong><button type="button" aria-label="更多操作"><Icon name="more" size={19} /></button></div>
+      <div className="community-mobile-header">
+        <Link href="/" aria-label="返回首页"><Icon name="chevron-left" size={22} /></Link>
+        <strong>{title}</strong>
+        <button
+          type="button"
+          aria-label="更多操作"
+          onClick={() => {
+            if (typeof navigator !== "undefined" && navigator.clipboard) {
+              void navigator.clipboard.writeText(window.location.href);
+              showToast("已复制板块链接");
+            }
+          }}
+        >
+          <Icon name="more" size={19} />
+        </button>
+      </div>
       <main className="page-frame community-detail-page">
         <Link href="/communities" className="back-link"><Icon name="chevron-left" size={16} />全部社区</Link>
         {communityError && <div className="data-note" role="status">{communityError}</div>}

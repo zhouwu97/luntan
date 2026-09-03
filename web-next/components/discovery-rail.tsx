@@ -12,8 +12,6 @@ const RANK_NUM_COLORS = ["#f59e0b", "#94a3b8", "#d97706", "#64748b"];
 
 export function DiscoveryRail({
   posts,
-  user,
-  onLogin,
 }: {
   posts: Post[];
   user: SessionUser | null;
@@ -21,7 +19,6 @@ export function DiscoveryRail({
 }) {
   const [rankingToys, setRankingToys] = useState<RankingToy[]>([]);
   const [weeklyTop, setWeeklyTop] = useState<RankingToy | undefined>();
-  const [checkedIn, setCheckedIn] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -50,14 +47,6 @@ export function DiscoveryRail({
   const displayTop = weeklyTop || rankingToys[0];
   const otherRanks = displayTop ? rankingToys.filter((t) => t.id !== displayTop.id).slice(0, 3) : rankingToys.slice(1, 4);
 
-  function handleCheckin() {
-    if (!user) {
-      onLogin();
-      return;
-    }
-    setCheckedIn(true);
-  }
-
   return (
     <aside className="desktop-right-rail" aria-label="社区右侧发现">
       {/* 热门/刚刚讨论 */}
@@ -71,22 +60,37 @@ export function DiscoveryRail({
             更多 <Icon name="chevron-right" size={14} />
           </Link>
         </div>
-
-        <div className="live-discussion-list">
+        <div className="rail-discussion-list">
           {hotDiscussions.length > 0 ? (
-            hotDiscussions.map((post, index) => (
+            hotDiscussions.map((item) => (
               <Link
-                key={post.id}
-                href={`/post/${encodeURIComponent(post.id)}`}
-                className="live-row"
+                key={item.id}
+                href={`/post/${encodeURIComponent(item.id)}`}
+                className="rail-discuss-item"
               >
-                <span className="live-index">{String(index + 1).padStart(2, "0")}</span>
-                <span className="live-body">
-                  <span className="live-title">{post.title}</span>
-                  <span className="live-meta">
-                    {post.commentCount} 条回复 · {relativeTime(post.activityAt || post.createdAt)}
+                <div className="rail-discuss-main">
+                  <span className="rail-discuss-tag">{item.community.name}</span>
+                  <p className="rail-discuss-title">{item.title}</p>
+                  <div className="rail-discuss-meta">
+                    <UserAvatar
+                      userId={item.author.id}
+                      name={item.author.nickname}
+                      url={item.author.avatarUrl}
+                      size="small"
+                    />
+                    <span>{item.author.nickname}</span>
+                    <span className="meta-dot">·</span>
+                    <time dateTime={item.createdAt}>
+                      {relativeTime(item.activityAt || item.createdAt)}
+                    </time>
+                  </div>
+                </div>
+                {item.commentCount > 0 && (
+                  <span className="rail-discuss-badge">
+                    <Icon name="message" size={12} />
+                    {compactCount(item.commentCount)}
                   </span>
-                </span>
+                )}
               </Link>
             ))
           ) : (
@@ -107,18 +111,18 @@ export function DiscoveryRail({
           </Link>
         </div>
 
-        {/* 榜首 Hero 卡片（专属深空天蓝质感） */}
+        {/* 榜首 Hero 卡片 */}
         {displayTop && (
           <Link href={`/ranking/${encodeURIComponent(displayTop.id)}`} className="rank-hero-celestial">
             <div className="rank-hero-top">
               <span className="rank-hero-kicker">本周榜首</span>
-              <span className="rank-hero-score">{displayTop.score ? displayTop.score.toFixed(1) : "9.8"}</span>
+              <span className="rank-hero-score">{displayTop.score ? displayTop.score.toFixed(1) : "暂无评分"}</span>
             </div>
             <strong className="rank-hero-title">{displayTop.name}</strong>
             <div className="rank-hero-meta">
-              <span>{displayTop.ratingCount || 10} 篇测评</span>
+              <span>{displayTop.ratingCount ? `${displayTop.ratingCount} 篇测评` : "暂无测评"}</span>
               <span className="meta-dot">·</span>
-              <span>{compactCount(displayTop.wantCount || 120)} 人想要</span>
+              <span>{compactCount(displayTop.wantCount || 0)} 人想要</span>
             </div>
           </Link>
         )}
@@ -149,7 +153,7 @@ export function DiscoveryRail({
                   </span>
                 </span>
                 <span className="rank-score-val">
-                  {toy.score ? toy.score.toFixed(1) : "9.0"}
+                  {toy.score ? toy.score.toFixed(1) : "—"}
                 </span>
               </Link>
             ))
@@ -157,28 +161,6 @@ export function DiscoveryRail({
             <p className="empty-rail-hint">正在更新本周榜单…</p>
           )}
         </div>
-      </section>
-
-      {/* 签到积分与社区互动 */}
-      <section className="rail-panel checkin-panel-celestial">
-        <div className="checkin-top-row">
-          <div className="checkin-copy">
-            <span className="checkin-kicker">每日一次</span>
-            <strong>{checkedIn ? "今日已签到" : user ? "今天来过" : "登录后签到"}</strong>
-            <p>{checkedIn ? "已获取今日积分，明天继续！" : user ? "签到可获得社区积分与经验" : "登录开启签到与全社区动态"}</p>
-          </div>
-          <span className="checkin-badge-icon">
-            <Icon name="trophy" size={32} />
-          </span>
-        </div>
-        <button
-          type="button"
-          className={`checkin-action-btn${checkedIn ? " is-checked" : ""}`}
-          onClick={handleCheckin}
-          disabled={checkedIn}
-        >
-          {checkedIn ? "已完成今日签到" : user ? "今日签到" : "去登录开启"}
-        </button>
       </section>
     </aside>
   );

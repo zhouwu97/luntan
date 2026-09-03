@@ -74,7 +74,7 @@ export function SearchShell() {
           </ResultSection>}
 
           {!loading && results.toys.length > 0 && <ResultSection title={`榜单商品 ${results.toys.length}`}>
-            {results.toys.map((toy) => <Link key={toy.id} href="/ranking" className="profile-post-row"><div><h3>{toy.name}</h3><p>{toy.description || toy.merchant || "榜单商品"}</p></div><div className="profile-post-meta"><span>{toy.score ? `${toy.score.toFixed(1)} 分` : "暂无评分"}</span><span>{toy.wantCount} 人想要</span></div></Link>)}
+            {results.toys.map((toy) => <Link key={toy.id} href={`/ranking/${encodeURIComponent(toy.id)}`} className="profile-post-row"><div><h3>{toy.name}</h3><p>{toy.description || toy.merchant || "榜单商品"}</p></div><div className="profile-post-meta"><span>{toy.score ? `${toy.score.toFixed(1)} 分` : "暂无评分"}</span><span>{toy.wantCount} 人想要</span></div></Link>)}
           </ResultSection>}
         </section>
       </main>

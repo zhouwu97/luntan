@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "./site-header";
 import { AppDownloadBanner } from "./app-download-banner";
@@ -10,9 +10,11 @@ import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
+import { ImageGalleryModal, type GalleryImage } from "./image-gallery-modal";
 import {
   createComment,
   createReply,
+  deleteComment,
   getCommentReplies,
   getComments,
   getFeed,
@@ -21,6 +23,8 @@ import {
   setCommentLike,
   setPostBookmark,
   setPostLike,
+  setUserFollow,
+  uploadImage,
 } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
 import type { Comment, Post, SessionUser } from "../types/forum";
@@ -31,22 +35,37 @@ export function PostDetailShell({ id }: { id: string }) {
   const { showToast } = useToast();
   const [post, setPost] = useState<Post | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [totalComments, setTotalComments] = useState(0);
+  const [hasMoreComments, setHasMoreComments] = useState(false);
+  const [loadingMoreComments, setLoadingMoreComments] = useState(false);
+  const [sortOrder, setSortOrder] = useState<"hot" | "asc" | "desc">("asc");
+  const [landlordOnly, setLandlordOnly] = useState(false);
   const [related, setRelated] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
   const [mobileComposerText, setMobileComposerText] = useState("");
+  const [mobileFiles, setMobileFiles] = useState<File[]>([]);
   const [sendingComment, setSendingComment] = useState(false);
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[] | null>(null);
+  const [galleryIndex, setGalleryIndex] = useState(0);
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
     setError("");
-    void Promise.all([getPost(id), getComments(id), getFeed({ sort: "hot", limit: 4 })])
-      .then(([nextPost, nextComments, nextRelated]) => {
+    void Promise.all([
+      getPost(id),
+      getComments(id, { offset: 0, limit: 30, sort: sortOrder, authorId: landlordOnly && post ? post.author.id : undefined }),
+      getFeed({ sort: "hot", limit: 4 }),
+    ])
+      .then(([nextPost, commentPage, nextRelated]) => {
         if (!mounted) return;
         setPost(nextPost);
-        setComments(nextComments);
+        setComments(commentPage.items);
+        setTotalComments(commentPage.total);
+        setHasMoreComments(commentPage.hasMore);
         setRelated(nextRelated.items.filter((item) => item.id !== id).slice(0, 4));
       })
       .catch((requestError: unknown) => {
@@ -65,8 +84,66 @@ export function PostDetailShell({ id }: { id: string }) {
   }, [id]);
 
   useEffect(() => {
+    if (!loading && typeof window !== "undefined" && window.location.hash === "#comments") {
+      const el = document.getElementById("comments");
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+      }
+    }
+  }, [loading]);
+
+  useEffect(() => {
     if (user && post) void recordHistory(post.id).catch(() => undefined);
   }, [post, user]);
+
+  async function handleSortOrFilterChange(nextSort: "hot" | "asc" | "desc", nextLandlord: boolean) {
+    setSortOrder(nextSort);
+    setLandlordOnly(nextLandlord);
+    try {
+      const page = await getComments(id, {
+        offset: 0,
+        limit: 30,
+        sort: nextSort,
+        authorId: nextLandlord && post ? post.author.id : undefined,
+      });
+      setComments(page.items);
+      setTotalComments(page.total);
+      setHasMoreComments(page.hasMore);
+    } catch {
+      showToast("加载评论失败，请重试");
+    }
+  }
+
+  async function handleLoadMoreComments() {
+    if (loadingMoreComments || !hasMoreComments) return;
+    setLoadingMoreComments(true);
+    try {
+      const page = await getComments(id, {
+        offset: comments.length,
+        limit: 30,
+        sort: sortOrder,
+        authorId: landlordOnly && post ? post.author.id : undefined,
+      });
+      setComments((curr) => [...curr, ...page.items]);
+      setTotalComments(page.total);
+      setHasMoreComments(page.hasMore);
+    } catch {
+      showToast("加载更多评论失败，请重试");
+    } finally {
+      setLoadingMoreComments(false);
+    }
+  }
+
+  function handleOpenGallery(images: GalleryImage[], index = 0) {
+    setGalleryImages(images);
+    setGalleryIndex(index);
+  }
+
+  function handleChooseMobileFiles(event: ChangeEvent<HTMLInputElement>) {
+    const next = Array.from(event.target.files || []).filter((f) => f.type.startsWith("image/"));
+    event.target.value = "";
+    setMobileFiles((curr) => [...curr, ...next].slice(0, 9));
+  }
 
   async function handleMobileSubmitComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,18 +151,31 @@ export function PostDetailShell({ id }: { id: string }) {
       router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
       return;
     }
-    if (!mobileComposerText.trim() || sendingComment) return;
+    if ((!mobileComposerText.trim() && mobileFiles.length === 0) || sendingComment) return;
     setSendingComment(true);
     try {
-      const newComment = await createComment(id, mobileComposerText.trim());
-      setComments((curr) => [...curr, newComment]);
+      const mediaIds: string[] = [];
+      for (const file of mobileFiles) {
+        mediaIds.push(await uploadImage(file));
+      }
+      const newComment = await createComment(id, mobileComposerText.trim(), mediaIds);
+      setComments((curr) => [newComment, ...curr]);
+      setTotalComments((t) => t + 1);
       setMobileComposerText("");
+      setMobileFiles([]);
       setMobileComposerOpen(false);
       showToast("回复发布成功！");
     } catch (reqErr) {
       showToast(formatError(reqErr, "回复失败，请重试"));
     } finally {
       setSendingComment(false);
+    }
+  }
+
+  function handleShareLink() {
+    if (typeof window !== "undefined" && navigator.clipboard) {
+      void navigator.clipboard.writeText(window.location.href);
+      showToast("已复制帖子链接");
     }
   }
 
@@ -110,8 +200,9 @@ export function PostDetailShell({ id }: { id: string }) {
         <SiteHeader />
         <main className="page-frame">
           <div className="empty-state">
-            <h1>帖子不存在</h1>
-            <p>这条内容可能已被删除。</p>
+            <Icon name="box" size={32} />
+            <h1>帖子不存在或已被删除</h1>
+            <p>{error || "你访问的帖子可能已被移动或设为私密。"}</p>
             <Link href="/" className="primary-link">
               返回首页
             </Link>
@@ -123,10 +214,9 @@ export function PostDetailShell({ id }: { id: string }) {
 
   return (
     <>
-      {/* 桌面端专用顶部导航栏 */}
-      <SiteHeader className="post-detail-site-header" />
+      <SiteHeader />
 
-      {/* 移动端原型顶部 Header */}
+      {/* 移动端详情顶部导航 */}
       <header className="detail-head mobile-only">
         <button
           type="button"
@@ -140,8 +230,8 @@ export function PostDetailShell({ id }: { id: string }) {
         <button
           type="button"
           className="icon-btn"
-          aria-label="更多操作"
-          onClick={() => showToast("已复制帖子链接")}
+          aria-label="复制链接与分享"
+          onClick={handleShareLink}
         >
           <Icon name="more" size={18} />
         </button>
@@ -157,19 +247,33 @@ export function PostDetailShell({ id }: { id: string }) {
 
             {error && <div className="data-note">{error}</div>}
 
-            <PostArticle post={post} user={user} onRequireAuth={() => router.push("/login")} />
+            <PostArticle
+              post={post}
+              user={user}
+              onRequireAuth={() => router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`)}
+              onOpenGallery={handleOpenGallery}
+            />
 
             <CommentsSection
               post={post}
               comments={comments}
               setComments={setComments}
+              totalComments={totalComments}
+              setTotalComments={setTotalComments}
+              hasMoreComments={hasMoreComments}
+              loadingMoreComments={loadingMoreComments}
+              sortOrder={sortOrder}
+              landlordOnly={landlordOnly}
+              onSortOrFilterChange={handleSortOrFilterChange}
+              onLoadMoreComments={handleLoadMoreComments}
               user={user}
-              onRequireAuth={() => router.push("/login")}
+              onRequireAuth={() => router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`)}
+              onOpenGallery={handleOpenGallery}
             />
           </section>
 
           {/* 桌面端侧边作者与相关推荐 */}
-          <DetailAside post={post} related={related} />
+          <DetailAside post={post} related={related} user={user} />
         </div>
       </main>
 
@@ -184,16 +288,16 @@ export function PostDetailShell({ id }: { id: string }) {
           />
         </div>
         <div className="composer-side">
-          <span className="comp-stat">
+          <a href="#comments" className="comp-stat" aria-label="查看评论">
             <Icon name="message" size={18} />
-            {compactCount(comments.length)}
-          </span>
+            {compactCount(totalComments)}
+          </a>
           <button
             type="button"
             className={`comp-stat stat${post.viewerState.hasLiked ? " selected" : ""}`}
             onClick={async () => {
               if (!user) {
-                router.push("/login");
+                router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
                 return;
               }
               const next = !post.viewerState.hasLiked;
@@ -204,14 +308,24 @@ export function PostDetailShell({ id }: { id: string }) {
                       likeCount: Math.max(0, p.likeCount + (next ? 1 : -1)),
                       viewerState: { ...p.viewerState, hasLiked: next },
                     }
-                  : p
+                  : p,
               );
               try {
                 await setPostLike(post.id, next);
               } catch {
-                // 回滚
+                setPost((p) =>
+                  p
+                    ? {
+                        ...p,
+                        likeCount: Math.max(0, p.likeCount + (next ? -1 : 1)),
+                        viewerState: { ...p.viewerState, hasLiked: !next },
+                      }
+                    : p,
+                );
+                showToast("点赞操作失败，请重试");
               }
             }}
+            aria-label={post.viewerState.hasLiked ? "已点赞" : "点赞"}
           >
             <Icon name="heart" size={18} />
             {compactCount(post.likeCount)}
@@ -219,17 +333,16 @@ export function PostDetailShell({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* 移动端评论输入弹层 */}
+      {/* 移动端弹出发评抽屉 */}
       {mobileComposerOpen && (
         <div
-          className="comment-reply-overlay mobile-only"
-          onClick={() => setMobileComposerOpen(false)}
+          className="composer-sheet-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMobileComposerOpen(false);
+          }}
         >
-          <div
-            className="comment-reply-modal"
-            style={{ padding: 16 }}
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="composer-sheet">
+            <div className="composer-sheet-handle" />
             <form onSubmit={handleMobileSubmitComment}>
               <textarea
                 autoFocus
@@ -246,35 +359,111 @@ export function PostDetailShell({ id }: { id: string }) {
                 value={mobileComposerText}
                 onChange={(e) => setMobileComposerText(e.target.value)}
               />
+
+              {mobileFiles.length > 0 && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  {mobileFiles.map((file, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        position: "relative",
+                        width: 54,
+                        height: 54,
+                        borderRadius: 8,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <img
+                        src={URL.createObjectURL(file)}
+                        alt=""
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMobileFiles((files) => files.filter((_, i) => i !== idx))}
+                        style={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          background: "rgba(0,0,0,0.6)",
+                          color: "#fff",
+                          border: 0,
+                          borderRadius: "50%",
+                          width: 18,
+                          height: 18,
+                          fontSize: 10,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 10,
+                  justifyContent: "space-between",
+                  alignItems: "center",
                   marginTop: 10,
                 }}
               >
-                <button
-                  type="button"
-                  className="outline-button"
-                  onClick={() => setMobileComposerOpen(false)}
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    color: "#3b82f6",
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
                 >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={!mobileComposerText.trim() || sendingComment}
-                >
-                  {sendingComment ? "发送中…" : "发送"}
-                </button>
+                  <Icon name="image" size={18} />
+                  <span>图片 ({mobileFiles.length}/9)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={handleChooseMobileFiles}
+                    disabled={mobileFiles.length >= 9}
+                  />
+                </label>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button
+                    type="button"
+                    className="outline-button"
+                    onClick={() => setMobileComposerOpen(false)}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={(!mobileComposerText.trim() && mobileFiles.length === 0) || sendingComment}
+                  >
+                    {sendingComment ? "发送中…" : "发送"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* 移动端保留的 App 下载浮窗 */}
+      {/* 图片全屏画廊查看器 */}
+      {galleryImages && (
+        <ImageGalleryModal
+          images={galleryImages}
+          initialIndex={galleryIndex}
+          onClose={() => setGalleryImages(null)}
+        />
+      )}
+
       <AppDownloadBanner />
     </>
   );
@@ -284,15 +473,24 @@ function PostArticle({
   post,
   user,
   onRequireAuth,
+  onOpenGallery,
 }: {
   post: Post;
   user: SessionUser | null;
   onRequireAuth: () => void;
+  onOpenGallery: (images: GalleryImage[], index?: number) => void;
 }) {
   const [liked, setLiked] = useState(post.viewerState.hasLiked);
   const [bookmarked, setBookmarked] = useState(post.viewerState.hasBookmarked);
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [bookmarkCount, setBookmarkCount] = useState(post.bookmarkCount);
+  const { showToast } = useToast();
+
+  const articleImages: GalleryImage[] = post.media.map((item) => ({
+    url: item.detailUrl || item.url || "",
+    alt: item.altText || post.title,
+    originalUrl: item.originalUrl || item.url,
+  }));
 
   async function toggleLike() {
     if (!user) return onRequireAuth();
@@ -304,6 +502,7 @@ function PostArticle({
     } catch {
       setLiked(!next);
       setLikeCount((value) => value + (next ? -1 : 1));
+      showToast("点赞失败，请重试");
     }
   }
 
@@ -314,26 +513,30 @@ function PostArticle({
     setBookmarkCount((value) => value + (next ? 1 : -1));
     try {
       await setPostBookmark(post.id, next);
+      showToast(next ? "已收藏帖子" : "已取消收藏");
     } catch {
       setBookmarked(!next);
       setBookmarkCount((value) => value + (next ? -1 : 1));
+      showToast("收藏操作失败，请重试");
     }
   }
 
   return (
     <article className="detail-article">
       <header className="detail-author">
-        <UserAvatar
-          userId={post.author.id}
-          name={post.author.nickname}
-          url={post.author.avatarUrl}
-          className="post-avatar"
-        />
+        <Link href={`/user/${encodeURIComponent(post.author.id)}`}>
+          <UserAvatar
+            userId={post.author.id}
+            name={post.author.nickname}
+            url={post.author.avatarUrl}
+            className="post-avatar"
+          />
+        </Link>
         <div className="post-author">
-          <div className="author-line">
+          <Link href={`/user/${encodeURIComponent(post.author.id)}`} className="author-line">
             <span className="author-name">{post.author.nickname}</span>
             <span className="lv">Lv.{post.author.level || 1}</span>
-          </div>
+          </Link>
           <div className="meta">
             {post.community.name} · {relativeTime(post.createdAt)}
           </div>
@@ -351,16 +554,22 @@ function PostArticle({
       {post.media.length > 0 && (
         <div className="detail-gallery">
           {post.media.map((asset, index) => (
-            <MediaImage key={index} asset={asset} alt={`${post.title} 图片 ${index + 1}`} />
+            <div
+              key={index}
+              style={{ cursor: "pointer" }}
+              onClick={() => onOpenGallery(articleImages, index)}
+            >
+              <MediaImage asset={asset} alt={`${post.title} 图片 ${index + 1}`} />
+            </div>
           ))}
         </div>
       )}
 
       <div className="detail-stats">
-        <span>
+        <a href="#comments" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "inherit", textDecoration: "none" }}>
           <Icon name="message" size={15} />
           {compactCount(post.commentCount)} 评论
-        </span>
+        </a>
         <button
           type="button"
           className={`stat${liked ? " selected" : ""}`}
@@ -392,45 +601,61 @@ function CommentsSection({
   post,
   comments,
   setComments,
+  totalComments,
+  setTotalComments,
+  hasMoreComments,
+  loadingMoreComments,
+  sortOrder,
+  landlordOnly,
+  onSortOrFilterChange,
+  onLoadMoreComments,
   user,
   onRequireAuth,
+  onOpenGallery,
 }: {
   post: Post;
   comments: Comment[];
   setComments: React.Dispatch<React.SetStateAction<Comment[]>>;
+  totalComments: number;
+  setTotalComments: React.Dispatch<React.SetStateAction<number>>;
+  hasMoreComments: boolean;
+  loadingMoreComments: boolean;
+  sortOrder: "hot" | "asc" | "desc";
+  landlordOnly: boolean;
+  onSortOrFilterChange: (nextSort: "hot" | "asc" | "desc", nextLandlord: boolean) => void;
+  onLoadMoreComments: () => void;
   user: SessionUser | null;
   onRequireAuth: () => void;
+  onOpenGallery: (images: GalleryImage[], index?: number) => void;
 }) {
   const [content, setContent] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [landlordOnly, setLandlordOnly] = useState(false);
-  const [sortOrder, setSortOrder] = useState<"hot" | "asc" | "desc">("hot");
   const [replyTarget, setReplyTarget] = useState<Comment | null>(null);
 
-  const displayComments = useMemo(() => {
-    let result = [...comments];
-    if (landlordOnly) {
-      result = result.filter((c) => c.author.id === post.author.id);
-    }
-    if (sortOrder === "hot") {
-      result.sort((a, b) => b.likeCount - a.likeCount);
-    } else if (sortOrder === "desc") {
-      result.reverse();
-    }
-    return result;
-  }, [comments, landlordOnly, post.author.id, sortOrder]);
+  function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
+    const next = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    e.target.value = "";
+    setFiles((curr) => [...curr, ...next].slice(0, 9));
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return onRequireAuth();
-    if (!content.trim() || busy) return;
+    if ((!content.trim() && files.length === 0) || busy) return;
     setBusy(true);
     setMessage("");
     try {
-      const next = await createComment(post.id, content.trim());
-      setComments((current) => [...current, next]);
+      const mediaIds: string[] = [];
+      for (const file of files) {
+        mediaIds.push(await uploadImage(file));
+      }
+      const next = await createComment(post.id, content.trim(), mediaIds);
+      setComments((current) => [next, ...current]);
+      setTotalComments((t) => t + 1);
       setContent("");
+      setFiles([]);
     } catch (requestError) {
       setMessage(formatError(requestError, "评论发送失败，请稍后重试"));
     } finally {
@@ -438,42 +663,53 @@ function CommentsSection({
     }
   }
 
+  async function handleDeleteComment(commentId: string) {
+    if (!window.confirm("确定要删除这条评论吗？")) return;
+    try {
+      await deleteComment(commentId);
+      setComments((curr) => curr.filter((c) => c.id !== commentId));
+      setTotalComments((t) => Math.max(0, t - 1));
+    } catch {
+      alert("删除评论失败，请重试");
+    }
+  }
+
   return (
-    <section className="comments-wrap" aria-label="帖子评论区">
+    <section className="comments-wrap" id="comments" aria-label="帖子评论区">
       <div className="comments-head">
-        <h2 className="comm-title">评论 ({comments.length})</h2>
-        <span className="comm-sub">全部回复</span>
+        <h2 className="comm-title">评论 ({totalComments})</h2>
+        <span className="comm-sub">全部讨论</span>
       </div>
 
-      {/* 移动端和桌面端通用的排序与只看楼主筛选条 */}
+      {/* 排序与筛选条 */}
       <div className="comment-tools">
         <div className="chips">
           <button
             type="button"
             className={`chip${sortOrder === "hot" ? " active" : ""}`}
-            onClick={() => setSortOrder("hot")}
+            onClick={() => onSortOrFilterChange("hot", landlordOnly)}
           >
             热门
           </button>
           <button
             type="button"
             className={`chip${sortOrder === "asc" ? " active" : ""}`}
-            onClick={() => setSortOrder("asc")}
+            onClick={() => onSortOrFilterChange("asc", landlordOnly)}
           >
-            顺序
+            最早
           </button>
           <button
             type="button"
             className={`chip${sortOrder === "desc" ? " active" : ""}`}
-            onClick={() => setSortOrder("desc")}
+            onClick={() => onSortOrFilterChange("desc", landlordOnly)}
           >
-            倒序
+            最新
           </button>
         </div>
         <button
           type="button"
           className={`landlord${landlordOnly ? " active" : ""}`}
-          onClick={() => setLandlordOnly((v) => !v)}
+          onClick={() => onSortOrFilterChange(sortOrder, !landlordOnly)}
         >
           只看楼主
         </button>
@@ -491,14 +727,86 @@ function CommentsSection({
           <textarea
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            placeholder={user ? "说点什么吧…" : "登录后参与回复"}
+            placeholder={user ? "写下你的评价、拆箱感受或回复…" : "登录后参与回复"}
             rows={2}
             onFocus={() => {
               if (!user) onRequireAuth();
             }}
           />
+
+          {files.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "6px 12px" }}>
+              {files.map((file, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    position: "relative",
+                    width: 52,
+                    height: 52,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    border: "1px solid #dce8f3",
+                  }}
+                >
+                  <img
+                    src={URL.createObjectURL(file)}
+                    alt=""
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFiles((curr) => curr.filter((_, i) => i !== idx))}
+                    style={{
+                      position: "absolute",
+                      top: 2,
+                      right: 2,
+                      background: "rgba(0,0,0,0.6)",
+                      color: "#fff",
+                      border: 0,
+                      borderRadius: "50%",
+                      width: 16,
+                      height: 16,
+                      fontSize: 10,
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="composer-footer">
-            <button type="submit" className="reply-submit" disabled={busy}>
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                color: "#64748b",
+                fontSize: 13,
+                cursor: "pointer",
+                padding: "4px 8px",
+              }}
+            >
+              <Icon name="image" size={17} />
+              <span>上传图片 ({files.length}/9)</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: "none" }}
+                onChange={handleChooseFiles}
+                disabled={files.length >= 9}
+              />
+            </label>
+            <button
+              type="submit"
+              className="reply-submit"
+              disabled={(!content.trim() && files.length === 0) || busy}
+            >
               {busy ? "发送中…" : "发布回复"}
             </button>
           </div>
@@ -508,20 +816,36 @@ function CommentsSection({
       {message && <div className="form-error">{message}</div>}
 
       <div className="comment-list">
-        {displayComments.length ? (
-          displayComments.map((comment: Comment) => (
+        {comments.length ? (
+          comments.map((comment: Comment) => (
             <CommentRow
               key={comment.id}
               comment={comment}
               user={user}
               onRequireAuth={onRequireAuth}
               onReply={() => setReplyTarget(comment)}
+              onDelete={() => handleDeleteComment(comment.id)}
+              onOpenGallery={onOpenGallery}
             />
           ))
         ) : (
           <div className="empty-state" style={{ padding: "30px 0" }}>
             <Icon name="message" size={24} />
             <p>{landlordOnly ? "楼主还没有发表评论" : "还没有回复，来做第一个分享的人吧！"}</p>
+          </div>
+        )}
+
+        {hasMoreComments && (
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 18, marginBottom: 18 }}>
+            <button
+              type="button"
+              className="outline-button"
+              onClick={onLoadMoreComments}
+              disabled={loadingMoreComments}
+              style={{ minWidth: 140 }}
+            >
+              {loadingMoreComments ? "正在加载…" : "加载更多评论"}
+            </button>
           </div>
         )}
       </div>
@@ -532,6 +856,7 @@ function CommentsSection({
           user={user}
           onRequireAuth={onRequireAuth}
           onClose={() => setReplyTarget(null)}
+          onOpenGallery={onOpenGallery}
         />
       )}
     </section>
@@ -543,11 +868,15 @@ function CommentRow({
   user,
   onRequireAuth,
   onReply,
+  onDelete,
+  onOpenGallery,
 }: {
   comment: Comment;
   user: SessionUser | null;
   onRequireAuth: () => void;
   onReply: () => void;
+  onDelete: () => void;
+  onOpenGallery: (images: GalleryImage[], index?: number) => void;
 }) {
   const [liked, setLiked] = useState(comment.viewerState.hasLiked);
   const [count, setCount] = useState(comment.likeCount);
@@ -566,22 +895,65 @@ function CommentRow({
     }
   }
 
+  const commentImages: GalleryImage[] = (comment.media || []).map((item) => ({
+    url: item.detailUrl || item.url || "",
+    alt: "评论配图",
+    originalUrl: item.originalUrl || item.url,
+  }));
+
+  const canDelete = Boolean(
+    user &&
+      (user.id === comment.author.id || user.role === "admin" || user.role === "moderator"),
+  );
+
   return (
     <article className="comment-card">
-      <UserAvatar
-        userId={comment.author.id}
-        name={comment.author.nickname}
-        url={comment.author.avatarUrl}
-        className="comm-avatar"
-      />
+      <Link href={`/user/${encodeURIComponent(comment.author.id)}`}>
+        <UserAvatar
+          userId={comment.author.id}
+          name={comment.author.nickname}
+          url={comment.author.avatarUrl}
+          className="comm-avatar"
+        />
+      </Link>
       <div className="comm-main">
         <div className="comm-head">
-          <span className="comm-name">{comment.author.nickname}</span>
+          <Link href={`/user/${encodeURIComponent(comment.author.id)}`} className="comm-name">
+            {comment.author.nickname}
+          </Link>
           <span className="comm-lv">Lv.{comment.author.level || 1}</span>
           <span className="comm-floor">#{comment.floor || "1"}</span>
         </div>
         <div className="comm-time">{relativeTime(comment.createdAt)}</div>
         <p className="comm-text">{comment.content}</p>
+
+        {commentImages.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              marginTop: 8,
+              marginBottom: 8,
+            }}
+          >
+            {commentImages.map((img, idx) => (
+              <img
+                key={idx}
+                src={img.url}
+                alt=""
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: 8,
+                  objectFit: "cover",
+                  cursor: "pointer",
+                }}
+                onClick={() => onOpenGallery(commentImages, idx)}
+              />
+            ))}
+          </div>
+        )}
 
         {comment.replyPreview && comment.replyPreview.length > 0 && (
           <div className="nested" onClick={onReply}>
@@ -598,6 +970,7 @@ function CommentRow({
             type="button"
             className={`comm-act${liked ? " selected" : ""}`}
             onClick={like}
+            aria-label={liked ? "取消赞" : "点赞"}
           >
             <Icon name="heart" size={14} />
             <span>{count}</span>
@@ -606,6 +979,17 @@ function CommentRow({
             <Icon name="message" size={14} />
             <span>回复</span>
           </button>
+          {canDelete && (
+            <button
+              type="button"
+              className="comm-act"
+              style={{ color: "#ef4444" }}
+              onClick={onDelete}
+            >
+              <Icon name="close" size={12} />
+              <span>删除</span>
+            </button>
+          )}
         </div>
       </div>
     </article>
@@ -617,15 +1001,21 @@ function CommentReplyModal({
   user,
   onRequireAuth,
   onClose,
+  onOpenGallery,
 }: {
   root: Comment;
   user: SessionUser | null;
   onRequireAuth: () => void;
   onClose: () => void;
+  onOpenGallery: (images: GalleryImage[], index?: number) => void;
 }) {
   const [replies, setReplies] = useState<Comment[]>([]);
+  const [nextCursor, setNextCursor] = useState<string>();
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [content, setContent] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -633,7 +1023,10 @@ function CommentReplyModal({
     let active = true;
     void getCommentReplies(root.id)
       .then((page) => {
-        if (active) setReplies(page.items);
+        if (!active) return;
+        setReplies(page.items);
+        setNextCursor(page.nextCursor);
+        setHasMore(page.hasMore);
       })
       .catch(() => {
         if (active) setMessage("回复加载失败，请重试");
@@ -646,21 +1039,63 @@ function CommentReplyModal({
     };
   }, [root.id]);
 
+  async function handleLoadMoreReplies() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await getCommentReplies(root.id, nextCursor);
+      setReplies((curr) => [...curr, ...page.items]);
+      setNextCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    } catch {
+      setMessage("加载更多回复失败");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
+    const next = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    e.target.value = "";
+    setFiles((curr) => [...curr, ...next].slice(0, 9));
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return onRequireAuth();
-    if (!content.trim() || busy) return;
+    if ((!content.trim() && files.length === 0) || busy) return;
     setBusy(true);
     try {
-      const next = await createReply(root.id, content.trim());
+      const mediaIds: string[] = [];
+      for (const file of files) {
+        mediaIds.push(await uploadImage(file));
+      }
+      const next = await createReply(root.id, content.trim(), undefined, mediaIds);
       setReplies((current) => [...current, next]);
       setContent("");
+      setFiles([]);
     } catch (requestError) {
       setMessage(formatError(requestError, "回复发送失败，请稍后重试"));
     } finally {
       setBusy(false);
     }
   }
+
+  async function handleDeleteReply(replyId: string) {
+    if (!window.confirm("确定要删除这条回复吗？")) return;
+    try {
+      await deleteComment(replyId);
+      setReplies((curr) => curr.filter((r) => r.id !== replyId));
+    } catch {
+      alert("删除回复失败，请重试");
+    }
+  }
+
+  const rootImages: GalleryImage[] = (root.media || []).map((item) => ({
+    url: item.detailUrl || item.url || "",
+    alt: "楼层配图",
+    originalUrl: item.originalUrl || item.url,
+  }));
 
   return (
     <div
@@ -683,48 +1118,155 @@ function CommentReplyModal({
             <Icon name="close" size={19} />
           </button>
         </header>
+
         <div className="comment-reply-scroll">
           <div className="comment-reply-root">
-            <UserAvatar
-              userId={root.author.id}
-              name={root.author.nickname}
-              url={root.author.avatarUrl}
-              className="avatar-comment"
-            />
+            <Link href={`/user/${encodeURIComponent(root.author.id)}`}>
+              <UserAvatar
+                userId={root.author.id}
+                name={root.author.nickname}
+                url={root.author.avatarUrl}
+                className="avatar-comment"
+              />
+            </Link>
             <div>
-              <strong>{root.author.nickname}</strong>
+              <Link href={`/user/${encodeURIComponent(root.author.id)}`}>
+                <strong>{root.author.nickname}</strong>
+              </Link>
               <p>{root.content}</p>
+              {rootImages.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {rootImages.map((img, idx) => (
+                    <img
+                      key={idx}
+                      src={img.url}
+                      alt=""
+                      style={{ width: 64, height: 64, borderRadius: 6, objectFit: "cover", cursor: "pointer" }}
+                      onClick={() => onOpenGallery(rootImages, idx)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
+
           {loading ? (
             <div className="comment-empty">正在加载回复…</div>
           ) : (
-            replies.map((reply) => (
-              <div className="comment-reply-item" key={reply.id}>
-                <UserAvatar
-                  userId={reply.author.id}
-                  name={reply.author.nickname}
-                  url={reply.author.avatarUrl}
-                  className="avatar-comment"
-                />
-                <div>
-                  <div>
-                    <strong>{reply.author.nickname}</strong>
-                    <span className="comment-time">{relativeTime(reply.createdAt)}</span>
+            replies.map((reply) => {
+              const replyImages: GalleryImage[] = (reply.media || []).map((item) => ({
+                url: item.detailUrl || item.url || "",
+                alt: "回复配图",
+                originalUrl: item.originalUrl || item.url,
+              }));
+              const canDelete = Boolean(
+                user &&
+                  (user.id === reply.author.id || user.role === "admin" || user.role === "moderator"),
+              );
+
+              return (
+                <div className="comment-reply-item" key={reply.id}>
+                  <Link href={`/user/${encodeURIComponent(reply.author.id)}`}>
+                    <UserAvatar
+                      userId={reply.author.id}
+                      name={reply.author.nickname}
+                      url={reply.author.avatarUrl}
+                      className="avatar-comment"
+                    />
+                  </Link>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <Link href={`/user/${encodeURIComponent(reply.author.id)}`}>
+                          <strong>{reply.author.nickname}</strong>
+                        </Link>
+                        <span className="comment-time">{relativeTime(reply.createdAt)}</span>
+                      </div>
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteReply(reply.id)}
+                          style={{ color: "#ef4444", background: "none", border: 0, fontSize: 12, cursor: "pointer" }}
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
+                    <p>{reply.content}</p>
+                    {replyImages.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                        {replyImages.map((img, idx) => (
+                          <img
+                            key={idx}
+                            src={img.url}
+                            alt=""
+                            style={{ width: 60, height: 60, borderRadius: 6, objectFit: "cover", cursor: "pointer" }}
+                            onClick={() => onOpenGallery(replyImages, idx)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <p>{reply.content}</p>
                 </div>
-              </div>
-            ))
+              );
+            })
+          )}
+
+          {hasMore && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "12px 0" }}>
+              <button
+                type="button"
+                className="outline-button"
+                onClick={handleLoadMoreReplies}
+                disabled={loadingMore}
+                style={{ minWidth: 120 }}
+              >
+                {loadingMore ? "正在加载…" : "加载更多回复"}
+              </button>
+            </div>
           )}
         </div>
+
+        {files.length > 0 && (
+          <div style={{ display: "flex", gap: 6, padding: "4px 16px" }}>
+            {files.map((file, idx) => (
+              <div key={idx} style={{ position: "relative", width: 44, height: 44, borderRadius: 6, overflow: "hidden" }}>
+                <img src={URL.createObjectURL(file)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <button
+                  type="button"
+                  onClick={() => setFiles((f) => f.filter((_, i) => i !== idx))}
+                  style={{
+                    position: "absolute",
+                    top: 1,
+                    right: 1,
+                    background: "rgba(0,0,0,0.6)",
+                    color: "#fff",
+                    border: 0,
+                    borderRadius: "50%",
+                    width: 14,
+                    height: 14,
+                    fontSize: 9,
+                    cursor: "pointer",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <form className="comment-reply-composer" onSubmit={submit}>
+          <label style={{ cursor: "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: "#64748b" }}>
+            <Icon name="image" size={19} />
+            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={files.length >= 9} />
+          </label>
           <input
             value={content}
             onChange={(event) => setContent(event.target.value)}
             placeholder="友善地回复一句…"
           />
-          <button type="submit" disabled={busy}>
+          <button type="submit" disabled={(!content.trim() && files.length === 0) || busy}>
             {busy ? "发送中" : "发送"}
           </button>
         </form>
@@ -734,70 +1276,112 @@ function CommentReplyModal({
   );
 }
 
-function DetailAside({ post, related }: { post: Post; related: Post[] }) {
+function DetailAside({ post, related, user }: { post: Post; related: Post[]; user: SessionUser | null }) {
+  const router = useRouter();
+  const { showToast } = useToast();
+  const [following, setFollowing] = useState(post.viewerState.isFollowingAuthor);
+  const [followBusy, setFollowBusy] = useState(false);
+
+  async function handleToggleFollow() {
+    if (!user) {
+      router.push(`/login?next=${encodeURIComponent(`/post/${post.id}`)}`);
+      return;
+    }
+    if (followBusy) return;
+    setFollowBusy(true);
+    const next = !following;
+    setFollowing(next);
+    try {
+      await setUserFollow(post.author.id, next);
+      showToast(next ? "已关注作者" : "已取消关注");
+    } catch {
+      setFollowing(!next);
+      showToast("关注操作失败，请重试");
+    } finally {
+      setFollowBusy(false);
+    }
+  }
+
+  const isSelf = Boolean(user && user.id === post.author.id);
+
   return (
     <aside className="detail-aside desktop-only">
       <section className="aside-panel author-panel">
         <h2>作者信息</h2>
         <div className="aside-author">
-          <UserAvatar
-            userId={post.author.id}
-            name={post.author.nickname}
-            url={post.author.avatarUrl}
-            size="large"
-          />
+          <Link href={`/user/${encodeURIComponent(post.author.id)}`}>
+            <UserAvatar
+              userId={post.author.id}
+              name={post.author.nickname}
+              url={post.author.avatarUrl}
+              size="large"
+            />
+          </Link>
           <div>
-            <strong>{post.author.nickname}</strong>
+            <Link href={`/user/${encodeURIComponent(post.author.id)}`}>
+              <strong>{post.author.nickname}</strong>
+            </Link>
             <span className="level-label">Lv.{post.author.level || 1}</span>
             <p>热爱拆箱和分享真实使用体验。</p>
           </div>
         </div>
-        <button type="button" className="outline-button">
-          + 关注
-        </button>
+        {!isSelf && (
+          <button
+            type="button"
+            className={`outline-button${following ? " active" : ""}`}
+            onClick={handleToggleFollow}
+            disabled={followBusy}
+            style={{
+              width: "100%",
+              marginTop: 12,
+              background: following ? "#eff6ff" : undefined,
+              borderColor: following ? "#3b82f6" : undefined,
+              color: following ? "#2563eb" : undefined,
+            }}
+          >
+            {followBusy ? "处理中…" : following ? "已关注" : "+ 关注"}
+          </button>
+        )}
       </section>
 
       <section className="aside-panel community-panel">
         <h2>来自社区</h2>
-        <div className="aside-community">
+        <Link
+          href={`/?community=${encodeURIComponent(post.community.id)}`}
+          className="aside-community"
+          style={{ textDecoration: "none", color: "inherit" }}
+        >
           <span className="community-icon lilac">
             <Icon name="trophy" size={19} />
           </span>
-          <div>
+          <div style={{ flex: 1 }}>
             <strong>{post.community.name}</strong>
             <p>{post.community.description || "和同好聊聊最近的新发现"}</p>
           </div>
           <Icon name="chevron-right" size={18} />
-        </div>
-        <Link href={`/community/${post.community.id}`} className="outline-button" style={{ textAlign: "center", display: "block" }}>
-          进入社区
         </Link>
       </section>
 
-      <section className="aside-panel related-panel">
-        <div className="discovery-heading">
-          <h2>相关帖子</h2>
-        </div>
-        {related.length ? (
-          related.map((item) => (
-            <Link href={`/post/${encodeURIComponent(item.id)}`} className="related-post" key={item.id}>
-              {item.media[0] ? (
-                <MediaImage asset={item.media[0]} alt="" className="related-media-image" />
-              ) : (
-                <span className="related-placeholder">
-                  <Icon name="box" size={19} />
-                </span>
-              )}
-              <span>
+      {related.length > 0 && (
+        <section className="aside-panel">
+          <h2>相关讨论</h2>
+          <div className="related-list">
+            {related.map((item) => (
+              <Link
+                key={item.id}
+                href={`/post/${encodeURIComponent(item.id)}`}
+                className="related-item"
+              >
                 <strong>{item.title}</strong>
-                <small>{item.author.nickname}</small>
-              </span>
-            </Link>
-          ))
-        ) : (
-          <p className="empty-rail">暂无相关帖子</p>
-        )}
-      </section>
+                <div>
+                  <span>{item.author.nickname}</span>
+                  <span>{compactCount(item.commentCount)} 回复</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </aside>
   );
 }

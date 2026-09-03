@@ -39,6 +39,9 @@ export default function UserPage() {
   const id = decodeURIComponent(params.id);
   const [profile, setProfile] = useState<ProfileSummary | null>(null);
   const [posts, setPosts] = useState<ProfilePost[]>([]);
+  const [nextCursor, setNextCursor] = useState<string>();
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [followBusy, setFollowBusy] = useState(false);
   const [error, setError] = useState("");
@@ -47,7 +50,11 @@ export default function UserPage() {
 
   useEffect(() => {
     if (!ready) return;
-    if (id === "me" && (!user || user.accountType === "guest")) {
+    if (id === "me") {
+      if (user && user.accountType !== "guest") {
+        router.replace("/me");
+        return;
+      }
       setProfile(guestProfile(user));
       setPosts([]);
       setError("");
@@ -55,7 +62,7 @@ export default function UserPage() {
       return;
     }
     let active = true;
-    const profileId = id === "me" ? user?.id : id;
+    const profileId = id;
     if (!profileId) return;
     setLoading(true);
     setError("");
@@ -63,7 +70,9 @@ export default function UserPage() {
       .then(([nextProfile, nextPosts]) => {
         if (!active) return;
         setProfile(nextProfile);
-        setPosts(nextPosts);
+        setPosts(nextPosts.items);
+        setNextCursor(nextPosts.nextCursor);
+        setHasMore(nextPosts.hasMore);
       })
       .catch((requestError: unknown) => {
         if (!active) return;
@@ -75,12 +84,27 @@ export default function UserPage() {
     return () => {
       active = false;
     };
-  }, [id, ready, user]);
+  }, [id, ready, router, user]);
+
+  async function handleLoadMorePosts() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await getUserPosts(id, nextCursor);
+      setPosts((curr) => [...curr, ...page.items]);
+      setNextCursor(page.nextCursor);
+      setHasMore(page.hasMore);
+    } catch {
+      setError("加载更多帖子失败，请重试");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function toggleFollow() {
     if (!profile || followBusy) return;
     if (!user || user.accountType === "guest") {
-      router.push(`/login?next=${encodeURIComponent("/user/me")}`);
+      router.push(`/login?next=${encodeURIComponent(`/user/${id}`)}`);
       return;
     }
     const next = !profile.isFollowing;
@@ -225,6 +249,19 @@ export default function UserPage() {
                     </div>
                   </Link>
                 ))}
+                {hasMore && (
+                  <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+                    <button
+                      type="button"
+                      className="outline-button"
+                      onClick={handleLoadMorePosts}
+                      disabled={loadingMore}
+                      style={{ minWidth: 140 }}
+                    >
+                      {loadingMore ? "正在加载…" : "加载更多帖子"}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="profile-empty">
@@ -330,24 +367,39 @@ export default function UserPage() {
 
             <div className="profile-post-list">
               {posts.length ? (
-                posts.map((post) => (
-                  <Link
-                    key={post.id}
-                    href={`/post/${encodeURIComponent(post.id)}`}
-                    className="profile-post-row"
-                  >
-                    <div className="row-content">
-                      <span className="row-community">{post.communityName}</span>
-                      <h4 className="row-title">{post.title}</h4>
-                      <p className="row-desc">{post.contentPreview || "（图片或多媒体分享）"}</p>
+                <>
+                  {posts.map((post) => (
+                    <Link
+                      key={post.id}
+                      href={`/post/${encodeURIComponent(post.id)}`}
+                      className="profile-post-row"
+                    >
+                      <div className="row-content">
+                        <span className="row-community">{post.communityName}</span>
+                        <h4 className="row-title">{post.title}</h4>
+                        <p className="row-desc">{post.contentPreview || "（图片或多媒体分享）"}</p>
+                      </div>
+                      <div className="row-meta">
+                        <span>{relativeTime(post.createdAt)}</span>
+                        <span>{compactCount(post.commentCount)} 回复</span>
+                        <span>{compactCount(post.likeCount)} 赞</span>
+                      </div>
+                    </Link>
+                  ))}
+                  {hasMore && (
+                    <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+                      <button
+                        type="button"
+                        className="outline-button"
+                        onClick={handleLoadMorePosts}
+                        disabled={loadingMore}
+                        style={{ width: "100%" }}
+                      >
+                        {loadingMore ? "正在加载…" : "加载更多帖子"}
+                      </button>
                     </div>
-                    <div className="row-meta">
-                      <span>{relativeTime(post.createdAt)}</span>
-                      <span>{compactCount(post.commentCount)} 回复</span>
-                      <span>{compactCount(post.likeCount)} 赞</span>
-                    </div>
-                  </Link>
-                ))
+                  )}
+                </>
               ) : (
                 <div className="empty-state" style={{ padding: "30px 0" }}>
                   <Icon name="sparkle" size={24} />

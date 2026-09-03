@@ -127,8 +127,29 @@ export default function NotificationsPage() {
   );
 }
 
+function notificationHref(item: ForumNotification): string | undefined {
+  if (!item.targetType || !item.targetId) return undefined;
+  switch (item.targetType) {
+    case "post":
+      return `/post/${encodeURIComponent(item.targetId)}`;
+    case "comment":
+      return `/post/${encodeURIComponent(item.targetId)}#comments`;
+    case "user":
+      return `/user/${encodeURIComponent(item.targetId)}`;
+    case "community":
+      return `/?community=${encodeURIComponent(item.targetId)}`;
+    case "ranking":
+    case "toy":
+      return `/ranking/${encodeURIComponent(item.targetId)}`;
+    case "activity":
+      return "/activities";
+    default:
+      return undefined;
+  }
+}
+
 function NotificationRow({ item, onRead }: { item: ForumNotification; onRead: (id: string) => void }) {
-  const href = item.targetType === "post" && item.targetId ? `/post/${encodeURIComponent(item.targetId)}` : undefined;
+  const href = notificationHref(item);
   const body = notificationBody(item);
   const kind = notificationKind(item);
   const content = <><span className={`notification-icon notification-icon-${kind}`}><Icon name={notificationIconName(item)} size={18} /></span><span className="notification-copy"><strong>{body.title}</strong>{body.content && <span>{body.content}</span>}<time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time></span>{!item.isRead && <span className="notification-unread" aria-label="未读" />}</>;

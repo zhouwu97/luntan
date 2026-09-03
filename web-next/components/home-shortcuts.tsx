@@ -33,33 +33,19 @@ export function HomeShortcuts({ onFilterHot }: { onFilterHot?: () => void }) {
         <span>热门帖子</span>
       </button>
 
-      <button
-        type="button"
-        className="quick"
-        aria-label="穿搭分享"
-        onClick={() => {
-          showToast("已切换到穿搭分享");
-        }}
-      >
+      <Link href="/search?q=穿搭分享" className="quick" aria-label="穿搭分享">
         <span className="quick-icon">
           <Icon name="hanger" size={21} />
         </span>
         <span>穿搭分享</span>
-      </button>
+      </Link>
 
-      <button
-        type="button"
-        className="quick"
-        aria-label="活动"
-        onClick={() => {
-          showToast("活动页入口已保留");
-        }}
-      >
+      <Link href="/activities" className="quick" aria-label="活动">
         <span className="quick-icon">
           <Icon name="calendar" size={21} />
         </span>
         <span>活动</span>
-      </button>
+      </Link>
     </div>
   );
 }

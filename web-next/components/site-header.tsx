@@ -107,7 +107,8 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
                 <div className="profile-menu">
                   <div className="profile-menu-name">{user.nickname}</div>
                   <div className="profile-menu-meta">Lv.{user.level || 1} · {user.accountType === "guest" ? "游客" : "已登录"}</div>
-                  <button type="button" onClick={() => { setMenuOpen(false); router.push(`/user/${user.id}`); }}>个人主页</button>
+                  <button type="button" onClick={() => { setMenuOpen(false); router.push("/me"); }}>我的工作台</button>
+                  <button type="button" onClick={() => { setMenuOpen(false); router.push(`/user/${user.id}`); }}>公开个人主页</button>
                   <button type="button" onClick={handleSignOut}>退出登录</button>
                 </div>
               )}

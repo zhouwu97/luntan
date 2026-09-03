@@ -65,6 +65,11 @@ apk-publish-*/
 deploy-release-*/
 next-release-*/
 release-wrapper-*/
+pkg-*/
+pkg-linux-*/
+next-pkg-*/
+release-*/
+release-linux-*/
 server/server/.tmp-release-*/
 /server/luntan-api
 /server/luntan-worker

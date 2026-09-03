@@ -41,7 +41,7 @@ export function BottomNav({
       <button
         type="button"
         className={`nav-item${activeNav === "profile" ? " active" : ""}`}
-        onClick={() => router.push(user ? "/user/me" : "/login")}
+        onClick={() => router.push(user ? "/me" : "/login")}
       >
         <Icon name="user" size={22} />
         <span>我的</span>

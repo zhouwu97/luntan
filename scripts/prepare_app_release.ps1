@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$ApkPath,
 
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 # 仍兼容旧调用方式，但拒绝传入不一致的版本，避免生成不可升级的清单。
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $pubspecPath = Join-Path $projectRoot 'pubspec.yaml'
-$pubspecVersionLine = Get-Content -LiteralPath $pubspecPath |
+$pubspecVersionLine = Get-Content -LiteralPath $pubspecPath -Encoding utf8 |
     Where-Object { $_ -match '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$' } |
     Select-Object -First 1
 if ($null -eq $pubspecVersionLine -or $pubspecVersionLine -notmatch '^\s*version:\s*(?<name>[0-9A-Za-z._-]+)\+(?<code>[1-9][0-9]*)\s*$') {

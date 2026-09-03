@@ -3,6 +3,7 @@ import type {
   ActivityItem,
   AuthSession,
   Comment,
+  CommentPage,
   Community,
   EmailCodeChallenge,
   FeedPage,
@@ -10,6 +11,7 @@ import type {
   MediaAsset,
   Post,
   ProfilePost,
+  ProfilePostPage,
   ProfileSummary,
   RankingAdminView,
   RankingAdminViewItem,
@@ -29,7 +31,7 @@ const asRecord = (value: unknown): JsonRecord =>
   value && typeof value === "object" ? (value as JsonRecord) : {};
 const asString = (value: unknown, fallback = "") => (typeof value === "string" ? value : fallback);
 const asNumber = (value: unknown, fallback = 0) =>
-  typeof value === "number" ? value : Number.isFinite(Number(value)) ? Number(value) : fallback;
+  typeof value === "number" && !Number.isNaN(value) ? value : fallback;
 const asBoolean = (value: unknown, fallback = false) =>
   typeof value === "boolean" ? value : fallback;
 
@@ -61,6 +63,7 @@ function parseSessionUser(raw: unknown): SessionUser {
     experience: asNumber(item.experience),
     email: asString(item.email) || undefined,
     status: asString(item.status) || undefined,
+    role: asString(item.role) || undefined,
     capabilities: parseCapabilities(item.capabilities),
   };
 }
@@ -151,6 +154,7 @@ export function parseComment(raw: unknown): Comment {
     postId: asString(item.post_id),
     author: parseUser(item.author),
     content: asString(item.content),
+    media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
     likeCount: asNumber(item.like_count),
     dislikeCount: asNumber(item.dislike_count),
     replyCount: asNumber(item.reply_count),
@@ -440,14 +444,29 @@ export async function getPost(id: string): Promise<Post> {
   return parsePost(await apiJson<JsonRecord>(`/posts/${encodeURIComponent(id)}?include_details=1`));
 }
 
-export async function getComments(postId: string): Promise<Comment[]> {
-  const payload = await apiJson<{ items?: unknown[] }>(
-    `/posts/${encodeURIComponent(postId)}/comments?limit=30&offset=0&sort=asc`,
+export async function getComments(
+  postId: string,
+  options: { offset?: number; limit?: number; sort?: "asc" | "desc" | "hot"; authorId?: string } = {},
+): Promise<CommentPage> {
+  const params = new URLSearchParams({
+    limit: String(options.limit ?? 30),
+    offset: String(options.offset ?? 0),
+    sort: options.sort || "asc",
+  });
+  if (options.authorId) params.set("author_id", options.authorId);
+  const payload = await apiJson<{ items?: unknown[]; total?: number; has_more?: boolean }>(
+    `/posts/${encodeURIComponent(postId)}/comments?${params.toString()}`,
   );
-  return Array.isArray(payload.items) ? payload.items.map(parseComment) : [];
+  const items = Array.isArray(payload.items) ? payload.items.map(parseComment) : [];
+  const total = typeof payload.total === "number" ? payload.total : items.length;
+  const hasMore = payload.has_more === true || total > (options.offset ?? 0) + items.length;
+  return { items, total, hasMore };
 }
 
-export async function getCommentReplies(commentId: string, cursor?: string): Promise<{ items: Comment[]; nextCursor?: string; hasMore: boolean }> {
+export async function getCommentReplies(
+  commentId: string,
+  cursor?: string,
+): Promise<{ items: Comment[]; nextCursor?: string; hasMore: boolean }> {
   const params = new URLSearchParams({ limit: "30" });
   if (cursor) params.set("cursor", cursor);
   const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
@@ -478,28 +497,53 @@ export async function setCommentLike(commentId: string, active: boolean): Promis
   });
 }
 
+export async function deletePost(postId: string): Promise<void> {
+  await apiFetch(`/posts/${encodeURIComponent(postId)}`, { method: "DELETE" });
+}
+
+export async function deleteComment(commentId: string): Promise<void> {
+  await apiFetch(`/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" });
+}
+
 function newIdempotencyKey(prefix: string): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export async function createComment(postId: string, content: string): Promise<Comment> {
+export async function createComment(postId: string, content: string, mediaIds?: string[]): Promise<Comment> {
   return parseComment(
-    await apiPost(`/posts/${encodeURIComponent(postId)}/comments`, { content }, {
-      "Idempotency-Key": newIdempotencyKey("web-comment"),
-    }),
+    await apiPost(
+      `/posts/${encodeURIComponent(postId)}/comments`,
+      {
+        content,
+        ...(mediaIds && mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
+      },
+      {
+        "Idempotency-Key": newIdempotencyKey("web-comment"),
+      },
+    ),
   );
 }
 
-export async function createReply(commentId: string, content: string, replyToUserId?: string): Promise<Comment> {
+export async function createReply(
+  commentId: string,
+  content: string,
+  replyToUserId?: string,
+  mediaIds?: string[],
+): Promise<Comment> {
   return parseComment(
-    await apiPost(`/comments/${encodeURIComponent(commentId)}/replies`, {
-      content,
-      reply_to_user_id: replyToUserId || undefined,
-    }, {
-      "Idempotency-Key": newIdempotencyKey("web-reply"),
-    }),
+    await apiPost(
+      `/comments/${encodeURIComponent(commentId)}/replies`,
+      {
+        content,
+        reply_to_user_id: replyToUserId || undefined,
+        ...(mediaIds && mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
+      },
+      {
+        "Idempotency-Key": newIdempotencyKey("web-reply"),
+      },
+    ),
   );
 }
 
@@ -611,8 +655,20 @@ export async function loginWithPassword(email: string, password: string): Promis
   return parseSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
 }
 
-export async function registerWithEmail(email: string, code: string, password: string, nickname = ""): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/register", { email, code, password, nickname }));
+export async function registerWithEmail(
+  email: string,
+  password: string,
+  code?: string,
+  nickname = "",
+): Promise<AuthSession> {
+  return parseSession(
+    await apiPost<JsonRecord>("/auth/register", {
+      email,
+      ...(code && code.trim() ? { code: code.trim() } : {}),
+      password,
+      nickname,
+    }),
+  );
 }
 
 export async function loginAsGuest(): Promise<AuthSession> {
@@ -643,23 +699,60 @@ export async function getUserProfile(id: string): Promise<ProfileSummary> {
   };
 }
 
-export async function getUserPosts(id: string): Promise<ProfilePost[]> {
-  const payload = await apiJson<{ items?: unknown[] }>(`/users/${encodeURIComponent(id)}/posts?limit=20`);
-  return Array.isArray(payload.items)
-    ? payload.items.map((raw) => {
-        const item = asRecord(raw);
-        return {
-          id: asString(item.id),
-          title: asString(item.title, "未命名帖子"),
-          contentPreview: asString(item.content_preview, asString(item.content)),
-          communityName: asString(item.community_name, "社区"),
-          commentCount: asNumber(item.comment_count),
-          likeCount: asNumber(item.like_count),
-          viewCount: asNumber(item.view_count),
-          createdAt: asString(item.created_at, asString(item.published_at)),
-        } satisfies ProfilePost;
-      })
-    : [];
+function parseProfilePost(raw: unknown): ProfilePost {
+  const item = asRecord(raw);
+  return {
+    id: asString(item.id),
+    title: asString(item.title, "未命名帖子"),
+    contentPreview: asString(item.content_preview, asString(item.content)),
+    communityName: asString(item.community_name, "社区"),
+    commentCount: asNumber(item.comment_count),
+    likeCount: asNumber(item.like_count),
+    viewCount: asNumber(item.view_count),
+    createdAt: asString(item.created_at, asString(item.published_at)),
+  } satisfies ProfilePost;
+}
+
+export async function getUserPosts(
+  id: string,
+  cursor?: string,
+  limit = 20,
+): Promise<ProfilePostPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
+    `/users/${encodeURIComponent(id)}/posts?${params.toString()}`,
+  );
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseProfilePost) : [],
+    nextCursor: asString(payload.next_cursor) || undefined,
+    hasMore: payload.has_more === true,
+  };
+}
+
+export async function getMyProfileList(
+  kind: "posts" | "comments" | "likes" | "bookmarks" | "history",
+  cursor?: string,
+  limit = 20,
+): Promise<{ items: ProfilePost[]; nextCursor?: string; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
+    `/me/${kind}?${params.toString()}`,
+  );
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseProfilePost) : [],
+    nextCursor: asString(payload.next_cursor) || undefined,
+    hasMore: payload.has_more === true,
+  };
+}
+
+export async function getMyPoints(): Promise<{ points: number; experience: number }> {
+  const payload = await apiJson<JsonRecord>("/me/points");
+  return {
+    points: asNumber(payload.points),
+    experience: asNumber(payload.experience),
+  };
 }
 
 export async function setUserFollow(id: string, active: boolean): Promise<void> {

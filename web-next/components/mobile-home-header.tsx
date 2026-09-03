@@ -58,7 +58,7 @@ export function MobileHomeHeader() {
         onClick={() => router.push(user ? "/notifications" : "/login")}
       >
         <Icon name="bell" size={20} />
-        {(unreadCount > 0 || !user) && <span className="notif-dot" />}
+        {Boolean(user && unreadCount > 0) && <span className="notif-dot" />}
       </button>
     </header>
   );

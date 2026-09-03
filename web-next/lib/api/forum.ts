@@ -19,6 +19,8 @@ import type {
   RankingToyComment,
   RankingToyCommentPage,
   RankingToyDetail,
+  ReportInput,
+  ReportResult,
   SearchResults,
   SessionUser,
   UserSummary,
@@ -703,6 +705,8 @@ function parseProfilePost(raw: unknown): ProfilePost {
   const item = asRecord(raw);
   return {
     id: asString(item.id),
+    commentId: asString(item.comment_id) || undefined,
+    activityAt: asString(item.activity_at) || undefined,
     title: asString(item.title, "未命名帖子"),
     contentPreview: asString(item.content_preview, asString(item.content)),
     communityName: asString(item.community_name, "社区"),
@@ -750,8 +754,25 @@ export async function getMyProfileList(
 export async function getMyPoints(): Promise<{ points: number; experience: number }> {
   const payload = await apiJson<JsonRecord>("/me/points");
   return {
-    points: asNumber(payload.points),
+    points: asNumber(payload.balance ?? payload.points),
     experience: asNumber(payload.experience),
+  };
+}
+
+export async function createReport(input: ReportInput): Promise<ReportResult> {
+  const payload = await apiJson<JsonRecord>("/reports", {
+    method: "POST",
+    body: JSON.stringify({
+      target_type: input.targetType,
+      target_id: input.targetId,
+      reason_code: input.reasonCode,
+      description: input.description || "",
+    }),
+  });
+  return {
+    id: asString(payload.id),
+    moderationCaseId: asString(payload.moderation_case_id),
+    status: asString(payload.status),
   };
 }
 

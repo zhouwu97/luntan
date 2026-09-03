@@ -219,7 +219,7 @@ export default function UserPage() {
                 <button
                   type="button"
                   className="primary-link"
-                  onClick={() => router.push(`/login?next=${encodeURIComponent("/user/me")}`)}
+                  onClick={() => router.push(`/login?next=${encodeURIComponent("/me")}`)}
                 >
                   登录 / 注册
                 </button>
@@ -352,7 +352,7 @@ export default function UserPage() {
                 <button
                   type="button"
                   className="primary-button"
-                  onClick={() => router.push(`/login?next=${encodeURIComponent("/user/me")}`)}
+                  onClick={() => router.push(`/login?next=${encodeURIComponent("/me")}`)}
                 >
                   立即登录
                 </button>

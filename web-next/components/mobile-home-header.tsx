@@ -30,7 +30,7 @@ export function MobileHomeHeader() {
         type="button"
         className="avatar-btn"
         aria-label="个人中心"
-        onClick={() => router.push(user ? "/user/me" : "/login")}
+        onClick={() => router.push(user ? "/me" : "/login")}
       >
         <UserAvatar
           userId={user?.id}

@@ -11,6 +11,7 @@ import { UserAvatar } from "./user-avatar";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { ImageGalleryModal, type GalleryImage } from "./image-gallery-modal";
+import { ReportModal } from "./report-modal";
 import {
   createComment,
   createReply,
@@ -50,6 +51,7 @@ export function PostDetailShell({ id }: { id: string }) {
   const [sendingComment, setSendingComment] = useState(false);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[] | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [reportTarget, setReportTarget] = useState<{ type: "post" | "comment"; id: string; title?: string } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -84,10 +86,19 @@ export function PostDetailShell({ id }: { id: string }) {
   }, [id]);
 
   useEffect(() => {
-    if (!loading && typeof window !== "undefined" && window.location.hash === "#comments") {
-      const el = document.getElementById("comments");
-      if (el) {
-        setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+    if (!loading && typeof window !== "undefined" && window.location.hash) {
+      const hash = window.location.hash;
+      if (hash === "#comments") {
+        const el = document.getElementById("comments");
+        if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+      } else if (hash.startsWith("#comment-")) {
+        const commentEl = document.getElementById(hash.slice(1));
+        if (commentEl) {
+          setTimeout(() => {
+            commentEl.scrollIntoView({ behavior: "smooth" });
+            commentEl.classList.add("comment-highlight");
+          }, 150);
+        }
       }
     }
   }, [loading]);
@@ -252,6 +263,7 @@ export function PostDetailShell({ id }: { id: string }) {
               user={user}
               onRequireAuth={() => router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`)}
               onOpenGallery={handleOpenGallery}
+              onOpenReport={() => setReportTarget({ type: "post", id: post.id, title: post.title })}
             />
 
             <CommentsSection
@@ -269,6 +281,9 @@ export function PostDetailShell({ id }: { id: string }) {
               user={user}
               onRequireAuth={() => router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`)}
               onOpenGallery={handleOpenGallery}
+              onReportComment={(c) =>
+                setReportTarget({ type: "comment", id: c.id, title: c.content ? c.content.slice(0, 30) : "评论" })
+              }
             />
           </section>
 
@@ -464,6 +479,16 @@ export function PostDetailShell({ id }: { id: string }) {
         />
       )}
 
+      {/* 举报弹层 */}
+      {reportTarget && (
+        <ReportModal
+          targetType={reportTarget.type}
+          targetId={reportTarget.id}
+          targetTitle={reportTarget.title}
+          onClose={() => setReportTarget(null)}
+        />
+      )}
+
       <AppDownloadBanner />
     </>
   );
@@ -474,11 +499,13 @@ function PostArticle({
   user,
   onRequireAuth,
   onOpenGallery,
+  onOpenReport,
 }: {
   post: Post;
   user: SessionUser | null;
   onRequireAuth: () => void;
   onOpenGallery: (images: GalleryImage[], index?: number) => void;
+  onOpenReport: () => void;
 }) {
   const [liked, setLiked] = useState(post.viewerState.hasLiked);
   const [bookmarked, setBookmarked] = useState(post.viewerState.hasBookmarked);
@@ -592,6 +619,18 @@ function PostArticle({
           <Icon name="eye" size={15} />
           {compactCount(post.viewCount)} 浏览
         </span>
+        <button
+          type="button"
+          className="stat"
+          onClick={() => {
+            if (!user) return onRequireAuth();
+            onOpenReport();
+          }}
+          style={{ background: "none", border: "none", cursor: "pointer" }}
+        >
+          <Icon name="info" size={15} />
+          举报
+        </button>
       </div>
     </article>
   );
@@ -612,6 +651,7 @@ function CommentsSection({
   user,
   onRequireAuth,
   onOpenGallery,
+  onReportComment,
 }: {
   post: Post;
   comments: Comment[];
@@ -627,6 +667,7 @@ function CommentsSection({
   user: SessionUser | null;
   onRequireAuth: () => void;
   onOpenGallery: (images: GalleryImage[], index?: number) => void;
+  onReportComment: (c: Comment) => void;
 }) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -826,6 +867,10 @@ function CommentsSection({
               onReply={() => setReplyTarget(comment)}
               onDelete={() => handleDeleteComment(comment.id)}
               onOpenGallery={onOpenGallery}
+              onReport={() => {
+                if (!user) return onRequireAuth();
+                onReportComment(comment);
+              }}
             />
           ))
         ) : (
@@ -870,6 +915,7 @@ function CommentRow({
   onReply,
   onDelete,
   onOpenGallery,
+  onReport,
 }: {
   comment: Comment;
   user: SessionUser | null;
@@ -877,6 +923,7 @@ function CommentRow({
   onReply: () => void;
   onDelete: () => void;
   onOpenGallery: (images: GalleryImage[], index?: number) => void;
+  onReport: () => void;
 }) {
   const [liked, setLiked] = useState(comment.viewerState.hasLiked);
   const [count, setCount] = useState(comment.likeCount);
@@ -907,7 +954,7 @@ function CommentRow({
   );
 
   return (
-    <article className="comment-card">
+    <article className="comment-card" id={`comment-${comment.id}`}>
       <Link href={`/user/${encodeURIComponent(comment.author.id)}`}>
         <UserAvatar
           userId={comment.author.id}
@@ -978,6 +1025,10 @@ function CommentRow({
           <button type="button" className="comm-act" onClick={onReply}>
             <Icon name="message" size={14} />
             <span>回复</span>
+          </button>
+          <button type="button" className="comm-act" onClick={onReport}>
+            <Icon name="info" size={13} />
+            <span>举报</span>
           </button>
           {canDelete && (
             <button

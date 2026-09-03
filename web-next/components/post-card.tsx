@@ -8,6 +8,7 @@ import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
 import { useToast } from "./toast-context";
 import { ImageGalleryModal, type GalleryImage } from "./image-gallery-modal";
+import { ReportModal } from "./report-modal";
 import type { Post, SessionUser } from "../types/forum";
 import { deletePost, setPostBookmark, setPostLike } from "../lib/api/forum";
 import { compactCount, relativeTime } from "../lib/format";
@@ -34,6 +35,7 @@ export function PostCard({
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [deleted, setDeleted] = useState(false);
 
   if (deleted) return null;
@@ -100,7 +102,11 @@ export function PostCard({
   function handleReport(event: MouseEvent) {
     stop(event);
     setMenuOpen(false);
-    showToast("已收到举报，我们将尽快核实处理");
+    if (!user) {
+      router.push(`/login?next=${encodeURIComponent(`/post/${post.id}`)}`);
+      return;
+    }
+    setReportOpen(true);
   }
 
   async function handleDelete(event: MouseEvent) {
@@ -278,6 +284,15 @@ export function PostCard({
           images={galleryImages}
           initialIndex={galleryIndex}
           onClose={() => setGalleryIndex(null)}
+        />
+      )}
+
+      {reportOpen && (
+        <ReportModal
+          targetType="post"
+          targetId={post.id}
+          targetTitle={post.title}
+          onClose={() => setReportOpen(false)}
         />
       )}
     </>

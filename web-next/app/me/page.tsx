@@ -248,20 +248,27 @@ export default function MyWorkbenchPage() {
           </div>
         ) : items.length > 0 ? (
           <div className="profile-post-list">
-            {items.map((item) => (
-              <Link key={item.id} href={`/post/${encodeURIComponent(item.id)}`} className="profile-post-row">
-                <div>
-                  <span className="profile-post-community">{item.communityName}</span>
-                  <h3>{item.title}</h3>
-                  <p>{item.contentPreview || "（此内容未提供文字摘要）"}</p>
-                </div>
-                <div className="profile-post-meta">
-                  <span>{relativeTime(item.createdAt)}</span>
-                  <span>{compactCount(item.commentCount)} 回复</span>
-                  <span>{compactCount(item.likeCount)} 赞</span>
-                </div>
-              </Link>
-            ))}
+            {items.map((item) => {
+              const rowKey = item.commentId ? `${item.id}-${item.commentId}` : item.id;
+              const href = item.commentId
+                ? `/post/${encodeURIComponent(item.id)}#comment-${encodeURIComponent(item.commentId)}`
+                : `/post/${encodeURIComponent(item.id)}`;
+              const timeDisplay = relativeTime(item.activityAt || item.createdAt);
+              return (
+                <Link key={rowKey} href={href} className="profile-post-row">
+                  <div>
+                    <span className="profile-post-community">{item.communityName}</span>
+                    <h3>{item.title}</h3>
+                    <p>{item.contentPreview || "（此内容未提供文字摘要）"}</p>
+                  </div>
+                  <div className="profile-post-meta">
+                    <span>{timeDisplay}</span>
+                    <span>{compactCount(item.commentCount)} 回复</span>
+                    <span>{compactCount(item.likeCount)} 赞</span>
+                  </div>
+                </Link>
+              );
+            })}
 
             {hasMore && (
               <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>

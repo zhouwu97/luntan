@@ -162,6 +162,8 @@ export interface ProfileSummary extends UserSummary {
 
 export interface ProfilePost {
   id: string;
+  commentId?: string;
+  activityAt?: string;
   title: string;
   contentPreview: string;
   communityName: string;
@@ -169,6 +171,19 @@ export interface ProfilePost {
   likeCount: number;
   viewCount: number;
   createdAt: string;
+}
+
+export interface ReportInput {
+  targetType: "post" | "comment" | "user" | "community";
+  targetId: string;
+  reasonCode: string;
+  description?: string;
+}
+
+export interface ReportResult {
+  id: string;
+  moderationCaseId: string;
+  status: string;
 }
 
 export interface ActivityItem {

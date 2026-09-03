@@ -61,8 +61,8 @@ func (s *Server) togglePostLike(w http.ResponseWriter, r *http.Request, postID s
 				writeInternalError(w, r, err)
 				return
 			}
-			// 点赞奖励与发帖奖励共享每日 +1 额度。
-			if err := awardDailyPointTx(r.Context(), tx, user.ID, "like", "点赞帖子", s.pointRewards.LikeCreate); err != nil {
+			// 点赞奖励：每天前 5 个点赞各 +1 积分，受每日总上限 20 约束。
+			if err := awardLikePointTx(r.Context(), tx, user.ID, "post", postID, s.pointRewards.LikeCreate, s.pointRewards.LikeDailyLimit, s.pointRewards.DailyEarnLimit); err != nil {
 				writeInternalError(w, r, err)
 				return
 			}
@@ -183,8 +183,8 @@ func (s *Server) toggleCommentLike(w http.ResponseWriter, r *http.Request, comme
 			return
 		}
 		if active {
-			// 点赞评论与点赞帖子、发帖共享每日 +1 额度。
-			if err := awardDailyPointTx(r.Context(), tx, user.ID, "like", "点赞评论", s.pointRewards.LikeCreate); err != nil {
+			// 点赞评论：每天前 5 个点赞各 +1 积分，受每日总上限 20 约束。
+			if err := awardLikePointTx(r.Context(), tx, user.ID, "comment", commentID, s.pointRewards.LikeCreate, s.pointRewards.LikeDailyLimit, s.pointRewards.DailyEarnLimit); err != nil {
 				writeInternalError(w, r, err)
 				return
 			}

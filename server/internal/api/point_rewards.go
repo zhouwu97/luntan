@@ -6,21 +6,29 @@ import (
 )
 
 // PointRewardRules 集中管理积分奖励与每日获取上限。
-// 产品已确认：发帖 +1、点赞 +1，每日最多获得 1 积分；评论不再发放积分。
-// 帖子被管理员推荐一次性奖励作者 +20，不受每日上限限制，取消推荐不扣分。
+// 产品已确认：
+// - 发帖 +10 积分
+// - 评论 +2 积分（不设上限）
+// - 点赞：每天前 5 个点赞各 +1 积分
+// - 每日总上限 20 积分（推荐奖励除外）
+// - 帖子被管理员推荐一次性奖励作者 +20，不受每日上限限制，取消推荐不扣分。
 // 这是用户可见的固定规则，不允许环境变量造成页面文案与实际发放不一致。
 type PointRewardRules struct {
 	PostCreate          int64
+	CommentCreate       int64
 	LikeCreate          int64
-	DailyEarnLimit      int64
+	LikeDailyLimit      int   // 点赞每日次数上限
+	DailyEarnLimit      int64 // 每日总积分上限（不含推荐）
 	RecommendationBonus int64
 }
 
 func defaultPointRewardRules() PointRewardRules {
 	return PointRewardRules{
-		PostCreate:          1,
+		PostCreate:          10,
+		CommentCreate:       2,
 		LikeCreate:          1,
-		DailyEarnLimit:      1,
+		LikeDailyLimit:      5,
+		DailyEarnLimit:      20,
 		RecommendationBonus: 20,
 	}
 }
@@ -42,7 +50,7 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 		return err
 	}
 	// 必须在用户行锁建立后再检查一次。否则两个相同事件并发时，
-	// 两个事务都可能先读到”没有流水”，随后第二个事务会撞上唯一索引。
+	// 两个事务都可能先读到"没有流水"，随后第二个事务会撞上唯一索引。
 	var existingBalance int64
 	err := tx.QueryRowContext(ctx, `SELECT balance_after FROM point_transactions WHERE user_id = $1 AND idempotency_key = $2`, userID, idempotencyKey).Scan(&existingBalance)
 	if err == nil {
@@ -53,11 +61,11 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 	}
 	if dailyEarnLimit > 0 && delta > 0 {
 		var earnedToday int64
-		// 自然日按北京时间计算，与用户感知的”一天”一致；
+		// 自然日按北京时间计算，与用户感知的"一天"一致；
 		// 双重 AT TIME ZONE 把上海零点正确还原成 timestamptz，不受会话时区影响。
-		// 每日额度只统计发帖/点赞这组活动奖励；推荐、兑换及管理员补偿等
+		// 每日额度统计发帖/点赞/评论活动奖励；推荐、兑换及管理员补偿等
 		// 其他正向流水不应消耗活动额度。
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID).Scan(&earnedToday); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(delta), 0) FROM point_transactions WHERE user_id = $1 AND delta > 0 AND source IN ('post', 'like', 'comment') AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`, userID).Scan(&earnedToday); err != nil {
 			return err
 		}
 		if earnedToday >= dailyEarnLimit {
@@ -77,7 +85,7 @@ func awardPointsTx(ctx context.Context, tx *sql.Tx, userID, source, reason, idem
 
 // awardDailyPointTx 为每日积分入口统一发放积分，所有入口（点赞、发帖等）竞争同一份每日额度。
 // 幂等键格式为 daily:YYYY-MM-DD:user:userID，确保用户每天只能通过任一入口获得一次奖励。
-// source 用于审计流水来源（”like” 或 “post”），但不影响幂等性。
+// source 用于审计流水来源（"like" 或 "post"），但不影响幂等性。
 func awardDailyPointTx(ctx context.Context, tx *sql.Tx, userID, source, reason string, delta int64) error {
 	if delta == 0 {
 		return nil
@@ -90,3 +98,35 @@ func awardDailyPointTx(ctx context.Context, tx *sql.Tx, userID, source, reason s
 	idempotencyKey := "daily:" + bizDate + ":user:" + userID
 	return awardPointsTx(ctx, tx, userID, source, reason, idempotencyKey, delta, 0)
 }
+
+// awardLikePointTx 为点赞发放积分，每天前 N 个点赞各奖励 delta 积分。
+// 通过统计当日已发放的点赞积分流水数量来判断是否还在配额内。
+// 幂等键由具体的点赞事件 ID 构成，每个点赞动作最多发放一次积分。
+func awardLikePointTx(ctx context.Context, tx *sql.Tx, userID, targetType, targetID string, delta int64, dailyLimit int, globalDailyLimit int64) error {
+	if delta == 0 || dailyLimit <= 0 {
+		return nil
+	}
+
+	// 统计今日已发放的点赞积分次数
+	var likeCountToday int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM point_transactions
+		WHERE user_id = $1
+		  AND source = 'like'
+		  AND delta > 0
+		  AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
+	`, userID).Scan(&likeCountToday); err != nil {
+		return err
+	}
+
+	// 已达到点赞次数上限，不再发放
+	if likeCountToday >= dailyLimit {
+		return nil
+	}
+
+	// 构造幂等键：like:targetType:targetID:userID
+	idempotencyKey := "like:" + targetType + ":" + targetID + ":user:" + userID
+	return awardPointsTx(ctx, tx, userID, "like", "点赞", idempotencyKey, delta, globalDailyLimit)
+}
+

@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_network_image.dart';
 import '../widgets/comments/comment_common_widgets.dart';
 import '../widgets/comments/comment_composer_controller.dart';
+import '../widgets/comments/comment_image_viewer.dart';
 import '../widgets/comments/comment_more_button.dart';
 import '../widgets/comments/comment_reply_bar.dart';
 import '../widgets/comments/comment_skeleton.dart';
@@ -280,26 +281,84 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
       widget.postAuthorId!.isNotEmpty &&
       comment.authorId == widget.postAuthorId;
 
-  void _openImagePreview(BuildContext context, String imageUrl) {
-    if (imageUrl.isEmpty) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
-            elevation: 0,
+  void _openImageGallery(
+    BuildContext context, {
+    required List<MediaAsset> mediaList,
+    int initialIndex = 0,
+  }) {
+    final urls = mediaList
+        .map((m) => m.originalUrl ?? m.previewUrl ?? '')
+        .where((u) => u.isNotEmpty)
+        .toList();
+    if (urls.isEmpty) return;
+    CommentImageViewer.open(
+      context,
+      imageUrls: urls,
+      initialIndex: initialIndex,
+    );
+  }
+
+  Widget _buildMediaColumn(BuildContext context, List<MediaAsset> mediaList) {
+    if (mediaList.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < mediaList.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _buildCommentImage(
+            context,
+            media: mediaList[i],
+            index: i,
+            gallery: mediaList,
           ),
-          body: Center(
-            child: InteractiveViewer(
-              child: AppNetworkImage(
-                url: imageUrl,
-                fit: BoxFit.contain,
-                errorBuilder: (_) => const Icon(
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCommentImage(
+    BuildContext context, {
+    required MediaAsset media,
+    required int index,
+    required List<MediaAsset> gallery,
+  }) {
+    final imageUrl = media.previewUrl ?? media.originalUrl ?? '';
+    if (imageUrl.isEmpty) return const SizedBox.shrink();
+
+    final width = media.width;
+    final height = media.height;
+    final double? aspectRatio =
+        (width != null && height != null && width > 0 && height > 0)
+            ? (width / height)
+            : null;
+
+    return GestureDetector(
+      onTap: () => _openImageGallery(
+        context,
+        mediaList: gallery,
+        initialIndex: index,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 480),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAF0F6),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE2EAF2), width: 0.8),
+          ),
+          child: AspectRatio(
+            aspectRatio: aspectRatio ?? (16 / 10),
+            child: AppNetworkImage(
+              url: imageUrl,
+              fit: BoxFit.cover,
+              aspectRatio: aspectRatio,
+              errorBuilder: (_) => const Padding(
+                padding: EdgeInsets.all(24),
+                child: Icon(
                   Icons.broken_image_outlined,
-                  color: Colors.white54,
-                  size: 64,
+                  color: Colors.grey,
+                  size: 32,
                 ),
               ),
             ),
@@ -507,47 +566,11 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                                       if (root.media.isNotEmpty)
                                         Padding(
                                           padding: const EdgeInsets.only(
-                                            top: 6,
+                                            top: 8,
                                           ),
-                                          child: Wrap(
-                                            spacing: 6,
-                                            runSpacing: 6,
-                                            children: root.media.map((m) {
-                                              final url = m.previewUrl ?? '';
-                                              if (url.isEmpty) {
-                                                return const SizedBox.shrink();
-                                              }
-                                              return GestureDetector(
-                                                onTap: () => _openImagePreview(
-                                                  context,
-                                                  m.originalUrl ?? url,
-                                                ),
-                                                child: ClipRRect(
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                  child: Container(
-                                                    decoration: BoxDecoration(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
-                                                          ),
-                                                      border: Border.all(
-                                                        color: const Color(
-                                                          0xFFDCE7F2,
-                                                        ),
-                                                        width: 0.8,
-                                                      ),
-                                                    ),
-                                                    child: AppNetworkImage(
-                                                      url: url,
-                                                      width: 80,
-                                                      height: 80,
-                                                      fit: BoxFit.cover,
-                                                    ),
-                                                  ),
-                                                ),
-                                              );
-                                            }).toList(),
+                                          child: _buildMediaColumn(
+                                            context,
+                                            root.media,
                                           ),
                                         ),
                                       if (root.stickerId != null &&
@@ -844,39 +867,8 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                         ],
                         if (reply.media.isNotEmpty)
                           Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: reply.media.map((m) {
-                                final url = m.previewUrl ?? '';
-                                if (url.isEmpty) return const SizedBox.shrink();
-                                return GestureDetector(
-                                  onTap: () => _openImagePreview(
-                                    context,
-                                    m.originalUrl ?? url,
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(
-                                          color: const Color(0xFFDCE7F2),
-                                          width: 0.8,
-                                        ),
-                                      ),
-                                      child: AppNetworkImage(
-                                        url: url,
-                                        width: 80,
-                                        height: 80,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
+                            padding: const EdgeInsets.only(top: 8),
+                            child: _buildMediaColumn(context, reply.media),
                           ),
                         if (reply.stickerId != null &&
                             reply.stickerId!.isNotEmpty)

@@ -108,7 +108,7 @@ class _MockRankingRepo extends RankingRepository {
 void main() {
 
   group('showCommentActionMenu 安全区避让与权限控制', () {
-    testWidgets('普通用户即便为评论作者，也不显示“删除评论”按钮', (tester) async {
+    testWidgets('普通用户为评论作者时，展示“删除评论”与“编辑评论”，且不展示“举报评论”', (tester) async {
       final comment = _mockComment(id: 'c1', authorId: 'u1');
 
       await tester.pumpWidget(
@@ -122,6 +122,7 @@ void main() {
                   currentUserId: 'u1',
                   canModerate: false,
                   onCopy: () {},
+                  onReport: () {},
                   onEdit: () {},
                   onDelete: () {},
                 ),
@@ -137,6 +138,41 @@ void main() {
 
       expect(find.text('复制内容'), findsOneWidget);
       expect(find.text('编辑评论'), findsOneWidget);
+      expect(find.text('删除评论'), findsOneWidget);
+      expect(find.text('举报评论'), findsNothing);
+    });
+
+    testWidgets('普通用户查看他人评论时，展示“举报评论”，不展示“删除评论”与“编辑评论”', (tester) async {
+      final comment = _mockComment(id: 'c1', authorId: 'u2');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showCommentActionMenu(
+                  context,
+                  comment: comment,
+                  currentUserId: 'u1',
+                  canModerate: false,
+                  onCopy: () {},
+                  onReport: () {},
+                  onEdit: () {},
+                  onDelete: () {},
+                ),
+                child: const Text('打开菜单'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开菜单'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('复制内容'), findsOneWidget);
+      expect(find.text('举报评论'), findsOneWidget);
+      expect(find.text('编辑评论'), findsNothing);
       expect(find.text('删除评论'), findsNothing);
     });
 

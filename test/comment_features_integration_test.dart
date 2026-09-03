@@ -8,6 +8,7 @@ import 'package:luntan/screens/comment_thread_screen.dart';
 import 'package:luntan/widgets/comments/comment_item.dart';
 import 'package:luntan/widgets/comments/comment_reply_preview.dart';
 import 'package:luntan/widgets/comments/comment_composer_controller.dart';
+import 'package:luntan/widgets/comments/comment_attachment_preview.dart';
 import 'package:luntan/widgets/comments/emoji/comment_emoji_panel.dart';
 import 'package:luntan/widgets/comments/emoji/sticker_catalog.dart';
 
@@ -396,6 +397,95 @@ void main() {
       expect(composer.bottomPanel, equals(CommentBottomPanel.none));
 
       composer.dispose();
+    });
+
+    test('CommentComposerController 多图添加、去重、上限9张与单张删除校验', () {
+      final composer = CommentComposerController();
+
+      // 1. 添加3张图片
+      composer.addLocalImages([
+        XFile('path/to/img1.jpg'),
+        XFile('path/to/img2.jpg'),
+        XFile('path/to/img3.jpg'),
+      ]);
+      expect(composer.localImages.length, 3);
+      expect(composer.draft.localImages.length, 3);
+      expect(composer.draft.localImage?.path, 'path/to/img1.jpg');
+
+      // 2. 去重校验：重复添加 img1
+      composer.addLocalImages([XFile('path/to/img1.jpg')]);
+      expect(composer.localImages.length, 3);
+
+      // 3. 上限9张校验：试图再加 8 张不同图片
+      composer.addLocalImages([
+        XFile('path/to/img4.jpg'),
+        XFile('path/to/img5.jpg'),
+        XFile('path/to/img6.jpg'),
+        XFile('path/to/img7.jpg'),
+        XFile('path/to/img8.jpg'),
+        XFile('path/to/img9.jpg'),
+        XFile('path/to/img10.jpg'),
+        XFile('path/to/img11.jpg'),
+      ]);
+      expect(composer.localImages.length, 9);
+
+      // 4. 单张删除
+      composer.removeLocalImageAt(1); // 移除 img2
+      expect(composer.localImages.length, 8);
+      expect(composer.localImages[0].path, 'path/to/img1.jpg');
+      expect(composer.localImages[1].path, 'path/to/img3.jpg');
+
+      // 5. 贴纸与多图互斥
+      final sticker = appStickerGroups.first.items.first;
+      composer.setSticker(sticker);
+      expect(composer.localImages, isEmpty);
+      expect(composer.draft.sticker, equals(sticker));
+
+      // 6. 再次添加图片，清除贴纸
+      composer.addLocalImages([XFile('path/to/new_img.jpg')]);
+      expect(composer.localImages.length, 1);
+      expect(composer.draft.sticker, isNull);
+
+      composer.dispose();
+    });
+
+    testWidgets('CommentAttachmentPreview 多图横向缩略图与计数展示测试', (tester) async {
+      int? removedIndex;
+      bool addMoreCalled = false;
+
+      final images = [
+        XFile('https://example.com/1.jpg'),
+        XFile('https://example.com/2.jpg'),
+        XFile('https://example.com/3.jpg'),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CommentAttachmentPreview(
+              localImages: images,
+              onRemoveImageAt: (index) => removedIndex = index,
+              onAddMoreImages: () => addMoreCalled = true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 校验顶部计数
+      expect(find.text('(3/9)'), findsOneWidget);
+      expect(find.text('已添加图片'), findsOneWidget);
+
+      // 校验添加按钮
+      expect(find.byIcon(Icons.add_photo_alternate_outlined), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.add_photo_alternate_outlined));
+      expect(addMoreCalled, isTrue);
+
+      // 校验删除第一张
+      final cancelButtons = find.byIcon(Icons.cancel);
+      expect(cancelButtons, findsNWidgets(3));
+      await tester.tap(cancelButtons.first);
+      expect(removedIndex, 0);
     });
 
     test('MockCommentRepository 支持创建带贴纸与图片附件的评论并成功检索', () async {

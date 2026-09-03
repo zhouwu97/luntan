@@ -162,16 +162,23 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
       widget.onFeedback(widget.blockedMessage);
       return;
     }
+    final remaining = 9 - _composer.localImages.length;
+    if (remaining <= 0) {
+      widget.onFeedback('最多只能添加9张图片');
+      return;
+    }
     try {
-      final image = await _picker.pickImage(
-        source: ImageSource.gallery,
+      final images = await _picker.pickMultiImage(
         maxWidth: 2048,
         maxHeight: 2048,
         imageQuality: 85,
       );
-      if (image != null) {
+      if (images.isNotEmpty) {
         setState(() => _isEditing = true);
-        _composer.setLocalImage(image);
+        if (images.length > remaining) {
+          widget.onFeedback('已自动选取前$remaining张图片（最多9张）');
+        }
+        _composer.addLocalImages(images);
       }
     } catch (e) {
       widget.onFeedback('选择图片失败: $e');
@@ -210,9 +217,11 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           children: [
             // 附件预览栏（图片或贴纸）
             CommentAttachmentPreview(
-              localImage: _composer.localImage,
+              localImages: _composer.localImages,
               sticker: _composer.sticker,
-              onRemoveImage: _composer.clearLocalImage,
+              onRemoveImageAt: _composer.removeLocalImageAt,
+              onAddMoreImages:
+                  _composer.localImages.length < 9 ? _handlePickImage : null,
               onRemoveSticker: _composer.clearSticker,
             ),
 
@@ -426,7 +435,7 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
         IconButton(
           icon: Icon(
             Icons.image_outlined,
-            color: _composer.localImage != null
+            color: _composer.localImages.isNotEmpty
                 ? AppTheme.primary
                 : const Color(0xFF6C8093),
             size: 22,
@@ -434,7 +443,9 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
           visualDensity: VisualDensity.compact,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 44, minHeight: 42),
-          tooltip: '添加图片',
+          tooltip: _composer.localImages.isNotEmpty
+              ? '已添加${_composer.localImages.length}张图片'
+              : '添加图片',
           onPressed: widget.sending ? null : _handlePickImage,
         ),
 

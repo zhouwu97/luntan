@@ -17,18 +17,26 @@ class CommentDraft {
     this.replyToUserId,
     this.replyToName,
     this.sticker,
-    this.localImage,
-  });
+    this.localImages = const [],
+    XFile? localImage,
+  }) : _legacyLocalImage = localImage;
 
   final String text;
   final String? parentCommentId;
   final String? replyToUserId;
   final String? replyToName;
   final AppSticker? sticker;
-  final XFile? localImage;
+  final List<XFile> localImages;
+  final XFile? _legacyLocalImage;
+
+  XFile? get localImage =>
+      _legacyLocalImage ?? (localImages.isNotEmpty ? localImages.first : null);
 
   bool get isEmpty =>
-      text.trim().isEmpty && sticker == null && localImage == null;
+      text.trim().isEmpty &&
+      sticker == null &&
+      localImages.isEmpty &&
+      _legacyLocalImage == null;
 }
 
 class CommentComposerController extends ChangeNotifier {
@@ -55,7 +63,7 @@ class CommentComposerController extends ChangeNotifier {
   String? _replyToUserId;
   String? _replyToName;
   AppSticker? _sticker;
-  XFile? _localImage;
+  final List<XFile> _localImages = [];
 
   bool get isOpen => _isOpen;
   CommentBottomPanel get bottomPanel => _bottomPanel;
@@ -68,7 +76,8 @@ class CommentComposerController extends ChangeNotifier {
   String? get replyToUserId => _replyToUserId;
   String? get replyToName => _replyToName;
   AppSticker? get sticker => _sticker;
-  XFile? get localImage => _localImage;
+  List<XFile> get localImages => List.unmodifiable(_localImages);
+  XFile? get localImage => _localImages.isNotEmpty ? _localImages.first : null;
 
   CommentDraft get draft => CommentDraft(
     text: textController.text.trim(),
@@ -76,7 +85,7 @@ class CommentComposerController extends ChangeNotifier {
     replyToUserId: _replyToUserId,
     replyToName: _replyToName,
     sticker: _sticker,
-    localImage: _localImage,
+    localImages: List.unmodifiable(_localImages),
   );
 
   void updateKeyboardMetrics(double inset) {
@@ -181,7 +190,7 @@ class CommentComposerController extends ChangeNotifier {
     if (_sticker?.id == sticker?.id) return;
     _sticker = sticker;
     if (sticker != null) {
-      _localImage = null; // 贴纸与图片互斥单选附件
+      _localImages.clear(); // 贴纸与图片互斥单选附件
     }
     notifyListeners();
   }
@@ -192,18 +201,46 @@ class CommentComposerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addLocalImages(List<XFile> images) {
+    for (final image in images) {
+      if (_localImages.length >= 9) break;
+
+      if (!_localImages.any((item) => item.path == image.path)) {
+        _localImages.add(image);
+      }
+    }
+
+    if (_localImages.isNotEmpty) {
+      _sticker = null; // 贴纸与图片互斥
+    }
+
+    notifyListeners();
+  }
+
+  void removeLocalImageAt(int index) {
+    if (index >= 0 && index < _localImages.length) {
+      _localImages.removeAt(index);
+      notifyListeners();
+    }
+  }
+
+  void clearLocalImages() {
+    if (_localImages.isEmpty) return;
+    _localImages.clear();
+    notifyListeners();
+  }
+
   void setLocalImage(XFile? image) {
-    _localImage = image;
+    _localImages.clear();
     if (image != null) {
+      _localImages.add(image);
       _sticker = null; // 贴纸与图片互斥单选附件
     }
     notifyListeners();
   }
 
   void clearLocalImage() {
-    if (_localImage == null) return;
-    _localImage = null;
-    notifyListeners();
+    clearLocalImages();
   }
 
   void insertEmoji(String emoji) {
@@ -308,7 +345,7 @@ class CommentComposerController extends ChangeNotifier {
     _cancelHandoff();
     textController.clear();
     _sticker = null;
-    _localImage = null;
+    _localImages.clear();
     _parentCommentId = null;
     _replyToUserId = null;
     _replyToName = null;

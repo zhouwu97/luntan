@@ -17,8 +17,8 @@ Future<void> showCommentActionMenu(
 }) {
   final isAuthor = currentUserId != null && comment.authorId == currentUserId;
   final canEdit = isAuthor && onEdit != null;
-  // 普通评论删除仅对管理权限开放，普通用户（即便为作者本人）不展示删除
-  final canDelete = canModerate && onDelete != null;
+  final canDelete = (isAuthor || canModerate) && onDelete != null;
+  final canReport = !isAuthor && onReport != null;
 
   return _showCommentActionSheet(
     context,
@@ -31,7 +31,7 @@ Future<void> showCommentActionMenu(
           onCopy();
         },
       ),
-      if (onReport != null)
+      if (canReport)
         ListTile(
           leading: const Icon(Icons.flag_outlined, color: AppTheme.orange),
           title: const Text('举报评论'),

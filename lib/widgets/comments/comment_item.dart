@@ -6,6 +6,7 @@ import '../../theme/app_theme.dart';
 import '../app_network_image.dart';
 import '../link_text.dart';
 import 'comment_common_widgets.dart';
+import 'comment_image_viewer.dart';
 import 'comment_more_button.dart';
 import 'comment_reply_preview.dart';
 import 'emoji/sticker_catalog.dart';
@@ -104,32 +105,20 @@ class _CommentItemState extends State<CommentItem>
     }
   }
 
-  void _openImagePreview(BuildContext context, String imageUrl) {
-    if (imageUrl.isEmpty) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
-            elevation: 0,
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              child: AppNetworkImage(
-                url: imageUrl,
-                fit: BoxFit.contain,
-                errorBuilder: (_) => const Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.white54,
-                  size: 64,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+  void _openImageGallery(
+    BuildContext context, {
+    required List<MediaAsset> mediaList,
+    int initialIndex = 0,
+  }) {
+    final urls = mediaList
+        .map((m) => m.originalUrl ?? m.previewUrl ?? '')
+        .where((u) => u.isNotEmpty)
+        .toList();
+    if (urls.isEmpty) return;
+    CommentImageViewer.open(
+      context,
+      imageUrls: urls,
+      initialIndex: initialIndex,
     );
   }
 
@@ -271,11 +260,11 @@ class _CommentItemState extends State<CommentItem>
               ),
             ),
 
-          // 多媒体图片预览
+          // 多媒体图片展示（按顺序自上而下逐张展开）
           if (!deleted && comment.media.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 46, top: 8),
-              child: _buildMediaGrid(context, comment.media),
+              child: _buildMediaColumn(context, comment.media),
             ),
 
           // 贴纸表情预览
@@ -374,72 +363,74 @@ class _CommentItemState extends State<CommentItem>
     );
   }
 
-  Widget _buildMediaGrid(BuildContext context, List<MediaAsset> mediaList) {
+  Widget _buildMediaColumn(BuildContext context, List<MediaAsset> mediaList) {
     if (mediaList.isEmpty) return const SizedBox.shrink();
 
-    if (mediaList.length == 1) {
-      final media = mediaList.first;
-      final imageUrl = media.previewUrl ?? '';
-      if (imageUrl.isEmpty) return const SizedBox.shrink();
-      return GestureDetector(
-        onTap: () => _openImagePreview(context, media.originalUrl ?? imageUrl),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 210, maxHeight: 210),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEAF0F6),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2EAF2), width: 0.8),
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < mediaList.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _buildCommentImage(
+            context,
+            media: mediaList[i],
+            index: i,
+            gallery: mediaList,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildCommentImage(
+    BuildContext context, {
+    required MediaAsset media,
+    required int index,
+    required List<MediaAsset> gallery,
+  }) {
+    final imageUrl = media.previewUrl ?? media.originalUrl ?? '';
+    if (imageUrl.isEmpty) return const SizedBox.shrink();
+
+    final width = media.width;
+    final height = media.height;
+    final double? aspectRatio =
+        (width != null && height != null && width > 0 && height > 0)
+            ? (width / height)
+            : null;
+
+    return GestureDetector(
+      onTap: () => _openImageGallery(
+        context,
+        mediaList: gallery,
+        initialIndex: index,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 480),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEAF0F6),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE2EAF2), width: 0.8),
+          ),
+          child: AspectRatio(
+            aspectRatio: aspectRatio ?? (16 / 10),
             child: AppNetworkImage(
               url: imageUrl,
               fit: BoxFit.cover,
+              aspectRatio: aspectRatio,
               errorBuilder: (_) => const Padding(
-                padding: EdgeInsets.all(16),
-                child: Icon(Icons.broken_image_outlined, color: Colors.grey),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: mediaList.map((media) {
-        final imageUrl = media.previewUrl ?? '';
-        if (imageUrl.isEmpty) return const SizedBox.shrink();
-
-        return GestureDetector(
-          onTap: () => _openImagePreview(
-            context,
-            media.originalUrl ?? imageUrl,
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              width: 86,
-              height: 86,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEAF0F6),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE2EAF2), width: 0.8),
-              ),
-              child: AppNetworkImage(
-                url: imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_) => const Icon(
+                padding: EdgeInsets.all(24),
+                child: Icon(
                   Icons.broken_image_outlined,
                   color: Colors.grey,
-                  size: 24,
+                  size: 32,
                 ),
               ),
             ),
           ),
-        );
-      }).toList(),
+        ),
+      ),
     );
   }
 

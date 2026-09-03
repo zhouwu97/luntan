@@ -132,6 +132,37 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  Future<List<String>> _uploadCommentImages(List<XFile> files) async {
+    if (files.isEmpty) return const [];
+    final List<String> mediaIds = [];
+    for (final file in files) {
+      final bytes = await file.readAsBytes();
+      final lower = file.name.toLowerCase();
+      final mimeType = lower.endsWith('.png')
+          ? 'image/png'
+          : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+      final digest = sha256.convert(bytes).toString();
+      if (widget.publishRepository != null) {
+        final ticket = await widget.publishRepository!.requestMediaUpload(
+          fileName: file.name,
+          mimeType: mimeType,
+          size: bytes.length,
+          sha256: digest,
+        );
+        await widget.publishRepository!.uploadMedia(
+          ticket: ticket,
+          bytes: bytes,
+          size: bytes.length,
+          sha256: digest,
+        );
+        mediaIds.add(ticket.mediaId);
+      } else {
+        mediaIds.add(file.path);
+      }
+    }
+    return mediaIds;
+  }
+
   Future<void> _submitReply(Post post) async {
     if (!widget.isAuthenticated) {
       widget.onRequireAuth?.call();
@@ -151,34 +182,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final before = post.commentCount;
 
     try {
-      List<String> mediaIds = const [];
-      if (draft.localImage != null) {
-        final file = draft.localImage!;
-        final bytes = await file.readAsBytes();
-        final lower = file.name.toLowerCase();
-        final mimeType = lower.endsWith('.png')
-            ? 'image/png'
-            : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-        final digest = sha256.convert(bytes).toString();
-        if (widget.publishRepository != null) {
-          final ticket = await widget.publishRepository!.requestMediaUpload(
-            fileName: file.name,
-            mimeType: mimeType,
-            size: bytes.length,
-            sha256: digest,
-          );
-          await widget.publishRepository!.uploadMedia(
-            ticket: ticket,
-            bytes: bytes,
-            size: bytes.length,
-            sha256: digest,
-          );
-          mediaIds = [ticket.mediaId];
-        } else {
-          mediaIds = [file.path];
-        }
-      }
-
+      final mediaIds = await _uploadCommentImages(draft.localImages);
       final stickerId = draft.sticker?.id;
 
       if (target == null) {
@@ -384,33 +388,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         blockedMessage: _commentBlockedMessage,
         onAuthorTap: widget.onOpenUserId,
         onReplyDraft: (target, draft) async {
-          List<String> mediaIds = const [];
-          if (draft.localImage != null) {
-            final file = draft.localImage!;
-            final bytes = await file.readAsBytes();
-            final lower = file.name.toLowerCase();
-            final mimeType = lower.endsWith('.png')
-                ? 'image/png'
-                : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-            final digest = sha256.convert(bytes).toString();
-            if (widget.publishRepository != null) {
-              final ticket = await widget.publishRepository!.requestMediaUpload(
-                fileName: file.name,
-                mimeType: mimeType,
-                size: bytes.length,
-                sha256: digest,
-              );
-              await widget.publishRepository!.uploadMedia(
-                ticket: ticket,
-                bytes: bytes,
-                size: bytes.length,
-                sha256: digest,
-              );
-              mediaIds = [ticket.mediaId];
-            } else {
-              mediaIds = [file.path];
-            }
-          }
+          final mediaIds = await _uploadCommentImages(draft.localImages);
           final stickerId = draft.sticker?.id;
           return widget.commentsController.replyTo(
             target,

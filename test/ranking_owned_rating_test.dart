@@ -60,6 +60,8 @@ class _OwnedRatingFakeApiClient extends ApiClient {
     return {};
   }
 
+  bool failDelete = false;
+
   @override
   Future<Map<String, dynamic>> deleteJson(
     String path, {
@@ -69,6 +71,14 @@ class _OwnedRatingFakeApiClient extends ApiClient {
   }) async {
     if (path == '/api/v1/ranking/toys/toy-butter-2/owned') {
       setOwnedCalls++;
+      if (failDelete) {
+        throw const ApiException(
+          type: ApiErrorType.unknown,
+          statusCode: 500,
+          code: 'server_error',
+          message: '服务器开小差了',
+        );
+      }
       ownedState = false;
       return {};
     }
@@ -227,5 +237,41 @@ void main() {
 
     expect(find.text('已取消“买过”标记'), findsOneWidget);
     expect(find.text('买过'), findsOneWidget);
+  });
+
+  testWidgets('取消买过如果服务器报错，不提示已取消买过标记且恢复已买过状态', (tester) async {
+    final client = _OwnedRatingFakeApiClient();
+    client.ownedState = true;
+    client.userRating = 8;
+    client.failDelete = true;
+    final repo = RankingRepository(client);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RankingItemDetailPage(
+          item: testItem,
+          repository: repo,
+          isAuthenticated: true,
+          canVote: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('已买过'), findsOneWidget);
+
+    // 点击“已买过”弹出打分弹窗
+    await tester.tap(find.text('已买过'));
+    await tester.pumpAndSettle();
+
+    // 点击“取消买过”触发失败
+    await tester.tap(find.text('取消买过'));
+    await tester.pumpAndSettle();
+
+    // 应该只出现服务器错误提示，绝不出现“已取消“买过”标记”
+    expect(find.text('服务器开小差了'), findsOneWidget);
+    expect(find.text('已取消“买过”标记'), findsNothing);
+    // 状态依旧保持为“已买过”
+    expect(find.text('已买过'), findsOneWidget);
   });
 }

@@ -1947,12 +1947,11 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
       return;
     }
     if (result is _RatingUnmarkOwnedResult) {
-      await _setOwnedState(false);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('已取消“买过”标记')));
-      }
+      final unmarked = await _setOwnedState(false);
+      if (!mounted || !unmarked) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已取消“买过”标记')));
       return;
     }
     if (result is _RatingCancelResult) {

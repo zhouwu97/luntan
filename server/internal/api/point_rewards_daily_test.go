@@ -326,7 +326,7 @@ func TestLikeConcurrentLimitEnforcement(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET points_balance = $1, updated_at = now() WHERE id = $2`)).
 		WithArgs(int64(15), "u1").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7)`)).
-		WithArgs(sqlmock.AnyArg(), "u1", "like", int64(1), int64(15), "点赞内容", "like:post:post5:user:u1").WillReturnResult(sqlmock.NewResult(1, 1))
+		WithArgs(sqlmock.AnyArg(), "u1", "like", int64(1), int64(15), "点赞", "like:post:post5:user:u1").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	tx1, err := db.Begin()

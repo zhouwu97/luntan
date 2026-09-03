@@ -171,16 +171,6 @@ class _FakeApiClient extends ApiClient {
     deletedPaths.add(path);
     return {};
   }
-
-  @override
-  Future<Map<String, dynamic>> delete(
-    String path, {
-    Map<String, String>? headers,
-    Object? body,
-  }) async {
-    deletedPaths.add(path);
-    return {};
-  }
 }
 
 class _FailingRankingRepository extends RankingRepository {

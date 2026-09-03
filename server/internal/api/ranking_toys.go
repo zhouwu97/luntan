@@ -1217,39 +1217,37 @@ func (s *Server) deleteRankingToyComment(w http.ResponseWriter, r *http.Request,
 		writeInternalError(w, r, err)
 		return
 	}
-	if !deletedAt.Valid {
-		if rootID == commentID {
-			// 一级评价：整楼软删除（包含根评价及其下所有二级回复），彻底避免孤儿数据。
+	if rootID == commentID {
+		// 一级评价：无论根评价自身是否已被软删除，均整楼级联软删除所有尚未软删除的子回复，彻底清理历史孤儿回复。
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE ranking_toy_comments
+			SET deleted_at = now(), updated_at = now()
+			WHERE (id = $1 OR root_id = $1) AND deleted_at IS NULL`, commentID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	} else if !deletedAt.Valid {
+		// 二级回复：仅软删除当前回复，并原子扣减父级评价的 reply_count。
+		result, err := tx.ExecContext(r.Context(), `
+			UPDATE ranking_toy_comments
+			SET deleted_at = now(), updated_at = now()
+			WHERE id = $1 AND deleted_at IS NULL`, commentID)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if affected > 0 {
 			if _, err := tx.ExecContext(r.Context(), `
 				UPDATE ranking_toy_comments
-				SET deleted_at = now(), updated_at = now()
-				WHERE (id = $1 OR root_id = $1) AND deleted_at IS NULL`, commentID); err != nil {
+				SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now()
+				WHERE id = $1`, rootID); err != nil {
 				writeInternalError(w, r, err)
 				return
-			}
-		} else {
-			// 二级回复：仅软删除当前回复，并原子扣减父级评价的 reply_count。
-			result, err := tx.ExecContext(r.Context(), `
-				UPDATE ranking_toy_comments
-				SET deleted_at = now(), updated_at = now()
-				WHERE id = $1 AND deleted_at IS NULL`, commentID)
-			if err != nil {
-				writeInternalError(w, r, err)
-				return
-			}
-			affected, err := result.RowsAffected()
-			if err != nil {
-				writeInternalError(w, r, err)
-				return
-			}
-			if affected > 0 {
-				if _, err := tx.ExecContext(r.Context(), `
-					UPDATE ranking_toy_comments
-					SET reply_count = GREATEST(reply_count - 1, 0), updated_at = now()
-					WHERE id = $1`, rootID); err != nil {
-					writeInternalError(w, r, err)
-					return
-				}
 			}
 		}
 	}

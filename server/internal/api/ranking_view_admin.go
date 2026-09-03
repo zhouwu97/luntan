@@ -320,10 +320,11 @@ func (s *Server) reorderRankingView(w http.ResponseWriter, r *http.Request) {
 			membershipQuery = `SELECT COUNT(*) FROM ranking_toys WHERE active = true AND id IN (`
 		}
 		placeholders := make([]string, 0, len(orderedIDs))
+		base := len(membershipArgs)
 		for i, id := range orderedIDs {
 			// IN 列表里的纯参数无法从左侧列推断类型（多元素会转成
 			// ANY(ARRAY[...])），Parse 阶段直接 42P18，必须显式标注。
-			placeholders = append(placeholders, fmt.Sprintf("$%d::text", len(membershipArgs)+i+1))
+			placeholders = append(placeholders, fmt.Sprintf("$%d::text", base+i+1))
 			membershipArgs = append(membershipArgs, id)
 		}
 		membershipQuery += strings.Join(placeholders, ",") + ")"

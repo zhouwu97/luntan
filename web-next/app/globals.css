@@ -3117,3 +3117,36 @@ img { display: block; max-width: 100%; }
   border-radius: 12px;
 }
 
+/* 侧边栏版本追踪角标 */
+.sidebar-version-footer {
+  margin-top: 14px;
+  padding: 0 4px;
+  text-align: center;
+}
+.sidebar-version-footer a {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text-faint, #94a3b8);
+  text-decoration: none;
+  opacity: 0.72;
+  transition: opacity 0.16s ease, color 0.16s ease;
+}
+.sidebar-version-footer a:hover {
+  opacity: 1;
+  color: var(--primary, #2563eb);
+  text-decoration: underline;
+}
+
+/* 整卡点击与悬浮微交互 */
+.post-card.post-card-clickable {
+  cursor: pointer;
+  transition: transform .22s var(--ease), box-shadow .22s var(--ease), border-color .18s ease;
+}
+.post-card.post-card-clickable:hover {
+  border-color: #bcd4f2;
+}
+.post-card.post-card-clickable:active {
+  transform: translateY(0);
+}
+
+

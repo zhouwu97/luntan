@@ -21,8 +21,6 @@ import { selectHomeCommunities } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
 import type { Community, Post } from "../types/forum";
 
-const DEFAULT_HOME_COMMUNITY_ID = "community-campus";
-
 export function normalizeSort(value: string | null): FeedSort {
   return value === "recommended" || value === "hot" ? value : "latest";
 }
@@ -42,12 +40,13 @@ export function HomeShell() {
   const searchParams = useSearchParams();
   const { user } = useSession();
   const { showToast } = useToast();
-  const requestedCommunityId = (searchParams.get("community") || "").trim();
+  const rawCommunity = (searchParams.get("community") || "").trim();
+  const requestedCommunityId = rawCommunity === "all" ? "" : rawCommunity;
   const query = (searchParams.get("q") || "").trim();
   const topic = (searchParams.get("topic") || "").trim();
 
   const [communities, setCommunities] = useState<Community[]>([]);
-  const [activeCommunityId, setActiveCommunityId] = useState(requestedCommunityId || DEFAULT_HOME_COMMUNITY_ID);
+  const [activeCommunityId, setActiveCommunityId] = useState(requestedCommunityId);
   const [sort, setSort] = useState<FeedSort>(() => normalizeSort(searchParams.get("sort")));
   const [latestOrder, setLatestOrder] = useState<LatestOrder>("comment");
   const [hasMedia, setHasMedia] = useState(false);
@@ -66,7 +65,8 @@ export function HomeShell() {
     const rawSort = searchParams.get("sort");
     setSort(normalizeSort(rawSort));
     setHasMedia(searchParams.get("media") === "1");
-    setActiveCommunityId(searchParams.get("community") || DEFAULT_HOME_COMMUNITY_ID);
+    const commParam = (searchParams.get("community") || "").trim();
+    setActiveCommunityId(commParam === "all" ? "" : commParam);
 
     if (rawSort === "featured") {
       const nextParams = new URLSearchParams(searchParams.toString());
@@ -83,13 +83,6 @@ export function HomeShell() {
         if (!mounted) return;
         const visible = selectHomeCommunities(items);
         setCommunities(visible);
-        setActiveCommunityId((current) => {
-          if (visible.some((item) => item.id === current)) return current;
-          const campus = visible.find(
-            (item) => item.id === DEFAULT_HOME_COMMUNITY_ID || item.name.trim() === "酱紫社区"
-          );
-          return campus?.id || visible[0]?.id || DEFAULT_HOME_COMMUNITY_ID;
-        });
       })
       .catch(() => {
         if (mounted) {
@@ -195,17 +188,14 @@ export function HomeShell() {
   }, [hasMedia, posts, query]);
 
   function chooseCommunity(community?: Community) {
-    if (!community) {
-      setActiveCommunityId("");
-      const nextParams = new URLSearchParams(searchParams.toString());
-      nextParams.delete("community");
-      router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
-      return;
-    }
-    setActiveCommunityId(community.id);
     const nextParams = new URLSearchParams(searchParams.toString());
-    if (community.id === DEFAULT_HOME_COMMUNITY_ID) nextParams.delete("community");
-    else nextParams.set("community", community.id);
+    if (!community || community.id === "all") {
+      setActiveCommunityId("");
+      nextParams.delete("community");
+    } else {
+      setActiveCommunityId(community.id);
+      nextParams.set("community", community.id);
+    }
     router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
   }
 

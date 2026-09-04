@@ -124,9 +124,31 @@ export function PostCard({
 
   const isAuthor = Boolean(user && user.id === post.author.id);
 
+  function handleCardClick(event: MouseEvent<HTMLElement>) {
+    if (typeof window !== "undefined") {
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim().length > 0) return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest(
+        "button, a, input, textarea, select, label, .media-frame, .post-card-menu-popover, .more, .like-btn",
+      )
+    ) {
+      return;
+    }
+
+    router.push(`/post/${encodeURIComponent(post.id)}`);
+  }
+
   return (
     <>
-      <article className="post-card" data-post-id={post.id}>
+      <article
+        className="post-card post-card-clickable"
+        data-post-id={post.id}
+        onClick={handleCardClick}
+      >
         <div className="post-head">
           <Link
             href={`/user/${encodeURIComponent(post.author.id)}`}

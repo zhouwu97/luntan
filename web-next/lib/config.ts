@@ -23,6 +23,7 @@ export function resolveAssetUrl(value?: string): string | undefined {
   if (!value) return undefined;
   const clean = value.trim();
   if (!clean) return undefined;
+  if (/^data:/i.test(clean) || /^blob:/i.test(clean)) return clean;
   if (/^https?:\/\//i.test(clean)) return normalizeHttpUrl(clean);
   if (appBasePath && (clean === appBasePath || clean.startsWith(`${appBasePath}/`))) return clean;
   if (clean.startsWith("/api/v1/") && apiOrigin) {

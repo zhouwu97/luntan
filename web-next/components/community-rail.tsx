@@ -231,6 +231,12 @@ export function CommunityRail({
         <Icon name="edit" size={18} />
         <span>发布新帖</span>
       </button>
+
+      <div className="sidebar-version-footer">
+        <a href="/api/version" target="_blank" rel="noreferrer" title="查看构建版本与运行状态">
+          Web Build: {process.env.NEXT_PUBLIC_GIT_SHA ? process.env.NEXT_PUBLIC_GIT_SHA.slice(0, 7) : "dev"}
+        </a>
+      </div>
     </aside>
   );
 }

@@ -22,6 +22,7 @@ import {
   getFeed,
   getPost,
   recordHistory,
+  setCommentDislike,
   setCommentLike,
   setPostBookmark,
   setPostLike,
@@ -36,15 +37,20 @@ export function PostDetailShell({ id }: { id: string }) {
   const { user } = useSession();
   const { showToast } = useToast();
   const [post, setPost] = useState<Post | null>(null);
+  const [postLoading, setPostLoading] = useState(true);
+  const [postError, setPostError] = useState("");
+
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentsError, setCommentsError] = useState("");
   const [totalComments, setTotalComments] = useState(0);
   const [hasMoreComments, setHasMoreComments] = useState(false);
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [sortOrder, setSortOrder] = useState<"hot" | "asc" | "desc">("asc");
   const [landlordOnly, setLandlordOnly] = useState(false);
+
   const [related, setRelated] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [relatedLoading, setRelatedLoading] = useState(false);
 
   const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
   const [mobileComposerText, setMobileComposerText] = useState("");
@@ -57,40 +63,91 @@ export function PostDetailShell({ id }: { id: string }) {
   const [targetChildCommentId, setTargetChildCommentId] = useState<string | null>(null);
   const [targetChildComment, setTargetChildComment] = useState<Comment | null>(null);
 
+  // 1. 优先获取并展示正文（核心数据，不被评论或推荐阻塞）
   useEffect(() => {
     let mounted = true;
-    setLoading(true);
-    setError("");
-    void Promise.all([
-      getPost(id),
-      getComments(id, { offset: 0, limit: 30, sort: sortOrder, authorId: landlordOnly && post ? post.author.id : undefined }),
-      getFeed({ sort: "hot", limit: 4 }),
-    ])
-      .then(([nextPost, commentPage, nextRelated]) => {
+    setPostLoading(true);
+    setPostError("");
+
+    getPost(id)
+      .then((nextPost) => {
         if (!mounted) return;
         setPost(nextPost);
-        setComments(commentPage.items);
-        setTotalComments(commentPage.total);
-        setHasMoreComments(commentPage.hasMore);
-        setRelated(nextRelated.items.filter((item) => item.id !== id).slice(0, 4));
       })
       .catch((requestError: unknown) => {
         if (!mounted) return;
         setPost(null);
-        setComments([]);
-        setRelated([]);
-        setError(formatError(requestError, "帖子暂时无法加载，请稍后再试"));
+        setPostError(formatError(requestError, "帖子暂时无法加载，请稍后再试"));
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mounted) setPostLoading(false);
       });
+
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  // 2. 独立并发加载评论（失败不影响正文）
+  const loadComments = (reset = true) => {
+    let mounted = true;
+    if (reset) {
+      setCommentsLoading(true);
+      setCommentsError("");
+    }
+    getComments(id, {
+      offset: 0,
+      limit: 30,
+      sort: sortOrder,
+      authorId: landlordOnly && post ? post.author.id : undefined,
+    })
+      .then((commentPage) => {
+        if (!mounted) return;
+        setComments(commentPage.items);
+        setTotalComments(commentPage.total);
+        setHasMoreComments(commentPage.hasMore);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setCommentsError("评论加载失败，请重试");
+      })
+      .finally(() => {
+        if (mounted) setCommentsLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  };
+
+  useEffect(() => {
+    return loadComments(true);
+  }, [id, sortOrder, landlordOnly, post?.author.id]);
+
+  // 3. 异步加载相关推荐（最低优先级，静默容错）
+  useEffect(() => {
+    let mounted = true;
+    setRelatedLoading(true);
+    getFeed({ sort: "hot", limit: 5 })
+      .then((feedPage) => {
+        if (!mounted) return;
+        setRelated(feedPage.items.filter((item) => item.id !== id).slice(0, 4));
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setRelated([]);
+      })
+      .finally(() => {
+        if (mounted) setRelatedLoading(false);
+      });
+
     return () => {
       mounted = false;
     };
   }, [id]);
 
   useEffect(() => {
-    if (loading || typeof window === "undefined" || !window.location.hash) return;
+    if (postLoading || typeof window === "undefined" || !window.location.hash) return;
     const hash = window.location.hash;
     if (hash === "#comments") {
       const el = document.getElementById("comments");
@@ -140,7 +197,7 @@ export function PostDetailShell({ id }: { id: string }) {
         })
         .catch(() => undefined);
     }
-  }, [loading]);
+  }, [postLoading]);
 
   useEffect(() => {
     if (user && post) void recordHistory(post.id).catch(() => undefined);
@@ -229,15 +286,37 @@ export function PostDetailShell({ id }: { id: string }) {
     }
   }
 
-  if (loading && !post) {
+  if (postLoading && !post) {
     return (
       <>
         <SiteHeader />
-        <main className="page-frame">
-          <div className="detail-skeleton">
-            <div />
-            <div />
-            <div />
+        <main className="page-frame post-detail-page-frame">
+          <div className="detail-grid">
+            <section className="detail-main">
+              <div className="back-link detail-back desktop-only" style={{ opacity: 0.6 }}>
+                <Icon name="chevron-left" size={17} />
+                <span>正在进入讨论…</span>
+              </div>
+              <article className="detail-article" style={{ pointerEvents: "none" }}>
+                <header className="detail-author">
+                  <div className="avatar avatar-large" style={{ background: "linear-gradient(110deg, #f1f5f9 8%, #e2e8f0 18%, #f1f5f9 33%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
+                  <div className="post-author" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ width: 120, height: 16, background: "#e2e8f0", borderRadius: 4, animation: "shimmer 1.5s infinite" }} />
+                    <div style={{ width: 90, height: 12, background: "#f1f5f9", borderRadius: 4 }} />
+                  </div>
+                </header>
+                <div style={{ width: "75%", height: 28, background: "#e2e8f0", borderRadius: 6, margin: "18px 0 14px", animation: "shimmer 1.5s infinite" }} />
+                <div className="detail-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ width: "100%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
+                  <div style={{ width: "96%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
+                  <div style={{ width: "88%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
+                  <div style={{ width: "60%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
+                </div>
+              </article>
+            </section>
+            <aside className="detail-aside desktop-only">
+              <section className="aside-panel" style={{ height: 180, animation: "shimmer 1.5s infinite" }} />
+            </aside>
           </div>
         </main>
       </>
@@ -252,7 +331,7 @@ export function PostDetailShell({ id }: { id: string }) {
           <div className="empty-state">
             <Icon name="box" size={32} />
             <h1>帖子不存在或已被删除</h1>
-            <p>{error || "你访问的帖子可能已被移动或设为私密。"}</p>
+            <p>{postError || "你访问的帖子可能已被移动或设为私密。"}</p>
             <Link href="/" className="primary-link">
               返回首页
             </Link>
@@ -295,7 +374,7 @@ export function PostDetailShell({ id }: { id: string }) {
               返回首页
             </Link>
 
-            {error && <div className="data-note">{error}</div>}
+            {postError && <div className="data-note">{postError}</div>}
 
             <PostArticle
               post={post}
@@ -313,6 +392,9 @@ export function PostDetailShell({ id }: { id: string }) {
               setTotalComments={setTotalComments}
               hasMoreComments={hasMoreComments}
               loadingMoreComments={loadingMoreComments}
+              commentsLoading={commentsLoading}
+              commentsError={commentsError}
+              onRetryComments={() => loadComments(true)}
               sortOrder={sortOrder}
               landlordOnly={landlordOnly}
               onSortOrFilterChange={handleSortOrFilterChange}
@@ -387,6 +469,45 @@ export function PostDetailShell({ id }: { id: string }) {
           >
             <Icon name="heart" size={18} />
             {compactCount(post.likeCount)}
+          </button>
+          <button
+            type="button"
+            className={`comp-stat stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
+            onClick={async () => {
+              if (!user) {
+                router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
+                return;
+              }
+              const next = !post.viewerState.hasBookmarked;
+              setPost((p) =>
+                p
+                  ? {
+                      ...p,
+                      bookmarkCount: Math.max(0, p.bookmarkCount + (next ? 1 : -1)),
+                      viewerState: { ...p.viewerState, hasBookmarked: next },
+                    }
+                  : p,
+              );
+              try {
+                await setPostBookmark(post.id, next);
+                showToast(next ? "已收藏帖子" : "已取消收藏");
+              } catch {
+                setPost((p) =>
+                  p
+                    ? {
+                        ...p,
+                        bookmarkCount: Math.max(0, p.bookmarkCount + (next ? -1 : 1)),
+                        viewerState: { ...p.viewerState, hasBookmarked: !next },
+                      }
+                    : p,
+                );
+                showToast("收藏操作失败，请重试");
+              }
+            }}
+            aria-label={post.viewerState.hasBookmarked ? "已收藏" : "收藏"}
+          >
+            <Icon name="bookmark" size={18} />
+            {compactCount(post.bookmarkCount)}
           </button>
         </div>
       </div>
@@ -687,6 +808,9 @@ function CommentsSection({
   setTotalComments,
   hasMoreComments,
   loadingMoreComments,
+  commentsLoading,
+  commentsError,
+  onRetryComments,
   sortOrder,
   landlordOnly,
   onSortOrFilterChange,
@@ -707,6 +831,9 @@ function CommentsSection({
   setTotalComments: React.Dispatch<React.SetStateAction<number>>;
   hasMoreComments: boolean;
   loadingMoreComments: boolean;
+  commentsLoading?: boolean;
+  commentsError?: string;
+  onRetryComments?: () => void;
   sortOrder: "hot" | "asc" | "desc";
   landlordOnly: boolean;
   onSortOrFilterChange: (nextSort: "hot" | "asc" | "desc", nextLandlord: boolean) => void;
@@ -907,7 +1034,27 @@ function CommentsSection({
       {message && <div className="form-error">{message}</div>}
 
       <div className="comment-list">
-        {comments.length ? (
+        {commentsLoading && !comments.length ? (
+          <div className="comment-loading-skeleton" style={{ display: "grid", gap: 14, padding: "12px 0" }}>
+            <div style={{ height: 90, background: "#f8fafc", borderRadius: 12, border: "1px solid var(--line)", animation: "shimmer 1.5s infinite" }} />
+            <div style={{ height: 90, background: "#f8fafc", borderRadius: 12, border: "1px solid var(--line)", animation: "shimmer 1.5s infinite" }} />
+          </div>
+        ) : commentsError && !comments.length ? (
+          <div className="empty-state" style={{ padding: "30px 0" }}>
+            <Icon name="info" size={24} />
+            <p>{commentsError}</p>
+            {onRetryComments && (
+              <button
+                type="button"
+                className="outline-button"
+                onClick={onRetryComments}
+                style={{ marginTop: 10, fontSize: 13 }}
+              >
+                重试加载评论
+              </button>
+            )}
+          </div>
+        ) : comments.length ? (
           comments.map((comment: Comment) => (
             <CommentRow
               key={comment.id}
@@ -978,7 +1125,9 @@ function CommentRow({
   onReport: () => void;
 }) {
   const [liked, setLiked] = useState(comment.viewerState.hasLiked);
+  const [disliked, setDisliked] = useState(comment.viewerState.hasDisliked);
   const [count, setCount] = useState(comment.likeCount);
+  const [dislikeCount, setDislikeCount] = useState(comment.dislikeCount || 0);
 
   async function like(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -986,11 +1135,33 @@ function CommentRow({
     const next = !liked;
     setLiked(next);
     setCount((value) => value + (next ? 1 : -1));
+    if (next && disliked) {
+      setDisliked(false);
+      setDislikeCount((val) => Math.max(0, val - 1));
+    }
     try {
       await setCommentLike(comment.id, next);
     } catch {
       setLiked(!next);
       setCount((value) => value + (next ? -1 : 1));
+    }
+  }
+
+  async function dislike(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (!user) return onRequireAuth();
+    const next = !disliked;
+    setDisliked(next);
+    setDislikeCount((value) => value + (next ? 1 : -1));
+    if (next && liked) {
+      setLiked(false);
+      setCount((val) => Math.max(0, val - 1));
+    }
+    try {
+      await setCommentDislike(comment.id, next);
+    } catch {
+      setDisliked(!next);
+      setDislikeCount((value) => value + (next ? -1 : 1));
     }
   }
 
@@ -1028,6 +1199,7 @@ function CommentRow({
 
         {commentImages.length > 0 && (
           <div
+            className="comment-media-grid"
             style={{
               display: "flex",
               gap: 8,
@@ -1040,7 +1212,7 @@ function CommentRow({
               <img
                 key={idx}
                 src={img.url}
-                alt=""
+                alt={img.alt || `评论图片 ${idx + 1}`}
                 style={{
                   width: 80,
                   height: 80,
@@ -1048,7 +1220,10 @@ function CommentRow({
                   objectFit: "cover",
                   cursor: "pointer",
                 }}
-                onClick={() => onOpenGallery(commentImages, idx)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenGallery(commentImages, idx);
+                }}
               />
             ))}
           </div>
@@ -1073,6 +1248,15 @@ function CommentRow({
           >
             <Icon name="heart" size={14} />
             <span>{count}</span>
+          </button>
+          <button
+            type="button"
+            className={`comm-act${disliked ? " selected" : ""}`}
+            onClick={dislike}
+            aria-label={disliked ? "取消踩" : "点踩"}
+          >
+            <Icon name="dislike" size={14} />
+            <span>{dislikeCount > 0 ? dislikeCount : "踩"}</span>
           </button>
           <button type="button" className="comm-act" onClick={onReply}>
             <Icon name="message" size={14} />

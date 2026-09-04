@@ -11,16 +11,25 @@ export function HomeCommunityTabs({
 }: {
   communities: Community[];
   activeId?: string;
-  onSelect: (community: Community) => void;
+  onSelect: (community?: Community) => void;
 }) {
+  const isAllActive = !activeId || activeId === "all";
+
   if (!communities.length) {
     return (
       <div className="community-tabs" role="tablist" aria-label="首页社区">
-        {preferredOrder.map((name, index) => (
+        <button
+          type="button"
+          className={`community-tab${isAllActive ? " active" : ""}`}
+          onClick={() => onSelect(undefined)}
+        >
+          全部
+        </button>
+        {preferredOrder.map((name) => (
           <button
             key={name}
             type="button"
-            className={`community-tab${index === 1 ? " active" : ""}`}
+            className="community-tab"
           >
             {name}
           </button>
@@ -41,6 +50,15 @@ export function HomeCommunityTabs({
 
   return (
     <div className="community-tabs" role="tablist" aria-label="首页社区">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={isAllActive}
+        className={`community-tab${isAllActive ? " active" : ""}`}
+        onClick={() => onSelect(undefined)}
+      >
+        全部
+      </button>
       {sorted.map((community) => {
         const active = community.id === activeId;
         return (

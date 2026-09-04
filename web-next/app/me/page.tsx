@@ -296,6 +296,17 @@ export default function MyWorkbenchPage() {
         )}
       </main>
 
+      <footer className="profile-version-footer" style={{ textAlign: "center", padding: "16px 0 24px" }}>
+        <a
+          href="/api/version"
+          target="_blank"
+          rel="noreferrer"
+          style={{ fontSize: 12, color: "#94a3b8", textDecoration: "none", fontFamily: "monospace" }}
+        >
+          Web Build: {process.env.NEXT_PUBLIC_GIT_SHA ? process.env.NEXT_PUBLIC_GIT_SHA.slice(0, 7) : "dev"}
+        </a>
+      </footer>
+
       <AppDownloadBanner />
       <BottomNav activeNav="profile" />
     </>

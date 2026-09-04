@@ -136,7 +136,12 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.getByText("已自动恢复上次草稿")).toBeVisible();
   });
 
-  test("4. 帖子与评论：30+评论真分页与全屏图片画廊查看器", async ({ page }) => {
+  test("4. 帖子与评论：30+评论真分页与全屏图片画廊查看器（正文多图与评论图片强校验）", async ({ page }) => {
+    const svgImg1 = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400'%3E%3Crect fill='%233b82f6' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' fill='%23ffffff' font-size='20' text-anchor='middle'%3EImage 1%3C/text%3E%3C/svg%3E";
+    const svgImg2 = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400'%3E%3Crect fill='%2310b981' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' fill='%23ffffff' font-size='20' text-anchor='middle'%3EImage 2%3C/text%3E%3C/svg%3E";
+    const svgImg3 = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400'%3E%3Crect fill='%23f59e0b' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' fill='%23ffffff' font-size='20' text-anchor='middle'%3EImage 3%3C/text%3E%3C/svg%3E";
+    const svgCommImg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Crect fill='%238b5cf6' width='100%25' height='100%25'/%3E%3Ctext x='50%25' y='50%25' fill='%23ffffff' font-size='16' text-anchor='middle'%3ECommPic%3C/text%3E%3C/svg%3E";
+
     // Mock 帖子与 30 条初始评论
     const mockPost = {
       id: "post-101",
@@ -144,12 +149,15 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       content: "本期评测玩具包含多张细节实拍图片",
       comment_count: 45,
       like_count: 88,
+      bookmark_count: 12,
       view_count: 500,
       created_at: new Date().toISOString(),
       author: { id: "u2", nickname: "测评专家", level: 5 },
       community: { id: "c1", name: "机甲区" },
       media: [
-        { id: "m1", url: "https://via.placeholder.com/600x400.png?text=Media1", detail_url: "https://via.placeholder.com/600x400.png?text=Media1" },
+        { id: "m1", url: svgImg1, detail_url: svgImg1, original_url: svgImg1, alt_text: "测评图1" },
+        { id: "m2", url: svgImg2, detail_url: svgImg2, original_url: svgImg2, alt_text: "测评图2" },
+        { id: "m3", url: svgImg3, detail_url: svgImg3, original_url: svgImg3, alt_text: "测评图3" },
       ],
       viewer_state: { has_liked: false, has_bookmarked: false },
     };
@@ -163,8 +171,8 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
         like_count: i,
         floor: i + 1,
         created_at: new Date().toISOString(),
-        media: i === 0 ? [{ id: "cm1", url: "https://via.placeholder.com/200x200.png?text=CommPic", detail_url: "https://via.placeholder.com/200x200.png?text=CommPic" }] : [],
-        viewer_state: { has_liked: false },
+        media: i === 0 ? [{ id: "cm1", url: svgCommImg, detail_url: svgCommImg, original_url: svgCommImg, alt_text: "评论配图1" }] : [],
+        viewer_state: { has_liked: false, has_disliked: false },
       })),
       total: 45,
       has_more: true,
@@ -192,16 +200,38 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     const loadMoreBtn = page.getByRole("button", { name: "加载更多评论" });
     await expect(loadMoreBtn).toBeVisible();
 
-    // 验证点击图片可成功唤起 ImageGalleryModal 全屏画廊
-    const postImage = page.locator(".detail-gallery img").first();
-    if (await postImage.isVisible()) {
-      await postImage.click();
-      await expect(page.getByRole("dialog", { name: "图片查看器" })).toBeVisible();
+    // 强制强校验：正文必须出现 3 张图片
+    const postImages = page.locator(".detail-gallery img");
+    await expect(postImages).toHaveCount(3);
 
-      // 按 ESC 退出画廊
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog", { name: "图片查看器" })).toBeHidden();
-    }
+    // 点击第 1 张图片，画廊弹窗必须出现，且计数为 1 / 3
+    await postImages.first().click();
+    const galleryModal = page.getByRole("dialog", { name: "图片查看器" });
+    await expect(galleryModal).toBeVisible();
+    await expect(galleryModal.getByText("1 / 3")).toBeVisible();
+
+    // 切换至下一张 -> 2 / 3
+    await galleryModal.getByRole("button", { name: "下一张" }).click();
+    await expect(galleryModal.getByText("2 / 3")).toBeVisible();
+
+    // 切换回上一张 -> 1 / 3
+    await galleryModal.getByRole("button", { name: "上一张" }).click();
+    await expect(galleryModal.getByText("1 / 3")).toBeVisible();
+
+    // 点击关闭按钮退出画廊
+    await galleryModal.getByRole("button", { name: "关闭查看器" }).click();
+    await expect(galleryModal).toBeHidden();
+
+    // 强制强校验：评论区第 1 条评论必须有配图，且点击能打开全屏画廊
+    const commentImage = page.locator("#comment-comment-1 .comment-media-grid img, .comment-media-grid img").first();
+    await expect(commentImage).toBeVisible();
+    await commentImage.click();
+    await expect(galleryModal).toBeVisible();
+    await expect(galleryModal.getByText("1 / 1")).toBeVisible();
+
+    // 按 ESC 键关闭画廊
+    await page.keyboard.press("Escape");
+    await expect(galleryModal).toBeHidden();
   });
 
   test("5. 真实举报功能：弹窗选择违规原因并成功提交 POST /api/v1/reports", async ({ page }) => {
@@ -563,5 +593,77 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(childReplyEl).toBeVisible();
     await expect(childReplyEl).toContainText("这是深层楼中楼精准回复内容");
     await expect(childReplyEl).toHaveClass(/comment-highlight/);
+  });
+
+  test("8. 移动端画廊与整卡点击：移动端图片查看与首页整卡点击跳转详情", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    const svgImg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='400'%3E%3Crect fill='%233b82f6' width='100%25' height='100%25'/%3E%3C/svg%3E";
+    const mockPost = {
+      id: "post-mobile-1",
+      title: "移动端专用测评贴",
+      content: "测试移动端全屏查看图片与整卡点击体验",
+      comment_count: 1,
+      like_count: 5,
+      bookmark_count: 2,
+      view_count: 88,
+      created_at: new Date().toISOString(),
+      author: { id: "u-m", nickname: "掌上评测员", level: 3 },
+      community: { id: "c1", name: "机甲区" },
+      media: [{ id: "m1", url: svgImg, detail_url: svgImg, original_url: svgImg, alt_text: "移动端配图" }],
+      viewer_state: { has_liked: false, has_bookmarked: false },
+    };
+
+    await page.route("**/api/v1/posts/post-mobile-1*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
+    });
+    await page.route("**/api/v1/posts/post-mobile-1/comments*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, has_more: false }) });
+    });
+    await page.route("**/api/v1/posts?sort=hot*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    // 1. 移动端视口下正文图片点击画廊
+    await page.goto("/post/post-mobile-1");
+    const mobilePostImg = page.locator(".detail-gallery img").first();
+    await expect(mobilePostImg).toBeVisible();
+    await mobilePostImg.click();
+    const modal = page.getByRole("dialog", { name: "图片查看器" });
+    await expect(modal).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(modal).toBeHidden();
+
+    // 2. 首页整卡点击跳转验证
+    await page.route(/\/api\/v1\/feed/, async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [mockPost], has_more: false }) });
+    });
+    await page.route(/\/api\/v1\/communities/, async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ id: "c1", name: "机甲区", member_count: 100 }] }) });
+    });
+
+    await page.evaluate(() => {
+      try {
+        localStorage.clear();
+      } catch {}
+    });
+
+    await page.goto("/");
+    const card = page.locator(".post-card[data-post-id='post-mobile-1']");
+    await expect(card).toBeVisible();
+    // 点击卡片上的空白区域（例如靠近边缘）触发整卡路由跳转
+    await card.click({ position: { x: 8, y: 8 } });
+    await page.waitForURL("**/post/post-mobile-1*");
+    expect(page.url()).toContain("/post/post-mobile-1");
+  });
+
+  test("9. 版本元数据：/api/version 正确暴露 Web 构建 SHA 与状态契约", async ({ request }) => {
+    const res = await request.get("/api/version");
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("ok");
+    expect(body.web).toBeDefined();
+    expect(body.web.commit).toBeDefined();
+    expect(body.web.build_time).toBeDefined();
   });
 });

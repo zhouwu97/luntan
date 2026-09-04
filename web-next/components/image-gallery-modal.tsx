@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 
 export interface GalleryImage {
@@ -19,6 +20,11 @@ export function ImageGalleryModal({
   onClose: () => void;
 }) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -41,10 +47,10 @@ export function ImageGalleryModal({
     };
   }, [images.length, onClose]);
 
-  if (!images.length) return null;
+  if (!mounted || !images.length) return null;
   const current = images[currentIndex] || images[0];
 
-  return (
+  const content = (
     <div
       className="gallery-modal-overlay"
       role="dialog"
@@ -138,4 +144,6 @@ export function ImageGalleryModal({
       )}
     </div>
   );
+
+  return createPortal(content, document.body);
 }

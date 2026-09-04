@@ -93,21 +93,45 @@ function parseCommunity(raw: unknown): Community {
 }
 
 function parseMedia(raw: unknown): MediaAsset {
+  if (typeof raw === "string" && raw.trim()) {
+    const rawUrl = raw.trim();
+    const url = resolveMediaUrl(rawUrl, "original") || rawUrl;
+    return {
+      id: rawUrl,
+      type: "image",
+      url,
+      thumbUrl: resolveMediaUrl(rawUrl, "thumb") || url,
+      detailUrl: resolveMediaUrl(rawUrl, "detail") || url,
+      originalUrl: url,
+      altText: "社区图片",
+    };
+  }
   const item = asRecord(raw);
   const thumb = asRecord(item.thumb);
   const detail = asRecord(item.detail);
   const original = asRecord(item.original);
+  const rawUrl = asString(item.url) || asString(detail.url) || asString(original.url) || asString(thumb.url);
+  const resolvedUrl = resolveMediaUrl(rawUrl) || rawUrl;
   return {
-    id: asString(item.id),
+    id: asString(item.id, rawUrl),
     type: item.type === "video" ? "video" : "image",
-    url: resolveMediaUrl(asString(item.url)) || resolveMediaUrl(asString(detail.url)),
-    thumbUrl: resolveMediaUrl(asString(thumb.url), "thumb"),
-    detailUrl: resolveMediaUrl(asString(detail.url), "detail"),
-    originalUrl: resolveMediaUrl(asString(original.url), "original"),
+    url: resolvedUrl,
+    thumbUrl: resolveMediaUrl(asString(thumb.url), "thumb") || resolvedUrl,
+    detailUrl: resolveMediaUrl(asString(detail.url), "detail") || resolvedUrl,
+    originalUrl: resolveMediaUrl(asString(original.url), "original") || resolvedUrl,
     width: asNumber(item.width, asNumber(detail.width)),
     height: asNumber(item.height, asNumber(detail.height)),
     altText: asString(item.alt_text, "社区图片"),
   };
+}
+
+function parseMediaList(rawRecord: JsonRecord): MediaAsset[] {
+  const rawList = Array.isArray(rawRecord.media)
+    ? rawRecord.media
+    : Array.isArray(rawRecord.images)
+      ? rawRecord.images
+      : [];
+  return rawList.map(parseMedia);
 }
 
 export function parsePost(raw: unknown): Post {
@@ -133,7 +157,7 @@ export function parsePost(raw: unknown): Post {
     updatedAt: asString(item.updated_at, asString(item.created_at)),
     publishedAt: asString(item.published_at) || undefined,
     activityAt: asString(item.activity_at) || undefined,
-    media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
+    media: parseMediaList(item),
     isFeatured: item.is_featured === true,
     isRecommended: item.is_recommended === true,
     recommendationPosition: item.recommendation_position == null ? undefined : asNumber(item.recommendation_position),
@@ -157,7 +181,7 @@ export function parseComment(raw: unknown): Comment {
     postId: asString(item.post_id),
     author: parseUser(item.author),
     content: asString(item.content),
-    media: Array.isArray(item.media) ? item.media.map(parseMedia) : [],
+    media: parseMediaList(item),
     likeCount: asNumber(item.like_count),
     dislikeCount: asNumber(item.dislike_count),
     replyCount: asNumber(item.reply_count),
@@ -511,6 +535,12 @@ export async function setPostBookmark(postId: string, active: boolean): Promise<
 
 export async function setCommentLike(commentId: string, active: boolean): Promise<void> {
   await apiFetch(`/comments/${encodeURIComponent(commentId)}/like`, {
+    method: active ? "PUT" : "DELETE",
+  });
+}
+
+export async function setCommentDislike(commentId: string, active: boolean): Promise<void> {
+  await apiFetch(`/comments/${encodeURIComponent(commentId)}/dislike`, {
     method: active ? "PUT" : "DELETE",
   });
 }

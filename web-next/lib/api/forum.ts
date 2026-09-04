@@ -110,15 +110,18 @@ function parseMedia(raw: unknown): MediaAsset {
   const thumb = asRecord(item.thumb);
   const detail = asRecord(item.detail);
   const original = asRecord(item.original);
-  const rawUrl = asString(item.url) || asString(detail.url) || asString(original.url) || asString(thumb.url);
+  const thumbUrlRaw = asString(thumb.url) || asString(item.thumb_url) || asString(item.thumbUrl);
+  const detailUrlRaw = asString(detail.url) || asString(item.detail_url) || asString(item.detailUrl);
+  const originalUrlRaw = asString(original.url) || asString(item.original_url) || asString(item.originalUrl);
+  const rawUrl = asString(item.url) || detailUrlRaw || originalUrlRaw || thumbUrlRaw;
   const resolvedUrl = resolveMediaUrl(rawUrl) || rawUrl;
   return {
     id: asString(item.id, rawUrl),
     type: item.type === "video" ? "video" : "image",
     url: resolvedUrl,
-    thumbUrl: resolveMediaUrl(asString(thumb.url), "thumb") || resolvedUrl,
-    detailUrl: resolveMediaUrl(asString(detail.url), "detail") || resolvedUrl,
-    originalUrl: resolveMediaUrl(asString(original.url), "original") || resolvedUrl,
+    thumbUrl: resolveMediaUrl(thumbUrlRaw, "thumb") || resolvedUrl,
+    detailUrl: resolveMediaUrl(detailUrlRaw, "detail") || resolvedUrl,
+    originalUrl: resolveMediaUrl(originalUrlRaw, "original") || resolvedUrl,
     width: asNumber(item.width, asNumber(detail.width)),
     height: asNumber(item.height, asNumber(detail.height)),
     altText: asString(item.alt_text, "社区图片"),

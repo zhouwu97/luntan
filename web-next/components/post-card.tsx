@@ -12,6 +12,7 @@ import { ReportModal } from "./report-modal";
 import type { Post, SessionUser } from "../types/forum";
 import { deletePost, setPostBookmark, setPostLike } from "../lib/api/forum";
 import { compactCount, relativeTime } from "../lib/format";
+import { mediaCandidates } from "../lib/media-url";
 
 function stop(event: MouseEvent) {
   event.preventDefault();
@@ -41,9 +42,12 @@ export function PostCard({
   if (deleted) return null;
 
   const galleryImages: GalleryImage[] = post.media.map((item) => ({
-    url: item.detailUrl || item.url || "",
+    url: item.detailUrl || item.url || item.originalUrl || "",
     alt: item.altText || post.title,
+    detailUrl: item.detailUrl,
     originalUrl: item.originalUrl || item.url,
+    thumbUrl: item.thumbUrl,
+    sources: mediaCandidates(item, "detail"),
   }));
 
   async function handleLike(event: MouseEvent<HTMLButtonElement>) {
@@ -147,6 +151,21 @@ export function PostCard({
       <article
         className="post-card post-card-clickable"
         data-post-id={post.id}
+        tabIndex={0}
+        role="article"
+        aria-label={post.title}
+        onPointerEnter={() => {
+          router.prefetch(`/post/${encodeURIComponent(post.id)}`);
+        }}
+        onTouchStart={() => {
+          router.prefetch(`/post/${encodeURIComponent(post.id)}`);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && event.target === event.currentTarget) {
+            event.preventDefault();
+            router.push(`/post/${encodeURIComponent(post.id)}`);
+          }
+        }}
         onClick={handleCardClick}
       >
         <div className="post-head">

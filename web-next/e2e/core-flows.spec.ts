@@ -666,4 +666,278 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     expect(body.web.commit).toBeDefined();
     expect(body.web.build_time).toBeDefined();
   });
+
+  test("10. 真实媒体网关与 Fallback 容灾：detail 返回 404 时画廊与评论图自动回退至 original 并正常渲染", async ({ page }) => {
+    const validSvgOriginal = "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect fill='#3b82f6' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='24' text-anchor='middle'>Original Fallback Success</text></svg>";
+
+    // detail 返回 404 异常
+    await page.route("**/api/v1/media-file/media_test_fallback/detail", async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Variant not found" }) });
+    });
+
+    // original 返回 200 正常图片
+    await page.route("**/api/v1/media-file/media_test_fallback/original", async (route) => {
+      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgOriginal });
+    });
+
+    const mockPostWithFallback = {
+      id: "post-fallback-1",
+      title: "媒体网关回退测试贴",
+      content: "测试详情图 404 情况下自动回退至原图渲染",
+      comment_count: 1,
+      like_count: 3,
+      bookmark_count: 1,
+      view_count: 50,
+      created_at: new Date().toISOString(),
+      author: { id: "u-fallback", nickname: "容灾测试员", level: 2 },
+      community: { id: "c1", name: "机甲区" },
+      media: [
+        {
+          id: "media_test_fallback",
+          url: "/api/v1/media-file/media_test_fallback/detail",
+          detail_url: "/api/v1/media-file/media_test_fallback/detail",
+          original_url: "/api/v1/media-file/media_test_fallback/original",
+          thumb_url: "/api/v1/media-file/media_test_fallback/detail",
+          alt_text: "需容灾回退的大图",
+        },
+      ],
+      viewer_state: { has_liked: false, has_bookmarked: false },
+    };
+
+    await page.route("**/api/v1/posts/post-fallback-1*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPostWithFallback) });
+    });
+
+    await page.route("**/api/v1/posts/post-fallback-1/comments*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, has_more: false }) });
+    });
+
+    await page.route("**/api/v1/posts?sort=hot*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto("/post/post-fallback-1");
+
+    // 点击正文图片打开大图查看器
+    const postImg = page.locator(".detail-gallery img").first();
+    await expect(postImg).toBeVisible();
+    await postImg.click();
+
+    // 确认画廊打开
+    const modal = page.getByRole("dialog", { name: "图片查看器" });
+    await expect(modal).toBeVisible();
+
+    // 关键断言：detail 404 后，画廊 main image 自动降级切至 original_url 并正常展示
+    const mainImg = modal.locator(".gallery-main-image");
+    await expect(mainImg).toHaveAttribute("src", /media_test_fallback\/original/);
+    await expect(mainImg).toBeVisible();
+
+    // 关闭画廊
+    await page.keyboard.press("Escape");
+    await expect(modal).toBeHidden();
+  });
+
+  test("11. 真实异步高延迟解耦：帖子快速返回 (80ms)，评论慢返回 (1200ms)，正文绝不被评论或推荐阻断", async ({ page }) => {
+    const mockPost = {
+      id: "post-async-delay-1",
+      title: "高延迟异步隔离测试帖",
+      content: "正文必须先秒开展示，评论在 1 秒多后慢速到达",
+      comment_count: 5,
+      like_count: 10,
+      bookmark_count: 2,
+      view_count: 100,
+      created_at: new Date().toISOString(),
+      author: { id: "u-async", nickname: "解耦测试员", level: 3 },
+      community: { id: "c1", name: "机甲区" },
+      media: [],
+      viewer_state: { has_liked: false, has_bookmarked: false },
+    };
+
+    // 帖子正文 80ms 快速响应
+    await page.route("**/api/v1/posts/post-async-delay-1*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
+    });
+
+    // 评论接口 1200ms 高延迟响应
+    await page.route("**/api/v1/posts/post-async-delay-1/comments*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [{ id: "comm-slow-1", post_id: "post-async-delay-1", author: { id: "u1", nickname: "慢速评论者" }, content: "这是一条慢速到达的评论", created_at: new Date().toISOString() }],
+          total: 1,
+          has_more: false,
+        }),
+      });
+    });
+
+    // 推荐流 2500ms 极高延迟
+    await page.route("**/api/v1/posts?sort=hot*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto("/post/post-async-delay-1");
+
+    // 验证正文在评论尚未返回时就已经先行展示，核心阅读不受阻断
+    await expect(page.getByRole("heading", { name: "高延迟异步隔离测试帖" })).toBeVisible();
+    await expect(page.getByText("正文必须先秒开展示，评论在 1 秒多后慢速到达")).toBeVisible();
+
+    // 验证此时评论区正在独立 loading，而正文已经完全可用
+    await expect(page.locator("#comments")).toBeVisible();
+
+    // 最终评论平滑渲染
+    await expect(page.getByText("这是一条慢速到达的评论")).toBeVisible({ timeout: 4000 });
+  });
+
+  test("12. 评论去重与防竞态：正文返回不触发二次请求，快速切换排序单一源驱动", async ({ page }) => {
+    let commentsRequestCount = 0;
+
+    const mockPost = {
+      id: "post-dedup-1",
+      title: "评论防竞态防重复请求测试帖",
+      content: "测试初次加载与正文返回不触发重复评论拉取",
+      comment_count: 2,
+      like_count: 4,
+      bookmark_count: 1,
+      view_count: 80,
+      created_at: new Date().toISOString(),
+      author: { id: "u-author-target", nickname: "发帖作者", level: 4 },
+      community: { id: "c1", name: "机甲区" },
+      media: [],
+      viewer_state: { has_liked: false, has_bookmarked: false },
+    };
+
+    // 延迟 150ms 返回正文，保证有明显的 post 从 null -> post 的转变
+    await page.route("**/api/v1/posts/post-dedup-1*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
+    });
+
+    await page.route("**/api/v1/posts/post-dedup-1/comments*", async (route) => {
+      commentsRequestCount++;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [{ id: "c1", post_id: "post-dedup-1", author: { id: "u2", nickname: "评友" }, content: "第一条评论", created_at: new Date().toISOString() }],
+          total: 1,
+          has_more: false,
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/posts?sort=hot*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto("/post/post-dedup-1");
+    await expect(page.getByRole("heading", { name: "评论防竞态防重复请求测试帖" })).toBeVisible();
+    await expect(page.getByText("第一条评论")).toBeVisible();
+
+    // 等待 300ms 确保 post 完成后没有触发第 2 次评论请求
+    await page.waitForTimeout(300);
+    expect(commentsRequestCount).toBe(1);
+
+    // 切换排序为最新
+    const latestBtn = page.getByRole("button", { name: "最新" });
+    await latestBtn.click();
+    await page.waitForTimeout(200);
+    // 验证切换只触发了一次新的请求（总数变为 2），没有多重请求
+    expect(commentsRequestCount).toBe(2);
+  });
+
+  test("13. 点赞与收藏状态单一源：移动端正文与底部浮动栏状态双向 100% 同步", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    const mockPost = {
+      id: "post-sync-state-1",
+      title: "双向状态同步测试贴",
+      content: "测试正文与移动端底部栏的点赞与收藏状态单一源同步",
+      comment_count: 0,
+      like_count: 10,
+      bookmark_count: 5,
+      view_count: 120,
+      created_at: new Date().toISOString(),
+      author: { id: "u-sync", nickname: "同步测试员", level: 3 },
+      community: { id: "c1", name: "机甲区" },
+      media: [],
+      viewer_state: { has_liked: false, has_bookmarked: false },
+    };
+
+    await page.route("**/api/v1/posts/post-sync-state-1*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
+    });
+
+    await page.route("**/api/v1/posts/post-sync-state-1/comments*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, has_more: false }) });
+    });
+
+    await page.route("**/api/v1/posts?sort=hot*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.route("**/api/v1/posts/post-sync-state-1/like", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    });
+
+    await page.route("**/api/v1/posts/post-sync-state-1/bookmark", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    });
+
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "mock-valid-token-13", expires_in: 3600 }),
+      });
+    });
+
+    await page.route("**/api/v1/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: "u-logged-13", username: "tester13", nickname: "测试用户13", role: "user" }),
+      });
+    });
+
+    await page.goto("/post/post-sync-state-1");
+    await expect(page.getByRole("heading", { name: "双向状态同步测试贴" })).toBeVisible();
+
+    // 1. 在正文区域点击点赞
+    const articleLikeBtn = page.locator(".detail-stats button").filter({ hasText: "点赞" });
+    const bottomLikeBtn = page.locator(".composer.mobile-only .composer-side button").nth(0);
+
+    await expect(articleLikeBtn).not.toHaveClass(/selected/);
+    await expect(bottomLikeBtn).not.toHaveClass(/selected/);
+    await expect(bottomLikeBtn).toHaveAttribute("aria-label", "点赞");
+
+    await articleLikeBtn.click();
+
+    // 验证正文与移动端底部栏【同时】变亮，计数同步增加
+    await expect(articleLikeBtn).toHaveClass(/selected/);
+    await expect(bottomLikeBtn).toHaveClass(/selected/);
+    await expect(bottomLikeBtn).toHaveAttribute("aria-label", "已点赞");
+    await expect(articleLikeBtn).toContainText("11 点赞");
+    await expect(bottomLikeBtn).toContainText("11");
+
+    // 2. 在移动端底部栏点击收藏
+    const bottomBookmarkBtn = page.locator(".composer.mobile-only .composer-side button").nth(1);
+    const articleBookmarkBtn = page.locator(".detail-stats button").filter({ hasText: "收藏" });
+
+    await expect(bottomBookmarkBtn).not.toHaveClass(/selected/);
+    await expect(articleBookmarkBtn).not.toHaveClass(/selected/);
+    await expect(bottomBookmarkBtn).toHaveAttribute("aria-label", "收藏");
+
+    await bottomBookmarkBtn.click();
+
+    // 验证底部与正文收藏【同时】变亮，计数同步增加
+    await expect(bottomBookmarkBtn).toHaveClass(/selected/);
+    await expect(articleBookmarkBtn).toHaveClass(/selected/);
+    await expect(bottomBookmarkBtn).toHaveAttribute("aria-label", "已收藏");
+    await expect(articleBookmarkBtn).toContainText("6 收藏");
+    await expect(bottomBookmarkBtn).toContainText("6");
+  });
 });

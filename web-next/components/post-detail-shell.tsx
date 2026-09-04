@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, MouseEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "./site-header";
 import { AppDownloadBanner } from "./app-download-banner";
@@ -12,6 +12,7 @@ import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { ImageGalleryModal, type GalleryImage } from "./image-gallery-modal";
 import { ReportModal } from "./report-modal";
+import { mediaCandidates } from "../lib/media-url";
 import {
   createComment,
   createReply,
@@ -30,7 +31,7 @@ import {
   uploadImage,
 } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
-import type { Comment, Post, SessionUser } from "../types/forum";
+import type { Comment, MediaAsset, Post, SessionUser } from "../types/forum";
 
 export function PostDetailShell({ id }: { id: string }) {
   const router = useRouter();
@@ -88,41 +89,59 @@ export function PostDetailShell({ id }: { id: string }) {
     };
   }, [id]);
 
-  // 2. 独立并发加载评论（失败不影响正文）
-  const loadComments = (reset = true) => {
-    let mounted = true;
-    if (reset) {
-      setCommentsLoading(true);
-      setCommentsError("");
-    }
-    getComments(id, {
-      offset: 0,
-      limit: 30,
-      sort: sortOrder,
-      authorId: landlordOnly && post ? post.author.id : undefined,
-    })
-      .then((commentPage) => {
-        if (!mounted) return;
-        setComments(commentPage.items);
-        setTotalComments(commentPage.total);
-        setHasMoreComments(commentPage.hasMore);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setCommentsError("评论加载失败，请重试");
-      })
-      .finally(() => {
-        if (mounted) setCommentsLoading(false);
-      });
+  // 2. 独立并发加载评论（带 requestId 防竞态、单一数据触发源，绝不阻塞正文）
+  const commentsRequestIdRef = useRef(0);
 
-    return () => {
-      mounted = false;
-    };
-  };
+  const fetchComments = useCallback(
+    (offset = 0, append = false) => {
+      if (landlordOnly && !post) return;
+
+      const reqId = ++commentsRequestIdRef.current;
+      if (!append) {
+        setCommentsLoading(true);
+        setCommentsError("");
+      } else {
+        setLoadingMoreComments(true);
+      }
+
+      getComments(id, {
+        offset,
+        limit: 30,
+        sort: sortOrder,
+        authorId: landlordOnly && post ? post.author.id : undefined,
+      })
+        .then((commentPage) => {
+          if (reqId !== commentsRequestIdRef.current) return;
+          if (append) {
+            setComments((curr) => [...curr, ...commentPage.items]);
+          } else {
+            setComments(commentPage.items);
+          }
+          setTotalComments(commentPage.total);
+          setHasMoreComments(commentPage.hasMore);
+        })
+        .catch(() => {
+          if (reqId !== commentsRequestIdRef.current) return;
+          if (!append) {
+            setCommentsError("评论加载失败，请重试");
+          } else {
+            showToast("加载更多评论失败，请重试");
+          }
+        })
+        .finally(() => {
+          if (reqId === commentsRequestIdRef.current) {
+            setCommentsLoading(false);
+            setLoadingMoreComments(false);
+          }
+        });
+    },
+    // 关键优化：仅当开启只看楼主时才把 post?.author.id 作为依赖，杜绝正文返回引发的重复请求
+    [id, sortOrder, landlordOnly, landlordOnly ? post?.author.id : undefined, showToast],
+  );
 
   useEffect(() => {
-    return loadComments(true);
-  }, [id, sortOrder, landlordOnly, post?.author.id]);
+    fetchComments(0, false);
+  }, [fetchComments]);
 
   // 3. 异步加载相关推荐（最低优先级，静默容错）
   useEffect(() => {
@@ -203,41 +222,79 @@ export function PostDetailShell({ id }: { id: string }) {
     if (user && post) void recordHistory(post.id).catch(() => undefined);
   }, [post, user]);
 
-  async function handleSortOrFilterChange(nextSort: "hot" | "asc" | "desc", nextLandlord: boolean) {
+  function handleSortOrFilterChange(nextSort: "hot" | "asc" | "desc", nextLandlord: boolean) {
+    // 状态变更驱动单一 effect 发起请求，不再手动二次拉取，彻底杜绝竞态与双重请求
     setSortOrder(nextSort);
     setLandlordOnly(nextLandlord);
+  }
+
+  function handleLoadMoreComments() {
+    if (loadingMoreComments || !hasMoreComments) return;
+    fetchComments(comments.length, true);
+  }
+
+  async function handleToggleLike() {
+    if (!user) {
+      router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
+      return;
+    }
+    if (!post) return;
+    const next = !post.viewerState.hasLiked;
+    setPost((p) =>
+      p
+        ? {
+            ...p,
+            likeCount: Math.max(0, p.likeCount + (next ? 1 : -1)),
+            viewerState: { ...p.viewerState, hasLiked: next },
+          }
+        : p,
+    );
     try {
-      const page = await getComments(id, {
-        offset: 0,
-        limit: 30,
-        sort: nextSort,
-        authorId: nextLandlord && post ? post.author.id : undefined,
-      });
-      setComments(page.items);
-      setTotalComments(page.total);
-      setHasMoreComments(page.hasMore);
+      await setPostLike(post.id, next);
     } catch {
-      showToast("加载评论失败，请重试");
+      setPost((p) =>
+        p
+          ? {
+              ...p,
+              likeCount: Math.max(0, p.likeCount + (next ? -1 : 1)),
+              viewerState: { ...p.viewerState, hasLiked: !next },
+            }
+          : p,
+      );
+      showToast("点赞操作失败，请重试");
     }
   }
 
-  async function handleLoadMoreComments() {
-    if (loadingMoreComments || !hasMoreComments) return;
-    setLoadingMoreComments(true);
+  async function handleToggleBookmark() {
+    if (!user) {
+      router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
+      return;
+    }
+    if (!post) return;
+    const next = !post.viewerState.hasBookmarked;
+    setPost((p) =>
+      p
+        ? {
+            ...p,
+            bookmarkCount: Math.max(0, p.bookmarkCount + (next ? 1 : -1)),
+            viewerState: { ...p.viewerState, hasBookmarked: next },
+          }
+        : p,
+    );
     try {
-      const page = await getComments(id, {
-        offset: comments.length,
-        limit: 30,
-        sort: sortOrder,
-        authorId: landlordOnly && post ? post.author.id : undefined,
-      });
-      setComments((curr) => [...curr, ...page.items]);
-      setTotalComments(page.total);
-      setHasMoreComments(page.hasMore);
+      await setPostBookmark(post.id, next);
+      showToast(next ? "已收藏帖子" : "已取消收藏");
     } catch {
-      showToast("加载更多评论失败，请重试");
-    } finally {
-      setLoadingMoreComments(false);
+      setPost((p) =>
+        p
+          ? {
+              ...p,
+              bookmarkCount: Math.max(0, p.bookmarkCount + (next ? -1 : 1)),
+              viewerState: { ...p.viewerState, hasBookmarked: !next },
+            }
+          : p,
+      );
+      showToast("收藏操作失败，请重试");
     }
   }
 
@@ -382,6 +439,8 @@ export function PostDetailShell({ id }: { id: string }) {
               onRequireAuth={() => router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`)}
               onOpenGallery={handleOpenGallery}
               onOpenReport={() => setReportTarget({ type: "post", id: post.id, title: post.title })}
+              onToggleLike={handleToggleLike}
+              onToggleBookmark={handleToggleBookmark}
             />
 
             <CommentsSection
@@ -394,7 +453,7 @@ export function PostDetailShell({ id }: { id: string }) {
               loadingMoreComments={loadingMoreComments}
               commentsLoading={commentsLoading}
               commentsError={commentsError}
-              onRetryComments={() => loadComments(true)}
+              onRetryComments={() => fetchComments(0, false)}
               sortOrder={sortOrder}
               landlordOnly={landlordOnly}
               onSortOrFilterChange={handleSortOrFilterChange}
@@ -435,36 +494,7 @@ export function PostDetailShell({ id }: { id: string }) {
           <button
             type="button"
             className={`comp-stat stat${post.viewerState.hasLiked ? " selected" : ""}`}
-            onClick={async () => {
-              if (!user) {
-                router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
-                return;
-              }
-              const next = !post.viewerState.hasLiked;
-              setPost((p) =>
-                p
-                  ? {
-                      ...p,
-                      likeCount: Math.max(0, p.likeCount + (next ? 1 : -1)),
-                      viewerState: { ...p.viewerState, hasLiked: next },
-                    }
-                  : p,
-              );
-              try {
-                await setPostLike(post.id, next);
-              } catch {
-                setPost((p) =>
-                  p
-                    ? {
-                        ...p,
-                        likeCount: Math.max(0, p.likeCount + (next ? -1 : 1)),
-                        viewerState: { ...p.viewerState, hasLiked: !next },
-                      }
-                    : p,
-                );
-                showToast("点赞操作失败，请重试");
-              }
-            }}
+            onClick={handleToggleLike}
             aria-label={post.viewerState.hasLiked ? "已点赞" : "点赞"}
           >
             <Icon name="heart" size={18} />
@@ -473,37 +503,7 @@ export function PostDetailShell({ id }: { id: string }) {
           <button
             type="button"
             className={`comp-stat stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
-            onClick={async () => {
-              if (!user) {
-                router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
-                return;
-              }
-              const next = !post.viewerState.hasBookmarked;
-              setPost((p) =>
-                p
-                  ? {
-                      ...p,
-                      bookmarkCount: Math.max(0, p.bookmarkCount + (next ? 1 : -1)),
-                      viewerState: { ...p.viewerState, hasBookmarked: next },
-                    }
-                  : p,
-              );
-              try {
-                await setPostBookmark(post.id, next);
-                showToast(next ? "已收藏帖子" : "已取消收藏");
-              } catch {
-                setPost((p) =>
-                  p
-                    ? {
-                        ...p,
-                        bookmarkCount: Math.max(0, p.bookmarkCount + (next ? -1 : 1)),
-                        viewerState: { ...p.viewerState, hasBookmarked: !next },
-                      }
-                    : p,
-                );
-                showToast("收藏操作失败，请重试");
-              }
-            }}
+            onClick={handleToggleBookmark}
             aria-label={post.viewerState.hasBookmarked ? "已收藏" : "收藏"}
           >
             <Icon name="bookmark" size={18} />
@@ -664,53 +664,25 @@ function PostArticle({
   onRequireAuth,
   onOpenGallery,
   onOpenReport,
+  onToggleLike,
+  onToggleBookmark,
 }: {
   post: Post;
   user: SessionUser | null;
   onRequireAuth: () => void;
   onOpenGallery: (images: GalleryImage[], index?: number) => void;
   onOpenReport: () => void;
+  onToggleLike: () => void;
+  onToggleBookmark: () => void;
 }) {
-  const [liked, setLiked] = useState(post.viewerState.hasLiked);
-  const [bookmarked, setBookmarked] = useState(post.viewerState.hasBookmarked);
-  const [likeCount, setLikeCount] = useState(post.likeCount);
-  const [bookmarkCount, setBookmarkCount] = useState(post.bookmarkCount);
-  const { showToast } = useToast();
-
   const articleImages: GalleryImage[] = post.media.map((item) => ({
-    url: item.detailUrl || item.url || "",
+    url: item.detailUrl || item.url || item.originalUrl || "",
     alt: item.altText || post.title,
+    detailUrl: item.detailUrl,
     originalUrl: item.originalUrl || item.url,
+    thumbUrl: item.thumbUrl,
+    sources: mediaCandidates(item, "detail"),
   }));
-
-  async function toggleLike() {
-    if (!user) return onRequireAuth();
-    const next = !liked;
-    setLiked(next);
-    setLikeCount((value) => value + (next ? 1 : -1));
-    try {
-      await setPostLike(post.id, next);
-    } catch {
-      setLiked(!next);
-      setLikeCount((value) => value + (next ? -1 : 1));
-      showToast("点赞失败，请重试");
-    }
-  }
-
-  async function toggleBookmark() {
-    if (!user) return onRequireAuth();
-    const next = !bookmarked;
-    setBookmarked(next);
-    setBookmarkCount((value) => value + (next ? 1 : -1));
-    try {
-      await setPostBookmark(post.id, next);
-      showToast(next ? "已收藏帖子" : "已取消收藏");
-    } catch {
-      setBookmarked(!next);
-      setBookmarkCount((value) => value + (next ? -1 : 1));
-      showToast("收藏操作失败，请重试");
-    }
-  }
 
   return (
     <article className="detail-article">
@@ -763,21 +735,21 @@ function PostArticle({
         </a>
         <button
           type="button"
-          className={`stat${liked ? " selected" : ""}`}
-          onClick={toggleLike}
+          className={`stat${post.viewerState.hasLiked ? " selected" : ""}`}
+          onClick={onToggleLike}
           style={{ background: "none", border: "none", cursor: "pointer" }}
         >
           <Icon name="heart" size={15} />
-          {compactCount(likeCount)} 点赞
+          {compactCount(post.likeCount)} 点赞
         </button>
         <button
           type="button"
-          className={`stat${bookmarked ? " selected" : ""}`}
-          onClick={toggleBookmark}
+          className={`stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
+          onClick={onToggleBookmark}
           style={{ background: "none", border: "none", cursor: "pointer" }}
         >
           <Icon name="bookmark" size={15} />
-          {compactCount(bookmarkCount)} 收藏
+          {compactCount(post.bookmarkCount)} 收藏
         </button>
         <span>
           <Icon name="eye" size={15} />
@@ -1165,10 +1137,73 @@ function CommentRow({
     }
   }
 
+function CommentMediaThumbnail({
+  asset,
+  alt,
+  onClick,
+}: {
+  asset: MediaAsset;
+  alt: string;
+  onClick: (e: MouseEvent) => void;
+}) {
+  const candidates = mediaCandidates(asset, "thumb");
+  const [candidateIdx, setCandidateIdx] = useState(0);
+  const src = candidates[candidateIdx] || asset.thumbUrl || asset.url;
+  const isFailed = candidateIdx >= candidates.length && candidates.length > 0;
+
+  if (isFailed) {
+    return (
+      <div
+        className="comment-media-thumb comment-media-failed"
+        style={{
+          width: 80,
+          height: 80,
+          borderRadius: 8,
+          background: "var(--color-bg-secondary, #f1f5f9)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--color-text-secondary, #94a3b8)",
+          cursor: "pointer",
+        }}
+        onClick={onClick}
+        title="图片加载失败，点击尝试打开画廊"
+      >
+        <Icon name="image" size={20} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      style={{
+        width: 80,
+        height: 80,
+        borderRadius: 8,
+        objectFit: "cover",
+        cursor: "pointer",
+      }}
+      onError={() => {
+        if (candidateIdx + 1 < candidates.length) {
+          setCandidateIdx((i) => i + 1);
+        } else {
+          setCandidateIdx(candidates.length);
+        }
+      }}
+      onClick={onClick}
+    />
+  );
+}
+
   const commentImages: GalleryImage[] = (comment.media || []).map((item) => ({
-    url: item.detailUrl || item.url || "",
-    alt: "评论配图",
+    url: item.detailUrl || item.url || item.originalUrl || "",
+    alt: item.altText || "评论配图",
+    detailUrl: item.detailUrl,
     originalUrl: item.originalUrl || item.url,
+    thumbUrl: item.thumbUrl,
+    sources: mediaCandidates(item, "detail"),
   }));
 
   const canDelete = Boolean(
@@ -1197,7 +1232,7 @@ function CommentRow({
         <div className="comm-time">{relativeTime(comment.createdAt)}</div>
         <p className="comm-text">{comment.content}</p>
 
-        {commentImages.length > 0 && (
+        {comment.media && comment.media.length > 0 && (
           <div
             className="comment-media-grid"
             style={{
@@ -1208,18 +1243,11 @@ function CommentRow({
               marginBottom: 8,
             }}
           >
-            {commentImages.map((img, idx) => (
-              <img
-                key={idx}
-                src={img.url}
-                alt={img.alt || `评论图片 ${idx + 1}`}
-                style={{
-                  width: 80,
-                  height: 80,
-                  borderRadius: 8,
-                  objectFit: "cover",
-                  cursor: "pointer",
-                }}
+            {comment.media.map((asset, idx) => (
+              <CommentMediaThumbnail
+                key={asset.id || idx}
+                asset={asset}
+                alt={asset.altText || `评论图片 ${idx + 1}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onOpenGallery(commentImages, idx);

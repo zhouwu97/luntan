@@ -32,9 +32,15 @@ export function resolveMediaUrl(value?: string, variant: "thumb" | "detail" | "o
   return resolveAssetUrl(clean);
 }
 
-export function mediaCandidates(asset: MediaAsset): string[] {
-  const values = [asset.thumbUrl, asset.detailUrl, asset.originalUrl, asset.url]
-    .map((value) => resolveMediaUrl(value))
+export function mediaCandidates(asset: MediaAsset, preferred: "thumb" | "detail" | "original" = "thumb"): string[] {
+  const order = preferred === "thumb"
+    ? [asset.thumbUrl, asset.detailUrl, asset.originalUrl, asset.url]
+    : preferred === "original"
+      ? [asset.originalUrl, asset.detailUrl, asset.url, asset.thumbUrl]
+      : [asset.detailUrl, asset.originalUrl, asset.url, asset.thumbUrl];
+
+  const values = order
+    .map((value) => resolveMediaUrl(value, preferred))
     .filter((value): value is string => Boolean(value));
   return [...new Set(values)];
 }

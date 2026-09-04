@@ -667,23 +667,33 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     expect(body.web.build_time).toBeDefined();
   });
 
-  test("10. 真实媒体网关与 Fallback 容灾：detail 返回 404 时画廊与评论图自动回退至 original 并正常渲染", async ({ page }) => {
+  test("10. 真实媒体网关与 Fallback 容灾：detail 返回 404 时正文画廊与评论图自动回退至 original 并正常渲染", async ({ page }) => {
     const validSvgOriginal = "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect fill='#3b82f6' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='24' text-anchor='middle'>Original Fallback Success</text></svg>";
+    const validSvgCommOriginal = "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><rect fill='#10b981' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='20' text-anchor='middle'>Comm Original Fallback Success</text></svg>";
 
-    // detail 返回 404 异常
+    // 1. 正文媒体：detail 返回 404 异常，original 返回 200
     await page.route("**/api/v1/media-file/media_test_fallback/detail", async (route) => {
       await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Variant not found" }) });
     });
-
-    // original 返回 200 正常图片
     await page.route("**/api/v1/media-file/media_test_fallback/original", async (route) => {
       await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgOriginal });
+    });
+
+    // 2. 评论媒体：thumb 404，detail 404，original 返回 200
+    await page.route("**/api/v1/media-file/media_comm_fallback/thumb", async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Thumb variant not found" }) });
+    });
+    await page.route("**/api/v1/media-file/media_comm_fallback/detail", async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Detail variant not found" }) });
+    });
+    await page.route("**/api/v1/media-file/media_comm_fallback/original", async (route) => {
+      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgCommOriginal });
     });
 
     const mockPostWithFallback = {
       id: "post-fallback-1",
       title: "媒体网关回退测试贴",
-      content: "测试详情图 404 情况下自动回退至原图渲染",
+      content: "测试详情图与评论图 404 情况下自动回退至原图渲染",
       comment_count: 1,
       like_count: 3,
       bookmark_count: 1,
@@ -704,12 +714,38 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       viewer_state: { has_liked: false, has_bookmarked: false },
     };
 
+    const mockCommentsWithFallback = {
+      items: [
+        {
+          id: "comm-fb-1",
+          post_id: "post-fallback-1",
+          author: { id: "u-comm-fb", nickname: "回退验证员", level: 1 },
+          content: "这是带容灾回退图片的评论",
+          floor: 1,
+          created_at: new Date().toISOString(),
+          media: [
+            {
+              id: "media_comm_fallback",
+              url: "/api/v1/media-file/media_comm_fallback/detail",
+              thumb_url: "/api/v1/media-file/media_comm_fallback/thumb",
+              detail_url: "/api/v1/media-file/media_comm_fallback/detail",
+              original_url: "/api/v1/media-file/media_comm_fallback/original",
+              alt_text: "评论需容灾图",
+            },
+          ],
+          viewer_state: { has_liked: false, has_disliked: false },
+        },
+      ],
+      total: 1,
+      has_more: false,
+    };
+
     await page.route("**/api/v1/posts/post-fallback-1*", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPostWithFallback) });
     });
 
     await page.route("**/api/v1/posts/post-fallback-1/comments*", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, has_more: false }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockCommentsWithFallback) });
     });
 
     await page.route("**/api/v1/posts?sort=hot*", async (route) => {
@@ -718,26 +754,35 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
 
     await page.goto("/post/post-fallback-1");
 
-    // 点击正文图片打开大图查看器
+    // 1. 验证正文图片画廊回退
     const postImg = page.locator(".detail-gallery img").first();
     await expect(postImg).toBeVisible();
     await postImg.click();
 
-    // 确认画廊打开
     const modal = page.getByRole("dialog", { name: "图片查看器" });
     await expect(modal).toBeVisible();
 
-    // 关键断言：detail 404 后，画廊 main image 自动降级切至 original_url 并正常展示
     const mainImg = modal.locator(".gallery-main-image");
     await expect(mainImg).toHaveAttribute("src", /media_test_fallback\/original/);
     await expect(mainImg).toBeVisible();
 
-    // 关闭画廊
+    await page.keyboard.press("Escape");
+    await expect(modal).toBeHidden();
+
+    // 2. 验证评论图片缩略图与画廊回退（thumb 404 / detail 404 → original 200）
+    const commentImg = page.locator("#comment-comm-fb-1 .comment-media-grid img").first();
+    await expect(commentImg).toBeVisible();
+    await expect(commentImg).toHaveAttribute("src", /media_comm_fallback\/original/);
+
+    // 点击评论缩略图，验证评论画廊大图同样回退到 original
+    await commentImg.click();
+    await expect(modal).toBeVisible();
+    await expect(modal.locator(".gallery-main-image")).toHaveAttribute("src", /media_comm_fallback\/original/);
     await page.keyboard.press("Escape");
     await expect(modal).toBeHidden();
   });
 
-  test("11. 真实异步高延迟解耦：帖子快速返回 (80ms)，评论慢返回 (1200ms)，正文绝不被评论或推荐阻断", async ({ page }) => {
+  test("11. 真实异步高延迟解耦：帖子快速响应，正文先行展示就绪，绝不被高延迟评论阻断", async ({ page }) => {
     const mockPost = {
       id: "post-async-delay-1",
       title: "高延迟异步隔离测试帖",
@@ -781,15 +826,16 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
 
     await page.goto("/post/post-async-delay-1");
 
-    // 验证正文在评论尚未返回时就已经先行展示，核心阅读不受阻断
-    await expect(page.getByRole("heading", { name: "高延迟异步隔离测试帖" })).toBeVisible();
-    await expect(page.getByText("正文必须先秒开展示，评论在 1 秒多后慢速到达")).toBeVisible();
+    // 核心断言 1：正文在进入页面后 600ms 内优先渲染展示
+    await expect(page.getByRole("heading", { name: "高延迟异步隔离测试帖" })).toBeVisible({ timeout: 600 });
+    await expect(page.getByText("正文必须先秒开展示，评论在 1 秒多后慢速到达")).toBeVisible({ timeout: 600 });
 
-    // 验证此时评论区正在独立 loading，而正文已经完全可用
+    // 核心断言 2：正文已就绪时，设置了 1200ms 高延迟的评论绝对尚未呈现（证明非阻塞异步解耦）
+    await expect(page.getByText("这是一条慢速到达的评论")).toBeHidden();
     await expect(page.locator("#comments")).toBeVisible();
 
-    // 最终评论平滑渲染
-    await expect(page.getByText("这是一条慢速到达的评论")).toBeVisible({ timeout: 4000 });
+    // 核心断言 3：最终慢速评论到达并成功呈现
+    await expect(page.getByText("这是一条慢速到达的评论")).toBeVisible({ timeout: 3500 });
   });
 
   test("12. 评论去重与防竞态：正文返回不触发二次请求，快速切换排序单一源驱动", async ({ page }) => {

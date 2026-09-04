@@ -26,10 +26,11 @@ function GalleryThumb({
 }) {
   const thumbCandidates =
     img.sources && img.sources.length > 0
-      ? [img.thumbUrl, ...img.sources].filter((s): s is string => Boolean(s))
-      : ([img.thumbUrl, img.url, img.detailUrl, img.originalUrl].filter((s): s is string => Boolean(s)));
+      ? [img.thumbUrl, ...img.sources].filter((s): s is string => Boolean(s && s.trim()))
+      : ([img.thumbUrl, img.url, img.detailUrl, img.originalUrl].filter((s): s is string => Boolean(s && s.trim())));
   const [thumbIdx, setThumbIdx] = useState(0);
-  const src = thumbCandidates[thumbIdx] || img.url;
+  const src = thumbCandidates[thumbIdx] || (img.url ? img.url.trim() : "");
+  const isThumbFailed = !src || thumbIdx >= thumbCandidates.length;
 
   return (
     <button
@@ -38,15 +39,34 @@ function GalleryThumb({
       onClick={onClick}
       aria-label={`查看第 ${index + 1} 张`}
     >
-      <img
-        src={src}
-        alt=""
-        onError={() => {
-          if (thumbIdx + 1 < thumbCandidates.length) {
-            setThumbIdx((i) => i + 1);
-          }
-        }}
-      />
+      {isThumbFailed ? (
+        <span
+          className="gallery-thumb-fallback"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "100%",
+            height: "100%",
+            background: "rgba(255, 255, 255, 0.1)",
+            color: "rgba(255, 255, 255, 0.6)",
+          }}
+        >
+          <Icon name="image" size={16} />
+        </span>
+      ) : (
+        <img
+          src={src}
+          alt=""
+          onError={() => {
+            if (thumbIdx + 1 < thumbCandidates.length) {
+              setThumbIdx((i) => i + 1);
+            } else {
+              setThumbIdx(thumbCandidates.length);
+            }
+          }}
+        />
+      )}
     </button>
   );
 }
@@ -98,10 +118,10 @@ export function ImageGalleryModal({
 
   const candidates =
     current.sources && current.sources.length > 0
-      ? current.sources
-      : ([current.detailUrl, current.originalUrl, current.url, current.thumbUrl].filter((s): s is string => Boolean(s)));
-  const currentSrc = candidates[candidateIndex] || current.url;
-  const isFailed = candidateIndex >= candidates.length && candidates.length > 0;
+      ? current.sources.filter((s): s is string => Boolean(s && s.trim()))
+      : ([current.detailUrl, current.originalUrl, current.url, current.thumbUrl].filter((s): s is string => Boolean(s && s.trim())));
+  const currentSrc = candidates[candidateIndex] || (current.url ? current.url.trim() : "");
+  const isFailed = !currentSrc || candidateIndex >= candidates.length;
 
   const content = (
     <div
@@ -118,7 +138,7 @@ export function ImageGalleryModal({
           {currentIndex + 1} / {images.length}
         </span>
         <div className="gallery-actions">
-          {(current.originalUrl || currentSrc) && (
+          {(current.originalUrl || (!isFailed && currentSrc)) && (
             <a
               href={current.originalUrl || currentSrc}
               target="_blank"
@@ -177,7 +197,7 @@ export function ImageGalleryModal({
               }}
             >
               <Icon name="image" size={48} />
-              <span>图片加载失败</span>
+              <span>{current.url || (current.sources && current.sources.length > 0) ? "图片加载失败" : "图片不可用或已被设为私密"}</span>
               {current.originalUrl && (
                 <a
                   href={current.originalUrl}

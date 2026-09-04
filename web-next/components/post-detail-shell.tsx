@@ -233,12 +233,19 @@ export function PostDetailShell({ id }: { id: string }) {
     fetchComments(comments.length, true);
   }
 
+  const likeRequestIdRef = useRef(0);
+  const bookmarkRequestIdRef = useRef(0);
+  const [likePending, setLikePending] = useState(false);
+  const [bookmarkPending, setBookmarkPending] = useState(false);
+
   async function handleToggleLike() {
     if (!user) {
       router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
       return;
     }
-    if (!post) return;
+    if (!post || likePending) return;
+    setLikePending(true);
+    const reqId = ++likeRequestIdRef.current;
     const next = !post.viewerState.hasLiked;
     setPost((p) =>
       p
@@ -252,16 +259,22 @@ export function PostDetailShell({ id }: { id: string }) {
     try {
       await setPostLike(post.id, next);
     } catch {
-      setPost((p) =>
-        p
-          ? {
-              ...p,
-              likeCount: Math.max(0, p.likeCount + (next ? -1 : 1)),
-              viewerState: { ...p.viewerState, hasLiked: !next },
-            }
-          : p,
-      );
-      showToast("点赞操作失败，请重试");
+      if (reqId === likeRequestIdRef.current) {
+        setPost((p) =>
+          p
+            ? {
+                ...p,
+                likeCount: Math.max(0, p.likeCount + (next ? -1 : 1)),
+                viewerState: { ...p.viewerState, hasLiked: !next },
+              }
+            : p,
+        );
+        showToast("点赞操作失败，请重试");
+      }
+    } finally {
+      if (reqId === likeRequestIdRef.current) {
+        setLikePending(false);
+      }
     }
   }
 
@@ -270,7 +283,9 @@ export function PostDetailShell({ id }: { id: string }) {
       router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
       return;
     }
-    if (!post) return;
+    if (!post || bookmarkPending) return;
+    setBookmarkPending(true);
+    const reqId = ++bookmarkRequestIdRef.current;
     const next = !post.viewerState.hasBookmarked;
     setPost((p) =>
       p
@@ -285,16 +300,22 @@ export function PostDetailShell({ id }: { id: string }) {
       await setPostBookmark(post.id, next);
       showToast(next ? "已收藏帖子" : "已取消收藏");
     } catch {
-      setPost((p) =>
-        p
-          ? {
-              ...p,
-              bookmarkCount: Math.max(0, p.bookmarkCount + (next ? -1 : 1)),
-              viewerState: { ...p.viewerState, hasBookmarked: !next },
-            }
-          : p,
-      );
-      showToast("收藏操作失败，请重试");
+      if (reqId === bookmarkRequestIdRef.current) {
+        setPost((p) =>
+          p
+            ? {
+                ...p,
+                bookmarkCount: Math.max(0, p.bookmarkCount + (next ? -1 : 1)),
+                viewerState: { ...p.viewerState, hasBookmarked: !next },
+              }
+            : p,
+        );
+        showToast("收藏操作失败，请重试");
+      }
+    } finally {
+      if (reqId === bookmarkRequestIdRef.current) {
+        setBookmarkPending(false);
+      }
     }
   }
 
@@ -441,6 +462,8 @@ export function PostDetailShell({ id }: { id: string }) {
               onOpenReport={() => setReportTarget({ type: "post", id: post.id, title: post.title })}
               onToggleLike={handleToggleLike}
               onToggleBookmark={handleToggleBookmark}
+              likePending={likePending}
+              bookmarkPending={bookmarkPending}
             />
 
             <CommentsSection
@@ -495,6 +518,7 @@ export function PostDetailShell({ id }: { id: string }) {
             type="button"
             className={`comp-stat stat${post.viewerState.hasLiked ? " selected" : ""}`}
             onClick={handleToggleLike}
+            disabled={likePending}
             aria-label={post.viewerState.hasLiked ? "已点赞" : "点赞"}
           >
             <Icon name="heart" size={18} />
@@ -504,6 +528,7 @@ export function PostDetailShell({ id }: { id: string }) {
             type="button"
             className={`comp-stat stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
             onClick={handleToggleBookmark}
+            disabled={bookmarkPending}
             aria-label={post.viewerState.hasBookmarked ? "已收藏" : "收藏"}
           >
             <Icon name="bookmark" size={18} />
@@ -666,6 +691,8 @@ function PostArticle({
   onOpenReport,
   onToggleLike,
   onToggleBookmark,
+  likePending = false,
+  bookmarkPending = false,
 }: {
   post: Post;
   user: SessionUser | null;
@@ -674,6 +701,8 @@ function PostArticle({
   onOpenReport: () => void;
   onToggleLike: () => void;
   onToggleBookmark: () => void;
+  likePending?: boolean;
+  bookmarkPending?: boolean;
 }) {
   const articleImages: GalleryImage[] = post.media.map((item) => ({
     url: item.detailUrl || item.url || item.originalUrl || "",
@@ -737,7 +766,8 @@ function PostArticle({
           type="button"
           className={`stat${post.viewerState.hasLiked ? " selected" : ""}`}
           onClick={onToggleLike}
-          style={{ background: "none", border: "none", cursor: "pointer" }}
+          disabled={likePending}
+          style={{ background: "none", border: "none", cursor: likePending ? "not-allowed" : "pointer" }}
         >
           <Icon name="heart" size={15} />
           {compactCount(post.likeCount)} 点赞
@@ -746,7 +776,8 @@ function PostArticle({
           type="button"
           className={`stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
           onClick={onToggleBookmark}
-          style={{ background: "none", border: "none", cursor: "pointer" }}
+          disabled={bookmarkPending}
+          style={{ background: "none", border: "none", cursor: bookmarkPending ? "not-allowed" : "pointer" }}
         >
           <Icon name="bookmark" size={15} />
           {compactCount(post.bookmarkCount)} 收藏

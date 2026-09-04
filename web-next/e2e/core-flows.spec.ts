@@ -5,13 +5,13 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await page.goto("/login");
 
     // 默认展示密码登录与邮箱、密码输入框
-    const emailInput = page.getByPlaceholder("请输入你的常用邮箱");
+    const emailInput = page.getByPlaceholder("请输入邮箱地址");
     await expect(emailInput).toBeVisible();
-    const passwordInput = page.getByPlaceholder("请输入登录密码");
+    const passwordInput = page.getByPlaceholder("请输入密码");
     await expect(passwordInput).toBeVisible();
 
     // 切换到“验证码登录”
-    const codeLoginTab = page.getByRole("button", { name: "验证码登录" });
+    const codeLoginTab = page.getByRole("button", { name: "验证码登录", exact: true });
     await codeLoginTab.click();
 
     // 此时应显示验证码输入框与获取验证码按钮
@@ -19,7 +19,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(sendCodeBtn).toBeVisible();
 
     // 再次切换回“密码登录”
-    const pwdLoginTab = page.getByRole("button", { name: "密码登录" });
+    const pwdLoginTab = page.getByRole("button", { name: "密码登录", exact: true });
     await pwdLoginTab.click();
     await expect(passwordInput).toBeVisible();
   });
@@ -32,9 +32,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await registerTab.click();
 
     // 验证注册表单字段：邮箱、密码、确认密码、昵称（可选）
-    const emailInput = page.getByPlaceholder("请输入你的常用邮箱");
-    const passwordInput = page.getByPlaceholder("设置至少 8 位登录密码");
-    const confirmPasswordInput = page.getByPlaceholder("再次确认登录密码");
+    const emailInput = page.getByPlaceholder("请输入邮箱地址");
+    const passwordInput = page.getByPlaceholder("至少 8 位密码");
+    const confirmPasswordInput = page.getByPlaceholder("再次输入密码");
     await expect(emailInput).toBeVisible();
     await expect(passwordInput).toBeVisible();
     await expect(confirmPasswordInput).toBeVisible();
@@ -44,7 +44,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await passwordInput.fill("Password123!");
     await confirmPasswordInput.fill("Password123!");
 
-    // 模拟注册 API 返回，验证客户端发送的数据允许 code 为空
+    // 模拟注册 API 返回合法的 access_token 与用户信息，验证免密注册成功并建立会话
     let submittedPayload: Record<string, unknown> | null = null;
     await page.route("**/api/v1/auth/register", async (route) => {
       submittedPayload = JSON.parse(route.request().postData() || "{}");
@@ -52,7 +52,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          token: "mock-token",
+          access_token: "mock-token-reg-123",
+          token_type: "Bearer",
+          expires_in: 3600,
           user: {
             id: "user-new-1",
             username: "testuser",
@@ -63,7 +65,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       });
     });
 
-    const submitBtn = page.getByRole("button", { name: "立即注册" });
+    const submitBtn = page.getByRole("button", { name: "注册并进入社区" });
     await submitBtn.click();
 
     // 确认已向后端发起注册请求，且没有客户端强制阻断
@@ -71,6 +73,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       expect(submittedPayload).not.toBeNull();
       expect(submittedPayload?.email).toBe("test_new_user@example.com");
     }).toPass();
+
+    // 验证注册成功后真实建立登录态并跳转回首页，无报错
+    await expect(page).toHaveURL("/");
   });
 
   test("3. 发帖草稿保护：本地持久化保存与恢复", async ({ page }) => {
@@ -85,6 +90,15 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
           updatedAt: Date.now(),
         }),
       );
+    });
+
+    // 拦截刷新以注入有效登录凭据
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "mock-valid-token", expires_in: 3600 }),
+      });
     });
 
     // Mock 用户信息以允许进入发布页
@@ -156,7 +170,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       has_more: true,
     };
 
-    await page.route("**/api/v1/posts/post-101", async (route) => {
+    await page.route("**/api/v1/posts/post-101*", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
     });
 
@@ -191,6 +205,14 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
   });
 
   test("5. 真实举报功能：弹窗选择违规原因并成功提交 POST /api/v1/reports", async ({ page }) => {
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "mock-valid-token", expires_in: 3600 }),
+      });
+    });
+
     // 注入登录状态
     await page.route("**/api/v1/me", async (route) => {
       await route.fulfill({
@@ -214,7 +236,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       viewer_state: { has_liked: false, has_bookmarked: false },
     };
 
-    await page.route("**/api/v1/posts/post-bad-1", async (route) => {
+    await page.route("**/api/v1/posts/post-bad-1*", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
     });
     await page.route("**/api/v1/posts/post-bad-1/comments*", async (route) => {
@@ -265,6 +287,15 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
   });
 
   test("6. 我的工作台：真实读取 balance 积分并支持评论精确锚点定位", async ({ page }) => {
+    // 拦截刷新以注入有效登录凭据
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "mock-valid-token", expires_in: 3600 }),
+      });
+    });
+
     // 注入登录态
     await page.route("**/api/v1/me", async (route) => {
       await route.fulfill({
@@ -351,5 +382,186 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
 
     await expect(firstLink).toHaveAttribute("href", "/post/post-multi-1#comment-c-first-1");
     await expect(secondLink).toHaveAttribute("href", "/post/post-multi-1#comment-c-second-2");
+
+    // 拦截详情页帖子数据
+    await page.route("**/api/v1/posts/post-multi-1*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "post-multi-1",
+          title: "同一个帖子的第一条回复",
+          content: "这是帖子的主要讨论正文内容",
+          comment_count: 50,
+          like_count: 10,
+          view_count: 100,
+          created_at: new Date().toISOString(),
+          author: { id: "u-author", nickname: "发帖作者", level: 2 },
+          community: { id: "c1", name: "开箱专区" },
+          viewer_state: { has_liked: false, has_bookmarked: false },
+        }),
+      });
+    });
+
+    // 模拟首屏评论列表中并不包含 c-first-1（模拟非首屏评论）
+    await page.route("**/api/v1/posts/post-multi-1/comments*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              id: "c-other-0",
+              post_id: "post-multi-1",
+              author: { id: "u-other", nickname: "其他楼层用户", level: 1 },
+              content: "这是首屏其他普通楼层评论",
+              floor: 1,
+              created_at: new Date().toISOString(),
+              viewer_state: {},
+            },
+          ],
+          total: 50,
+          has_more: true,
+        }),
+      });
+    });
+
+    let contextRequested = false;
+    await page.route("**/api/v1/comments/c-first-1/context", async (route) => {
+      contextRequested = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          post_id: "post-multi-1",
+          comment_id: "c-first-1",
+          root_id: "c-first-1",
+          is_root: true,
+          root_comment: {
+            id: "c-first-1",
+            post_id: "post-multi-1",
+            author: { id: "u-owner", nickname: "工作台主人", level: 4 },
+            content: "我先说两句",
+            floor: 35,
+            like_count: 3,
+            reply_count: 0,
+            created_at: new Date().toISOString(),
+            viewer_state: {},
+          },
+        }),
+      });
+    });
+
+    // 真实点击“我的回复”链接
+    await firstLink.click();
+
+    // 验证跳转到详情页且携带目标 hash
+    await expect(page).toHaveURL("/post/post-multi-1#comment-c-first-1");
+
+    // 验证 Context 接口被调用以获取非首屏评论
+    await expect(async () => {
+      expect(contextRequested).toBe(true);
+    }).toPass();
+
+    // 验证目标评论节点被成功挂载至 DOM，并添加了 comment-highlight 过渡高亮样式
+    const targetCommentEl = page.locator("#comment-c-first-1");
+    await expect(targetCommentEl).toBeVisible();
+    await expect(targetCommentEl).toContainText("我先说两句");
+    await expect(targetCommentEl).toHaveClass(/comment-highlight/);
+  });
+
+  test("7. 评论锚点：楼中楼深层回复通过 Context 自动展开回复抽屉并精准定位高亮", async ({ page }) => {
+    // 拦截帖子数据
+    await page.route("**/api/v1/posts/post-nested-10*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "post-nested-10",
+          title: "嵌套回复测试帖子",
+          content: "测试楼中楼锚点唤起与定位",
+          comment_count: 10,
+          like_count: 5,
+          view_count: 60,
+          created_at: new Date().toISOString(),
+          author: { id: "u-author", nickname: "楼主", level: 2 },
+          community: { id: "c1", name: "机甲区" },
+          viewer_state: {},
+        }),
+      });
+    });
+
+    // 首屏只包含根评论 c-root-10
+    const mockRootComment = {
+      id: "c-root-10",
+      post_id: "post-nested-10",
+      author: { id: "u-root", nickname: "根评论作者", level: 3 },
+      content: "这是根评论主楼层",
+      floor: 2,
+      reply_count: 5,
+      created_at: new Date().toISOString(),
+      viewer_state: {},
+    };
+
+    await page.route("**/api/v1/posts/post-nested-10/comments*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [mockRootComment],
+          total: 1,
+          has_more: false,
+        }),
+      });
+    });
+
+    // 模拟子回复的 Context 查询
+    const mockChildReply = {
+      id: "c-child-99",
+      post_id: "post-nested-10",
+      author: { id: "u-child", nickname: "楼中楼辩友", level: 1 },
+      content: "这是深层楼中楼精准回复内容",
+      root_id: "c-root-10",
+      parent_id: "c-root-10",
+      created_at: new Date().toISOString(),
+      viewer_state: {},
+    };
+
+    await page.route("**/api/v1/comments/c-child-99/context", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          post_id: "post-nested-10",
+          comment_id: "c-child-99",
+          root_id: "c-root-10",
+          parent_id: "c-root-10",
+          is_root: false,
+          root_comment: mockRootComment,
+          target_comment: mockChildReply,
+        }),
+      });
+    });
+
+    // 模拟回复抽屉请求根评论的 replies
+    await page.route("**/api/v1/comments/c-root-10/replies*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [mockChildReply],
+          has_more: false,
+        }),
+      });
+    });
+
+    // 直接通过 URL 携带楼中楼回复 hash 进入帖子
+    await page.goto("/post/post-nested-10#comment-c-child-99");
+
+    // 验证楼中楼弹窗被自动打开，且目标子回复成功呈现并获得高亮
+    const childReplyEl = page.locator(".comment-reply-modal #comment-c-child-99");
+    await expect(childReplyEl).toBeVisible();
+    await expect(childReplyEl).toContainText("这是深层楼中楼精准回复内容");
+    await expect(childReplyEl).toHaveClass(/comment-highlight/);
   });
 });

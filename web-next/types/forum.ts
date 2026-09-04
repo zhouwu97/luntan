@@ -106,6 +106,16 @@ export interface CommentPage {
   hasMore: boolean;
 }
 
+export interface CommentContext {
+  postId: string;
+  commentId: string;
+  rootId: string;
+  parentId?: string;
+  isRoot: boolean;
+  rootComment?: Comment;
+  targetComment?: Comment;
+}
+
 export interface ProfilePostPage {
   items: ProfilePost[];
   nextCursor?: string;

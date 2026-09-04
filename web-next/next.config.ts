@@ -4,7 +4,7 @@ const basePath = process.env.NEXT_PUBLIC_APP_BASE_PATH?.trim() || "";
 
 const nextConfig: NextConfig = {
   basePath,
-  output: "standalone",
+  output: process.env.OUTPUT_STANDALONE === "true" ? "standalone" : undefined,
   reactStrictMode: true,
 };
 

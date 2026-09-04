@@ -715,18 +715,104 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 	httpserver.WriteJSON(w, http.StatusCreated, response)
 }
 
-func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID string) (commentResponse, error) {
+type commentQueryer interface {
+	userSummaryQueryer
+	databaseQueryer
+}
+
+type commentContextResponse struct {
+	PostID        string           `json:"post_id"`
+	CommentID     string           `json:"comment_id"`
+	RootID        string           `json:"root_id"`
+	ParentID      *string          `json:"parent_id,omitempty"`
+	IsRoot        bool             `json:"is_root"`
+	RootComment   *commentResponse `json:"root_comment,omitempty"`
+	TargetComment *commentResponse `json:"target_comment,omitempty"`
+}
+
+func (s *Server) getCommentContext(w http.ResponseWriter, r *http.Request, commentID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	viewer, _ := s.optionalAuthenticatedUser(r.Context(), r)
+
+	var (
+		postID      string
+		rawRootID   sql.NullString
+		rawParentID sql.NullString
+		pubStatus   string
+		modStatus   string
+		deletedAt   sql.NullTime
+	)
+
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT post_id, root_id, parent_id, publication_status, moderation_status, deleted_at
+		FROM comments
+		WHERE id = $1`, commentID).Scan(
+		&postID, &rawRootID, &rawParentID, &pubStatus, &modStatus, &deletedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrCommentNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if deletedAt.Valid || pubStatus != "published" || modStatus != "normal" {
+		writeAuthError(w, r, ErrCommentNotFound)
+		return
+	}
+
+	rootID := commentID
+	if rawRootID.Valid && strings.TrimSpace(rawRootID.String) != "" {
+		rootID = rawRootID.String
+	}
+	isRoot := rootID == commentID
+
+	var parentID *string
+	if rawParentID.Valid && strings.TrimSpace(rawParentID.String) != "" {
+		val := rawParentID.String
+		parentID = &val
+	}
+
+	rootComment, err := loadCommentResponse(r.Context(), s.db, rootID, viewer.ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	var targetComment *commentResponse
+	if !isRoot {
+		tc, err := loadCommentResponse(r.Context(), s.db, commentID, viewer.ID)
+		if err == nil {
+			targetComment = &tc
+		}
+	}
+
+	httpserver.WriteJSON(w, http.StatusOK, commentContextResponse{
+		PostID:        postID,
+		CommentID:     commentID,
+		RootID:        rootID,
+		ParentID:      parentID,
+		IsRoot:        isRoot,
+		RootComment:   &rootComment,
+		TargetComment: targetComment,
+	})
+}
+
+func loadCommentResponse(ctx context.Context, q commentQueryer, commentID, viewerID string) (commentResponse, error) {
 	var response commentResponse
 	var authorID, rootID, parentID, replyTo, stickerID, avatarMediaID string
 	var floorNo sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), COALESCE(ma.id, ''), COALESCE(ma.object_key, ''),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
 		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.dislike_count, c.reply_count,
 		       c.publication_status, c.moderation_status,
 		       c.created_at, c.updated_at,
-		       CASE WHEN c.root_id = c.id THEN (
+		       CASE WHEN (c.root_id IS NULL OR c.root_id = '' OR c.root_id = c.id) THEN (
 		           SELECT COUNT(*) FROM comments c2
 		           WHERE c2.post_id = c.post_id AND c2.deleted_at IS NULL
 		             AND c2.publication_status = 'published' AND c2.moderation_status = 'normal'
@@ -759,17 +845,17 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID 
 	response.ParentID = optionalString(parentID)
 	response.ReplyToUserID = optionalString(replyTo)
 	response.StickerID = optionalString(stickerID)
-	if err := enrichReplyToUser(ctx, tx, &response); err != nil {
+	if err := enrichReplyToUser(ctx, q, &response); err != nil {
 		return commentResponse{}, err
 	}
 	responseList := []commentResponse{response}
-	if err := enrichCommentsMedia(ctx, tx, responseList); err != nil {
+	if err := enrichCommentsMedia(ctx, q, responseList); err != nil {
 		return commentResponse{}, err
 	}
 	response = responseList[0]
 	if viewerID != "" {
 		var hasLiked, hasDisliked bool
-		if err := tx.QueryRowContext(ctx, `SELECT
+		if err := q.QueryRowContext(ctx, `SELECT
 		       EXISTS (SELECT 1 FROM comment_reactions cr WHERE cr.comment_id = c.id AND cr.user_id = $2 AND cr.reaction_type = 'like'),
 		       EXISTS (SELECT 1 FROM comment_reactions cr WHERE cr.comment_id = c.id AND cr.user_id = $2 AND cr.reaction_type = 'dislike')
 		       FROM comments c WHERE c.id = $1`, commentID, viewerID).Scan(&hasLiked, &hasDisliked); err != nil {
@@ -780,6 +866,10 @@ func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID 
 		response.ViewerState = &viewerCommentState{}
 	}
 	return response, nil
+}
+
+func loadCommentResponseTx(ctx context.Context, tx *sql.Tx, commentID, viewerID string) (commentResponse, error) {
+	return loadCommentResponse(ctx, tx, commentID, viewerID)
 }
 
 type databaseQueryer interface {

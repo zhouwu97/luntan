@@ -3,6 +3,7 @@ import type {
   ActivityItem,
   AuthSession,
   Comment,
+  CommentContext,
   CommentPage,
   Community,
   EmailCodeChallenge,
@@ -478,6 +479,21 @@ export async function getCommentReplies(
     items: Array.isArray(payload.items) ? payload.items.map(parseComment) : [],
     nextCursor: asString(payload.next_cursor) || undefined,
     hasMore: payload.has_more === true,
+  };
+}
+
+export async function getCommentContext(commentId: string): Promise<CommentContext> {
+  const payload = await apiJson<JsonRecord>(
+    `/comments/${encodeURIComponent(commentId)}/context`,
+  );
+  return {
+    postId: asString(payload.post_id),
+    commentId: asString(payload.comment_id),
+    rootId: asString(payload.root_id),
+    parentId: asString(payload.parent_id) || undefined,
+    isRoot: payload.is_root === true,
+    rootComment: payload.root_comment ? parseComment(payload.root_comment) : undefined,
+    targetComment: payload.target_comment ? parseComment(payload.target_comment) : undefined,
   };
 }
 

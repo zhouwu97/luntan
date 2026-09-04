@@ -16,6 +16,7 @@ import {
   createComment,
   createReply,
   deleteComment,
+  getCommentContext,
   getCommentReplies,
   getComments,
   getFeed,
@@ -52,6 +53,9 @@ export function PostDetailShell({ id }: { id: string }) {
   const [galleryImages, setGalleryImages] = useState<GalleryImage[] | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [reportTarget, setReportTarget] = useState<{ type: "post" | "comment"; id: string; title?: string } | null>(null);
+  const [replyTarget, setReplyTarget] = useState<Comment | null>(null);
+  const [targetChildCommentId, setTargetChildCommentId] = useState<string | null>(null);
+  const [targetChildComment, setTargetChildComment] = useState<Comment | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -86,20 +90,51 @@ export function PostDetailShell({ id }: { id: string }) {
   }, [id]);
 
   useEffect(() => {
-    if (!loading && typeof window !== "undefined" && window.location.hash) {
-      const hash = window.location.hash;
-      if (hash === "#comments") {
-        const el = document.getElementById("comments");
-        if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
-      } else if (hash.startsWith("#comment-")) {
-        const commentEl = document.getElementById(hash.slice(1));
-        if (commentEl) {
-          setTimeout(() => {
-            commentEl.scrollIntoView({ behavior: "smooth" });
-            commentEl.classList.add("comment-highlight");
-          }, 150);
-        }
+    if (loading || typeof window === "undefined" || !window.location.hash) return;
+    const hash = window.location.hash;
+    if (hash === "#comments") {
+      const el = document.getElementById("comments");
+      if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+    } else if (hash.startsWith("#comment-")) {
+      const commentId = hash.replace("#comment-", "");
+      const existing = document.getElementById(`comment-${commentId}`);
+      if (existing) {
+        setTimeout(() => {
+          existing.scrollIntoView({ behavior: "smooth", block: "center" });
+          existing.classList.add("comment-highlight");
+        }, 150);
+        return;
       }
+
+      void getCommentContext(commentId)
+        .then((ctx) => {
+          if (ctx.isRoot) {
+            if (ctx.rootComment) {
+              setComments((curr) => {
+                if (curr.some((c) => c.id === ctx.rootComment!.id)) return curr;
+                return [...curr, ctx.rootComment!];
+              });
+              setTimeout(() => {
+                const el = document.getElementById(`comment-${commentId}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  el.classList.add("comment-highlight");
+                }
+              }, 200);
+            }
+          } else {
+            if (ctx.rootComment) {
+              setComments((curr) => {
+                if (curr.some((c) => c.id === ctx.rootComment!.id)) return curr;
+                return [...curr, ctx.rootComment!];
+              });
+              setTargetChildCommentId(commentId);
+              setTargetChildComment(ctx.targetComment || null);
+              setReplyTarget(ctx.rootComment);
+            }
+          }
+        })
+        .catch(() => undefined);
     }
   }, [loading]);
 
@@ -284,6 +319,10 @@ export function PostDetailShell({ id }: { id: string }) {
               onReportComment={(c) =>
                 setReportTarget({ type: "comment", id: c.id, title: c.content ? c.content.slice(0, 30) : "评论" })
               }
+              replyTarget={replyTarget}
+              setReplyTarget={setReplyTarget}
+              targetChildCommentId={targetChildCommentId}
+              targetChildComment={targetChildComment}
             />
           </section>
 
@@ -652,6 +691,10 @@ function CommentsSection({
   onRequireAuth,
   onOpenGallery,
   onReportComment,
+  replyTarget,
+  setReplyTarget,
+  targetChildCommentId,
+  targetChildComment,
 }: {
   post: Post;
   comments: Comment[];
@@ -668,12 +711,15 @@ function CommentsSection({
   onRequireAuth: () => void;
   onOpenGallery: (images: GalleryImage[], index?: number) => void;
   onReportComment: (c: Comment) => void;
+  replyTarget: Comment | null;
+  setReplyTarget: React.Dispatch<React.SetStateAction<Comment | null>>;
+  targetChildCommentId?: string | null;
+  targetChildComment?: Comment | null;
 }) {
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [replyTarget, setReplyTarget] = useState<Comment | null>(null);
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
     const next = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
@@ -898,6 +944,8 @@ function CommentsSection({
       {replyTarget && (
         <CommentReplyModal
           root={replyTarget}
+          targetCommentId={targetChildCommentId || undefined}
+          targetComment={targetChildComment || undefined}
           user={user}
           onRequireAuth={onRequireAuth}
           onClose={() => setReplyTarget(null)}
@@ -1049,12 +1097,16 @@ function CommentRow({
 
 function CommentReplyModal({
   root,
+  targetCommentId,
+  targetComment,
   user,
   onRequireAuth,
   onClose,
   onOpenGallery,
 }: {
   root: Comment;
+  targetCommentId?: string;
+  targetComment?: Comment;
   user: SessionUser | null;
   onRequireAuth: () => void;
   onClose: () => void;
@@ -1075,12 +1127,22 @@ function CommentReplyModal({
     void getCommentReplies(root.id)
       .then((page) => {
         if (!active) return;
-        setReplies(page.items);
+        let items = page.items;
+        if (targetCommentId && targetComment && !items.some((item) => item.id === targetCommentId)) {
+          items = [...items, targetComment];
+        }
+        setReplies(items);
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
       })
       .catch(() => {
-        if (active) setMessage("回复加载失败，请重试");
+        if (active) {
+          if (targetCommentId && targetComment) {
+            setReplies([targetComment]);
+          } else {
+            setMessage("回复加载失败，请重试");
+          }
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -1088,7 +1150,20 @@ function CommentReplyModal({
     return () => {
       active = false;
     };
-  }, [root.id]);
+  }, [root.id, targetCommentId, targetComment]);
+
+  useEffect(() => {
+    if (!loading && targetCommentId) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`comment-${targetCommentId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("comment-highlight");
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, targetCommentId, replies]);
 
   async function handleLoadMoreReplies() {
     if (!nextCursor || loadingMore) return;
@@ -1216,7 +1291,7 @@ function CommentReplyModal({
               );
 
               return (
-                <div className="comment-reply-item" key={reply.id}>
+                <div className="comment-reply-item" key={reply.id} id={`comment-${reply.id}`}>
                   <Link href={`/user/${encodeURIComponent(reply.author.id)}`}>
                     <UserAvatar
                       userId={reply.author.id}

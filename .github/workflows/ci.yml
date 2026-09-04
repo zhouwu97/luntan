@@ -117,10 +117,17 @@ jobs:
       - run: go test -p 1 ./...
       - run: go vet ./...
       - run: go build ./cmd/...
-      # 安全扫描必须与日常测试同为 PR/main 门禁，避免依赖升级或新代码重新引入
-      # 已经修过的可达漏洞与敏感信息。
+      # 漏洞检查与日常测试同为门禁，避免依赖升级引入已知可达漏洞。
       - name: Run govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks 需要完整历史，才能覆盖整个提交历史中的泄露记录。
+          fetch-depth: 0
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:

@@ -62,7 +62,7 @@ func TestCommentCreationAwardsPoints(t *testing.T) {
 			"post_id": postID,
 			"content": content,
 		})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/comments", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+session.AccessToken)
 		req.Header.Set("Content-Type", "application/json")
 		res := httptest.NewRecorder()
@@ -147,7 +147,7 @@ func TestCommentPointsRespectsDailyLimit(t *testing.T) {
 	// 模拟用户当天已获得 19 积分
 	if _, err := s.db.Exec(`
 		INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key, created_at)
-		VALUES ($1, $2, 'post', 19, 19, '模拟已获得积分', 'sim-19-'+$3,
+		VALUES ($1, $2, 'post', 19, 19, '模拟已获得积分', 'sim-19-' || $3::text,
 			date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')
 	`, "sim-tx-"+suffix, session.User.ID, suffix); err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestCommentPointsRespectsDailyLimit(t *testing.T) {
 		"post_id": postID,
 		"content": "接近上限的评论",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/comments", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+session.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
@@ -228,7 +228,7 @@ func TestCommentPointsBlockedAtDailyLimit(t *testing.T) {
 	// 模拟用户当天已获得 20 积分（达到上限）
 	if _, err := s.db.Exec(`
 		INSERT INTO point_transactions (id, user_id, source, delta, balance_after, reason, idempotency_key, created_at)
-		VALUES ($1, $2, 'post', 20, 20, '模拟已达上限', 'sim-20-'+$3,
+		VALUES ($1, $2, 'post', 20, 20, '模拟已达上限', 'sim-20-' || $3::text,
 			date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')
 	`, "sim-tx-"+suffix, session.User.ID, suffix); err != nil {
 		t.Fatal(err)
@@ -242,7 +242,7 @@ func TestCommentPointsBlockedAtDailyLimit(t *testing.T) {
 		"post_id": postID,
 		"content": "达到上限后的评论",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/comments", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+session.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()

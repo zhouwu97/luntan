@@ -44,9 +44,14 @@ void main() {
     expect(find.text('注册'), findsWidgets);
     expect(find.text('验证码登录'), findsOneWidget);
     expect(find.text('密码登录'), findsOneWidget);
+    expect(find.text('暂不登录，以游客身份体验'), findsOneWidget);
+
+    // 切换到验证码登录
+    await tester.tap(find.text('验证码登录'));
+    await tester.pumpAndSettle();
+
     expect(find.text('获取验证码'), findsOneWidget);
     expect(find.text('登录并进入论坛'), findsOneWidget);
-    expect(find.text('暂不登录，以游客身份体验'), findsOneWidget);
 
     // 输入前缀数字时应展示常用邮箱后缀 chips
     final emailField = find.byType(TextField).first;
@@ -110,7 +115,12 @@ void main() {
     await tester.tap(find.text('登录').first);
     await tester.pumpAndSettle();
     expect(find.text('验证码登录'), findsOneWidget);
-    expect(find.text('登录并进入论坛'), findsOneWidget);
+    expect(find.text('密码登录'), findsOneWidget);
+    expect(find.text('登录'), findsWidgets);
+    final backEmailWidget = tester.widget<TextField>(
+      find.byType(TextField).first,
+    );
+    expect(backEmailWidget.controller?.text, 'user@example.com');
   });
 
   testWidgets('AuthScreen 密码登录流程与明暗文切换', (tester) async {
@@ -208,6 +218,10 @@ void main() {
       ),
     );
 
+    // 切换到验证码登录
+    await tester.tap(find.text('验证码登录'));
+    await tester.pumpAndSettle();
+
     final emailField = find.byType(TextField).first;
     await tester.enterText(emailField, 'user@test.com');
     await tester.pump();
@@ -276,13 +290,9 @@ void main() {
 
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'newuser@example.com');
-    await tester.tap(find.text('获取验证码'));
-    await tester.pumpAndSettle();
-
-    await tester.enterText(fields.at(1), '654321');
+    await tester.enterText(fields.at(1), 'password123');
     await tester.enterText(fields.at(2), 'password123');
-    await tester.enterText(fields.at(3), 'password123');
-    await tester.enterText(fields.at(4), '新杯友');
+    await tester.enterText(fields.at(3), '新杯友');
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.text('注册并进入论坛'));

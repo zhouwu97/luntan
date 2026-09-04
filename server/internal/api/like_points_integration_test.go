@@ -1,9 +1,7 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -73,13 +71,8 @@ func TestLikePointsConcurrency(t *testing.T) {
 
 	// 点赞函数
 	likePost := func(postID string) int {
-		body, _ := json.Marshal(map[string]interface{}{
-			"target_type": "post",
-			"target_id":   postID,
-		})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/likes", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/posts/"+postID+"/like", nil)
 		req.Header.Set("Authorization", "Bearer "+likerSession.AccessToken)
-		req.Header.Set("Content-Type", "application/json")
 		res := httptest.NewRecorder()
 		NewHandler(s.db).ServeHTTP(res, req)
 		return res.Code
@@ -87,7 +80,7 @@ func TestLikePointsConcurrency(t *testing.T) {
 
 	// 先点赞前 4 个帖子
 	for i := 0; i < 4; i++ {
-		if code := likePost(postIDs[i]); code != http.StatusCreated {
+		if code := likePost(postIDs[i]); code != http.StatusOK {
 			t.Fatalf("点赞帖子 %d 失败: status=%d", i, code)
 		}
 	}
@@ -118,7 +111,7 @@ func TestLikePointsConcurrency(t *testing.T) {
 
 	// 两个请求都应该成功创建点赞记录
 	for i, code := range results {
-		if code != http.StatusCreated {
+		if code != http.StatusOK {
 			t.Fatalf("并发点赞 %d 失败: status=%d", i, code)
 		}
 	}
@@ -198,16 +191,11 @@ func TestLikePointsDailyLimit(t *testing.T) {
 
 	// 点赞函数
 	likePost := func(postID string) {
-		body, _ := json.Marshal(map[string]interface{}{
-			"target_type": "post",
-			"target_id":   postID,
-		})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/likes", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/posts/"+postID+"/like", nil)
 		req.Header.Set("Authorization", "Bearer "+likerSession.AccessToken)
-		req.Header.Set("Content-Type", "application/json")
 		res := httptest.NewRecorder()
 		NewHandler(s.db).ServeHTTP(res, req)
-		if res.Code != http.StatusCreated {
+		if res.Code != http.StatusOK {
 			t.Fatalf("点赞失败: status=%d body=%s", res.Code, res.Body.String())
 		}
 	}

@@ -106,6 +106,32 @@ func viewerReactionExprs(viewerPos int) (string, string) {
 	return liked, disliked
 }
 
+// checkPostVisible 校验帖子对当前访问者是否可见。
+// 规则：公开且正常的帖子对所有人可见；待审核或非公开帖子仅作者本人和具备 report.review 权限的审核员可见。
+// 不可见或已软删除时统一返回 ErrPostNotFound。
+func (s *Server) checkPostVisible(ctx context.Context, r *http.Request, postID string) error {
+	var postAuthorID, communityID, publicationStatus, moderationStatus string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT author_id, community_id, publication_status, moderation_status
+		FROM posts
+		WHERE id = $1 AND deleted_at IS NULL`, postID).
+		Scan(&postAuthorID, &communityID, &publicationStatus, &moderationStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrPostNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if publicationStatus != "published" || moderationStatus != "normal" {
+		viewer, ok := resolveOptionalViewer(s, r)
+		canReview := ok && viewer.ID != "" && s.hasScopedPermission(r, viewer.ID, "report.review", communityID)
+		if !ok || (viewer.ID != postAuthorID && !canReview) {
+			return ErrPostNotFound
+		}
+	}
+	return nil
+}
+
 func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID string) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -134,31 +160,13 @@ func (s *Server) listComments(w http.ResponseWriter, r *http.Request, postID str
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_SORT", Message: "sort 仅支持 asc、desc、hot"})
 		return
 	}
-	// 评论列表的可见性必须与帖子详情保持一致：公开帖子对所有人可读，
-	// 作者本人和审核人员也可以读取自己有权限查看的待审核帖子。
-	// 如果这里仍只检查 published/normal，作者打开自己的待审核帖子时会
-	// 得到 POST_NOT_FOUND，客户端就会显示“评论加载失败”。
-	var postAuthorID, communityID, publicationStatus, moderationStatus string
-	err = s.db.QueryRowContext(r.Context(), `
-		SELECT author_id, community_id, publication_status, moderation_status
-		FROM posts
-		WHERE id = $1 AND deleted_at IS NULL`, postID).
-		Scan(&postAuthorID, &communityID, &publicationStatus, &moderationStatus)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeAuthError(w, r, ErrPostNotFound)
-		return
-	}
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if publicationStatus != "published" || moderationStatus != "normal" {
-		viewer, ok := resolveOptionalViewer(s, r)
-		canReview := ok && viewer.ID != "" && s.hasScopedPermission(r, viewer.ID, "report.review", communityID)
-		if !ok || (viewer.ID != postAuthorID && !canReview) {
+	if err := s.checkPostVisible(r.Context(), r, postID); err != nil {
+		if errors.Is(err, ErrPostNotFound) {
 			writeAuthError(w, r, ErrPostNotFound)
-			return
+		} else {
+			writeInternalError(w, r, err)
 		}
+		return
 	}
 
 	args := []any{postID}
@@ -764,6 +772,16 @@ func (s *Server) getCommentContext(w http.ResponseWriter, r *http.Request, comme
 		return
 	}
 
+	// 权限边界校验：目标评论所属帖子对当前访问者必须可见（复用帖子可见性规则）
+	if err := s.checkPostVisible(r.Context(), r, postID); err != nil {
+		if errors.Is(err, ErrPostNotFound) {
+			writeAuthError(w, r, ErrPostNotFound)
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+
 	rootID := commentID
 	if rawRootID.Valid && strings.TrimSpace(rawRootID.String) != "" {
 		rootID = rawRootID.String
@@ -781,11 +799,19 @@ func (s *Server) getCommentContext(w http.ResponseWriter, r *http.Request, comme
 		writeInternalError(w, r, err)
 		return
 	}
+	if rootComment.Publication != "published" && rootComment.Publication != "deleted" {
+		writeAuthError(w, r, ErrCommentNotFound)
+		return
+	}
+	if rootComment.Publication == "published" && rootComment.Moderation != "normal" {
+		writeAuthError(w, r, ErrCommentNotFound)
+		return
+	}
 
 	var targetComment *commentResponse
 	if !isRoot {
 		tc, err := loadCommentResponse(r.Context(), s.db, commentID, viewer.ID)
-		if err == nil {
+		if err == nil && tc.Publication == "published" && tc.Moderation == "normal" {
 			targetComment = &tc
 		}
 	}
@@ -809,7 +835,8 @@ func loadCommentResponse(ctx context.Context, q commentQueryer, commentID, viewe
 		SELECT c.id, c.post_id, c.author_id, u.username, COALESCE(up.nickname, u.username),
 		       COALESCE(up.level, 1), COALESCE(ma.id, ''), COALESCE(ma.object_key, ''),
 		       COALESCE(c.root_id, ''), COALESCE(c.parent_id, ''), COALESCE(c.reply_to_user_id, ''),
-		       c.content, COALESCE(c.sticker_id, ''), c.like_count, c.dislike_count, c.reply_count,
+		       CASE WHEN c.publication_status = 'deleted' THEN '' ELSE c.content END,
+		       COALESCE(c.sticker_id, ''), c.like_count, c.dislike_count, c.reply_count,
 		       c.publication_status, c.moderation_status,
 		       c.created_at, c.updated_at,
 		       CASE WHEN (c.root_id IS NULL OR c.root_id = '' OR c.root_id = c.id) THEN (
@@ -845,14 +872,23 @@ func loadCommentResponse(ctx context.Context, q commentQueryer, commentID, viewe
 	response.ParentID = optionalString(parentID)
 	response.ReplyToUserID = optionalString(replyTo)
 	response.StickerID = optionalString(stickerID)
-	if err := enrichReplyToUser(ctx, q, &response); err != nil {
-		return commentResponse{}, err
+
+	if response.Publication == "deleted" {
+		// 根评论被软删除时保留墓碑以支持楼中楼展示，但必须彻底清空正文与媒体附件，严防删除内容泄露。
+		response.Content = ""
+		response.StickerID = nil
+		response.Media = []postMediaResponse{}
+		response.Attachments = []commentAttachmentResponse{}
+	} else {
+		if err := enrichReplyToUser(ctx, q, &response); err != nil {
+			return commentResponse{}, err
+		}
+		responseList := []commentResponse{response}
+		if err := enrichCommentsMedia(ctx, q, responseList); err != nil {
+			return commentResponse{}, err
+		}
+		response = responseList[0]
 	}
-	responseList := []commentResponse{response}
-	if err := enrichCommentsMedia(ctx, q, responseList); err != nil {
-		return commentResponse{}, err
-	}
-	response = responseList[0]
 	if viewerID != "" {
 		var hasLiked, hasDisliked bool
 		if err := q.QueryRowContext(ctx, `SELECT

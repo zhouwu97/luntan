@@ -108,6 +108,10 @@ export function PostDetailShell({ id }: { id: string }) {
 
       void getCommentContext(commentId)
         .then((ctx) => {
+          if (ctx.postId && ctx.postId !== id) {
+            router.replace(`/post/${encodeURIComponent(ctx.postId)}#comment-${encodeURIComponent(commentId)}`);
+            return;
+          }
           if (ctx.isRoot) {
             if (ctx.rootComment) {
               setComments((curr) => {
@@ -1170,7 +1174,10 @@ function CommentReplyModal({
     setLoadingMore(true);
     try {
       const page = await getCommentReplies(root.id, nextCursor);
-      setReplies((curr) => [...curr, ...page.items]);
+      setReplies((curr) => {
+        const ids = new Set(curr.map((item) => item.id));
+        return [...curr, ...page.items.filter((item) => !ids.has(item.id))];
+      });
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch {

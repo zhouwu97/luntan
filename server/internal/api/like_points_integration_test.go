@@ -67,6 +67,9 @@ func TestLikePointsConcurrency(t *testing.T) {
 			postID, authorSession.User.ID, communityID, fmt.Sprintf("帖子%d", i)); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'normal', post_status = 'published' WHERE id = $1`, postID); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 点赞函数
@@ -185,6 +188,9 @@ func TestLikePointsDailyLimit(t *testing.T) {
 			INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at)
 			VALUES ($1, $2, $3, 'normal', 'published', 'normal', $4, 'content', now())`,
 			postID, authorSession.User.ID, communityID, fmt.Sprintf("帖子%d", i)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'normal', post_status = 'published' WHERE id = $1`, postID); err != nil {
 			t.Fatal(err)
 		}
 	}

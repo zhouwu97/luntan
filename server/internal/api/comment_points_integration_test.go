@@ -65,6 +65,7 @@ func TestCommentCreationAwardsPoints(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+session.AccessToken)
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", fmt.Sprintf("cpts-idem-%d-%s", time.Now().UnixNano(), content))
 		res := httptest.NewRecorder()
 		NewHandler(s.db).ServeHTTP(res, req)
 		if res.Code != http.StatusCreated {
@@ -164,6 +165,7 @@ func TestCommentPointsRespectsDailyLimit(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+session.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "cptl-idem-"+suffix)
 	res := httptest.NewRecorder()
 	NewHandler(s.db).ServeHTTP(res, req)
 	if res.Code != http.StatusCreated {
@@ -245,6 +247,7 @@ func TestCommentPointsBlockedAtDailyLimit(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/posts/"+postID+"/comments", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+session.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "cptb-idem-"+suffix)
 	res := httptest.NewRecorder()
 	NewHandler(s.db).ServeHTTP(res, req)
 	if res.Code != http.StatusCreated {

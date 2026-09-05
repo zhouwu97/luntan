@@ -278,6 +278,7 @@ Comment _commentFromJson(Map<String, dynamic> json) {
             height: _nullableInt(value['height']),
             altText: _nullableString(value['alt_text']),
             thumb: _parseVariant(value['thumb']),
+            feed: _parseVariant(value['feed']),
             detail: _parseVariant(value['detail']),
             original: _parseVariant(value['original']),
           );

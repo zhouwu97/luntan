@@ -299,8 +299,8 @@ void main() {
         ),
       );
 
-      // Feed 正文预览必须优先 detail 变体，避免在高 DPR 设备上放大 thumb。
-      expect(asset.previewUrl, 'https://example.com/detail.jpg');
+      // Feed 兼容 getter 默认走小图；单图由组件显式选择 feed 变体。
+      expect(asset.previewUrl, 'https://example.com/thumb.jpg');
       expect(asset.detailUrl, 'https://example.com/detail.jpg');
       expect(asset.originalUrl, 'https://example.com/original.jpg');
       expect(asset.thumbUrl, 'https://example.com/thumb.jpg');
@@ -322,7 +322,7 @@ void main() {
           height: 1800,
         ),
       );
-      expect(noDetail.previewUrl, 'https://example.com/original.jpg');
+      expect(noDetail.previewUrl, 'https://example.com/thumb.jpg');
 
       const onlyUrl = MediaAsset(
         id: 'only_url',

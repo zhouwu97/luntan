@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/api/api_client.dart';
 import '../data/api/auth_repository.dart';
 import '../data/api/profile_repository.dart';
 import '../widgets/app_network_image.dart';
+import '../data/cache/image_cache_manager.dart';
 
 enum AuthStatus {
   unknown,
@@ -28,6 +31,7 @@ class AuthController extends ChangeNotifier {
 
   /// 由 API 客户端在 refresh token 也失效时调用，统一清理根状态。
   void invalidateSession() {
+    unawaited(ForumImageCaches.clearPrivate());
     user = null;
     error = const ApiException(
       type: ApiErrorType.unauthorized,
@@ -341,6 +345,7 @@ class AuthController extends ChangeNotifier {
     try {
       await _repository.logout();
     } finally {
+      await ForumImageCaches.clearPrivate();
       user = null;
       error = null;
       status = AuthStatus.unauthenticated;

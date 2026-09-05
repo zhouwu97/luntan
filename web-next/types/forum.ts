@@ -35,6 +35,7 @@ export interface MediaAsset {
   type: "image" | "video";
   url?: string;
   thumbUrl?: string;
+  feedUrl?: string;
   detailUrl?: string;
   originalUrl?: string;
   width?: number;

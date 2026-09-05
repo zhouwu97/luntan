@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../data/mock_forum_data.dart';
+import '../data/cache/image_cache_manager.dart';
 import 'app_network_image.dart';
 
 /// 帖子媒体预览的使用场景。
@@ -247,7 +248,7 @@ class PostMediaPreview extends StatelessWidget {
   }) {
     final imageUrl = mode == PostMediaPreviewMode.detail
         ? media.detailUrl
-        : media.previewUrl;
+        : (images.length == 1 ? media.feedSingleUrl : media.feedGridUrl);
 
     final tile = LayoutBuilder(
       builder: (context, constraints) {
@@ -259,6 +260,7 @@ class PostMediaPreview extends StatelessWidget {
               if (imageUrl != null && imageUrl.isNotEmpty)
                 AppNetworkImage(
                   url: imageUrl,
+                  cachePolicy: ImageCachePolicy.preview,
                   fit: fit,
                   alignment: alignment,
                   aspectRatio: mediaAssetRatio(media),
@@ -458,6 +460,9 @@ class _MediaGalleryScreenState extends State<MediaGalleryScreen> {
                               // 高度——绝不能按显示框双轴精确缩放压扁位图。
                               return AppNetworkImage(
                                 url: imageUrl,
+                                cachePolicy: showingOriginal
+                                    ? ImageCachePolicy.original
+                                    : ImageCachePolicy.preview,
                                 fit: BoxFit.contain,
                                 aspectRatio: mediaAssetRatio(image),
                                 memCacheWidth: zoomWidth,

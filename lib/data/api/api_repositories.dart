@@ -239,6 +239,7 @@ Post _postFromJson(Map<String, dynamic> json) {
             moderationStatus: _string(value['moderation_status']) == 'censored' ? 'censored' : 'normal',
             maskRegions: masks,
             thumb: _parseVariant(value['thumb']),
+            feed: _parseVariant(value['feed']),
             detail: _parseVariant(value['detail']),
             original: _parseVariant(value['original']),
           );

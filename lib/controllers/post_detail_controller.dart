@@ -29,24 +29,42 @@ class PostDetailController extends ChangeNotifier {
   PostDetailController({
     required PostRepository repository,
     required this.postId,
-  }) : _repository = repository;
+    this.initialPost,
+  }) : _repository = repository {
+    if (initialPost != null) {
+      _state = PostDetailState(
+        status: PostDetailStatus.success,
+        detail: PostDetail(post: initialPost!),
+      );
+    }
+  }
 
   final PostRepository _repository;
   final String postId;
+  final Post? initialPost;
   PostDetailState _state = const PostDetailState();
 
   PostDetailState get state => _state;
 
   Future<void> load() async {
-    _state = const PostDetailState(status: PostDetailStatus.loading);
-    notifyListeners();
+    final snapshot = _state.detail;
+    if (snapshot == null) {
+      _state = const PostDetailState(status: PostDetailStatus.loading);
+      notifyListeners();
+    }
     try {
       final detail = await _repository.getPost(postId);
       _state = detail == null
           ? const PostDetailState(status: PostDetailStatus.notFound)
           : PostDetailState(status: PostDetailStatus.success, detail: detail);
     } catch (error) {
-      _state = PostDetailState(status: PostDetailStatus.error, error: error);
+      _state = snapshot == null
+          ? PostDetailState(status: PostDetailStatus.error, error: error)
+          : PostDetailState(
+              status: PostDetailStatus.success,
+              detail: snapshot,
+              error: error,
+            );
     }
     notifyListeners();
   }

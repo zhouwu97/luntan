@@ -258,6 +258,7 @@ ProfilePostItem profilePostItemFromJson(Map<String, dynamic> value) {
             height: _nullableInt(item['height']),
             altText: _nullableString(item['alt_text']),
             thumb: _parseVariant(item['thumb']),
+            feed: _parseVariant(item['feed']),
             detail: _parseVariant(item['detail']),
             original: _parseVariant(item['original']),
           );

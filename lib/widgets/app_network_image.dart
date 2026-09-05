@@ -2,6 +2,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../data/cache/image_cache_manager.dart';
+
 /// 媒体 URL 的基准地址，由启动流程注入 API base。
 ///
 /// 服务端在未配置对象存储域名时可能返回相对媒体地址（如
@@ -107,6 +109,8 @@ class AppNetworkImage extends StatelessWidget {
     this.aspectRatio,
     this.autoMemCacheSize = true,
     this.fadeInDuration = const Duration(milliseconds: 160),
+    this.cachePolicy = ImageCachePolicy.preview,
+    this.cacheAccountScope,
   });
 
   final String? url;
@@ -119,6 +123,8 @@ class AppNetworkImage extends StatelessWidget {
   final int? memCacheWidth;
   final int? memCacheHeight;
   final Duration fadeInDuration;
+  final ImageCachePolicy cachePolicy;
+  final String? cacheAccountScope;
 
   /// 原图宽高比（width / height）。
   ///
@@ -195,7 +201,7 @@ class AppNetworkImage extends StatelessWidget {
           ),
         );
 
-        if (kIsWeb) {
+        if (kIsWeb || cachePolicy == ImageCachePolicy.none) {
           // Web 端使用原生 NetworkImage。媒体 URL 已按展示场景选择
           // thumb/detail 变体，因此这里不再附加解码尺寸，避免 CanvasKit
           // 在详情进出后复用不同 ResizeImage 状态而不重绘。
@@ -218,6 +224,7 @@ class AppNetworkImage extends StatelessWidget {
 
         return CachedNetworkImage(
           imageUrl: resolved,
+          cacheManager: ForumImageCaches.forPolicy(cachePolicy, accountScope: cacheAccountScope),
           width: width,
           height: height,
           fit: fit,
@@ -253,10 +260,16 @@ class AppNetworkImage extends StatelessWidget {
 /// 供 [CircleAvatar.backgroundImage] 等需要 [ImageProvider] 的场景使用。
 ///
 /// 解析失败时返回 null，调用方回退到默认头像/占位。
-ImageProvider? appNetworkImageProvider(String? url, {int? maxWidth}) {
+ImageProvider? appNetworkImageProvider(
+  String? url, {
+  int? maxWidth,
+  ImageCachePolicy cachePolicy = ImageCachePolicy.avatar,
+  String? cacheAccountScope,
+}) {
   final resolved = resolveMediaUrl(url);
   if (resolved == null) {
     return null;
   }
-  return CachedNetworkImageProvider(resolved, maxWidth: maxWidth);
+  final cacheManager = ForumImageCaches.forPolicy(cachePolicy, accountScope: cacheAccountScope);
+  return CachedNetworkImageProvider(resolved, maxWidth: maxWidth, cacheManager: cacheManager);
 }

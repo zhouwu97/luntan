@@ -19,6 +19,7 @@ type mediaVariantResponse struct {
 	Height    int    `json:"height"`
 	SizeBytes int64  `json:"size,omitempty"`
 	MimeType  string `json:"mime_type,omitempty"`
+	sha256    string
 }
 
 type postMediaResponse struct {
@@ -32,6 +33,7 @@ type postMediaResponse struct {
 	ModerationStatus string                `json:"moderation_status,omitempty"`
 	MaskRegions      []media.MaskRegion    `json:"mask_regions,omitempty"`
 	Thumb            *mediaVariantResponse `json:"thumb,omitempty"`
+	Feed             *mediaVariantResponse `json:"feed,omitempty"`
 	Detail           *mediaVariantResponse `json:"detail,omitempty"`
 	Original         *mediaVariantResponse `json:"original,omitempty"`
 }
@@ -102,7 +104,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 	if len(items) > 0 {
 		variantsMap := make(map[string]map[string]*mediaVariantResponse)
 		vRows, err := s.db.QueryContext(ctx, `
-			SELECT mv.media_id, mv.variant, mv.object_key, mv.mime_type, mv.width, mv.height, mv.size_bytes
+			SELECT mv.media_id, mv.variant, mv.object_key, mv.mime_type, mv.width, mv.height, mv.size_bytes, COALESCE(mv.sha256, '')
 			FROM media_variants mv
 			JOIN post_media pm ON pm.media_id = mv.media_id
 			WHERE pm.post_id = $1 AND mv.status = 'ready'`, response.ID)
@@ -111,16 +113,18 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 				var mid, variant, objKey, mimeType string
 				var width, height int
 				var sizeBytes int64
-				if err := vRows.Scan(&mid, &variant, &objKey, &mimeType, &width, &height, &sizeBytes); err == nil {
+				var sha256 string
+				if err := vRows.Scan(&mid, &variant, &objKey, &mimeType, &width, &height, &sizeBytes, &sha256); err == nil {
 					if variantsMap[mid] == nil {
 						variantsMap[mid] = make(map[string]*mediaVariantResponse)
 					}
 					variantsMap[mid][variant] = &mediaVariantResponse{
-						URL:       gatewayMediaURL(mid, variant),
+						URL:       gatewayMediaURLWithHash(mid, variant, sha256),
 						Width:     width,
 						Height:    height,
 						SizeBytes: sizeBytes,
 						MimeType:  mimeType,
+						sha256:    sha256,
 					}
 				}
 			}
@@ -135,6 +139,7 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 				// 严格 fail-closed：打码图片若缺少打码变体，绝对禁止回退未打码原图/普通变体
 				if vmap != nil {
 					item.Thumb = vmap["censored_thumb"]
+					item.Feed = vmap["censored_feed"]
 					item.Detail = vmap["censored_detail"]
 					item.Original = vmap["censored_original"]
 				} else {
@@ -151,9 +156,13 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 				} else {
 					item.URL = "" // 无有效打码变体时不输出任何可能泄漏原图的 URL
 				}
+				if item.Feed == nil {
+					item.Feed = item.Detail
+				}
 			} else {
 				if vmap != nil {
 					item.Thumb = vmap["thumb"]
+					item.Feed = vmap["feed"]
 					item.Detail = vmap["detail"]
 					item.Original = vmap["original"]
 					// 有受控变体时 URL 指向变体而非源图；backfill 完成后旧
@@ -165,6 +174,9 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 					} else if item.Original != nil {
 						item.URL = item.Original.URL
 					}
+				}
+				if item.Feed == nil {
+					item.Feed = item.Detail
 				}
 				if item.Thumb == nil && item.URL != "" {
 					item.Thumb = &mediaVariantResponse{
@@ -338,6 +350,25 @@ func publicMediaURL(objectKey string) string {
 // gatewayMediaURL 受控网关形态地址；客户端不接触内部 objectKey。
 func gatewayMediaURL(mediaID, variant string) string {
 	return "/api/v1/media-file/" + mediaID + "/" + variant
+}
+
+func gatewayMediaURLWithHash(mediaID, variant, hash string) string {
+	if !validMediaHash(hash) {
+		return gatewayMediaURL(mediaID, variant)
+	}
+	return gatewayMediaURL(mediaID, variant) + "/" + strings.ToLower(hash)
+}
+
+func validMediaHash(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // mediaVariantURL 优先下发 {mediaID}/{variant} 网关地址；媒体 ID 缺失时

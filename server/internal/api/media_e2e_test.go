@@ -11,6 +11,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +123,9 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'original'`).
 		WithArgs("media_e2e_123", objectKey+"_original.jpg", 2400, 1600, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'feed'`).
+		WithArgs("media_e2e_123", objectKey+"_feed.jpg", 960, 640, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'detail'`).
 		WithArgs("media_e2e_123", objectKey+"_detail.jpg", 1440, 960, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -174,12 +178,13 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 			AddRow("media_e2e_123", "image/jpeg", 2400, 1600, "photo.jpg", objectKey, "normal", "[]"))
 
 	// Query media_variants
-	mock.ExpectQuery(`SELECT mv\.media_id, mv\.variant, mv\.object_key, mv\.mime_type, mv\.width, mv\.height, mv\.size_bytes FROM media_variants mv`).
+	mock.ExpectQuery(`SELECT mv\.media_id, mv\.variant, mv\.object_key, mv\.mime_type, mv\.width, mv\.height, mv\.size_bytes, COALESCE\(mv\.sha256, ''\)`).
 		WithArgs("post-1").
-		WillReturnRows(sqlmock.NewRows([]string{"media_id", "variant", "object_key", "mime_type", "width", "height", "size_bytes"}).
-			AddRow("media_e2e_123", "thumb", objectKey+"_thumb.jpg", "image/jpeg", 640, 427, int64(len(thumbBytes))).
-			AddRow("media_e2e_123", "detail", objectKey+"_detail.jpg", "image/jpeg", 1440, 960, int64(len(detailBytes))).
-			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes))))
+		WillReturnRows(sqlmock.NewRows([]string{"media_id", "variant", "object_key", "mime_type", "width", "height", "size_bytes", "sha256"}).
+			AddRow("media_e2e_123", "thumb", objectKey+"_thumb.jpg", "image/jpeg", 640, 427, int64(len(thumbBytes)), strings.Repeat("a", 64)).
+			AddRow("media_e2e_123", "feed", objectKey+"_feed.jpg", "image/jpeg", 960, 640, int64(len(detailBytes)), strings.Repeat("b", 64)).
+			AddRow("media_e2e_123", "detail", objectKey+"_detail.jpg", "image/jpeg", 1440, 960, int64(len(detailBytes)), strings.Repeat("c", 64)).
+			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes)), strings.Repeat("d", 64)))
 
 	// Query post hot_suppressed
 	mock.ExpectQuery(`(?s)SELECT COALESCE\(hot_suppressed, false\).*FROM posts WHERE id = \$1`).

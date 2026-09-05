@@ -17,7 +17,7 @@ function resolveApiPath(path: string): string {
  * 本地开发时 imported-media 与 /api/v1/media-file 都走 Next 同源代理，
  * 生产环境若配置了 API 地址则使用后端源站，避免把 objectKey 当成静态文件。
  */
-export function resolveMediaUrl(value?: string, variant: "thumb" | "detail" | "original" = "detail"): string | undefined {
+export function resolveMediaUrl(value?: string, variant: "thumb" | "feed" | "detail" | "original" = "detail"): string | undefined {
   if (!value) return undefined;
   const clean = value.trim();
   if (!clean) return undefined;
@@ -32,15 +32,17 @@ export function resolveMediaUrl(value?: string, variant: "thumb" | "detail" | "o
   return resolveAssetUrl(clean);
 }
 
-export function mediaCandidates(asset: MediaAsset, preferred: "thumb" | "detail" | "original" = "thumb"): string[] {
+export function mediaCandidates(asset: MediaAsset, preferred: "thumb" | "feed" | "detail" | "original" = "thumb"): string[] {
   const order = preferred === "thumb"
-    ? [asset.thumbUrl, asset.detailUrl, asset.originalUrl, asset.url]
+    ? [[asset.thumbUrl, "thumb"], [asset.feedUrl, "feed"], [asset.detailUrl, "detail"]]
+    : preferred === "feed"
+      ? [[asset.feedUrl, "feed"], [asset.detailUrl, "detail"], [asset.thumbUrl, "thumb"]]
     : preferred === "original"
-      ? [asset.originalUrl, asset.detailUrl, asset.url, asset.thumbUrl]
-      : [asset.detailUrl, asset.originalUrl, asset.url, asset.thumbUrl];
+      ? [[asset.originalUrl, "original"], [asset.detailUrl, "detail"], [asset.feedUrl, "feed"], [asset.url, "original"], [asset.thumbUrl, "thumb"]]
+      : [[asset.detailUrl, "detail"], [asset.originalUrl, "original"], [asset.feedUrl, "feed"], [asset.thumbUrl, "thumb"], [asset.url, "original"]];
 
   const values = order
-    .map((value) => resolveMediaUrl(value, preferred))
+    .map(([value, variant]) => resolveMediaUrl(value, variant as "thumb" | "feed" | "detail" | "original"))
     .filter((value): value is string => Boolean(value));
   return [...new Set(values)];
 }

@@ -398,6 +398,7 @@ class MediaAsset {
     this.moderationStatus = 'normal',
     this.maskRegions = const [],
     this.thumb,
+    this.feed,
     this.detail,
     this.original,
     this.emoji = '🖼️',
@@ -414,16 +415,20 @@ class MediaAsset {
   final String moderationStatus;
   final List<MaskRegion> maskRegions;
   final MediaVariant? thumb;
+  final MediaVariant? feed;
   final MediaVariant? detail;
   final MediaVariant? original;
 
   bool get isCensored => moderationStatus == 'censored';
 
-  /// Feed/正文预览图地址：优先 detail，避免单图卡片把 640px thumb 放大后变糊。
-  ///
-  /// 历史媒体可能没有 detail，因此按 original、裸 url、thumb 的顺序降级；
-  /// 需要明确使用小图的头像、九宫格等场景应调用 [thumbUrl]。
-  String? get previewUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;
+  /// Feed 多图瓦片使用 640px thumb，避免小图宫格误拉 1440px 详情图。
+  String? get feedGridUrl => thumb?.url ?? detailUrl;
+
+  /// Feed 单图使用 960px feed 变体，旧媒体退回详情图。
+  String? get feedSingleUrl => feed?.url ?? detail?.url ?? thumb?.url ?? originalUrl;
+
+  /// 保留旧调用方，但默认采用小图规格，Feed 不再隐式请求 detail。
+  String? get previewUrl => feedGridUrl;
 
   /// 详情大图地址：优先 detail，退回 original 或裸 url，最后才是 thumb。
   String? get detailUrl => detail?.url ?? original?.url ?? url ?? thumb?.url;

@@ -62,8 +62,8 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 	}
 
 	isVideo := strings.EqualFold(strings.TrimSpace(payload.MimeType), "video/mp4")
-	readyVariants := "'source', 'original', 'detail', 'thumb'"
-	readyTarget := 4
+	readyVariants := "'source', 'original', 'detail', 'feed', 'thumb'"
+	readyTarget := 5
 	if isVideo {
 		// 视频当前只登记源对象，图片衍生图不能由视频处理链路伪造。
 		readyVariants = "'source'"
@@ -123,11 +123,15 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 		}
 
 		origKey := payload.ObjectKey + "_original.jpg"
+		feedKey := payload.ObjectKey + "_feed.jpg"
 		detailKey := payload.ObjectKey + "_detail.jpg"
 		thumbKey := payload.ObjectKey + "_thumb.jpg"
 		// 只有三个真实对象全部上传成功后，下面的数据库事务才会写 ready。
 		if err := h.Storage.Put(ctx, origKey, procRes.Original.MimeType, bytes.NewReader(procRes.Original.Data), procRes.Original.SizeBytes); err != nil {
 			return fmt.Errorf("upload original variant: %w", err)
+		}
+		if err := h.Storage.Put(ctx, feedKey, procRes.Feed.MimeType, bytes.NewReader(procRes.Feed.Data), procRes.Feed.SizeBytes); err != nil {
+			return fmt.Errorf("upload feed variant: %w", err)
 		}
 		if err := h.Storage.Put(ctx, detailKey, procRes.Detail.MimeType, bytes.NewReader(procRes.Detail.Data), procRes.Detail.SizeBytes); err != nil {
 			return fmt.Errorf("upload detail variant: %w", err)
@@ -183,6 +187,16 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 	}
 
 	// 3. detail 变体（长边 <= 1440px）
+	feedKey := payload.ObjectKey + "_feed.jpg"
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
+		VALUES ($1, 'feed', $2, 'image/jpeg', $3, $4, $5, $6, 'ready', $7, $7)
+		ON CONFLICT (media_id, variant) DO UPDATE SET object_key = EXCLUDED.object_key, width = EXCLUDED.width, height = EXCLUDED.height, size_bytes = EXCLUDED.size_bytes, sha256 = EXCLUDED.sha256, status = 'ready', updated_at = EXCLUDED.updated_at
+	`, payload.MediaID, feedKey, procRes.Feed.Width, procRes.Feed.Height, procRes.Feed.SizeBytes, procRes.Feed.SHA256, now); err != nil {
+		return fmt.Errorf("save feed variant: %w", err)
+	}
+
+	// 4. detail 变体（长边 <= 1440px）
 	detailKey := payload.ObjectKey + "_detail.jpg"
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)
@@ -199,7 +213,7 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 		return fmt.Errorf("save detail variant: %w", err)
 	}
 
-	// 4. thumb 变体（长边 <= 640px）
+	// 5. thumb 变体（长边 <= 640px）
 	thumbKey := payload.ObjectKey + "_thumb.jpg"
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_variants (media_id, variant, object_key, mime_type, width, height, size_bytes, sha256, status, created_at, updated_at)

@@ -1,18 +1,22 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { MouseEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "./icons";
 import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
 import { useToast } from "./toast-context";
-import { ImageGalleryModal, type GalleryImage } from "./image-gallery-modal";
-import { ReportModal } from "./report-modal";
+import type { GalleryImage } from "./image-gallery-modal";
 import type { Post, SessionUser } from "../types/forum";
 import { deletePost, setPostBookmark, setPostLike } from "../lib/api/forum";
 import { compactCount, relativeTime } from "../lib/format";
 import { mediaCandidates } from "../lib/media-url";
+import { prefetchPost, setPostSnapshot } from "../lib/post-memory-cache";
+
+const ImageGalleryModal = dynamic(() => import("./image-gallery-modal").then((module) => module.ImageGalleryModal), { ssr: false });
+const ReportModal = dynamic(() => import("./report-modal").then((module) => module.ReportModal), { ssr: false });
 
 function stop(event: MouseEvent) {
   event.preventDefault();
@@ -23,10 +27,12 @@ export function PostCard({
   post,
   user,
   contextMeta,
+  feedIndex,
 }: {
   post: Post;
   user: SessionUser | null;
   contextMeta?: string;
+  feedIndex?: number;
 }) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -143,7 +149,13 @@ export function PostCard({
       return;
     }
 
+    setPostSnapshot(post, user?.id);
     router.push(`/post/${encodeURIComponent(post.id)}`);
+  }
+
+  function prepareDetail() {
+    void prefetchPost(post, user?.id);
+    router.prefetch(`/post/${encodeURIComponent(post.id)}`);
   }
 
   return (
@@ -155,14 +167,15 @@ export function PostCard({
         role="article"
         aria-label={post.title}
         onPointerEnter={() => {
-          router.prefetch(`/post/${encodeURIComponent(post.id)}`);
+          prepareDetail();
         }}
         onTouchStart={() => {
-          router.prefetch(`/post/${encodeURIComponent(post.id)}`);
+          prepareDetail();
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && event.target === event.currentTarget) {
             event.preventDefault();
+            setPostSnapshot(post, user?.id);
             router.push(`/post/${encodeURIComponent(post.id)}`);
           }
         }}
@@ -252,7 +265,7 @@ export function PostCard({
         )}
 
         <div className="post-card-body">
-          <Link href={`/post/${encodeURIComponent(post.id)}`} className="post-card-content-link">
+          <Link href={`/post/${encodeURIComponent(post.id)}`} className="post-card-content-link" onClick={() => setPostSnapshot(post, user?.id)}>
             <h2 className="post-title">{post.title}</h2>
             <p className="post-text">{post.content}</p>
           </Link>
@@ -272,7 +285,12 @@ export function PostCard({
                   <MediaImage
                     asset={item}
                     alt={item.altText || "帖子图片"}
-                    loading={index === 0 ? "eager" : "lazy"}
+                    preferred={post.media.length === 1 ? "feed" : "thumb"}
+                    loading={feedIndex === 0 && index === 0 ? "eager" : "lazy"}
+                    fetchPriority={feedIndex === 0 && index === 0 ? "high" : "auto"}
+                    sizes={post.media.length === 1 ? "(max-width: 720px) 100vw, 640px" : "(max-width: 720px) 33vw, 220px"}
+                    width={item.width}
+                    height={item.height}
                     className="media-image"
                   />
                   {post.media.length > 4 && index === 3 && (

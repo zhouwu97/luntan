@@ -158,6 +158,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         repository: auth,
         profileRepository: repositories.isApiMode ? repositories.profile : null,
       );
+      authController!.addListener(_syncFeedAccountScope);
       repositories.apiClient?.onSessionInvalidated = _handleSessionInvalidated;
       authInitialization = authController!.initialize().then((_) async {
         if (authController?.status == AuthStatus.authenticated) {
@@ -248,6 +249,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     unreadCount.dispose();
+    authController?.removeListener(_syncFeedAccountScope);
     authController?.dispose();
     interactionController.dispose();
     publishController.dispose();
@@ -257,6 +259,13 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     repositories.close();
     updateCoordinator.dispose();
     super.dispose();
+  }
+
+  void _syncFeedAccountScope() {
+    final auth = authController;
+    feedController.setAccountScope(
+      auth?.status == AuthStatus.authenticated ? auth?.user?.id : null,
+    );
   }
 
   @override
@@ -449,6 +458,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     final detailController = PostDetailController(
       repository: repositories.post,
       postId: normalizedPostId,
+      initialPost: postForHistory,
     );
     final commentsController = CommentsController(
       repository: repositories.comments!,

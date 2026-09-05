@@ -12,6 +12,8 @@ import {
   registerWithEmail,
 } from "../lib/api/forum";
 import { refreshSession } from "../lib/api/client";
+import { clearFeedCache } from "../lib/feed-cache";
+import { clearPostSnapshots } from "../lib/post-memory-cache";
 
 interface SessionContextValue {
   user: SessionUser | null;
@@ -88,7 +90,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         setUnreadCount(0);
       },
       signOut: async () => {
+        const accountScope = user?.id;
         await logout();
+        clearFeedCache(accountScope);
+        clearPostSnapshots(accountScope);
         setUser(null);
         setUnreadCount(0);
       },

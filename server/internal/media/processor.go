@@ -36,7 +36,7 @@ type MaskPoint struct {
 }
 
 type ProcessedVariant struct {
-	Variant   string // "thumb", "detail", "original", "censored_thumb", "censored_detail", "censored_original"
+	Variant   string // "thumb", "feed", "detail", "original", "censored_*"
 	MimeType  string
 	Width     int
 	Height    int
@@ -51,12 +51,13 @@ type ProcessResult struct {
 	SourceMimeType string
 	AppliedRegions int
 	Thumb          ProcessedVariant
+	Feed           ProcessedVariant
 	Detail         ProcessedVariant
 	Original       ProcessedVariant
 }
 
 // ProcessImage 真实解码图像源文件，剔除 EXIF/GPS 元数据并按分辨率生成
-// thumb (<= 640px)、detail (<= 1440px) 与 original (原尺寸重新编码) 变体。
+// thumb (<= 640px)、feed (<= 960px)、detail (<= 1440px) 与 original 变体。
 func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -88,7 +89,18 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 		return nil, fmt.Errorf("encode original variant: %w", err)
 	}
 
-	// 2. 生成 detail 变体（长边 <= 1440px）
+	// 2. 生成 feed 变体（长边 <= 960px），覆盖手机 Feed 单图的 3x 解码尺寸。
+	feedW, feedH := calcScaledDimensions(origW, origH, 960)
+	var feedImg image.Image = srcImg
+	if feedW != origW || feedH != origH {
+		feedImg = resizeCatmullRom(srcImg, feedW, feedH)
+	}
+	feedVariant, err := encodeVariant(feedImg, feedW, feedH, "feed", 85)
+	if err != nil {
+		return nil, fmt.Errorf("encode feed variant: %w", err)
+	}
+
+	// 3. 生成 detail 变体（长边 <= 1440px）
 	detailW, detailH := calcScaledDimensions(origW, origH, 1440)
 	var detailImg image.Image = srcImg
 	if detailW != origW || detailH != origH {
@@ -99,7 +111,7 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 		return nil, fmt.Errorf("encode detail variant: %w", err)
 	}
 
-	// 3. 生成 thumb 变体（长边 <= 640px）
+	// 4. 生成 thumb 变体（长边 <= 640px）
 	thumbW, thumbH := calcScaledDimensions(origW, origH, 640)
 	var thumbImg image.Image = srcImg
 	if thumbW != origW || thumbH != origH {
@@ -115,6 +127,7 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 		OriginalHeight: origH,
 		SourceMimeType: "image/" + format,
 		Thumb:          thumbVariant,
+		Feed:           feedVariant,
 		Detail:         detailVariant,
 		Original:       origVariant,
 	}, nil
@@ -728,7 +741,18 @@ func ProcessCensoredImageBytes(data []byte, regions []MaskRegion) (*ProcessResul
 		return nil, fmt.Errorf("encode censored original variant: %w", err)
 	}
 
-	// 2. 生成 censored_detail (长边 <= 1440px)
+	// 2. 生成 censored_feed (长边 <= 960px)
+	feedW, feedH := calcScaledDimensions(origW, origH, 960)
+	var feedImg image.Image = censoredImg
+	if feedW != origW || feedH != origH {
+		feedImg = resizeCatmullRom(censoredImg, feedW, feedH)
+	}
+	feedVariant, err := encodeVariant(feedImg, feedW, feedH, "censored_feed", 85)
+	if err != nil {
+		return nil, fmt.Errorf("encode censored feed variant: %w", err)
+	}
+
+	// 3. 生成 censored_detail (长边 <= 1440px)
 	detailW, detailH := calcScaledDimensions(origW, origH, 1440)
 	var detailImg image.Image = censoredImg
 	if detailW != origW || detailH != origH {
@@ -739,7 +763,7 @@ func ProcessCensoredImageBytes(data []byte, regions []MaskRegion) (*ProcessResul
 		return nil, fmt.Errorf("encode censored detail variant: %w", err)
 	}
 
-	// 3. 生成 censored_thumb (长边 <= 640px)
+	// 4. 生成 censored_thumb (长边 <= 640px)
 	thumbW, thumbH := calcScaledDimensions(origW, origH, 640)
 	var thumbImg image.Image = censoredImg
 	if thumbW != origW || thumbH != origH {
@@ -756,6 +780,7 @@ func ProcessCensoredImageBytes(data []byte, regions []MaskRegion) (*ProcessResul
 		SourceMimeType: "image/" + format,
 		AppliedRegions: appliedRegions,
 		Thumb:          thumbVariant,
+		Feed:           feedVariant,
 		Detail:         detailVariant,
 		Original:       origVariant,
 	}, nil

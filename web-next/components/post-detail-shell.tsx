@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { ChangeEvent, FormEvent, MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "./site-header";
@@ -10,9 +11,9 @@ import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
-import { ImageGalleryModal, type GalleryImage } from "./image-gallery-modal";
-import { ReportModal } from "./report-modal";
+import type { GalleryImage } from "./image-gallery-modal";
 import { mediaCandidates } from "../lib/media-url";
+import { fetchPost, getPostSnapshot, setPostSnapshot } from "../lib/post-memory-cache";
 import {
   createComment,
   createReply,
@@ -21,7 +22,6 @@ import {
   getCommentReplies,
   getComments,
   getFeed,
-  getPost,
   recordHistory,
   setCommentDislike,
   setCommentLike,
@@ -33,12 +33,15 @@ import {
 import { compactCount, formatError, relativeTime } from "../lib/format";
 import type { Comment, MediaAsset, Post, SessionUser } from "../types/forum";
 
+const ImageGalleryModal = dynamic(() => import("./image-gallery-modal").then((module) => module.ImageGalleryModal), { ssr: false });
+const ReportModal = dynamic(() => import("./report-modal").then((module) => module.ReportModal), { ssr: false });
+
 export function PostDetailShell({ id }: { id: string }) {
   const router = useRouter();
   const { user } = useSession();
   const { showToast } = useToast();
-  const [post, setPost] = useState<Post | null>(null);
-  const [postLoading, setPostLoading] = useState(true);
+  const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id));
+  const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id));
   const [postError, setPostError] = useState("");
 
   const [comments, setComments] = useState<Comment[]>([]);
@@ -67,17 +70,20 @@ export function PostDetailShell({ id }: { id: string }) {
   // 1. 优先获取并展示正文（核心数据，不被评论或推荐阻塞）
   useEffect(() => {
     let mounted = true;
-    setPostLoading(true);
+    const snapshot = getPostSnapshot(id, user?.id) || getPostSnapshot(id);
+    if (snapshot) setPost(snapshot);
+    setPostLoading(!snapshot);
     setPostError("");
 
-    getPost(id)
+    fetchPost(id, user?.id)
       .then((nextPost) => {
         if (!mounted) return;
         setPost(nextPost);
+        setPostSnapshot(nextPost, user?.id);
       })
       .catch((requestError: unknown) => {
         if (!mounted) return;
-        setPost(null);
+        if (!snapshot) setPost(null);
         setPostError(formatError(requestError, "帖子暂时无法加载，请稍后再试"));
       })
       .finally(() => {
@@ -87,7 +93,7 @@ export function PostDetailShell({ id }: { id: string }) {
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, user?.id]);
 
   // 2. 独立并发加载评论（带 requestId 防竞态、单一数据触发源，绝不阻塞正文）
   const commentsRequestIdRef = useRef(0);
@@ -751,7 +757,7 @@ function PostArticle({
               style={{ cursor: "pointer" }}
               onClick={() => onOpenGallery(articleImages, index)}
             >
-              <MediaImage asset={asset} alt={`${post.title} 图片 ${index + 1}`} />
+              <MediaImage asset={asset} preferred="detail" alt={`${post.title} 图片 ${index + 1}`} />
             </div>
           ))}
         </div>
@@ -1177,7 +1183,12 @@ function CommentMediaThumbnail({
   alt: string;
   onClick: (e: MouseEvent) => void;
 }) {
-  const candidates = mediaCandidates(asset, "thumb");
+  // 评论详情允许用原图做最终容灾；首页 Feed 使用的 MediaImage 不走这条链。
+  const candidates = [...new Set([
+    ...mediaCandidates(asset, "thumb"),
+    ...mediaCandidates(asset, "detail"),
+    ...mediaCandidates(asset, "original"),
+  ])];
   const [candidateIdx, setCandidateIdx] = useState(0);
   const src = candidates[candidateIdx] || asset.thumbUrl || asset.url;
   const isFailed = candidateIdx >= candidates.length && candidates.length > 0;

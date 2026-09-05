@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+import '../data/cache/feed_cache.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
 
@@ -43,10 +46,13 @@ class FeedState {
 }
 
 class FeedController extends ChangeNotifier {
-  FeedController({required FeedRepository repository})
-    : _repository = repository;
+  FeedController({required FeedRepository repository, String? accountScope})
+    : _repository = repository,
+      _accountScope = accountScope ?? 'anon';
 
   final FeedRepository _repository;
+  final FeedCacheService _cache = FeedCacheService();
+  String _accountScope;
   FeedState _state = const FeedState();
   int _generation = 0;
   int? _loadingMoreGeneration;
@@ -72,7 +78,16 @@ class FeedController extends ChangeNotifier {
 
   Future<void> initialLoad() async {
     if (_state.status != FeedStatus.initial) return;
+    final requestGeneration = _generation + 1;
+    unawaited(_restoreCache(requestGeneration));
     await _startFirstPage();
+  }
+
+  void setAccountScope(String? accountId) {
+    final next = accountId?.trim().isNotEmpty == true ? accountId!.trim() : 'anon';
+    if (_accountScope == next) return;
+    _accountScope = next;
+    reset();
   }
 
   Future<void> refresh() async {
@@ -155,6 +170,7 @@ class FeedController extends ChangeNotifier {
         nextCursor: cursorRepeated ? null : page.nextCursor,
         hasMore: cursorRepeated ? false : page.hasMore,
       );
+      unawaited(_cache.write(accountScope: _accountScope, communityId: communityId, sort: sort, latestOrder: latestOrder, page: FeedPage(items: items, nextCursor: _state.nextCursor, hasMore: _state.hasMore)));
     } catch (error) {
       if (generation != _generation) return;
       _state = _state.copyWith(
@@ -205,6 +221,7 @@ class FeedController extends ChangeNotifier {
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       );
+      unawaited(_cache.write(accountScope: _accountScope, communityId: communityId, sort: sort, latestOrder: latestOrder, page: page));
     } catch (error) {
       if (generation != _generation) return;
       _state = FeedState(
@@ -214,6 +231,26 @@ class FeedController extends ChangeNotifier {
       );
     }
     if (generation == _generation) notifyListeners();
+  }
+
+  Future<void> _restoreCache(int expectedGeneration) async {
+    final cached = await _cache.read(
+      accountScope: _accountScope,
+      communityId: _communityId,
+      sort: _sort,
+      latestOrder: _latestOrder,
+    );
+    if (cached == null || expectedGeneration != _generation || _state.items.isNotEmpty) return;
+    _knownIds
+      ..clear()
+      ..addAll(cached.items.map((item) => item.id));
+    _state = FeedState(
+      status: cached.items.isEmpty ? FeedStatus.empty : FeedStatus.success,
+      items: cached.items,
+      nextCursor: cached.nextCursor,
+      hasMore: cached.hasMore,
+    );
+    notifyListeners();
   }
 
   Future<FeedPage> _fetch({

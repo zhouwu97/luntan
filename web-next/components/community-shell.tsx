@@ -10,7 +10,7 @@ import { SiteHeader } from "./site-header";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { getCommunity, getFeed } from "../lib/api/forum";
-import { readFeedCache, writeFeedCache } from "../lib/feed-cache";
+import { readFeedCacheSnapshot, writeFeedCache } from "../lib/feed-cache";
 import { relativeTime } from "../lib/format";
 import type { Community, Post } from "../types/forum";
 
@@ -59,16 +59,19 @@ export function CommunityShell({ communityId }: { communityId: string }) {
     return () => { active = false; };
   }, [communityId]);
 
-  const cacheOptions = useMemo(() => ({ communityId, sort, latestOrder, hasMedia }), [communityId, hasMedia, latestOrder, sort]);
+  const cacheOptions = useMemo(() => ({ communityId, sort, latestOrder, hasMedia, accountScope: user?.id }), [communityId, hasMedia, latestOrder, sort, user?.id]);
 
   useEffect(() => {
     let active = true;
-    const cached = readFeedCache(cacheOptions);
+    const snapshot = readFeedCacheSnapshot(cacheOptions);
+    const cached = snapshot?.page || null;
     setPosts(cached?.items || []);
     setNextCursor(cached?.nextCursor);
     setHasMore(Boolean(cached?.hasMore));
-    setLoading(!cached);
+    setLoading(!snapshot);
     setError("");
+
+    if (snapshot?.isFresh) return () => { active = false; };
 
     void getFeed({ communityId, sort, latestOrder, hasMedia })
       .then((page) => {
@@ -153,7 +156,7 @@ export function CommunityShell({ communityId }: { communityId: string }) {
           <FeedToolbar sort={sort} latestOrder={latestOrder} hasMedia={hasMedia} filterOpen={filterOpen} onSortChange={(nextSort) => updateQuery(nextSort)} onLatestOrderChange={setLatestOrder} onFilterToggle={() => setFilterOpen((value) => !value)} onMediaChange={(value) => updateQuery(sort, value)} canPublish={Boolean(user)} />
           {loading && visiblePosts.length > 0 && <div className="feed-refreshing" role="status">正在更新内容…</div>}
           {error && <div className="data-note" role="status">{error}</div>}
-          {loading && !visiblePosts.length ? <div className="loading-stack community-detail-loading"><div className="skeleton-card" /><div className="skeleton-card short" /></div> : visiblePosts.length ? <div className="post-list community-detail-post-list">{visiblePosts.map((post) => <PostCard key={post.id} post={post} user={user} contextMeta={sort === "latest" && latestOrder === "comment" && post.activityAt ? `最近回复 ${relativeTime(post.activityAt)}` : undefined} />)}</div> : <div className="empty-state community-detail-empty"><span className="empty-icon"><Icon name="box" size={24} /></span><h2>{emptyTitle}</h2><p>{query ? `没有找到与“${query}”匹配的内容` : "稍后再来看看吧。"}</p></div>}
+          {loading && !visiblePosts.length ? <div className="loading-stack community-detail-loading"><div className="skeleton-card" /><div className="skeleton-card short" /></div> : visiblePosts.length ? <div className="post-list community-detail-post-list">{visiblePosts.map((post, index) => <PostCard key={post.id} post={post} user={user} feedIndex={index} contextMeta={sort === "latest" && latestOrder === "comment" && post.activityAt ? `最近回复 ${relativeTime(post.activityAt)}` : undefined} />)}</div> : <div className="empty-state community-detail-empty"><span className="empty-icon"><Icon name="box" size={24} /></span><h2>{emptyTitle}</h2><p>{query ? `没有找到与“${query}”匹配的内容` : "稍后再来看看吧。"}</p></div>}
           {hasMore && <button type="button" className="load-more-button community-detail-more" onClick={loadMore} disabled={loadingMore}>{loadingMore ? "正在加载…" : "加载更多"}</button>}
         </section>
         <button type="button" className="mobile-refresh community-detail-refresh" aria-label="刷新社区内容" onClick={() => setRefreshVersion((value) => value + 1)}><Icon name="refresh" size={20} /></button>

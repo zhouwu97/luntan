@@ -401,21 +401,23 @@ func newMediaID() (string, error) {
 	return "media_" + hex.EncodeToString(raw[:]), nil
 }
 
-// 公开图片变体白名单：gateway 鉴权模型下普通媒体只放行这三类派生变体。
+// 公开图片变体白名单：gateway 鉴权模型下普通媒体只放行派生变体。
 var publicImageVariants = map[string]bool{
 	"original": true,
+	"feed":     true,
 	"detail":   true,
 	"thumb":    true,
 }
 
 // knownGatewayVariants 枚举 /api/v1/media-file/{mediaID}/{variant} 中第二段
-// 的合法取值；不在表内的变体名直接 404，不回退为 objectKey 解析。
+// 的合法取值；第三段可选为 64 位 SHA-256，不在表内的变体名直接 404。
 var knownGatewayVariants = map[string]bool{
 	"source":            true,
 	"original":          true,
 	"detail":            true,
 	"thumb":             true,
 	"censored_original": true,
+	"censored_feed":     true,
 	"censored_detail":   true,
 	"censored_thumb":    true,
 }
@@ -460,25 +462,36 @@ const mediaPublicVisibilityExpr = `EXISTS (
 // media- 或榜单导入器使用的 mda- 前缀媒体 ID，避免与
 // media/{userID}/{mediaID} 形态的历史 objectKey 混淆。
 func parseGatewayMediaPath(rest string) (mediaID, variant string, ok bool) {
+	mediaID, variant, _, ok = parseGatewayMediaPathVersioned(rest)
+	return
+}
+
+func parseGatewayMediaPathVersioned(rest string) (mediaID, variant, revision string, ok bool) {
 	segments := strings.Split(rest, "/")
-	if len(segments) != 2 {
-		return "", "", false
+	if len(segments) != 2 && len(segments) != 3 {
+		return "", "", "", false
 	}
 	id, name := segments[0], segments[1]
 	if !isGatewayMediaID(id) {
-		return "", "", false
+		return "", "", "", false
 	}
 	if !knownGatewayVariants[name] {
-		return "", "", false
+		return "", "", "", false
 	}
-	return id, name, true
+	if len(segments) == 3 {
+		if !validMediaHash(segments[2]) {
+			return "", "", "", false
+		}
+		revision = strings.ToLower(segments[2])
+	}
+	return id, name, revision, true
 }
 
 // isGatewayShapedPath 判断路径是否是“媒体 ID/变体”形态（无论变体名是否合法），
 // 用于把非法变体名的请求与历史 objectKey 区分开。
 func isGatewayShapedPath(rest string) bool {
 	segments := strings.Split(rest, "/")
-	if len(segments) != 2 {
+	if len(segments) != 2 && len(segments) != 3 {
 		return false
 	}
 	id := segments[0]
@@ -492,7 +505,7 @@ func isGatewayMediaID(id string) bool {
 }
 
 // publicVariantAllowed 实现公开变体白名单：censored 媒体只放行 censored_*
-// 打码变体；普通媒体放行 original/detail/thumb；source 仅视频放行（其唯一
+// 打码变体；普通媒体放行 original/feed/detail/thumb；source 仅视频放行（其唯一
 // 可播放表示，且视频不支持打码）。其余一律拒绝。
 func publicVariantAllowed(mimeType, moderationStatus, variant string) bool {
 	if moderationStatus == "censored" {
@@ -511,7 +524,14 @@ func publicVariantAllowed(mimeType, moderationStatus, variant string) bool {
 // 对象，下发一年期 immutable；其余对象下发 private/no-store，避免之后切换为
 // censored 时浏览器/CDN 仍持有未打码内容。
 func mediaCacheControl(moderationStatus, variant string) string {
+	return mediaCacheControlVersioned(moderationStatus, variant, false)
+}
+
+func mediaCacheControlVersioned(moderationStatus, variant string, versioned bool) string {
 	if moderationStatus == "censored" && strings.HasPrefix(variant, "censored_") {
+		return "public, max-age=31536000, immutable"
+	}
+	if versioned && moderationStatus == "normal" && variant != "source" {
 		return "public, max-age=31536000, immutable"
 	}
 	// 普通媒体可能在审核后变为 censored，不能长期缓存未打码内容；
@@ -544,8 +564,8 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, rest str
 		writeAuthError(w, r, ErrStorageUnavailable)
 		return
 	}
-	if mediaID, variant, ok := parseGatewayMediaPath(rest); ok {
-		s.serveGatewayMediaVariant(w, r, backend, mediaID, variant)
+	if mediaID, variant, revision, ok := parseGatewayMediaPathVersioned(rest); ok {
+		s.serveGatewayMediaVariant(w, r, backend, mediaID, variant, revision)
 		return
 	}
 	// media_x/y 形态但变体名不在白名单：明确是网关形态的非法请求，直接 404，
@@ -573,17 +593,27 @@ func (s *Server) gatewayAuthorizationReady(w http.ResponseWriter, r *http.Reques
 
 // serveGatewayMediaVariant 处理 {mediaID}/{variant} 形态：按媒体 ID 与变体名
 // 解析出对象后执行公开变体白名单与资源公开可见校验。
-func (s *Server) serveGatewayMediaVariant(w http.ResponseWriter, r *http.Request, backend mediaStorage, mediaID, variant string) {
+func (s *Server) serveGatewayMediaVariant(w http.ResponseWriter, r *http.Request, backend mediaStorage, mediaID, variant, revision string) {
 	if !s.gatewayAuthorizationReady(w, r) {
 		return
 	}
-	var mimeType, moderationStatus, objectKey string
-	err := s.db.QueryRowContext(r.Context(), `
-		SELECT ma.mime_type, COALESCE(ma.moderation_status, 'normal'), mv.object_key
-		FROM media_assets ma
-		JOIN media_variants mv ON mv.media_id = ma.id AND mv.variant = $2 AND mv.status = 'ready'
-		WHERE ma.id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
-		  AND (`+mediaPublicVisibilityExpr+`)`, mediaID, variant).Scan(&mimeType, &moderationStatus, &objectKey)
+	var mimeType, moderationStatus, objectKey, storedHash string
+	var err error
+	if revision == "" {
+		err = s.db.QueryRowContext(r.Context(), `
+			SELECT ma.mime_type, COALESCE(ma.moderation_status, 'normal'), mv.object_key
+			FROM media_assets ma
+			JOIN media_variants mv ON mv.media_id = ma.id AND mv.variant = $2 AND mv.status = 'ready'
+			WHERE ma.id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
+			  AND (`+mediaPublicVisibilityExpr+`)`, mediaID, variant).Scan(&mimeType, &moderationStatus, &objectKey)
+	} else {
+		err = s.db.QueryRowContext(r.Context(), `
+			SELECT ma.mime_type, COALESCE(ma.moderation_status, 'normal'), mv.object_key, COALESCE(mv.sha256, '')
+			FROM media_assets ma
+			JOIN media_variants mv ON mv.media_id = ma.id AND mv.variant = $2 AND mv.status = 'ready'
+			WHERE ma.id = $1 AND ma.status = 'ready' AND ma.deleted_at IS NULL
+			  AND (`+mediaPublicVisibilityExpr+`)`, mediaID, variant).Scan(&mimeType, &moderationStatus, &objectKey, &storedHash)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrMediaNotFound)
 		return
@@ -596,7 +626,11 @@ func (s *Server) serveGatewayMediaVariant(w http.ResponseWriter, r *http.Request
 		writeAuthError(w, r, ErrMediaNotFound)
 		return
 	}
-	s.serveAuthorizedMediaObject(w, r, backend, objectKey, mediaCacheControl(moderationStatus, variant))
+	if revision != "" && !strings.EqualFold(revision, storedHash) {
+		writeAuthError(w, r, ErrMediaNotFound)
+		return
+	}
+	s.serveAuthorizedMediaObjectWithHash(w, r, backend, objectKey, mediaCacheControlVersioned(moderationStatus, variant, revision != ""), storedHash)
 }
 
 // serveMediaFileGateway 处理 gateway 模式下的 {objectKey} 历史形态：先把
@@ -768,6 +802,16 @@ func (s *Server) serveMediaFileDirect(w http.ResponseWriter, r *http.Request, ba
 // （含 Range/条件请求）；否则回退 Go 进程内拉流，本地存储返回 ReadSeeker 时
 // 由 http.ServeContent 额外提供 Range 与条件请求支持。
 func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey, cacheControl string) {
+	s.serveAuthorizedMediaObjectWithHash(w, r, backend, objectKey, cacheControl, "")
+}
+
+func (s *Server) serveAuthorizedMediaObjectWithHash(w http.ResponseWriter, r *http.Request, backend mediaStorage, objectKey, cacheControl, contentHash string) {
+	etagForSize := func(size int64) string {
+		if validMediaHash(contentHash) {
+			return `"` + strings.ToLower(contentHash) + `"`
+		}
+		return mediaETag(objectKey, size)
+	}
 	if s.mediaDeliveryMode == "gateway" && s.mediaAccelPrefix != "" {
 		// 历史导入媒体的 object_key 可能是完整的 imported-media URL；
 		// 当前内部 Nginx location 指向 user-media，不能把该 URL 原样
@@ -775,7 +819,7 @@ func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Reque
 		// 回退到存储适配器，由其按受控规则归一化路径后读取。
 		if accelKey, ok := mediaAccelObjectKey(objectKey); ok {
 			w.Header().Set("Cache-Control", cacheControl)
-			w.Header().Set("ETag", mediaETag(objectKey, 0))
+			w.Header().Set("ETag", etagForSize(0))
 			w.Header().Set("X-Accel-Redirect", s.mediaAccelPrefix+"/"+accelKey)
 			w.WriteHeader(http.StatusOK)
 			return
@@ -795,7 +839,7 @@ func (s *Server) serveAuthorizedMediaObject(w http.ResponseWriter, r *http.Reque
 	}
 	defer rc.Close()
 	w.Header().Set("Cache-Control", cacheControl)
-	etag := mediaETag(objectKey, size)
+	etag := etagForSize(size)
 	w.Header().Set("ETag", etag)
 	if strings.Contains(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
@@ -1031,6 +1075,7 @@ func validateModerationInput(input moderateMediaInput) (string, string, error) {
 
 type mediaModerationVersionKeys struct {
 	Original string
+	Feed     string
 	Detail   string
 	Thumb    string
 }
@@ -1041,12 +1086,14 @@ func ensureMediaModerationBaselineTx(ctx context.Context, tx *sql.Tx, mediaID st
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO media_moderation_versions (
 			id, media_id, media_id_snapshot, version_no, moderation_status, mask_regions,
-			original_object_key, detail_object_key, thumb_object_key,
+			original_object_key, feed_object_key, detail_object_key, thumb_object_key,
 			reason, created_at
 		)
 		SELECT $1, ma.id, ma.id, 1, 'normal', '[]'::jsonb,
 			COALESCE((SELECT mv.object_key FROM media_variants mv
 				WHERE mv.media_id = ma.id AND mv.variant = 'original' AND mv.status = 'ready'), ma.object_key),
+			COALESCE((SELECT mv.object_key FROM media_variants mv
+				WHERE mv.media_id = ma.id AND mv.variant = 'feed' AND mv.status = 'ready'), ''),
 			COALESCE((SELECT mv.object_key FROM media_variants mv
 				WHERE mv.media_id = ma.id AND mv.variant = 'detail' AND mv.status = 'ready'), ''),
 			COALESCE((SELECT mv.object_key FROM media_variants mv
@@ -1071,11 +1118,11 @@ func appendMediaModerationVersionTx(ctx context.Context, tx *sql.Tx, mediaID, st
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO media_moderation_versions (
 			id, media_id, media_id_snapshot, version_no, moderation_status, mask_regions,
-			original_object_key, detail_object_key, thumb_object_key,
+			original_object_key, feed_object_key, detail_object_key, thumb_object_key,
 			operator_id, reason, created_at
-		) VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)`,
+		) VALUES ($1, $2, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)`,
 		newPostID(), mediaID, versionNo, status, string(regionsJSON),
-		keys.Original, keys.Detail, keys.Thumb, operatorID, reason, createdAt); err != nil {
+		keys.Original, keys.Feed, keys.Detail, keys.Thumb, operatorID, reason, createdAt); err != nil {
 		return 0, err
 	}
 	return versionNo, nil
@@ -1231,12 +1278,13 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		maskSum := sha256.Sum256(regionsJSON)
 		maskHash := hex.EncodeToString(maskSum[:])[:8]
 		origKey := fmt.Sprintf("%s_censored_%s_original.jpg", objectKey, maskHash)
+		feedKey := fmt.Sprintf("%s_censored_%s_feed.jpg", objectKey, maskHash)
 		detailKey := fmt.Sprintf("%s_censored_%s_detail.jpg", objectKey, maskHash)
 		thumbKey := fmt.Sprintf("%s_censored_%s_thumb.jpg", objectKey, maskHash)
 
 		// 严格校验每一个变体的上传结果（Fail Closed）；失败时清理已经
 		// 上传的孤儿变体，避免留下无法被 DB 引用的公开对象。
-		writtenKeys := make([]string, 0, 3)
+		writtenKeys := make([]string, 0, 4)
 		cleanupVariants := func() {
 			if len(writtenKeys) == 0 {
 				return
@@ -1256,6 +1304,10 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		}
 		if err := putVariant(origKey, procRes.Original); err != nil {
 			writeInternalError(w, r, fmt.Errorf("failed to store censored_original: %w", err))
+			return
+		}
+		if err := putVariant(feedKey, procRes.Feed); err != nil {
+			writeInternalError(w, r, fmt.Errorf("failed to store censored_feed: %w", err))
 			return
 		}
 		if err := putVariant(detailKey, procRes.Detail); err != nil {
@@ -1291,6 +1343,7 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			p       media.ProcessedVariant
 		}{
 			{"censored_original", origKey, procRes.Original},
+			{"censored_feed", feedKey, procRes.Feed},
 			{"censored_detail", detailKey, procRes.Detail},
 			{"censored_thumb", thumbKey, procRes.Thumb},
 		} {
@@ -1332,6 +1385,7 @@ func (s *Server) moderateMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		}
 		if _, err := appendMediaModerationVersionTx(r.Context(), tx, mediaID, "censored", regionsJSON, mediaModerationVersionKeys{
 			Original: origKey,
+			Feed:     feedKey,
 			Detail:   detailKey,
 			Thumb:    thumbKey,
 		}, user.ID, input.Reason, now); err != nil {

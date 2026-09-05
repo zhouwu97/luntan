@@ -16,7 +16,7 @@ import { PostCard } from "./post-card";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { getCommunities, getFeed } from "../lib/api/forum";
-import { readFeedCache, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
+import { readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
 import { selectHomeCommunities } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
 import type { Community, Post } from "../types/forum";
@@ -30,9 +30,10 @@ function cacheOptions(
   sort: FeedSort,
   latestOrder: LatestOrder,
   hasMedia: boolean,
-  topic: string
+  topic: string,
+  accountScope?: string,
 ): FeedCacheOptions {
-  return { communityId, sort, latestOrder, hasMedia, topic: topic || undefined };
+  return { communityId, sort, latestOrder, hasMedia, topic: topic || undefined, accountScope };
 }
 
 export function HomeShell() {
@@ -97,18 +98,24 @@ export function HomeShell() {
 
   const activeCommunity = communities.find((community) => community.id === activeCommunityId);
   const currentCacheOptions = useMemo(
-    () => cacheOptions(activeCommunityId, sort, latestOrder, hasMedia, topic),
-    [activeCommunityId, hasMedia, latestOrder, sort, topic]
+    () => cacheOptions(activeCommunityId, sort, latestOrder, hasMedia, topic, user?.id),
+    [activeCommunityId, hasMedia, latestOrder, sort, topic, user?.id]
   );
 
   useEffect(() => {
     let mounted = true;
-    const cached = readFeedCache(currentCacheOptions);
+    const snapshot = readFeedCacheSnapshot(currentCacheOptions);
+    const cached = snapshot?.page || null;
     setPosts(cached?.items || []);
     setNextCursor(cached?.nextCursor);
     setHasMore(cached?.hasMore === true);
-    setLoading(true);
+    setLoading(!snapshot);
     setError("");
+
+    // 一分钟内直接复用缓存；超过软 TTL 仍先展示旧内容，再由后台请求更新。
+    if (snapshot?.isFresh) return () => {
+      mounted = false;
+    };
 
     void getFeed({
       sort,
@@ -307,11 +314,12 @@ export function HomeShell() {
               </div>
             ) : visiblePosts.length ? (
               <div className="post-list">
-                {visiblePosts.map((post) => (
+                {visiblePosts.map((post, index) => (
                   <PostCard
                     key={post.id}
                     post={post}
                     user={user}
+                    feedIndex={index}
                     contextMeta={
                       sort === "latest" && latestOrder === "comment" && post.activityAt
                         ? `最近回复 ${relativeTime(post.activityAt)}`

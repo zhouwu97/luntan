@@ -29,6 +29,7 @@ import type {
 import { apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
 
 type JsonRecord = Record<string, unknown>;
+const feedRequests = new Map<string, Promise<FeedPage>>();
 
 const asRecord = (value: unknown): JsonRecord =>
   value && typeof value === "object" ? (value as JsonRecord) : {};
@@ -109,19 +110,24 @@ function parseMedia(raw: unknown): MediaAsset {
   const item = asRecord(raw);
   const thumb = asRecord(item.thumb);
   const detail = asRecord(item.detail);
+  const feed = asRecord(item.feed);
   const original = asRecord(item.original);
   const thumbUrlRaw = asString(thumb.url) || asString(item.thumb_url) || asString(item.thumbUrl);
   const detailUrlRaw = asString(detail.url) || asString(item.detail_url) || asString(item.detailUrl);
+  const feedUrlRaw = asString(feed.url) || asString(item.feed_url) || asString(item.feedUrl);
   const originalUrlRaw = asString(original.url) || asString(item.original_url) || asString(item.originalUrl);
   const rawUrl = asString(item.url) || detailUrlRaw || originalUrlRaw || thumbUrlRaw;
   const resolvedUrl = resolveMediaUrl(rawUrl) || rawUrl;
+  const mediaKey = rawUrl || asString(item.id);
+  const canDeriveVariants = /^media(?:[-_]|$)/i.test(mediaKey);
   return {
     id: asString(item.id, rawUrl),
     type: item.type === "video" ? "video" : "image",
     url: resolvedUrl,
-    thumbUrl: resolveMediaUrl(thumbUrlRaw, "thumb") || resolvedUrl,
-    detailUrl: resolveMediaUrl(detailUrlRaw, "detail") || resolvedUrl,
-    originalUrl: resolveMediaUrl(originalUrlRaw, "original") || resolvedUrl,
+    thumbUrl: resolveMediaUrl(thumbUrlRaw, "thumb") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "thumb") : undefined),
+    feedUrl: resolveMediaUrl(feedUrlRaw, "feed") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "feed") : undefined),
+    detailUrl: resolveMediaUrl(detailUrlRaw, "detail") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "detail") : undefined),
+    originalUrl: resolveMediaUrl(originalUrlRaw, "original") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "original") : undefined),
     width: asNumber(item.width, asNumber(detail.width)),
     height: asNumber(item.height, asNumber(detail.height)),
     altText: asString(item.alt_text, "社区图片"),
@@ -311,14 +317,19 @@ export async function getFeed(options: {
   if (options.hasMedia) params.set("has_media", "true");
   if (options.topic) params.set("topic", options.topic);
   if (options.cursor) params.set("cursor", options.cursor);
-  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
-    `/feed/latest?${params.toString()}`,
-  );
-  return {
+  const requestKey = params.toString();
+  const existing = feedRequests.get(requestKey);
+  if (existing) return existing;
+  const request = apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
+    `/feed/latest?${requestKey}`,
+  ).then((payload) => ({
     items: Array.isArray(payload.items) ? payload.items.map(parsePost) : [],
     nextCursor: payload.next_cursor,
     hasMore: payload.has_more === true,
-  };
+  }));
+  const sharedRequest = request.finally(() => feedRequests.delete(requestKey));
+  feedRequests.set(requestKey, sharedRequest);
+  return sharedRequest;
 }
 
 export async function getActivities(): Promise<ActivityItem[]> {

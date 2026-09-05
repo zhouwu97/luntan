@@ -536,3 +536,20 @@ func TestMediaCacheControlPolicy(t *testing.T) {
 		t.Fatalf("source cache = %q", mediaCacheControl("normal", "source"))
 	}
 }
+
+func TestVersionedMediaGatewayPathAndCachePolicy(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	id, variant, revision, ok := parseGatewayMediaPathVersioned("media_abc/detail/" + hash)
+	if !ok || id != "media_abc" || variant != "detail" || revision != hash {
+		t.Fatalf("unexpected versioned path parse: %q %q %q %v", id, variant, revision, ok)
+	}
+	if got := gatewayMediaURLWithHash(id, variant, revision); got != "/api/v1/media-file/media_abc/detail/"+hash {
+		t.Fatalf("unexpected versioned URL: %s", got)
+	}
+	if got := mediaCacheControlVersioned("normal", "detail", true); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("unexpected versioned cache policy: %s", got)
+	}
+	if _, _, _, ok := parseGatewayMediaPathVersioned("media_abc/detail/not-a-sha"); ok {
+		t.Fatal("invalid revision must be rejected")
+	}
+}

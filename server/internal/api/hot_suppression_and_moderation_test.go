@@ -163,7 +163,7 @@ func TestModerateMediaNormalReset(t *testing.T) {
 		WithArgs("media_101").
 		WillReturnRows(sqlmock.NewRows([]string{"version_no"}).AddRow(2))
 	mock.ExpectExec(`(?s)INSERT INTO media_moderation_versions.*VALUES \(\$1, \$2, \$2, \$3, \$4, \$5::jsonb`).
-		WithArgs(sqlmock.AnyArg(), "media_101", 2, "normal", "[]", "media/u1/media_101", "", "", "admin_1", "恢复原图展示", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "media_101", 2, "normal", "[]", "media/u1/media_101", "", "", "", "admin_1", "恢复原图展示", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// Admin log

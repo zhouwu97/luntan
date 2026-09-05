@@ -174,15 +174,19 @@ func TestMediaHandlerProcessDecodesAndGeneratesRealVariants(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'original'`).
 		WithArgs("m123", sourceKey+"_original.jpg", 2400, 1600, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	// 5. 写入 detail (1440x960)
+	// 5. 写入 feed (960x640)
+	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'feed'`).
+		WithArgs("m123", sourceKey+"_feed.jpg", 960, 640, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// 6. 写入 detail (1440x960)
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'detail'`).
 		WithArgs("m123", sourceKey+"_detail.jpg", 1440, 960, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	// 6. 写入 thumb (640x427)
+	// 7. 写入 thumb (640x427)
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'thumb'`).
 		WithArgs("m123", sourceKey+"_thumb.jpg", 640, 427, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	// 7. 事务 Commit
+	// 8. 事务 Commit
 	mock.ExpectCommit()
 
 	if err := handler.Handle(ctx, Event{EventType: "media.process", Payload: payload}); err != nil {
@@ -228,10 +232,10 @@ func TestMediaHandlerProcessIdempotency(t *testing.T) {
 		ObjectKey: "media/u1/ready",
 	})
 
-	// 模拟已存在 4 个 ready 变体
+	// 模拟已存在 5 个 ready 变体
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM media_variants WHERE media_id = \$1 AND status = 'ready'`).
 		WithArgs("m_already_ready").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(4))
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
 
 	// 不应发起任何 INSERT / UPDATE 事务
 	if err := handler.Handle(context.Background(), Event{EventType: "media.process", Payload: payload}); err != nil {

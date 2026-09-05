@@ -25,20 +25,51 @@ async function proxy(request: NextRequest, context: RouteContext) {
   headers.delete("content-length");
   headers.set("origin", process.env.API_PROXY_ORIGIN?.trim() || "https://shengbeijiang.com");
 
-  const response = await fetch(target, {
-    method: request.method,
-    headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
-    redirect: "manual",
-    cache: "no-store",
-  });
+  try {
+    let response: Response;
+    try {
+      response = await fetch(target, {
+        method: request.method,
+        headers,
+        body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
+        redirect: "manual",
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (primaryError: unknown) {
+      const errorStr = String((primaryError as { cause?: unknown })?.cause || primaryError);
+      const isConnRefused =
+        errorStr.includes("ECONNREFUSED") ||
+        (primaryError as { code?: string })?.code === "ECONNREFUSED" ||
+        (primaryError as { cause?: { code?: string } })?.cause?.code === "ECONNREFUSED";
 
-  const responseHeaders = new Headers();
-  for (const name of passthroughHeaders) {
-    const value = response.headers.get(name);
-    if (value) responseHeaders.set(name, value);
+      if (isConnRefused && targetOrigin !== "https://shengbeijiang.com") {
+        const fallbackTarget = new URL(`/imported-media/${encodedPath}${request.nextUrl.search}`, "https://shengbeijiang.com");
+        const fallbackHeaders = new Headers(headers);
+        fallbackHeaders.set("origin", "https://shengbeijiang.com");
+        response = await fetch(fallbackTarget, {
+          method: request.method,
+          headers: fallbackHeaders,
+          body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
+          redirect: "manual",
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        });
+      } else {
+        throw primaryError;
+      }
+    }
+
+    const responseHeaders = new Headers();
+    for (const name of passthroughHeaders) {
+      const value = response.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
+    return new NextResponse(response.body, { status: response.status, headers: responseHeaders });
+  } catch (error) {
+    console.error("[imported-media-proxy]", { path: request.nextUrl.pathname, error });
+    return NextResponse.json({ error: { code: "UPSTREAM_UNAVAILABLE", message: "媒体服务不可用" } }, { status: 502 });
   }
-  return new NextResponse(response.body, { status: response.status, headers: responseHeaders });
 }
 
 export const GET = proxy;

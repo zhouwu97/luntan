@@ -17,7 +17,7 @@ import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { getCommunities, getFeed } from "../lib/api/forum";
 import { readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
-import { selectHomeCommunities } from "../lib/home-communities";
+import { selectHomeCommunities, HOME_COMMUNITY_FALLBACKS } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
 import type { Community, Post } from "../types/forum";
 
@@ -46,7 +46,7 @@ export function HomeShell() {
   const query = (searchParams.get("q") || "").trim();
   const topic = (searchParams.get("topic") || "").trim();
 
-  const [communities, setCommunities] = useState<Community[]>([]);
+  const [communities, setCommunities] = useState<Community[]>(HOME_COMMUNITY_FALLBACKS);
   const [activeCommunityId, setActiveCommunityId] = useState(requestedCommunityId);
   const [sort, setSort] = useState<FeedSort>(() => normalizeSort(searchParams.get("sort")));
   const [latestOrder, setLatestOrder] = useState<LatestOrder>("comment");
@@ -83,18 +83,18 @@ export function HomeShell() {
       .then((items) => {
         if (!mounted) return;
         const visible = selectHomeCommunities(items);
-        setCommunities(visible);
+        setCommunities(visible.length ? visible : HOME_COMMUNITY_FALLBACKS);
       })
       .catch(() => {
         if (mounted) {
-          setCommunities([]);
-          setCommunityError("首页板块暂时无法加载，请稍后重试");
+          setCommunities((current) => (current.length ? current : HOME_COMMUNITY_FALLBACKS));
+          setCommunityError("community_error");
         }
       });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [refreshVersion]);
 
   const activeCommunity = communities.find((community) => community.id === activeCommunityId);
   const currentCacheOptions = useMemo(
@@ -294,10 +294,6 @@ export function HomeShell() {
           </div>
 
           <section className="feed-column" aria-label={`${activeCommunity?.name || "首页"}帖子流`}>
-            {communityError && <div className="data-note" role="status">{communityError}</div>}
-            {error && <div className="data-note" role="status">{error}</div>}
-            {query && <div className="data-note" role="status">正在显示“{query}”的匹配内容</div>}
-
             <FeedToolbar
               sort={sort}
               latestOrder={latestOrder}
@@ -309,6 +305,26 @@ export function HomeShell() {
               onMediaChange={chooseMedia}
               canPublish={Boolean(user)}
             />
+
+            {(error || communityError) && (
+              <div className="degraded-banner" role="status">
+                <div className="degraded-banner-content">
+                  <span className="degraded-banner-icon" aria-hidden="true">⚠</span>
+                  <span className="degraded-banner-text">
+                    {posts.length > 0 ? "网络连接不稳定，已显示缓存内容" : "网络连接不稳定，内容暂时无法加载"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="degraded-banner-retry"
+                  onClick={() => setRefreshVersion((v) => v + 1)}
+                >
+                  重试
+                </button>
+              </div>
+            )}
+
+            {query && <div className="data-note" role="status">正在显示“{query}”的匹配内容</div>}
 
             {loading && !visiblePosts.length ? (
               <div className="loading-stack">

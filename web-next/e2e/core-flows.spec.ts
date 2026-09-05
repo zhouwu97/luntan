@@ -1099,7 +1099,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     // 验证推荐列表空态：只展示真实说明，绝不把热门补位进来
     await expect(page.getByRole("heading", { name: "暂无推荐内容" })).toBeVisible();
     await expect(page.getByText("管理员推荐的精选帖子会出现在这里")).toBeVisible();
-    await expect(page.getByText("热门帖子不应自动补位到推荐")).toBeHidden();
+    await expect(page.locator(".feed-column").getByText("热门帖子不应自动补位到推荐")).toBeHidden();
 
     // 6. 点击“最新”返回，URL 恢复干净 /，再次展示最新帖子
     await latestTab.click();

@@ -6,6 +6,42 @@ export const HOME_COMMUNITY_IDS = [
   "community-daily",
 ] as const;
 
+export const HOME_COMMUNITY_FALLBACKS: Community[] = [
+  {
+    id: "community-unboxing",
+    slug: "unboxing",
+    name: "大型拆箱",
+    description: "晒单测评、开箱验货与好物交流",
+    memberCount: 0,
+    followerCount: 0,
+    postCount: 0,
+    sortOrder: 1,
+    status: "active",
+  },
+  {
+    id: "community-campus",
+    slug: "campus",
+    name: "酱紫社区",
+    description: "社群交流与校园/生活话题",
+    memberCount: 0,
+    followerCount: 0,
+    postCount: 0,
+    sortOrder: 2,
+    status: "active",
+  },
+  {
+    id: "community-daily",
+    slug: "daily",
+    name: "杂鱼日常",
+    description: "随手记录、灌水与日常碎碎念",
+    memberCount: 0,
+    followerCount: 0,
+    postCount: 0,
+    sortOrder: 3,
+    status: "active",
+  },
+];
+
 const HOME_COMMUNITY_NAMES = new Set(["大型拆箱", "酱紫社区", "杂鱼日常"]);
 const HOME_COMMUNITY_ORDER: Map<string, number> = new Map(HOME_COMMUNITY_IDS.map((id, index) => [id, index]));
 const HOME_NAME_ORDER: Map<string, number> = new Map(["大型拆箱", "酱紫社区", "杂鱼日常"].map((name, index) => [name, index]));

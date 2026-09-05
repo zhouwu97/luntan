@@ -7,6 +7,15 @@ import { ToastProvider } from "../components/toast-context";
 export const metadata: Metadata = {
   title: "圣杯酱 · 玩具交流轻社区",
   description: "分享设备、桌搭、校园生活和真实使用体验。",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.png", type: "image/png", sizes: "192x192" },
+      { url: "/app-icon.png", type: "image/png", sizes: "512x512" },
+    ],
+    shortcut: "/app-icon.png",
+    apple: [{ url: "/app-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {

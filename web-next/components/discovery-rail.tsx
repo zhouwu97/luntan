@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Icon } from "./icons";
 import { UserAvatar } from "./user-avatar";
-import { getRankingView } from "../lib/api/forum";
+import { getFeed, getRankingView } from "../lib/api/forum";
 import { compactCount, relativeTime } from "../lib/format";
 import type { Post, RankingToy, SessionUser } from "../types/forum";
 
@@ -19,30 +19,71 @@ export function DiscoveryRail({
 }) {
   const [rankingToys, setRankingToys] = useState<RankingToy[]>([]);
   const [weeklyTop, setWeeklyTop] = useState<RankingToy | undefined>();
+  const [rankingState, setRankingState] = useState<"loading" | "ready" | "empty" | "error">("loading");
 
-  useEffect(() => {
-    let mounted = true;
+  const [hotFeed, setHotFeed] = useState<Post[]>([]);
+  const [hotState, setHotState] = useState<"loading" | "ready" | "empty" | "error">("loading");
+
+  const loadRanking = () => {
+    setRankingState("loading");
     getRankingView()
       .then((res) => {
-        if (!mounted) return;
         if (res.items?.length) {
           setRankingToys(res.items.slice(0, 4));
           setWeeklyTop(res.weeklyTop || res.items[0]);
+          setRankingState("ready");
+        } else {
+          setRankingToys([]);
+          setWeeklyTop(undefined);
+          setRankingState("empty");
         }
       })
       .catch(() => {
-        // Fallback gracefully if ranking API is quiet
+        setRankingState("error");
       });
+  };
+
+  const loadHotFeed = () => {
+    setHotState("loading");
+    getFeed({ sort: "hot", limit: 5 })
+      .then((page) => {
+        if (page.items?.length) {
+          setHotFeed(page.items.slice(0, 4));
+          setHotState("ready");
+        } else {
+          setHotFeed([]);
+          setHotState("empty");
+        }
+      })
+      .catch(() => {
+        setHotState("error");
+      });
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    loadRanking();
+
+    // 延后微任务发起热门独立请求，保证主 Feed 优先契约与隔离
+    const timer = setTimeout(() => {
+      if (mounted) loadHotFeed();
+    }, 60);
+
     return () => {
       mounted = false;
+      clearTimeout(timer);
     };
   }, []);
 
-  // 热门/刚刚讨论：按评论与最新活跃度排序
-  const hotDiscussions = posts
-    .slice()
-    .sort((a, b) => b.commentCount + b.likeCount - (a.commentCount + a.likeCount))
-    .slice(0, 4);
+  const fallbackFromPosts = () =>
+    posts
+      .slice()
+      .sort((a, b) => b.commentCount + b.likeCount - (a.commentCount + a.likeCount))
+      .slice(0, 4);
+
+  const hotDiscussions = hotFeed.length > 0
+    ? hotFeed
+    : (hotState === "loading" && posts.length > 0 ? fallbackFromPosts() : hotFeed);
 
   const displayTop = weeklyTop || rankingToys[0];
   const otherRanks = displayTop ? rankingToys.filter((t) => t.id !== displayTop.id).slice(0, 3) : rankingToys.slice(1, 4);
@@ -93,6 +134,15 @@ export function DiscoveryRail({
                 )}
               </Link>
             ))
+          ) : hotState === "loading" ? (
+            <p className="empty-rail-hint">正在加载热门讨论…</p>
+          ) : hotState === "error" ? (
+            <div className="rail-error-box">
+              <p className="empty-rail-hint">热门讨论暂时无法加载</p>
+              <button type="button" className="rail-retry-btn" onClick={loadHotFeed}>
+                重试
+              </button>
+            </div>
           ) : (
             <p className="empty-rail-hint">暂无最新讨论，快去发布吧</p>
           )}
@@ -111,56 +161,69 @@ export function DiscoveryRail({
           </Link>
         </div>
 
-        {/* 榜首 Hero 卡片 */}
-        {displayTop && (
-          <Link href={`/ranking/${encodeURIComponent(displayTop.id)}`} className="rank-hero-celestial">
-            <div className="rank-hero-top">
-              <span className="rank-hero-kicker">本周榜首</span>
-              <span className="rank-hero-score">{displayTop.score ? displayTop.score.toFixed(1) : "暂无评分"}</span>
-            </div>
-            <strong className="rank-hero-title">{displayTop.name}</strong>
-            <div className="rank-hero-meta">
-              <span>{displayTop.ratingCount ? `${displayTop.ratingCount} 篇测评` : "暂无测评"}</span>
-              <span className="meta-dot">·</span>
-              <span>{compactCount(displayTop.wantCount || 0)} 人想要</span>
-            </div>
-          </Link>
-        )}
-
-        {/* 第 2 ~ 4 名榜单行 */}
-        <div className="rank-rows-list">
-          {otherRanks.length > 0 ? (
-            otherRanks.map((toy, index) => (
-              <Link
-                key={toy.id}
-                href={`/ranking/${encodeURIComponent(toy.id)}`}
-                className="rank-row-item"
-              >
-                <span className="rank-num" style={{ color: RANK_NUM_COLORS[index] }}>
-                  {index + 2}
-                </span>
-                <span className="rank-thumb-frame">
-                  {toy.coverUrl ? (
-                    <img src={toy.coverUrl} alt={toy.name} className="rank-thumb-img" />
-                  ) : (
-                    <Icon name="box" size={20} className="rank-thumb-fallback" />
-                  )}
-                </span>
-                <span className="rank-info">
-                  <span className="rank-name">{toy.name}</span>
-                  <span className="rank-meta">
-                    {toy.category || "热门玩具"} · {toy.ratingCount || 0} 测评
-                  </span>
-                </span>
-                <span className="rank-score-val">
-                  {toy.score ? toy.score.toFixed(1) : "—"}
-                </span>
+        {rankingState === "loading" ? (
+          <p className="empty-rail-hint">正在加载榜单…</p>
+        ) : rankingState === "error" ? (
+          <div className="rail-error-box">
+            <p className="empty-rail-hint">榜单暂时无法加载</p>
+            <button type="button" className="rail-retry-btn" onClick={loadRanking}>
+              重试
+            </button>
+          </div>
+        ) : rankingState === "empty" ? (
+          <p className="empty-rail-hint">本周暂无榜单数据</p>
+        ) : (
+          <>
+            {/* 榜首 Hero 卡片 */}
+            {displayTop && (
+              <Link href={`/ranking/${encodeURIComponent(displayTop.id)}`} className="rank-hero-celestial">
+                <div className="rank-hero-top">
+                  <span className="rank-hero-kicker">本周榜首</span>
+                  <span className="rank-hero-score">{displayTop.score ? displayTop.score.toFixed(1) : "暂无评分"}</span>
+                </div>
+                <strong className="rank-hero-title">{displayTop.name}</strong>
+                <div className="rank-hero-meta">
+                  <span>{displayTop.ratingCount ? `${displayTop.ratingCount} 篇测评` : "暂无测评"}</span>
+                  <span className="meta-dot">·</span>
+                  <span>{compactCount(displayTop.wantCount || 0)} 人想要</span>
+                </div>
               </Link>
-            ))
-          ) : (
-            <p className="empty-rail-hint">正在更新本周榜单…</p>
-          )}
-        </div>
+            )}
+
+            {/* 第 2 ~ 4 名榜单行 */}
+            <div className="rank-rows-list">
+              {otherRanks.length > 0 ? (
+                otherRanks.map((toy, index) => (
+                  <Link
+                    key={toy.id}
+                    href={`/ranking/${encodeURIComponent(toy.id)}`}
+                    className="rank-row-item"
+                  >
+                    <span className="rank-num" style={{ color: RANK_NUM_COLORS[index] }}>
+                      {index + 2}
+                    </span>
+                    <span className="rank-thumb-frame">
+                      {toy.coverUrl ? (
+                        <img src={toy.coverUrl} alt={toy.name} className="rank-thumb-img" />
+                      ) : (
+                        <Icon name="box" size={20} className="rank-thumb-fallback" />
+                      )}
+                    </span>
+                    <span className="rank-info">
+                      <span className="rank-name">{toy.name}</span>
+                      <span className="rank-meta">
+                        {toy.category || "热门玩具"} · {toy.ratingCount || 0} 测评
+                      </span>
+                    </span>
+                    <span className="rank-score-val">
+                      {toy.score ? toy.score.toFixed(1) : "—"}
+                    </span>
+                  </Link>
+                ))
+              ) : null}
+            </div>
+          </>
+        )}
       </section>
     </aside>
   );

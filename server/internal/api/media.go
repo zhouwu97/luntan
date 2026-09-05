@@ -414,6 +414,7 @@ var publicImageVariants = map[string]bool{
 var knownGatewayVariants = map[string]bool{
 	"source":            true,
 	"original":          true,
+	"feed":              true,
 	"detail":            true,
 	"thumb":             true,
 	"censored_original": true,
@@ -520,18 +521,14 @@ func publicVariantAllowed(mimeType, moderationStatus, variant string) bool {
 	return publicImageVariants[variant]
 }
 
-// mediaCacheControl 保持既有缓存纪律：censored_* 打码变体是内容寻址的不可变
-// 对象，下发一年期 immutable；其余对象下发 private/no-store，避免之后切换为
-// censored 时浏览器/CDN 仍持有未打码内容。
+// mediaCacheControl 保持审核安全：只有已打码且内容寻址的变体允许长期缓存；
+// 普通图片必须重新验证，避免审核后浏览器继续展示旧的未打码内容。
 func mediaCacheControl(moderationStatus, variant string) string {
 	return mediaCacheControlVersioned(moderationStatus, variant, false)
 }
 
 func mediaCacheControlVersioned(moderationStatus, variant string, versioned bool) string {
 	if moderationStatus == "censored" && strings.HasPrefix(variant, "censored_") {
-		return "public, max-age=31536000, immutable"
-	}
-	if versioned && moderationStatus == "normal" && variant != "source" {
 		return "public, max-age=31536000, immutable"
 	}
 	// 普通媒体可能在审核后变为 censored，不能长期缓存未打码内容；

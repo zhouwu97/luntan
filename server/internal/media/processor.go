@@ -57,7 +57,7 @@ type ProcessResult struct {
 }
 
 // ProcessImage 真实解码图像源文件，剔除 EXIF/GPS 元数据并按分辨率生成
-// thumb (<= 640px)、feed (<= 960px)、detail (<= 1440px) 与 original 变体。
+// thumb (<= 640px)、feed (宽 <= 1080px 且高 <= 1920px)、detail (<= 1440px) 与 original 变体。
 func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -89,8 +89,8 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 		return nil, fmt.Errorf("encode original variant: %w", err)
 	}
 
-	// 2. 生成 feed 变体（长边 <= 960px），覆盖手机 Feed 单图的 3x 解码尺寸。
-	feedW, feedH := calcScaledDimensions(origW, origH, 960)
+	// 2. 生成 feed 变体：以 1080px 宽为目标，同时限制超长竖图高度，保持比例且不放大。
+	feedW, feedH := calcFeedDimensions(origW, origH)
 	var feedImg image.Image = srcImg
 	if feedW != origW || feedH != origH {
 		feedImg = resizeCatmullRom(srcImg, feedW, feedH)
@@ -142,6 +142,27 @@ func calcScaledDimensions(w, h, maxDimension int) (int, int) {
 		return w, h
 	}
 	scale := float64(maxDimension) / float64(maxSide)
+	newW := int(math.Round(float64(w) * scale))
+	newH := int(math.Round(float64(h) * scale))
+	if newW < 1 {
+		newW = 1
+	}
+	if newH < 1 {
+		newH = 1
+	}
+	return newW, newH
+}
+
+func calcFeedDimensions(w, h int) (int, int) {
+	const maxWidth = 1080
+	const maxHeight = 1920
+	if w <= maxWidth && h <= maxHeight {
+		return w, h
+	}
+	scale := math.Min(float64(maxWidth)/float64(w), float64(maxHeight)/float64(h))
+	if scale > 1 {
+		scale = 1
+	}
 	newW := int(math.Round(float64(w) * scale))
 	newH := int(math.Round(float64(h) * scale))
 	if newW < 1 {
@@ -741,8 +762,8 @@ func ProcessCensoredImageBytes(data []byte, regions []MaskRegion) (*ProcessResul
 		return nil, fmt.Errorf("encode censored original variant: %w", err)
 	}
 
-	// 2. 生成 censored_feed (长边 <= 960px)
-	feedW, feedH := calcScaledDimensions(origW, origH, 960)
+	// 2. 生成 censored_feed，使用与普通 feed 相同的宽度/高度约束。
+	feedW, feedH := calcFeedDimensions(origW, origH)
 	var feedImg image.Image = censoredImg
 	if feedW != origW || feedH != origH {
 		feedImg = resizeCatmullRom(censoredImg, feedW, feedH)

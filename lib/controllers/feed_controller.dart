@@ -78,16 +78,18 @@ class FeedController extends ChangeNotifier {
 
   Future<void> initialLoad() async {
     if (_state.status != FeedStatus.initial) return;
-    final requestGeneration = _generation + 1;
-    unawaited(_restoreCache(requestGeneration));
-    await _startFirstPage();
+    await _startFirstPage(restoreCache: true);
   }
 
-  void setAccountScope(String? accountId) {
-    final next = accountId?.trim().isNotEmpty == true ? accountId!.trim() : 'anon';
+  Future<void> setAccountScope(String? accountId) async {
+    final next = accountId?.trim().isNotEmpty == true
+        ? accountId!.trim()
+        : 'anon';
     if (_accountScope == next) return;
     _accountScope = next;
+    final hasActiveQuery = _state.status != FeedStatus.initial;
     reset();
+    if (hasActiveQuery) await _startFirstPage(restoreCache: true);
   }
 
   Future<void> refresh() async {
@@ -123,7 +125,7 @@ class FeedController extends ChangeNotifier {
       _knownIds.clear();
       _state = const FeedState();
     }
-    await _startFirstPage();
+    await _startFirstPage(restoreCache: true);
   }
 
   Future<void> setLatestOrder(LatestOrder order) async {
@@ -133,7 +135,7 @@ class FeedController extends ChangeNotifier {
     _latestOrder = order;
     _knownIds.clear();
     _state = const FeedState();
-    await _startFirstPage();
+    await _startFirstPage(restoreCache: true);
   }
 
   Future<void> loadMore() async {
@@ -170,7 +172,19 @@ class FeedController extends ChangeNotifier {
         nextCursor: cursorRepeated ? null : page.nextCursor,
         hasMore: cursorRepeated ? false : page.hasMore,
       );
-      unawaited(_cache.write(accountScope: _accountScope, communityId: communityId, sort: sort, latestOrder: latestOrder, page: FeedPage(items: items, nextCursor: _state.nextCursor, hasMore: _state.hasMore)));
+      unawaited(
+        _cache.write(
+          accountScope: _accountScope,
+          communityId: communityId,
+          sort: sort,
+          latestOrder: latestOrder,
+          page: FeedPage(
+            items: items,
+            nextCursor: _state.nextCursor,
+            hasMore: _state.hasMore,
+          ),
+        ),
+      );
     } catch (error) {
       if (generation != _generation) return;
       _state = _state.copyWith(
@@ -185,9 +199,10 @@ class FeedController extends ChangeNotifier {
     }
   }
 
-  Future<void> _startFirstPage() {
+  Future<void> _startFirstPage({bool restoreCache = false}) {
     final generation = ++_generation;
     _loadingMoreGeneration = null;
+    if (restoreCache) unawaited(_restoreCache(generation));
     return _loadFirstPage(
       generation,
       communityId: _communityId,
@@ -221,7 +236,15 @@ class FeedController extends ChangeNotifier {
         nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       );
-      unawaited(_cache.write(accountScope: _accountScope, communityId: communityId, sort: sort, latestOrder: latestOrder, page: page));
+      unawaited(
+        _cache.write(
+          accountScope: _accountScope,
+          communityId: communityId,
+          sort: sort,
+          latestOrder: latestOrder,
+          page: page,
+        ),
+      );
     } catch (error) {
       if (generation != _generation) return;
       _state = FeedState(
@@ -240,7 +263,11 @@ class FeedController extends ChangeNotifier {
       sort: _sort,
       latestOrder: _latestOrder,
     );
-    if (cached == null || expectedGeneration != _generation || _state.items.isNotEmpty) return;
+    if (cached == null ||
+        expectedGeneration != _generation ||
+        _state.items.isNotEmpty) {
+      return;
+    }
     _knownIds
       ..clear()
       ..addAll(cached.items.map((item) => item.id));

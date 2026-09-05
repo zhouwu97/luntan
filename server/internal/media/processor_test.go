@@ -32,6 +32,28 @@ func createTestJPEG(w, h int) []byte {
 	return buf.Bytes()
 }
 
+func TestCalcFeedDimensionsPreservesPortraitClarity(t *testing.T) {
+	cases := []struct {
+		name       string
+		width      int
+		height     int
+		wantWidth  int
+		wantHeight int
+	}{
+		{name: "landscape", width: 2400, height: 1600, wantWidth: 1080, wantHeight: 720},
+		{name: "portrait", width: 2160, height: 3840, wantWidth: 1080, wantHeight: 1920},
+		{name: "small", width: 800, height: 1200, wantWidth: 800, wantHeight: 1200},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			width, height := calcFeedDimensions(tc.width, tc.height)
+			if width != tc.wantWidth || height != tc.wantHeight {
+				t.Fatalf("calcFeedDimensions(%d, %d) = %dx%d, want %dx%d", tc.width, tc.height, width, height, tc.wantWidth, tc.wantHeight)
+			}
+		})
+	}
+}
+
 func TestProcessImage_2400x1600(t *testing.T) {
 	sourceBytes := createTestJPEG(2400, 1600)
 	sourceHasher := sha256.New()
@@ -50,6 +72,9 @@ func TestProcessImage_2400x1600(t *testing.T) {
 	// 验证 Detail 变体 (长边 <= 1440)
 	if res.Detail.Width != 1440 || res.Detail.Height != 960 {
 		t.Errorf("expected detail 1440x960, got %dx%d", res.Detail.Width, res.Detail.Height)
+	}
+	if res.Feed.Width != 1080 || res.Feed.Height != 720 {
+		t.Errorf("expected feed 1080x720, got %dx%d", res.Feed.Width, res.Feed.Height)
 	}
 	// 验证 Thumb 变体 (长边 <= 640)
 	if res.Thumb.Width != 640 || (res.Thumb.Height != 426 && res.Thumb.Height != 427) {

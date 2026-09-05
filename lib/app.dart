@@ -263,8 +263,10 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   void _syncFeedAccountScope() {
     final auth = authController;
-    feedController.setAccountScope(
-      auth?.status == AuthStatus.authenticated ? auth?.user?.id : null,
+    unawaited(
+      feedController.setAccountScope(
+        auth?.status == AuthStatus.authenticated ? auth?.user?.id : null,
+      ),
     );
   }
 

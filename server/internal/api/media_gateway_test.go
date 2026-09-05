@@ -79,6 +79,48 @@ func TestGatewayMediaVariantServesPublicVariantOfPublishedPost(t *testing.T) {
 	}
 }
 
+func TestGatewayMediaVariantServesVersionedFeedVariant(t *testing.T) {
+	s, mock, store := newGatewayTestServer(t, "gateway")
+	payload := []byte("feed-bytes")
+	key := "media/u-1/media_abc_feed.jpg"
+	hash := strings.Repeat("b", 64)
+	if err := store.Put(context.Background(), key, "image/jpeg", bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(`(?s)SELECT ma\.mime_type.*COALESCE\(mv\.sha256, ''\)`).
+		WithArgs("media_abc", "feed").
+		WillReturnRows(sqlmock.NewRows([]string{"mime_type", "moderation_status", "object_key", "sha256"}).
+			AddRow("image/jpeg", "normal", key, hash))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media_abc/feed/"+hash, nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, "media_abc/feed/"+hash)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), payload) {
+		t.Fatalf("body mismatch: %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=0, must-revalidate" {
+		t.Fatalf("Cache-Control = %q, want revalidation policy for normal feed", got)
+	}
+	mock.ExpectQuery(`(?s)SELECT ma\.mime_type.*COALESCE\(mv\.sha256, ''\)`).
+		WithArgs("media_abc", "feed").
+		WillReturnRows(sqlmock.NewRows([]string{"mime_type", "moderation_status", "object_key", "sha256"}).
+			AddRow("image/jpeg", "normal", key, hash))
+	wrongHash := strings.Repeat("c", 64)
+	wrongReq := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media_abc/feed/"+wrongHash, nil)
+	wrongRec := httptest.NewRecorder()
+	s.serveMediaFile(wrongRec, wrongReq, "media_abc/feed/"+wrongHash)
+	if wrongRec.Code != http.StatusNotFound {
+		t.Fatalf("wrong hash status = %d, want 404", wrongRec.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
 // 回归：公开性条件包含多个 OR EXISTS，必须整体受 media_id 条件约束。
 // 如果缺少外层括号，PostgreSQL 的 AND 优先级会让其他公开媒体绕过
 // ma.id = $1，导致不同媒体请求都返回同一个任意变体。
@@ -162,6 +204,26 @@ func TestGatewayMediaVariantServesCensoredVariantWithImmutableCache(t *testing.T
 	}
 	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
 		t.Fatalf("Cache-Control = %q, want immutable for censored variants", got)
+	}
+}
+
+func TestGatewayMediaVariantServesCensoredFeedVariant(t *testing.T) {
+	s, mock, store := newGatewayTestServer(t, "gateway")
+	key := "media/u-1/media_abc_censored_beef_feed.jpg"
+	if err := store.Put(context.Background(), key, "image/jpeg", bytes.NewReader([]byte("masked-feed")), 11); err != nil {
+		t.Fatal(err)
+	}
+	expectGatewayVariantRow(mock, "media_abc", "censored_feed", "image/jpeg", "censored", key)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/media-file/media_abc/censored_feed", nil)
+	rec := httptest.NewRecorder()
+	s.serveMediaFile(rec, req, "media_abc/censored_feed")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for censored feed variant", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("Cache-Control = %q, want immutable for censored feed", got)
 	}
 }
 
@@ -506,6 +568,7 @@ func TestParseGatewayMediaPath(t *testing.T) {
 		wantOK      bool
 	}{
 		{"media_abc123/detail", "media_abc123", "detail", true},
+		{"media_abc123/feed", "media_abc123", "feed", true},
 		{"media_abc123/censored_thumb", "media_abc123", "censored_thumb", true},
 		{"media-import-7715-0/thumb", "media-import-7715-0", "thumb", true},
 		{"mda-6ed519e20612b852cb88cf22/detail", "mda-6ed519e20612b852cb88cf22", "detail", true},
@@ -546,8 +609,8 @@ func TestVersionedMediaGatewayPathAndCachePolicy(t *testing.T) {
 	if got := gatewayMediaURLWithHash(id, variant, revision); got != "/api/v1/media-file/media_abc/detail/"+hash {
 		t.Fatalf("unexpected versioned URL: %s", got)
 	}
-	if got := mediaCacheControlVersioned("normal", "detail", true); got != "public, max-age=31536000, immutable" {
-		t.Fatalf("unexpected versioned cache policy: %s", got)
+	if got := mediaCacheControlVersioned("normal", "detail", true); got != "private, max-age=0, must-revalidate" {
+		t.Fatalf("unexpected versioned normal cache policy: %s", got)
 	}
 	if _, _, _, ok := parseGatewayMediaPathVersioned("media_abc/detail/not-a-sha"); ok {
 		t.Fatal("invalid revision must be rejected")

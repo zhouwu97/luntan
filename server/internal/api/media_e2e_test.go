@@ -124,7 +124,7 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 		WithArgs("media_e2e_123", objectKey+"_original.jpg", 2400, 1600, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'feed'`).
-		WithArgs("media_e2e_123", objectKey+"_feed.jpg", 960, 640, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("media_e2e_123", objectKey+"_feed.jpg", 1080, 720, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'detail'`).
 		WithArgs("media_e2e_123", objectKey+"_detail.jpg", 1440, 960, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -182,7 +182,7 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 		WithArgs("post-1").
 		WillReturnRows(sqlmock.NewRows([]string{"media_id", "variant", "object_key", "mime_type", "width", "height", "size_bytes", "sha256"}).
 			AddRow("media_e2e_123", "thumb", objectKey+"_thumb.jpg", "image/jpeg", 640, 427, int64(len(thumbBytes)), strings.Repeat("a", 64)).
-			AddRow("media_e2e_123", "feed", objectKey+"_feed.jpg", "image/jpeg", 960, 640, int64(len(detailBytes)), strings.Repeat("b", 64)).
+			AddRow("media_e2e_123", "feed", objectKey+"_feed.jpg", "image/jpeg", 1080, 720, int64(len(detailBytes)), strings.Repeat("b", 64)).
 			AddRow("media_e2e_123", "detail", objectKey+"_detail.jpg", "image/jpeg", 1440, 960, int64(len(detailBytes)), strings.Repeat("c", 64)).
 			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes)), strings.Repeat("d", 64)))
 

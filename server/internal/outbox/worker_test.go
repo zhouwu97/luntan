@@ -174,9 +174,9 @@ func TestMediaHandlerProcessDecodesAndGeneratesRealVariants(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'original'`).
 		WithArgs("m123", sourceKey+"_original.jpg", 2400, 1600, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	// 5. 写入 feed (960x640)
+	// 5. 写入 feed (1080x720)
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'feed'`).
-		WithArgs("m123", sourceKey+"_feed.jpg", 960, 640, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("m123", sourceKey+"_feed.jpg", 1080, 720, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	// 6. 写入 detail (1440x960)
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'detail'`).

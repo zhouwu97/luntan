@@ -54,13 +54,16 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
   return (
     <header className={`site-header${home ? " home-site-header" : ""}${className ? ` ${className}` : ""}`}>
       <div className="header-inner">
-        <Link href="/" className="brand" aria-label="圣杯酱首页">
-          <span className="brand-mark">
-            <img src="/app-icon.png" alt="圣杯酱" className="brand-icon-img" />
-          </span>
-          <span className="brand-word">圣杯酱</span>
-          <span className="brand-dot" aria-hidden="true" />
-        </Link>
+        <div className="brand-wrap" style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <Link href="/" className="brand" aria-label="圣杯酱首页">
+            <span className="brand-mark">
+              <img src="/app-icon.png" alt="圣杯酱" className="brand-icon-img" />
+            </span>
+            <span className="brand-word">圣杯酱</span>
+            <span className="brand-dot" aria-hidden="true" />
+          </Link>
+          <span className="tagline desktop-only">分享热爱，遇见同好！</span>
+        </div>
 
         <nav className="desktop-nav" aria-label="主导航">
           {navItems.map((item) => {
@@ -109,6 +112,14 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
                   <div className="profile-menu-meta">Lv.{user.level || 1} · {user.accountType === "guest" ? "游客" : "已登录"}</div>
                   <button type="button" onClick={() => { setMenuOpen(false); router.push("/me"); }}>我的工作台</button>
                   <button type="button" onClick={() => { setMenuOpen(false); router.push(`/user/${user.id}`); }}>公开个人主页</button>
+                  {(user.capabilities?.can_manage_admins || user.capabilities?.can_moderate) && (
+                    <>
+                      <div style={{ height: 1, background: "#e2e8f0", margin: "6px 0" }} />
+                      <button type="button" onClick={() => { setMenuOpen(false); router.push("/admin/recommendations"); }}>首页推荐管理</button>
+                      <button type="button" onClick={() => { setMenuOpen(false); router.push("/admin/ranking"); }}>排行榜排序管理</button>
+                    </>
+                  )}
+                  <div style={{ height: 1, background: "#e2e8f0", margin: "6px 0" }} />
                   <button type="button" onClick={handleSignOut}>退出登录</button>
                 </div>
               )}

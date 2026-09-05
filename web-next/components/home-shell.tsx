@@ -71,8 +71,8 @@ export function HomeShell() {
 
     if (rawSort === "featured") {
       const nextParams = new URLSearchParams(searchParams.toString());
-      nextParams.set("sort", "latest");
-      router.replace(`/?${nextParams.toString()}`, { scroll: false });
+      nextParams.delete("sort");
+      router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
     }
   }, [router, searchParams]);
 
@@ -123,6 +123,7 @@ export function HomeShell() {
       hasMedia,
       latestOrder,
       topic: topic || undefined,
+      accountScope: user?.id,
     })
       .then((page) => {
         if (!mounted) return;
@@ -166,6 +167,7 @@ export function HomeShell() {
         latestOrder,
         topic: topic || undefined,
         cursor: nextCursor,
+        accountScope: user?.id,
       });
       setPosts((current) => {
         const knownIds = new Set(current.map((post) => post.id));
@@ -235,6 +237,7 @@ export function HomeShell() {
         hasMedia,
         latestOrder,
         topic: topic || undefined,
+        accountScope: user?.id,
       });
       setPosts(page.items);
       setNextCursor(page.nextCursor);

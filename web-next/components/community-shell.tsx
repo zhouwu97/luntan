@@ -73,7 +73,7 @@ export function CommunityShell({ communityId }: { communityId: string }) {
 
     if (snapshot?.isFresh) return () => { active = false; };
 
-    void getFeed({ communityId, sort, latestOrder, hasMedia })
+    void getFeed({ communityId, sort, latestOrder, hasMedia, accountScope: user?.id })
       .then((page) => {
         if (!active) return;
         setPosts(page.items);
@@ -110,7 +110,7 @@ export function CommunityShell({ communityId }: { communityId: string }) {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getFeed({ communityId, sort, latestOrder, hasMedia, cursor: nextCursor });
+      const page = await getFeed({ communityId, sort, latestOrder, hasMedia, cursor: nextCursor, accountScope: user?.id });
       setPosts((current) => {
         const known = new Set(current.map((post) => post.id));
         const merged = [...current, ...page.items.filter((post) => !known.has(post.id))];

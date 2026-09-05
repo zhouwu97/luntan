@@ -54,12 +54,26 @@ function entries(): Array<{ key: string; raw: string; entry: FeedCacheEntry }> {
         result.push({ key, raw, entry });
       } else {
         store.removeItem(key);
+        memoryCache.delete(key);
       }
     } catch {
       store.removeItem(key);
+      memoryCache.delete(key);
     }
   }
   return result;
+}
+
+function trimMemoryCache(): void {
+  const candidates = [...memoryCache.entries()]
+    .sort(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
+  let total = candidates.reduce((sum, [, entry]) => sum + byteLength(JSON.stringify(entry)), 0);
+  while (candidates.length > MAX_ENTRIES || total > MAX_BYTES) {
+    const removed = candidates.shift();
+    if (!removed) break;
+    memoryCache.delete(removed[0]);
+    total -= byteLength(JSON.stringify(removed[1]));
+  }
 }
 
 export function readFeedCache(options: FeedCacheOptions): FeedPage | null {
@@ -122,8 +136,10 @@ export function writeFeedCache(options: FeedCacheOptions, page: FeedPage): void 
       const removed = candidates.shift();
       if (!removed) break;
       store.removeItem(removed.key);
+      memoryCache.delete(removed.key);
       total -= byteLength(removed.raw);
     }
+    trimMemoryCache();
   } catch {
     // localStorage 不可用或空间不足时不影响真实接口请求。
   }
@@ -131,13 +147,14 @@ export function writeFeedCache(options: FeedCacheOptions, page: FeedPage): void 
 
 export function clearFeedCache(accountScope?: string): void {
   const store = storage();
-  if (!store) return;
   const prefix = accountScope ? `${CACHE_PREFIX}${encodeURIComponent(accountScope)}:` : CACHE_PREFIX;
-  for (let index = store.length - 1; index >= 0; index -= 1) {
-    const key = store.key(index);
-    if (key?.startsWith(prefix)) {
-      store.removeItem(key);
-      memoryCache.delete(key);
+  if (store) {
+    for (let index = store.length - 1; index >= 0; index -= 1) {
+      const key = store.key(index);
+      if (key?.startsWith(prefix)) {
+        store.removeItem(key);
+        memoryCache.delete(key);
+      }
     }
   }
   for (const key of memoryCache.keys()) {

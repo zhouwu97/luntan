@@ -33,41 +33,43 @@ export function FeedToolbar({
   return (
     <div className="feedbar feed-toolbar">
       <div className="feed-tabs" role="tablist" aria-label="帖子流排序">
-        {tabs.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            role="tab"
-            aria-selected={sort === tab.value}
-            className={`feed-tab${sort === tab.value ? " active" : ""}`}
-            onClick={() => onSortChange(tab.value)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+        <div className="tab-row">
+          {tabs.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              role="tab"
+              aria-selected={sort === tab.value}
+              className={`feed-tab tab${sort === tab.value ? " active" : ""}`}
+              onClick={() => onSortChange(tab.value)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-      <div className="order-pill" role="group" aria-label="最新排序方式">
-        <button
-          type="button"
-          className={latestOrder === "comment" ? "active" : ""}
-          onClick={() => {
-            if (sort !== "latest") onSortChange("latest");
-            onLatestOrderChange("comment");
-          }}
-        >
-          按回复
-        </button>
-        <button
-          type="button"
-          className={latestOrder === "post" ? "active" : ""}
-          onClick={() => {
-            if (sort !== "latest") onSortChange("latest");
-            onLatestOrderChange("post");
-          }}
-        >
-          按发帖
-        </button>
+        <div className="sort-switch order-pill" role="group" aria-label="最新排序方式">
+          <button
+            type="button"
+            className={latestOrder === "comment" ? "active" : ""}
+            onClick={() => {
+              if (sort !== "latest") onSortChange("latest");
+              onLatestOrderChange("comment");
+            }}
+          >
+            按回复
+          </button>
+          <button
+            type="button"
+            className={latestOrder === "post" ? "active" : ""}
+            onClick={() => {
+              if (sort !== "latest") onSortChange("latest");
+              onLatestOrderChange("post");
+            }}
+          >
+            按发帖
+          </button>
+        </div>
       </div>
     </div>
   );

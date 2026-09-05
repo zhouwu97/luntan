@@ -804,9 +804,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
     });
 
-    // 评论接口 1200ms 高延迟响应
+    // 评论接口 2000ms 高延迟响应
     await page.route("**/api/v1/posts/post-async-delay-1/comments*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -985,5 +985,659 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(bottomBookmarkBtn).toHaveAttribute("aria-label", "已收藏");
     await expect(articleBookmarkBtn).toContainText("6 收藏");
     await expect(bottomBookmarkBtn).toContainText("6");
+  });
+
+  test("14. 首页默认入口与排序语义：/ 默认进入最新且 URL 保持干净，推荐严格按管理员精选无自动回退", async ({ page }) => {
+    // 监听所有 feed 流请求
+    const requestedSorts: string[] = [];
+    await page.route("**/api/v1/feed/latest*", async (route) => {
+      const url = new URL(route.request().url());
+      const sort = url.searchParams.get("sort") || "none";
+      requestedSorts.push(sort);
+
+      if (sort === "latest") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [
+              {
+                id: "post-latest-1",
+                title: "最新帖子第一篇",
+                content: "最新版块的测试内容",
+                comment_count: 12,
+                like_count: 8,
+                view_count: 90,
+                created_at: new Date().toISOString(),
+                author: { id: "u-lat-1", nickname: "最新作者1", level: 2 },
+                community: { id: "c1", name: "酱紫社区" },
+                media: [],
+                viewer_state: { has_liked: false, has_bookmarked: false },
+              },
+            ],
+            total: 1,
+            has_more: false,
+          }),
+        });
+      } else if (sort === "recommended") {
+        // 推荐流：管理员未配置推荐时返回 0 篇，验证绝对无自动 fallback
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ items: [], total: 0, has_more: false }),
+        });
+      } else if (sort === "hot") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [
+              {
+                id: "post-hot-1",
+                title: "热门帖子不应自动补位到推荐",
+                content: "热门内容",
+                comment_count: 99,
+                like_count: 88,
+                view_count: 999,
+                created_at: new Date().toISOString(),
+                author: { id: "u-hot-1", nickname: "热门作者", level: 5 },
+                community: { id: "c1", name: "机甲区" },
+                media: [],
+                viewer_state: { has_liked: false, has_bookmarked: false },
+              },
+            ],
+            total: 1,
+            has_more: false,
+          }),
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ items: [], total: 0, has_more: false }),
+        });
+      }
+    });
+
+    await page.route("**/api/v1/communities*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [{ id: "c1", name: "酱紫社区", slug: "jiangzi", post_count: 10 }],
+        }),
+      });
+    });
+
+    // 访问根路径 /
+    await page.goto("/");
+
+    // 1. 先等待最新帖子正常渲染（确保网络请求与渲染均已完成）
+    await expect(page.getByRole("heading", { name: "最新帖子第一篇" })).toBeVisible();
+
+    // 2. 验证 URL 保持纯净的 /，不强加 ?sort=latest
+    expect(new URL(page.url()).pathname).toBe("/");
+    expect(new URL(page.url()).search).toBe("");
+
+    // 3. 验证“最新”Tab 默认激活高亮
+    const latestTab = page.locator(".feed-tabs button.tab").filter({ hasText: "最新" });
+    await expect(latestTab).toBeVisible();
+    await expect(latestTab).toHaveAttribute("aria-selected", "true");
+    await expect(latestTab).toHaveClass(/active/);
+
+    // 4. 验证首次请求的 sort 参数包含 latest
+    expect(requestedSorts).toContain("latest");
+    expect(requestedSorts[0]).toBe("latest");
+
+    // 5. 点击“推荐”Tab，验证切换并测试无 fallback 逻辑
+    const recommendedTab = page.locator(".feed-tabs button.tab").filter({ hasText: "推荐" });
+    await recommendedTab.click();
+
+    await expect(page).toHaveURL("/?sort=recommended");
+    await expect(recommendedTab).toHaveAttribute("aria-selected", "true");
+
+    // 验证推荐列表空态：只展示真实说明，绝不把热门补位进来
+    await expect(page.getByRole("heading", { name: "暂无推荐内容" })).toBeVisible();
+    await expect(page.getByText("管理员推荐的精选帖子会出现在这里")).toBeVisible();
+    await expect(page.getByText("热门帖子不应自动补位到推荐")).toBeHidden();
+
+    // 6. 点击“最新”返回，URL 恢复干净 /，再次展示最新帖子
+    await latestTab.click();
+    await expect(page).toHaveURL("/");
+    await expect(page.getByRole("heading", { name: "最新帖子第一篇" })).toBeVisible();
+  });
+
+  test("15. 首页人工推荐管理：权限隔离、搜索帖子、添加位次与重新排序保存", async ({ page }) => {
+    // 1. 模拟非管理员用户访问，应被守卫拦截呈现“访问受限”
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ access_token: "mock-valid-token-user", expires_in: 3600 }),
+      });
+    });
+
+    await page.route("**/api/v1/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: "u-normal", username: "user1", nickname: "普通用户", role: "user" }),
+      });
+    });
+
+    await page.goto("/admin/recommendations");
+    await expect(page.getByRole("heading", { name: "访问受限" })).toBeVisible();
+    await expect(page.getByText("该功能仅限平台管理员使用。")).toBeVisible();
+
+    // 2. 切换为管理员身份
+    await page.unroute("**/api/v1/me");
+    await page.route("**/api/v1/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: "u-admin", username: "admin", nickname: "超级管理员", role: "admin" }),
+      });
+    });
+
+    let mockRecommendations = [
+      {
+        post_id: "p-rec-1",
+        position: 1,
+        recommended_at: new Date().toISOString(),
+        post: {
+          id: "p-rec-1",
+          title: "现有精选帖子A",
+          author: { nickname: "作者A" },
+          community: { name: "酱紫社区" },
+          created_at: new Date().toISOString(),
+        },
+      },
+      {
+        post_id: "p-rec-2",
+        position: 2,
+        recommended_at: new Date().toISOString(),
+        post: {
+          id: "p-rec-2",
+          title: "现有精选帖子B",
+          author: { nickname: "作者B" },
+          community: { name: "大型拆箱" },
+          created_at: new Date().toISOString(),
+        },
+      },
+    ];
+
+    await page.route("**/api/v1/admin/recommendations", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ items: mockRecommendations }),
+        });
+      }
+    });
+
+    let reorderPayload: unknown = null;
+    await page.route("**/api/v1/admin/recommendations/reorder", async (route) => {
+      reorderPayload = JSON.parse(route.request().postData() || "[]");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    });
+
+    await page.route("**/api/v1/admin/recommendations/p-rec-new", async (route) => {
+      if (route.request().method() === "PUT") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+      }
+    });
+
+    await page.route("**/api/v1/admin/recommendations/p-rec-1", async (route) => {
+      if (route.request().method() === "DELETE") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+      }
+    });
+
+    await page.route("**/api/v1/search?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          posts: [
+            {
+              id: "p-rec-new",
+              title: "待推荐的好物新帖",
+              content: "测评内容十分详实",
+              author_name: "新作者",
+              author: { nickname: "新作者" },
+              community: { name: "活动专区" },
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/posts/p-rec-new*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "p-rec-new",
+          title: "待推荐的好物新帖",
+          content: "测评内容十分详实",
+          author: { nickname: "新作者" },
+          community: { name: "活动专区" },
+          created_at: new Date().toISOString(),
+          media: [],
+          comment_count: 3,
+          like_count: 5,
+        }),
+      });
+    });
+
+    // 再次访问，成功进入
+    await page.goto("/admin/recommendations");
+    await expect(page.getByRole("heading", { name: /首页.*推荐管理/ })).toBeVisible();
+
+    // 验证当前已有两条推荐
+    await expect(page.getByText("现有精选帖子A")).toBeVisible();
+    await expect(page.getByText("现有精选帖子B")).toBeVisible();
+
+    // 3. 搜索帖子并加入推荐
+    const searchInput = page.locator(".admin-search-panel input");
+    await searchInput.fill("好物");
+    await page.getByRole("button", { name: "搜索帖子" }).click();
+
+    // 候选列表出现
+    await expect(page.getByText("待推荐的好物新帖")).toBeVisible();
+    await page.getByText("待推荐的好物新帖").click();
+
+    // 提交加入推荐
+    await page.getByRole("button", { name: "确认加入首页推荐" }).click();
+    await expect(page.getByText("已成功加入首页推荐！")).toBeVisible();
+
+    // 4. 测试下移与保存排序
+    const firstRowDownBtn = page.locator("button[title='下移']").first();
+    await firstRowDownBtn.click();
+
+    // 保存排序按钮由 disabled 变为可用
+    const saveOrderBtn = page.getByRole("button", { name: "保存排序" });
+    await expect(saveOrderBtn).toBeEnabled();
+    await saveOrderBtn.click();
+
+    // 验证调用了 reorder API
+    await expect(async () => {
+      expect(reorderPayload).not.toBeNull();
+    }).toPass();
+
+    // 5. 测试移除推荐
+    page.on("dialog", (dialog) => dialog.accept());
+    const removeBtn = page.locator("button").filter({ hasText: "移除" }).first();
+    await removeBtn.click();
+    await expect(page.getByText("已从首页推荐中移除")).toBeVisible();
+  });
+
+  test("16. 评论系统：一级评论外露最多 4 条热评预览，点击查看全部恢复楼层时间顺序", async ({ page }) => {
+    const mockPost = {
+      id: "post-hot-replies-1",
+      title: "四条热评外露结构测试帖",
+      content: "测试一级评论外露 4 条高赞热评，点击后恢复时间正序",
+      comment_count: 10,
+      like_count: 20,
+      bookmark_count: 5,
+      view_count: 300,
+      created_at: new Date().toISOString(),
+      author: { id: "u-author", nickname: "楼主", level: 3 },
+      community: { id: "c1", name: "酱紫社区" },
+      media: [],
+      viewer_state: { has_liked: false, has_bookmarked: false },
+    };
+
+    const mockComments = {
+      items: [
+        {
+          id: "comm-root-1",
+          post_id: "post-hot-replies-1",
+          author: { id: "u-comm-root", nickname: "一级楼主", level: 2 },
+          content: "这是具有多条二级回复的一级主评论",
+          floor: 1,
+          reply_count: 6,
+          created_at: new Date().toISOString(),
+          media: [],
+          viewer_state: { has_liked: false, has_disliked: false },
+          reply_preview: [
+            {
+              id: "rep-hot-1",
+              content: "第一条热评回复，点赞最高",
+              author: { id: "u-rep-1", nickname: "热评甲", level: 2 },
+              like_count: 68,
+              created_at: "2026-09-05T08:30:00Z",
+            },
+            {
+              id: "rep-hot-2",
+              content: "第二条热评回复",
+              author: { id: "u-rep-2", nickname: "热评乙", level: 1 },
+              like_count: 52,
+              created_at: "2026-09-05T08:40:00Z",
+            },
+            {
+              id: "rep-hot-3",
+              content: "第三条热评回复",
+              author: { id: "u-rep-3", nickname: "热评丙", level: 3 },
+              like_count: 48,
+              created_at: "2026-09-05T08:10:00Z",
+            },
+            {
+              id: "rep-hot-4",
+              content: "第四条热评回复",
+              author: { id: "u-rep-4", nickname: "热评丁", level: 2 },
+              like_count: 36,
+              created_at: "2026-09-05T08:50:00Z",
+            },
+          ],
+        },
+      ],
+      total: 1,
+      has_more: false,
+    };
+
+    // 楼中楼完整回复列表（恢复按时间/楼层顺序 asc）
+    const mockThreadReplies = [
+      {
+        id: "rep-hot-3",
+        content: "第三条热评回复（最早发言）",
+        author: { id: "u-rep-3", nickname: "热评丙", level: 3 },
+        floor: 1,
+        created_at: "2026-09-05T08:10:00Z",
+        like_count: 48,
+      },
+      {
+        id: "rep-hot-1",
+        content: "第一条热评回复，点赞最高",
+        author: { id: "u-rep-1", nickname: "热评甲", level: 2 },
+        floor: 2,
+        created_at: "2026-09-05T08:30:00Z",
+        like_count: 68,
+      },
+      {
+        id: "rep-hot-2",
+        content: "第二条热评回复",
+        author: { id: "u-rep-2", nickname: "热评乙", level: 1 },
+        floor: 3,
+        created_at: "2026-09-05T08:40:00Z",
+        like_count: 52,
+      },
+      {
+        id: "rep-hot-4",
+        content: "第四条热评回复",
+        author: { id: "u-rep-4", nickname: "热评丁", level: 2 },
+        floor: 4,
+        created_at: "2026-09-05T08:50:00Z",
+        like_count: 36,
+      },
+      {
+        id: "rep-asc-5",
+        content: "第五条回复，点赞少但按顺序展示",
+        author: { id: "u-rep-5", nickname: "新人戊", level: 1 },
+        floor: 5,
+        created_at: "2026-09-05T09:00:00Z",
+        like_count: 2,
+      },
+      {
+        id: "rep-asc-6",
+        content: "第六条最新回复",
+        author: { id: "u-rep-6", nickname: "新人己", level: 1 },
+        floor: 6,
+        created_at: "2026-09-05T09:10:00Z",
+        like_count: 1,
+      },
+    ];
+
+    await page.route("**/api/v1/posts/post-hot-replies-1/comments*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockComments) });
+    });
+
+    await page.route("**/api/v1/posts/post-hot-replies-1*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
+    });
+
+    let repliesRequestedSort = "";
+    await page.route("**/api/v1/comments/comm-root-1/replies*", async (route) => {
+      const url = new URL(route.request().url());
+      repliesRequestedSort = url.searchParams.get("sort") || "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: mockThreadReplies, total: 6, has_more: false }),
+      });
+    });
+
+    await page.route("**/api/v1/feed/latest*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto("/post/post-hot-replies-1");
+
+    // 先等待帖子正文与主评论渲染就绪
+    await expect(page.getByRole("heading", { name: "四条热评外露结构测试帖" })).toBeVisible();
+    await expect(page.getByText("这是具有多条二级回复的一级主评论")).toBeVisible();
+
+    // 1. 验证一级评论外露 4 条热评预览
+    const hotRepliesBox = page.locator("#comment-comm-root-1 .hot-replies");
+    await expect(hotRepliesBox).toBeVisible();
+    await expect(hotRepliesBox.locator(".reply-row")).toHaveCount(4);
+
+    // 验证热评第一名内容和热度数值呈现
+    await expect(hotRepliesBox).toContainText("第一条热评回复，点赞最高");
+    await expect(hotRepliesBox).toContainText("68");
+    await expect(hotRepliesBox).toContainText("第四条热评回复");
+
+    // 2. 点击“查看全部 6 条回复 ›”
+    const viewAllBtn = hotRepliesBox.getByRole("button", { name: /查看全部 6 条回复/ });
+    await expect(viewAllBtn).toBeVisible();
+    await viewAllBtn.click();
+
+    // 3. 验证楼中楼模态框弹出
+    const replyModal = page.getByRole("dialog", { name: /评论回复/ });
+    await expect(replyModal).toBeVisible();
+
+    // 4. 验证接口调用指定了 sort=asc
+    expect(repliesRequestedSort).toBe("asc");
+
+    // 5. 验证在模态框中按时间第一条的“第三条热评回复（最早发言）”排在首位，且第 5、6 条按时间正常追加展示
+    const threadItems = replyModal.locator(".comment-reply-item");
+    await expect(threadItems).toHaveCount(6);
+    await expect(threadItems.first()).toContainText("第三条热评回复（最早发言）");
+    await expect(threadItems.last()).toContainText("第六条最新回复");
+  });
+
+  test("17. PC 排行榜 beiyoujiang 层级与服务端原序保护：Top1 深色卡片、Top2/3 并排、Rank4+ 横向行及右侧栏逻辑", async ({ page }) => {
+    // 设为 1440x900 电脑版桌面端视口
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const mockRankingToys = [
+      {
+        id: "toy-1",
+        name: "黄油小姐二代",
+        merchant: "ACG",
+        category: "CUP",
+        score: 8.7,
+        rating: 8.7,
+        rating_count: 47,
+        want_count: 1600,
+        cover_url: "/mock-cover-1.jpg",
+        tags: ["ACG", "测评"],
+      },
+      {
+        id: "toy-2",
+        name: "鱼头",
+        merchant: "CUP",
+        category: "高性价比",
+        score: 9.1,
+        rating: 9.1,
+        rating_count: 90,
+        want_count: 850,
+        cover_url: "/mock-cover-2.jpg",
+        tags: ["CUP", "高性价比"],
+      },
+      {
+        id: "toy-3",
+        name: "双穴爱莉",
+        merchant: "CUP",
+        category: "经典",
+        score: 9.1,
+        rating: 9.1,
+        rating_count: 14,
+        want_count: 320,
+        cover_url: "/mock-cover-3.jpg",
+        tags: ["CUP"],
+      },
+      {
+        id: "toy-4",
+        name: "天与苍穹",
+        merchant: "CUP",
+        category: "软萌",
+        score: 8.9,
+        rating: 8.9,
+        rating_count: 26,
+        want_count: 480,
+        cover_url: "/mock-cover-4.jpg",
+        tags: ["CUP"],
+      },
+      {
+        id: "toy-5",
+        name: "蓝海星落",
+        merchant: "CUP",
+        category: "新品",
+        score: 8.8,
+        rating: 8.8,
+        rating_count: 31,
+        want_count: 390,
+        cover_url: "/mock-cover-5.jpg",
+        tags: ["CUP"],
+      },
+    ];
+
+    await page.route("**/api/v1/ranking/toys*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: mockRankingToys }),
+      });
+    });
+
+    await page.route("**/api/v1/communities*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto("/ranking");
+
+    // 1. 验证 PC 桌面端三栏网格容器已渲染
+    const desktopGrid = page.locator(".ranking-desktop-grid");
+    await expect(desktopGrid).toBeVisible();
+
+    // 2. 验证严格遵照服务端原序：
+    // 虽然第 2、3 名评分为 9.1，高于第 1 名的 8.7，但前端绝对不重新按评分倒序，第 1 名仍然严格为“黄油小姐二代”！
+    const top1Card = page.locator(".ranking-top1-card");
+    await expect(top1Card).toBeVisible();
+    await expect(top1Card.locator(".top1-num")).toHaveText("01");
+    await expect(top1Card.locator(".top1-title")).toHaveText("黄油小姐二代");
+    await expect(top1Card.locator(".top1-score-val strong")).toHaveText("8.7");
+    await expect(top1Card.locator(".top1-kpis")).toContainText("47 篇测评");
+
+    // 3. 验证 Top 2 与 Top 3 并排网格
+    const top23Grid = page.locator(".ranking-top23-grid");
+    await expect(top23Grid).toBeVisible();
+    const topCards = top23Grid.locator(".ranking-top23-card");
+    await expect(topCards).toHaveCount(2);
+    await expect(topCards.nth(0)).toContainText("鱼头");
+    await expect(topCards.nth(0).locator(".top23-badge")).toHaveText("02");
+    await expect(topCards.nth(1)).toContainText("双穴爱莉");
+    await expect(topCards.nth(1).locator(".top23-badge")).toHaveText("03");
+
+    // 4. 验证第 4 名以后为紧凑横向列表行
+    const listRows = page.locator(".ranking-horizontal-row");
+    await expect(listRows).toHaveCount(2);
+    await expect(listRows.nth(0)).toContainText("04");
+    await expect(listRows.nth(0)).toContainText("天与苍穹");
+    await expect(listRows.nth(1)).toContainText("05");
+    await expect(listRows.nth(1)).toContainText("蓝海星落");
+
+    // 5. 验证右侧栏智能留白：因为当前每周冠军与榜首为同一商品（toy-1），右侧栏不重复渲染相同冠军卡片
+    const rightRail = page.locator(".ranking-right-rail");
+    await expect(rightRail.locator(".rank-right-champion-card")).toBeHidden();
+  });
+
+  test("18. 视口隔离测试：移动端 375px 保持原结构与交互不变，桌面端 1440px 完整呈现三栏与单图规范", async ({ page }) => {
+    // 1. 移动端 375x667 视口
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    await page.route("**/api/v1/feed/latest*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              id: "post-viewport-1",
+              title: "单图规范测试帖",
+              content: "测试单图自适应包含不拉伸",
+              comment_count: 1,
+              like_count: 2,
+              view_count: 20,
+              created_at: new Date().toISOString(),
+              author: { id: "u-vp-1", nickname: "视口作者", level: 2 },
+              community: { id: "c1", name: "机甲区" },
+              media: [
+                {
+                  id: "m-single-1",
+                  url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
+                  thumb_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
+                  detail_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
+                  original_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
+                  alt_text: "竖屏单图",
+                },
+              ],
+              viewer_state: { has_liked: false, has_bookmarked: false },
+            },
+          ],
+          total: 1,
+          has_more: false,
+        }),
+      });
+    });
+
+    await page.route("**/api/v1/communities*", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    });
+
+    await page.goto("/");
+
+    // 移动端：底部浮动导航栏与移动端元素可见
+    const mobileBottomNav = page.locator("nav.bottom-nav");
+    await expect(mobileBottomNav).toBeVisible();
+
+    // 移动端：桌面左侧与右侧侧边栏严格隐藏
+    const desktopLeftRail = page.locator(".home-left-col");
+    await expect(desktopLeftRail).toBeHidden();
+    const desktopRightCol = page.locator(".home-right-col");
+    await expect(desktopRightCol).toBeHidden();
+
+    // 2. 桌面端 1440x900 视口
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // 桌面端：底部移动端导航栏隐藏，桌面左右侧栏可见
+    await expect(mobileBottomNav).toBeHidden();
+    await expect(desktopLeftRail).toBeVisible();
+    await expect(desktopRightCol).toBeVisible();
+
+    // 3. 验证单图规范：max-height: 420px，object-fit: contain，无强制拉伸
+    const singleMediaImg = page.locator(".media-single img").first();
+    await expect(singleMediaImg).toBeVisible();
+    const imgStyles = await singleMediaImg.evaluate((el) => {
+      const computed = window.getComputedStyle(el);
+      return {
+        objectFit: computed.objectFit,
+        maxHeight: computed.maxHeight,
+      };
+    });
+    expect(imgStyles.objectFit).toBe("contain");
+    expect(imgStyles.maxHeight).toBe("420px");
   });
 });

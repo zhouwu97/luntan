@@ -16,6 +16,13 @@ import { selectHomeCommunities } from "../../lib/home-communities";
 import { compactCount, formatError } from "../../lib/format";
 import type { Community, RankingToy } from "../../types/forum";
 
+// 模块化排行榜架构组件（移植 beiyoujiang 架构）
+import styles from "./ranking.module.css";
+import { RankingDesktopShell } from "../../components/ranking/ranking-shell";
+import { RankingTopThree } from "../../components/ranking/ranking-top-three";
+import { RankingList } from "../../components/ranking/ranking-list";
+import { RankingRightRail } from "../../components/ranking/ranking-right-rail";
+
 const rankingTabs = [
   { key: "", label: "综合热榜" },
   { key: "BEGINNER", label: "慢玩入门" },
@@ -108,7 +115,7 @@ export default function RankingPage() {
     );
   }, [items, searchQuery]);
 
-  // 移动端专用逻辑
+  // 移动端专用逻辑（与 Flutter ranking_page.dart 对齐）
   const featuredItem = useMemo(() => {
     if (searchQuery.trim()) return undefined;
     return weeklyTop || filteredItems.find((item) => item.rank === 1) || filteredItems[0];
@@ -124,7 +131,7 @@ export default function RankingPage() {
   const top3 = filteredItems[2];
   const restItems = filteredItems.slice(3);
 
-  // 仅当 weeklyTop != 当前 Top1 时在右侧展示独立冠军栏
+  // 仅当 weeklyTop != 当前 Top1 时在右侧展示独立冠军栏，无独立冠军时不保留幽灵右栏，中间自动吃满
   const showRightRail = Boolean(
     weeklyTop && filteredItems.length > 0 && weeklyTop.id !== filteredItems[0]?.id
   );
@@ -169,7 +176,7 @@ export default function RankingPage() {
       {/* 桌面端专用导航栏 */}
       <SiteHeader className="ranking-site-header" />
 
-      {/* 移动端原型顶部 Header (严格保持不变) */}
+      {/* 移动端/竖屏顶部 Header (对齐 Flutter ranking_page.dart) */}
       <header className="rank-head mobile-only">
         <button
           type="button"
@@ -208,7 +215,7 @@ export default function RankingPage() {
         </button>
       </header>
 
-      {/* 移动端原型分类导航条 (严格保持不变) */}
+      {/* 移动端/竖屏分类导航条 (对齐 Flutter ranking_page.dart) */}
       <nav className="rank-tabs mobile-only" aria-label="榜单类型">
         {rankingTabs.map((tab, index) => (
           <button
@@ -222,7 +229,7 @@ export default function RankingPage() {
         ))}
       </nav>
 
-      {/* 移动端原型商品分类条 (严格保持不变) */}
+      {/* 移动端/竖屏商品分类条 (对齐 Flutter ranking_page.dart) */}
       <div className="category-strip mobile-only" aria-label="商品分类">
         {rankingCategories.map((category) => (
           <button
@@ -239,11 +246,10 @@ export default function RankingPage() {
 
       <main className="page-frame ranking-page-frame">
         {/* =========================================================
-            PC 桌面端完整三栏系统（对齐 beiyoujiang 与 HTML 设计原型）
+            PC 桌面端完整架构（完全移植 beiyoujiang 架构 + 模块化 CSS）
            ========================================================= */}
-        <div className="home-grid ranking-desktop-grid desktop-only">
-          {/* 左侧社区导航栏 */}
-          <div className="home-left-col">
+        <RankingDesktopShell
+          leftRail={
             <CommunityRail
               communities={communities}
               activeId=""
@@ -251,257 +257,122 @@ export default function RankingPage() {
                 router.push(comm ? `/?community=${encodeURIComponent(comm.id)}` : "/");
               }}
             />
+          }
+          rightRail={
+            showRightRail && weeklyTop ? (
+              <RankingRightRail
+                weeklyTop={weeklyTop}
+                returnPath={returnPath}
+                scoreText={scoreText}
+                compactCount={compactCount}
+                onOpenRules={() => setRuleModalOpen(true)}
+              />
+            ) : null
+          }
+          hasRightRail={showRightRail}
+        >
+          {/* 顶部标题与规则入口 */}
+          <div className={styles.headRow}>
+            <div>
+              <h1 className={styles.title}>本周好物榜</h1>
+              <p className={styles.subtitle}>根据同好真实拆箱、测评评分与互动热度排序</p>
+            </div>
+            <button
+              type="button"
+              className={styles.ruleBtn}
+              onClick={() => setRuleModalOpen(true)}
+              data-testid="ranking-rule-btn"
+            >
+              <Icon name="info" size={14} />
+              <span>榜单规则</span>
+            </button>
           </div>
 
-          {/* 中间榜单主体 */}
-          <section className="ranking-main-col" aria-label="本周好物榜">
-            {/* 顶部标题与规则 */}
-            <div className="ranking-body-head">
-              <div>
-                <h1 className="ranking-page-title">本周好物榜</h1>
-                <p className="ranking-page-sub">根据同好真实拆箱、测评评分与互动热度排序</p>
-              </div>
+          {/* 分类筛选工具栏 */}
+          <div className={styles.filtersCard} data-testid="ranking-filters-card">
+            <nav className={styles.tabsRow} aria-label="榜单维度">
+              {rankingTabs.map((tab, index) => (
+                <button
+                  key={tab.key || "all"}
+                  type="button"
+                  className={`${styles.tabBtn}${selectedTab === index ? ` ${styles.active}` : ""}`}
+                  onClick={() => selectTab(index)}
+                  data-testid={`ranking-tab-${tab.key || "all"}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+
+            <div className={styles.catsRow} aria-label="商品品类">
               <button
                 type="button"
-                className="ranking-rule-btn"
-                onClick={() => setRuleModalOpen(true)}
+                className={`${styles.catBtn}${selectedCategory === "" ? ` ${styles.active}` : ""}`}
+                onClick={() => selectCategory("")}
+                data-testid="ranking-cat-all"
               >
-                <Icon name="info" size={14} />
-                <span>榜单规则</span>
+                全部
               </button>
-            </div>
-
-            {/* 分类切换：Tabs 与 Pills */}
-            <div className="ranking-filters-bar">
-              <nav className="ranking-tabs-row" aria-label="榜单维度">
-                {rankingTabs.map((tab, index) => (
-                  <button
-                    key={tab.key || "all"}
-                    type="button"
-                    className={`ranking-tab-btn${selectedTab === index ? " active" : ""}`}
-                    onClick={() => selectTab(index)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </nav>
-
-              <div className="ranking-cats-row" aria-label="商品品类">
+              {rankingCategories.map((cat) => (
                 <button
+                  key={cat.key}
                   type="button"
-                  className={`ranking-cat-btn${selectedCategory === "" ? " active" : ""}`}
-                  onClick={() => selectCategory("")}
+                  className={`${styles.catBtn}${selectedCategory === cat.key ? ` ${styles.active}` : ""}`}
+                  onClick={() => selectCategory(cat.key)}
+                  data-testid={`ranking-cat-${cat.key}`}
                 >
-                  全部
+                  <Icon name={cat.icon} size={13} />
+                  <span>{cat.label}</span>
                 </button>
-                {rankingCategories.map((cat) => (
-                  <button
-                    key={cat.key}
-                    type="button"
-                    className={`ranking-cat-btn${selectedCategory === cat.key ? " active" : ""}`}
-                    onClick={() => selectCategory(cat.key)}
-                  >
-                    <Icon name={cat.icon} size={14} />
-                    <span>{cat.label}</span>
-                  </button>
-                ))}
-              </div>
+              ))}
             </div>
-
-            {error && <div className="data-note" role="status">{error}</div>}
-
-            {loading ? (
-              <div className="loading-stack" style={{ padding: "20px 0" }}>
-                <div className="skeleton-card" style={{ height: 260 }} />
-                <div className="skeleton-card short" />
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="empty-state">
-                <Icon name="trophy" size={28} />
-                <h2>暂无上榜商品</h2>
-                <p>{searchQuery ? "未找到匹配的商品。" : "当前分类暂无上榜商品。"}</p>
-              </div>
-            ) : (
-              <div className="ranking-desktop-flow">
-                {/* 1. TOP 1 深色重点卡 (深蓝背景，独立大图，核心三指标) */}
-                {top1 && (
-                  <Link
-                    href={`/ranking/${encodeURIComponent(top1.id)}?from=${encodeURIComponent(returnPath)}`}
-                    className="ranking-top1-link"
-                  >
-                    <article className="ranking-top1-card">
-                      <div className="top1-crown-badge">
-                        <Icon name="trophy" size={13} /> 本周冠军
-                      </div>
-                      <div className="top1-num">01</div>
-                      <div className="top1-img-wrap">
-                        <img
-                          src={top1.coverUrl || top1.heroUrl || "/default-avatar.webp"}
-                          alt={top1.name}
-                          className="top1-img"
-                        />
-                      </div>
-                      <div className="top1-details">
-                        <div className="top1-title-line">
-                          <h2 className="top1-title">{top1.name}</h2>
-                          <div className="top1-score-val">
-                            <strong>{scoreText(top1.score)}</strong>
-                            <small>分</small>
-                          </div>
-                        </div>
-                        <div className="top1-meta-tags">
-                          <span className="top1-merchant">{top1.merchant || "CUP"}</span>
-                          {top1.tags.slice(0, 2).map((t) => (
-                            <span key={t} className="top1-tag">#{t}</span>
-                          ))}
-                        </div>
-                        <p className="top1-desc">{top1.description || "热门精选，玩家高口碑推荐好物"}</p>
-                        <div className="top1-kpis">
-                          <span className="kpi-item">
-                            <b>{top1.ratingCount || 0}</b> 篇测评
-                          </span>
-                          <span className="kpi-sep">·</span>
-                          <span className="kpi-item">
-                            <b>{compactCount(top1.wantCount || 0)}</b> 人想要
-                          </span>
-                        </div>
-                      </div>
-                    </article>
-                  </Link>
-                )}
-
-                {/* 2. TOP 2 / TOP 3 双列并排卡 */}
-                {(top2 || top3) && (
-                  <div className="ranking-top23-grid">
-                    {top2 && (
-                      <Link
-                        href={`/ranking/${encodeURIComponent(top2.id)}?from=${encodeURIComponent(returnPath)}`}
-                        className="ranking-top23-link"
-                      >
-                        <article className="ranking-top23-card">
-                          <div className="top23-badge rank-2">02</div>
-                          <div className="top23-thumb">
-                            <img src={top2.coverUrl || "/default-avatar.webp"} alt={top2.name} />
-                          </div>
-                          <div className="top23-info">
-                            <h3 className="top23-name">{top2.name}</h3>
-                            <div className="top23-meta">
-                              <span>{top2.merchant || "CUP"}</span>
-                              <span className="dot">·</span>
-                              <span>{top2.ratingCount || 0} 测评</span>
-                            </div>
-                            <div className="top23-score">
-                              <strong>{scoreText(top2.score)}</strong>
-                              <small>分</small>
-                            </div>
-                          </div>
-                        </article>
-                      </Link>
-                    )}
-
-                    {top3 && (
-                      <Link
-                        href={`/ranking/${encodeURIComponent(top3.id)}?from=${encodeURIComponent(returnPath)}`}
-                        className="ranking-top23-link"
-                      >
-                        <article className="ranking-top23-card">
-                          <div className="top23-badge rank-3">03</div>
-                          <div className="top23-thumb">
-                            <img src={top3.coverUrl || "/default-avatar.webp"} alt={top3.name} />
-                          </div>
-                          <div className="top23-info">
-                            <h3 className="top23-name">{top3.name}</h3>
-                            <div className="top23-meta">
-                              <span>{top3.merchant || "CUP"}</span>
-                              <span className="dot">·</span>
-                              <span>{top3.ratingCount || 0} 测评</span>
-                            </div>
-                            <div className="top23-score">
-                              <strong>{scoreText(top3.score)}</strong>
-                              <small>分</small>
-                            </div>
-                          </div>
-                        </article>
-                      </Link>
-                    )}
-                  </div>
-                )}
-
-                {/* 3. 第 4 名以后 横向行列表 */}
-                {restItems.length > 0 && (
-                  <div className="ranking-rows-container">
-                    {restItems.map((item, idx) => {
-                      const rankNum = (idx + 4).toString().padStart(2, "0");
-                      return (
-                        <Link
-                          key={item.id}
-                          href={`/ranking/${encodeURIComponent(item.id)}?from=${encodeURIComponent(returnPath)}`}
-                          className="ranking-row-link"
-                        >
-                          <article className="ranking-horizontal-row">
-                            <div className="row-rank-num">{rankNum}</div>
-                            <div className="row-thumb">
-                              <img src={item.coverUrl || "/default-avatar.webp"} alt={item.name} />
-                            </div>
-                            <div className="row-content">
-                              <h4 className="row-title">{item.name}</h4>
-                              <div className="row-meta">
-                                <span>{item.merchant || "CUP"}</span>
-                                <span className="dot">·</span>
-                                <span>{item.ratingCount || 0} 测评</span>
-                                <span className="dot">·</span>
-                                <span>{compactCount(item.wantCount || 0)} 想要</span>
-                              </div>
-                            </div>
-                            <div className="row-score">
-                              <strong>{scoreText(item.score)}</strong>
-                              <small>分</small>
-                            </div>
-                          </article>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* 右栏按需展示：只有 weeklyTop != 当前 Top1 才展示 */}
-          <div className="home-right-col ranking-right-rail-col">
-            {showRightRail && weeklyTop ? (
-              <aside className="ranking-champ-rail">
-                <div className="rail-head" style={{ marginBottom: 10 }}>
-                  <div className="rail-head-title">
-                    <span className="rail-head-icon blue"><Icon name="trophy" size={16} /></span>
-                    <h3>本周冠军</h3>
-                  </div>
-                </div>
-                <Link
-                  href={`/ranking/${encodeURIComponent(weeklyTop.id)}?from=${encodeURIComponent(returnPath)}`}
-                  className="rank-hero-celestial"
-                  style={{ textDecoration: "none" }}
-                >
-                  <div className="rank-hero-top">
-                    <span className="rank-hero-kicker">官方榜首</span>
-                    <span className="rank-hero-score">{scoreText(weeklyTop.score)}</span>
-                  </div>
-                  <strong className="rank-hero-title">{weeklyTop.name}</strong>
-                  <div className="rank-hero-meta">
-                    <span>{weeklyTop.ratingCount || 0} 篇测评</span>
-                    <span className="meta-dot">·</span>
-                    <span>{compactCount(weeklyTop.wantCount || 0)} 人想要</span>
-                  </div>
-                </Link>
-              </aside>
-            ) : null}
           </div>
-        </div>
+
+          {error && <div className="data-note" role="status">{error}</div>}
+
+          {loading ? (
+            <div className="loading-stack" style={{ padding: "20px 0" }}>
+              <div className="skeleton-card" style={{ height: 200 }} />
+              <div className="skeleton-card short" />
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="empty-state" data-testid="ranking-empty-state">
+              <Icon name="trophy" size={28} />
+              <h2>暂无上榜商品</h2>
+              <p>{searchQuery ? "未找到匹配的商品。" : "当前分类暂无上榜商品。"}</p>
+            </div>
+          ) : (
+            <div className="ranking-flow-content">
+              {/* 1. TOP 1, TOP 2, TOP 3 重点卡片 */}
+              <RankingTopThree
+                top1={top1}
+                top2={top2}
+                top3={top3}
+                returnPath={returnPath}
+                scoreText={scoreText}
+                compactCount={compactCount}
+              />
+
+              {/* 2. 第 4 名以后 横向列表行 */}
+              {restItems.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <RankingList
+                    items={restItems}
+                    startIndex={4}
+                    returnPath={returnPath}
+                    scoreText={scoreText}
+                    compactCount={compactCount}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </RankingDesktopShell>
 
         {/* =========================================================
-            移动端商品列表展示 (100% 保持移动端原有排版与结构)
+            移动端/竖屏商品列表展示 (对齐 Flutter ranking_page.dart)
            ========================================================= */}
-        <div className="rank-list mobile-only">
+        <div className="rank-list mobile-only" data-testid="ranking-mobile-list">
           {loading ? (
             <div className="loading-stack" style={{ padding: 12 }}>
               <div className="skeleton-card" />

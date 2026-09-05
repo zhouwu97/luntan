@@ -1447,9 +1447,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(threadItems.last()).toContainText("第六条最新回复");
   });
 
-  test("17. PC 排行榜 beiyoujiang 层级与服务端原序保护：Top1 深色卡片、Top2/3 并排、Rank4+ 横向行及右侧栏逻辑", async ({ page }) => {
-    // 设为 1440x900 电脑版桌面端视口
-    await page.setViewportSize({ width: 1440, height: 900 });
+  test("17. PC 排行榜 beiyoujiang 架构与多视口布局：display:grid、列宽、Top2/3同行、Rank4+行高及右栏智能扩展", async ({ page }) => {
+    // 设为 1920x1080 PC 宽屏视口
+    await page.setViewportSize({ width: 1920, height: 1080 });
 
     const mockRankingToys = [
       {
@@ -1528,45 +1528,91 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
 
     await page.goto("/ranking");
 
-    // 1. 验证 PC 桌面端三栏网格容器已渲染
-    const desktopGrid = page.locator(".ranking-desktop-grid");
-    await expect(desktopGrid).toBeVisible();
+    // 1. 验证 PC 桌面端 RankingDesktopShell 及其 Grid 布局生效
+    const desktopShell = page.getByTestId("ranking-desktop-shell");
+    await expect(desktopShell).toBeVisible();
+
+    const shellGrid = page.getByTestId("ranking-shell-grid");
+    await expect(shellGrid).toBeVisible();
+
+    const gridStyles = await shellGrid.evaluate((el) => {
+      const computed = window.getComputedStyle(el);
+      return {
+        display: computed.display,
+        gridTemplateColumns: computed.gridTemplateColumns,
+      };
+    });
+    expect(gridStyles.display).toBe("grid");
+
+    // 无独立周冠军时，自动应用 .noRightRail，不保留幽灵右栏，中间栏自动吃满 (220px 1fr)
+    expect(gridStyles.gridTemplateColumns).toMatch(/220px\s+\d+(\.\d+)?px/);
+    await expect(page.getByTestId("ranking-right-rail")).toBeHidden();
 
     // 2. 验证严格遵照服务端原序：
     // 虽然第 2、3 名评分为 9.1，高于第 1 名的 8.7，但前端绝对不重新按评分倒序，第 1 名仍然严格为“黄油小姐二代”！
-    const top1Card = page.locator(".ranking-top1-card");
-    await expect(top1Card).toBeVisible();
-    await expect(top1Card.locator(".top1-num")).toHaveText("01");
-    await expect(top1Card.locator(".top1-title")).toHaveText("黄油小姐二代");
-    await expect(top1Card.locator(".top1-score-val strong")).toHaveText("8.7");
-    await expect(top1Card.locator(".top1-kpis")).toContainText("47 篇测评");
+    const top1Link = page.getByTestId("ranking-top1-link");
+    await expect(top1Link).toBeVisible();
+    await expect(top1Link).toContainText("01");
+    await expect(top1Link).toContainText("黄油小姐二代");
+    await expect(top1Link).toContainText("8.7");
+    await expect(top1Link).toContainText("47 篇测评");
 
-    // 3. 验证 Top 2 与 Top 3 并排网格
-    const top23Grid = page.locator(".ranking-top23-grid");
+    // 3. 验证 Top 2 与 Top 3 并排在同一水平行（垂直坐标 top 误差小于 5px）
+    const top23Grid = page.getByTestId("ranking-top23-grid");
     await expect(top23Grid).toBeVisible();
-    const topCards = top23Grid.locator(".ranking-top23-card");
-    await expect(topCards).toHaveCount(2);
-    await expect(topCards.nth(0)).toContainText("鱼头");
-    await expect(topCards.nth(0).locator(".top23-badge")).toHaveText("02");
-    await expect(topCards.nth(1)).toContainText("双穴爱莉");
-    await expect(topCards.nth(1).locator(".top23-badge")).toHaveText("03");
+    const top2Card = page.getByTestId("ranking-top2-link");
+    const top3Card = page.getByTestId("ranking-top3-link");
+    await expect(top2Card).toBeVisible();
+    await expect(top3Card).toBeVisible();
+    await expect(top2Card).toContainText("02");
+    await expect(top2Card).toContainText("鱼头");
+    await expect(top3Card).toContainText("03");
+    await expect(top3Card).toContainText("双穴爱莉");
 
-    // 4. 验证第 4 名以后为紧凑横向列表行
-    const listRows = page.locator(".ranking-horizontal-row");
-    await expect(listRows).toHaveCount(2);
-    await expect(listRows.nth(0)).toContainText("04");
-    await expect(listRows.nth(0)).toContainText("天与苍穹");
-    await expect(listRows.nth(1)).toContainText("05");
-    await expect(listRows.nth(1)).toContainText("蓝海星落");
+    const top2Box = await top2Card.boundingBox();
+    const top3Box = await top3Card.boundingBox();
+    expect(top2Box).not.toBeNull();
+    expect(top3Box).not.toBeNull();
+    expect(Math.abs((top2Box?.y || 0) - (top3Box?.y || 0))).toBeLessThan(5);
 
-    // 5. 验证右侧栏智能留白：因为当前每周冠军与榜首为同一商品（toy-1），右侧栏不重复渲染相同冠军卡片
-    const rightRail = page.locator(".ranking-right-rail");
-    await expect(rightRail.locator(".rank-right-champion-card")).toBeHidden();
+    // 4. 验证第 4 名以后为紧凑横向行列表（行高在 90px~110px 之间）
+    const row04 = page.getByTestId("ranking-row-04");
+    const row05 = page.getByTestId("ranking-row-05");
+    await expect(row04).toBeVisible();
+    await expect(row04).toContainText("04");
+    await expect(row04).toContainText("天与苍穹");
+    await expect(row05).toBeVisible();
+    await expect(row05).toContainText("05");
+    await expect(row05).toContainText("蓝海星落");
+
+    const row04Box = await row04.boundingBox();
+    expect(row04Box).not.toBeNull();
+    expect(row04Box!.height).toBeGreaterThanOrEqual(85);
+    expect(row04Box!.height).toBeLessThanOrEqual(115);
+
+    // 5. 验证 1366x768 视口下依然保持良好桌面网格
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await expect(shellGrid).toBeVisible();
+    const gridStyles1366 = await shellGrid.evaluate((el) => window.getComputedStyle(el).display);
+    expect(gridStyles1366).toBe("grid");
+
+    // 6. 验证 1024x768 横屏视口下居中主榜单，左栏与右栏隐藏
+    await page.setViewportSize({ width: 1100, height: 750 });
+    const leftRailStyles = await page.getByTestId("ranking-left-rail").evaluate((el) => window.getComputedStyle(el).display);
+    expect(leftRailStyles).toBe("none");
+
+    // 7. 验证 1080x1920 PC 竖屏视口：
+    // 隐藏桌面 Shell，切换到单列移动端风格；但由于不是真实手机，绝不弹出下载 App 浮窗！
+    await page.setViewportSize({ width: 1080, height: 1920 });
+    await expect(desktopShell).toBeHidden();
+    await expect(page.getByTestId("ranking-mobile-list")).toBeVisible();
+    // 验证 PC 竖屏无 App 下载浮窗
+    await expect(page.locator(".app-download-banner")).toBeHidden();
   });
 
-  test("18. 视口隔离测试：移动端 375px 保持原结构与交互不变，桌面端 1440px 完整呈现三栏与单图规范", async ({ page }) => {
-    // 1. 移动端 375x667 视口
-    await page.setViewportSize({ width: 375, height: 667 });
+  test("18. 手机与 PC 竖屏架构隔离：390x844 手机仅保留 3 个主社区板块，PC 1440x900 完整呈现桌面三栏", async ({ page }) => {
+    // 1. 移动端 390x844 手机视口
+    await page.setViewportSize({ width: 390, height: 844 });
 
     await page.route("**/api/v1/feed/latest*", async (route) => {
       await route.fulfill({
@@ -1583,7 +1629,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
               view_count: 20,
               created_at: new Date().toISOString(),
               author: { id: "u-vp-1", nickname: "视口作者", level: 2 },
-              community: { id: "c1", name: "机甲区" },
+              community: { id: "c1", name: "酱紫社区" },
               media: [
                 {
                   id: "m-single-1",
@@ -1604,14 +1650,32 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     });
 
     await page.route("**/api/v1/communities*", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            { id: "c-1", name: "大型拆箱", slug: "unboxing", sort_order: 1 },
+            { id: "c-2", name: "酱紫社区", slug: "campus", sort_order: 2 },
+            { id: "c-3", name: "杂鱼日常", slug: "daily", sort_order: 3 },
+            { id: "c-extra", name: "额外板块", slug: "extra", sort_order: 4 },
+          ],
+        }),
+      });
     });
 
     await page.goto("/");
 
-    // 移动端：底部浮动导航栏与移动端元素可见
+    // 移动端：底部浮动导航栏与移动端头部可见
     const mobileBottomNav = page.locator("nav.bottom-nav");
     await expect(mobileBottomNav).toBeVisible();
+
+    // 移动端：严格只有 3 个社区 Tab（大型拆箱 | 酱紫社区 | 杂鱼日常），没有冗余的“全部”
+    const communityTabs = page.locator(".home-community-tabs .home-community-tab");
+    await expect(communityTabs).toHaveCount(3);
+    await expect(communityTabs.nth(0)).toContainText("大型拆箱");
+    await expect(communityTabs.nth(1)).toContainText("酱紫社区");
+    await expect(communityTabs.nth(2)).toContainText("杂鱼日常");
 
     // 移动端：桌面左侧与右侧侧边栏严格隐藏
     const desktopLeftRail = page.locator(".home-left-col");
@@ -1641,3 +1705,4 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     expect(imgStyles.maxHeight).toBe("420px");
   });
 });
+

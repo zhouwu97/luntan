@@ -109,7 +109,7 @@ export function readFeedCacheSnapshot(options: FeedCacheOptions): FeedCacheSnaps
     store?.setItem(key, JSON.stringify(touchedEntry));
     return {
       ageMs: Math.max(0, now - entry.savedAt),
-      isFresh: now - entry.savedAt <= SOFT_TTL_MS,
+      isFresh: options.sort !== "recommended" && now - entry.savedAt <= SOFT_TTL_MS,
       page: {
       items: entry.page.items as Post[],
       nextCursor: entry.page.nextCursor,

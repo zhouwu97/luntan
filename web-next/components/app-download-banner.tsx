@@ -26,6 +26,11 @@ export function AppDownloadBanner({ className = "" }: { className?: string }) {
   const [closed, setClosed] = useState(false);
 
   useEffect(() => {
+    const isRealMobileWeb =
+      window.matchMedia("(max-width: 820px) and (pointer: coarse)").matches ||
+      /Android|iPhone|iPad/i.test(window.navigator.userAgent);
+    if (!isRealMobileWeb) return;
+
     const standaloneQuery = window.matchMedia("(display-mode: standalone)");
     const standalone = standaloneQuery.matches
       || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;

@@ -102,6 +102,9 @@ export function PostDetailShell({ id }: { id: string }) {
   // 2. 独立并发加载评论（带 requestId 防竞态、单一数据触发源，绝不阻塞正文）
   const commentsRequestIdRef = useRef(0);
 
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+
   const fetchComments = useCallback(
     (offset = 0, append = false) => {
       if (landlordOnly && !post) return;
@@ -135,7 +138,7 @@ export function PostDetailShell({ id }: { id: string }) {
           if (!append) {
             setCommentsError("评论加载失败，请重试");
           } else {
-            showToast("加载更多评论失败，请重试");
+            showToastRef.current("加载更多评论失败，请重试");
           }
         })
         .finally(() => {
@@ -146,7 +149,7 @@ export function PostDetailShell({ id }: { id: string }) {
         });
     },
     // 关键优化：仅当开启只看楼主时才把 post?.author.id 作为依赖，杜绝正文返回引发的重复请求
-    [id, sortOrder, landlordOnly, landlordOnly ? post?.author.id : undefined, showToast],
+    [id, sortOrder, landlordOnly, landlordOnly ? post?.author.id : undefined],
   );
 
   useEffect(() => {

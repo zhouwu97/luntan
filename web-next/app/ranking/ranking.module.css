@@ -1,0 +1,589 @@
+/* 排行榜专用模块化样式体系 (移植 beiyoujiang 架构与圣杯酱视觉) */
+
+.desktopShell {
+  width: min(1328px, calc(100% - 32px));
+  margin: 20px auto 60px;
+}
+
+/* 横屏三栏栅格：当存在右栏时为 220px 1fr 280px，无右栏时中间吃满 220px 1fr */
+.shellGrid {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 280px;
+  gap: 20px;
+  align-items: start;
+}
+
+.shellGrid.noRightRail {
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.leftRail {
+  position: sticky;
+  top: 86px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mainCol {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rightRail {
+  position: sticky;
+  top: 86px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 顶部标题与规则 */
+.headRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 900;
+  color: #1e293b;
+  letter-spacing: -0.3px;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.ruleBtn {
+  border: 1px solid #dce8f3;
+  background: #fff;
+  color: #3b82f6;
+  border-radius: 18px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.16s ease;
+}
+
+.ruleBtn:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+/* 筛选工具栏 */
+.filtersCard {
+  background: #fff;
+  border: 1px solid #e7eef6;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(40, 75, 115, 0.05);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tabsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.tabBtn {
+  border: 0;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 10px;
+  padding: 6px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.16s ease;
+}
+
+.tabBtn:hover {
+  color: #1e293b;
+  background: #e2e8f0;
+}
+
+.tabBtn.active {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+}
+
+.catsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 8px;
+}
+
+.catBtn {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 20px;
+  padding: 4px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.16s ease;
+}
+
+.catBtn:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.catBtn.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+/* Top 1 深色特色卡片 */
+.top1Link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.top1Card {
+  position: relative;
+  background: linear-gradient(135deg, #0c416f 0%, #07345e 65%, #0b578c 100%);
+  border-radius: 16px;
+  padding: 22px 24px;
+  color: #fff;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(12, 65, 111, 0.2);
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.top1Card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(12, 65, 111, 0.25);
+}
+
+.top1Num {
+  position: absolute;
+  right: 20px;
+  top: 10px;
+  font-size: 64px;
+  font-weight: 900;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  font-family: ui-monospace, monospace;
+}
+
+.top1CrownBadge {
+  position: absolute;
+  left: 24px;
+  top: 14px;
+  background: rgba(255, 215, 0, 0.2);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  color: #fde047;
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 6px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.top1ImgBox {
+  width: 140px;
+  height: 140px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.top1ImgBox img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.top1Details {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.top1TitleLine {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.top1Title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.2px;
+}
+
+.top1ScoreVal {
+  color: #ffd33d;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.top1ScoreVal strong {
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.top1ScoreVal small {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.top1Tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.top1Merchant {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.top1Tag {
+  font-size: 11px;
+  color: #bfdbfe;
+  opacity: 0.85;
+}
+
+.top1Desc {
+  margin: 2px 0 4px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.top1Kpis {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #a6c9e9;
+}
+
+.top1Kpis b {
+  color: #fff;
+  font-weight: 800;
+}
+
+/* Top 2 / Top 3 并排卡片 */
+.top23Grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.top23Link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.top23Card {
+  background: #fff;
+  border: 1px solid #e7eef6;
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 4px 14px rgba(40, 75, 115, 0.05);
+  display: grid;
+  grid-template-columns: 28px 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.top23Card:hover {
+  transform: translateY(-1px);
+  border-color: #bfdbfe;
+}
+
+.top23Badge {
+  font-size: 18px;
+  font-weight: 900;
+  font-family: ui-monospace, monospace;
+}
+
+.top23Badge.rank2 {
+  color: #ff7e26;
+}
+
+.top23Badge.rank3 {
+  color: #e08a3c;
+}
+
+.top23Thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  background: #f8fafc;
+  overflow: hidden;
+  border: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.top23Thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.top23Info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.top23Name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top23Meta {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.top23Score {
+  color: #ff7722;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+}
+
+.top23Score strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.top23Score small {
+  font-size: 10px;
+}
+
+/* 第 4 名以后 横向行列表 */
+.listContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rowLink {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.horizontalRow {
+  min-height: 90px;
+  max-height: 108px;
+  background: #fff;
+  border: 1px solid #e7eef6;
+  border-radius: 12px;
+  padding: 10px 16px;
+  box-shadow: 0 3px 10px rgba(40, 75, 115, 0.04);
+  display: grid;
+  grid-template-columns: 32px 64px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  transition: all 0.16s ease;
+}
+
+.horizontalRow:hover {
+  border-color: #cbd5e1;
+  background: #fbfdff;
+}
+
+.rowNum {
+  font-size: 16px;
+  font-weight: 900;
+  color: #94a3b8;
+  text-align: center;
+  font-family: ui-monospace, monospace;
+}
+
+.rowThumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: hidden;
+  border: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rowThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rowContent {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rowTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rowScore {
+  color: #ff7722;
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* 右侧栏周冠军卡片 */
+.championCard {
+  background: #fff;
+  border: 1px solid #e7eef6;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 4px 16px rgba(40, 75, 115, 0.05);
+}
+
+.championKicker {
+  font-size: 11px;
+  color: #2563eb;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.championThumb {
+  width: 100%;
+  height: 130px;
+  border-radius: 10px;
+  background: #f8fafc;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.championThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.championTitle {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0 0 4px;
+}
+
+.championMeta {
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* 响应式断点控制 */
+
+/* 1024px ~ 1279px 桌面窄横屏：居中显示主榜单，隐藏左栏与右栏 */
+@media (min-width: 1024px) and (max-width: 1279px) and (orientation: landscape) {
+  .shellGrid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  .leftRail,
+  .rightRail {
+    display: none !important;
+  }
+}
+
+/* 移动端与竖屏断点：隐藏桌面 Shell */
+@media (max-width: 820px), (orientation: portrait) and (max-width: 1200px) {
+  .desktopShell {
+    display: none !important;
+  }
+}

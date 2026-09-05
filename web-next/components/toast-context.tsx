@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
 interface ToastContextValue {
   showToast: (message: string) => void;
@@ -25,8 +25,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }, 1600);
   }, []);
 
+  const contextValue = useMemo(() => ({ showToast }), [showToast]);
+
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <div className={`toast${visible ? " show" : ""}`} role="status" aria-live="polite">
         {message}

@@ -13,64 +13,48 @@ export function HomeCommunityTabs({
   activeId?: string;
   onSelect: (community?: Community) => void;
 }) {
-  const isAllActive = !activeId || activeId === "all";
-
-  if (!communities.length) {
-    return (
-      <div className="community-tabs" role="tablist" aria-label="首页社区">
-        <button
-          type="button"
-          className={`community-tab${isAllActive ? " active" : ""}`}
-          onClick={() => onSelect(undefined)}
-        >
-          全部
-        </button>
-        {preferredOrder.map((name) => (
-          <button
-            key={name}
-            type="button"
-            className="community-tab"
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  // Sort according to preferred order if matches
-  const sorted = [...communities].sort((a, b) => {
+  // 严格只展示三个核心板块，对齐 Flutter 首页真源（无“全部”冗余项）
+  const filtered = communities.filter((c) => preferredOrder.includes(c.name.trim()));
+  const sorted = (filtered.length ? filtered : communities).sort((a, b) => {
     const idxA = preferredOrder.indexOf(a.name.trim());
     const idxB = preferredOrder.indexOf(b.name.trim());
-    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-    if (idxA !== -1) return -1;
-    if (idxB !== -1) return 1;
-    return 0;
+    return (idxA !== -1 ? idxA : 99) - (idxB !== -1 ? idxB : 99);
   });
 
+  const displayList = sorted.length
+    ? sorted
+    : preferredOrder.map((name, index) => ({
+        id: `fallback-${index}`,
+        slug: `slug-${index}`,
+        name,
+        sortOrder: index,
+      } as Community));
+
   return (
-    <div className="community-tabs" role="tablist" aria-label="首页社区">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={isAllActive}
-        className={`community-tab${isAllActive ? " active" : ""}`}
-        onClick={() => onSelect(undefined)}
-      >
-        全部
-      </button>
-      {sorted.map((community) => {
-        const active = community.id === activeId;
+    <div className="home-community-tabs" role="tablist" aria-label="首页社区板块切换">
+      {displayList.map((community) => {
+        const isCampus = community.name.trim() === "酱紫社区";
+        // 若没有显式指定 activeId，在移动端语义上高亮“酱紫社区”
+        const isActive = activeId
+          ? community.id === activeId || community.name.trim() === activeId
+          : isCampus;
+
         return (
           <button
-            key={community.id}
+            key={community.id || community.name}
             type="button"
             role="tab"
-            aria-selected={active}
-            className={`community-tab${active ? " active" : ""}`}
+            aria-selected={isActive}
+            className={`home-community-tab${isActive ? " active" : ""}${isCampus ? " campus-art-tab" : ""}`}
             onClick={() => onSelect(community)}
           >
-            {community.name}
+            {isCampus ? (
+              <span className="campus-art-label">
+                <span className="campus-star">✦</span> 酱紫社区
+              </span>
+            ) : (
+              <span>{community.name}</span>
+            )}
           </button>
         );
       })}

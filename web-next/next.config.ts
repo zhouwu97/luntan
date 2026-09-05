@@ -24,6 +24,7 @@ const nextConfig: NextConfig = {
   basePath,
   output: process.env.OUTPUT_STANDALONE === "true" ? "standalone" : undefined,
   reactStrictMode: true,
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   env: {
     NEXT_PUBLIC_GIT_SHA: gitSha,
     NEXT_PUBLIC_BUILD_TIME: buildTime,

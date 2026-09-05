@@ -1428,7 +1428,7 @@ img { display: block; max-width: 100%; }
 .desktop-only { display: block; }
 .mobile-only { display: none !important; }
 
-@media (min-width: 761px) {
+@media (min-width: 821px) and (orientation: landscape), (min-width: 1201px) {
   .site-header { display: block !important; }
   .mobile-head { display: none !important; }
   .home-mobile-navigation { display: none !important; }
@@ -1444,7 +1444,7 @@ img { display: block; max-width: 100%; }
   .rank-list.mobile-only { display: none !important; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 820px), (orientation: portrait) and (max-width: 1200px) {
   .desktop-only { display: none !important; }
   .mobile-only { display: block !important; }
   header.mobile-only, .rank-head.mobile-only, .detail-head.mobile-only { display: flex !important; }

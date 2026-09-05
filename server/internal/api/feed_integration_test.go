@@ -828,3 +828,49 @@ func TestReplyToHiddenCommentRejected(t *testing.T) {
 		t.Fatalf("expected no reply persisted, got err=%v count=%d", err, replyCount)
 	}
 }
+
+// 推荐严格限定管理员人工源：
+// 普通公开帖 A、管理员推荐 B (pos=2)、管理员推荐 C (pos=1)
+// 请求 sort=recommended：必须为 [C, B]，绝对不能出现 A；
+// 移除 C 后，再次请求只剩 [B]。
+func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
+	s := feedIntegrationServer(t)
+	communityID, ids := insertFeedFixtures(t, s)
+
+	postA := ids["p1"]
+	postB := ids["p2"]
+	postC := ids["p3"]
+
+	// 将 postB 加入推荐，位次 2
+	if _, err := s.db.Exec(`
+		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at)
+		VALUES ($1, (SELECT author_id FROM posts WHERE id = $1), 2, now() - interval '1 hour')`, postB); err != nil {
+		t.Fatal(err)
+	}
+
+	// 将 postC 加入推荐，位次 1
+	if _, err := s.db.Exec(`
+		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at)
+		VALUES ($1, (SELECT author_id FROM posts WHERE id = $1), 1, now())`, postC); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 获取推荐 Feed，必须只有 C 和 B，且按 position 正序排，绝无未被推荐的 A
+	got := fetchFeedIDs(t, s, "recommended", communityID)
+	requireFeedOrder(t, got, []string{postC, postB}, "recommended: initial")
+	if slices.Contains(got, postA) {
+		t.Fatalf("未人工推荐的帖子 A (%s) 不应出现在推荐流中: %v", postA, got)
+	}
+
+	// 2. 从推荐中移除 C
+	if _, err := s.db.Exec(`DELETE FROM home_recommendations WHERE post_id = $1`, postC); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 再次获取推荐 Feed，必须只剩 B
+	gotAfterDelete := fetchFeedIDs(t, s, "recommended", communityID)
+	requireFeedOrder(t, gotAfterDelete, []string{postB}, "recommended: after delete C")
+	if slices.Contains(gotAfterDelete, postC) {
+		t.Fatalf("已被移除推荐的帖子 C (%s) 仍出现在推荐流中: %v", postC, gotAfterDelete)
+	}
+}

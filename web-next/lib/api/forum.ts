@@ -9,6 +9,7 @@ import type {
   EmailCodeChallenge,
   FeedPage,
   ForumNotification,
+  HomeRecommendationItem,
   MediaAsset,
   Post,
   ProfilePost,
@@ -306,6 +307,7 @@ export async function getFeed(options: {
   topic?: string;
   limit?: number;
   cursor?: string;
+  accountScope?: string;
 }): Promise<FeedPage> {
   const params = new URLSearchParams({
     limit: String(options.limit ?? 20),
@@ -317,11 +319,12 @@ export async function getFeed(options: {
   if (options.hasMedia) params.set("has_media", "true");
   if (options.topic) params.set("topic", options.topic);
   if (options.cursor) params.set("cursor", options.cursor);
-  const requestKey = params.toString();
+  const queryKey = params.toString();
+  const requestKey = `${encodeURIComponent(options.accountScope || "anon")}:${queryKey}`;
   const existing = feedRequests.get(requestKey);
   if (existing) return existing;
   const request = apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
-    `/feed/latest?${requestKey}`,
+    `/feed/latest?${queryKey}`,
   ).then((payload) => ({
     items: Array.isArray(payload.items) ? payload.items.map(parsePost) : [],
     nextCursor: payload.next_cursor,
@@ -507,8 +510,9 @@ export async function getComments(
 export async function getCommentReplies(
   commentId: string,
   cursor?: string,
+  sort = "asc",
 ): Promise<{ items: Comment[]; nextCursor?: string; hasMore: boolean }> {
-  const params = new URLSearchParams({ limit: "30" });
+  const params = new URLSearchParams({ limit: "30", sort });
   if (cursor) params.set("cursor", cursor);
   const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
     `/comments/${encodeURIComponent(commentId)}/replies?${params.toString()}`,
@@ -976,4 +980,72 @@ export async function saveRankingAdminViewOrder(input: {
     mode: asString(payload.mode) === "MANUAL" ? "MANUAL" : "AUTO",
     version: asNumber(payload.version),
   };
+}
+
+function parseHomeRecommendationItem(raw: unknown): HomeRecommendationItem {
+  const item = asRecord(raw);
+  return {
+    postId: asString(item.post_id),
+    position: asNumber(item.position),
+    recommendedBy: asString(item.recommended_by),
+    recommendedAt: asString(item.recommended_at),
+    expiresAt: asString(item.expires_at) || undefined,
+    post: item.post ? parsePost(item.post) : undefined,
+  };
+}
+
+export async function getHomeRecommendations(): Promise<HomeRecommendationItem[]> {
+  const payload = await apiJson<{ items?: unknown[] }>("/admin/recommendations");
+  return Array.isArray(payload.items) ? payload.items.map(parseHomeRecommendationItem) : [];
+}
+
+export async function setHomeRecommendation(
+  postId: string,
+  input?: { position?: number; expiresAt?: string },
+): Promise<{ success: boolean; position: number }> {
+  const body: Record<string, unknown> = {};
+  if (typeof input?.position === "number") body.position = input.position;
+  if (input?.expiresAt) body.expires_at = input.expiresAt;
+  const payload = await apiJson<JsonRecord>(`/admin/recommendations/${encodeURIComponent(postId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return {
+    success: payload.success === true,
+    position: asNumber(payload.position),
+  };
+}
+
+export async function removeHomeRecommendation(postId: string): Promise<void> {
+  await apiFetch(`/admin/recommendations/${encodeURIComponent(postId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function reorderHomeRecommendations(
+  items: Array<{ postId: string; position: number }>,
+): Promise<void> {
+  await apiJson("/admin/recommendations/reorder", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      items: items.map((item) => ({
+        post_id: item.postId,
+        position: item.position,
+      })),
+    }),
+  });
+}
+
+export async function setPostHotSuppression(
+  postId: string,
+  suppressed: boolean,
+  reason?: string,
+): Promise<void> {
+  await apiJson(`/admin/posts/${encodeURIComponent(postId)}/hot-suppression`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ suppressed, reason }),
+  });
 }

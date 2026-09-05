@@ -324,3 +324,13 @@ export interface RankingAdminView {
   syncedAt?: string;
   weeklyTop?: RankingAdminWeeklyTop;
 }
+
+export interface HomeRecommendationItem {
+  postId: string;
+  position: number;
+  recommendedBy: string;
+  recommendedAt: string;
+  expiresAt?: string;
+  post?: Post;
+}
+

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { MouseEvent, useState } from "react";
+import { MouseEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "./icons";
 import { MediaImage } from "./media-image";
@@ -10,8 +10,15 @@ import { UserAvatar } from "./user-avatar";
 import { useToast } from "./toast-context";
 import type { GalleryImage } from "./image-gallery-modal";
 import type { Post, SessionUser } from "../types/forum";
-import { deletePost, setPostBookmark, setPostLike } from "../lib/api/forum";
-import { compactCount, relativeTime } from "../lib/format";
+import {
+  deletePost,
+  removeHomeRecommendation,
+  setHomeRecommendation,
+  setPostBookmark,
+  setPostHotSuppression,
+  setPostLike,
+} from "../lib/api/forum";
+import { compactCount, formatError, relativeTime } from "../lib/format";
 import { mediaCandidates } from "../lib/media-url";
 import { prefetchPost, setPostSnapshot } from "../lib/post-memory-cache";
 
@@ -44,6 +51,14 @@ export function PostCard({
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+  }, []);
+  const isModerator = Boolean(user?.capabilities?.can_moderate || user?.capabilities?.can_manage_admins);
+  const [isRecommended, setIsRecommended] = useState(post.isRecommended === true);
+  const [isHotSuppressed, setIsHotSuppressed] = useState(false);
 
   if (deleted) return null;
 
@@ -132,6 +147,37 @@ export function PostCard({
     }
   }
 
+  async function handleToggleRecommendation(event: MouseEvent) {
+    stop(event);
+    setMenuOpen(false);
+    try {
+      if (isRecommended) {
+        await removeHomeRecommendation(post.id);
+        setIsRecommended(false);
+        showToast("已取消首页推荐");
+      } else {
+        await setHomeRecommendation(post.id);
+        setIsRecommended(true);
+        showToast("已加入首页推荐！");
+      }
+    } catch (err) {
+      showToast(formatError(err, "操作推荐失败"));
+    }
+  }
+
+  async function handleToggleHotSuppression(event: MouseEvent) {
+    stop(event);
+    setMenuOpen(false);
+    try {
+      const next = !isHotSuppressed;
+      await setPostHotSuppression(post.id, next, next ? "管理员隐藏热门" : "");
+      setIsHotSuppressed(next);
+      showToast(next ? "已隐藏此帖热门展示" : "已恢复热门展示");
+    } catch (err) {
+      showToast(formatError(err, "操作热门状态失败"));
+    }
+  }
+
   const isAuthor = Boolean(user && user.id === post.author.id);
 
   function handleCardClick(event: MouseEvent<HTMLElement>) {
@@ -154,8 +200,24 @@ export function PostCard({
   }
 
   function prepareDetail() {
+    router.prefetch(`/post/${encodeURIComponent(post.id)}`);
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = setTimeout(() => {
+      void prefetchPost(post, user?.id);
+    }, 160);
+  }
+
+  function prefetchDetailImmediately() {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
     void prefetchPost(post, user?.id);
     router.prefetch(`/post/${encodeURIComponent(post.id)}`);
+  }
+
+  function cancelDetailPrefetch() {
+    if (prefetchTimerRef.current) {
+      clearTimeout(prefetchTimerRef.current);
+      prefetchTimerRef.current = null;
+    }
   }
 
   return (
@@ -169,8 +231,9 @@ export function PostCard({
         onPointerEnter={() => {
           prepareDetail();
         }}
+        onPointerLeave={cancelDetailPrefetch}
         onTouchStart={() => {
-          prepareDetail();
+          prefetchDetailImmediately();
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && event.target === event.currentTarget) {
@@ -242,15 +305,39 @@ export function PostCard({
                   <Icon name="info" size={14} />
                   <span>举报帖子</span>
                 </button>
-                {isAuthor && (
-                  <button
-                    type="button"
-                    className="post-card-menu-item danger"
-                    onClick={handleDelete}
-                  >
-                    <Icon name="close" size={14} />
-                    <span>删除帖子</span>
-                  </button>
+                {isModerator && (
+                  <>
+                    <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
+                    <button
+                      type="button"
+                      className="post-card-menu-item"
+                      onClick={handleToggleRecommendation}
+                    >
+                      <Icon name="sparkle" size={14} />
+                      <span>{isRecommended ? "取消首页推荐" : "加入首页推荐"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="post-card-menu-item"
+                      onClick={handleToggleHotSuppression}
+                    >
+                      <Icon name="flame" size={14} />
+                      <span>{isHotSuppressed ? "取消隐藏热门" : "隐藏热门"}</span>
+                    </button>
+                  </>
+                )}
+                {(isAuthor || isModerator) && (
+                  <>
+                    <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
+                    <button
+                      type="button"
+                      className="post-card-menu-item danger"
+                      onClick={handleDelete}
+                    >
+                      <Icon name="close" size={14} />
+                      <span>删除帖子</span>
+                    </button>
+                  </>
                 )}
               </div>
             )}
@@ -271,7 +358,7 @@ export function PostCard({
           </Link>
 
           {post.media.length > 0 && (
-            <div className={`post-media media-count-${Math.min(4, post.media.length)}`}>
+            <div className={`post-media ${post.media.length === 1 ? "media-single" : "multi-media"} media-count-${Math.min(4, post.media.length)}`}>
               {post.media.slice(0, 4).map((item, index) => (
                 <div
                   className="media-frame"

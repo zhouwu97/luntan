@@ -18,14 +18,18 @@ import {
   createComment,
   createReply,
   deleteComment,
+  deletePost,
   getCommentContext,
   getCommentReplies,
   getComments,
   getFeed,
   recordHistory,
+  removeHomeRecommendation,
   setCommentDislike,
   setCommentLike,
+  setHomeRecommendation,
   setPostBookmark,
+  setPostHotSuppression,
   setPostLike,
   setUserFollow,
   uploadImage,
@@ -40,8 +44,8 @@ export function PostDetailShell({ id }: { id: string }) {
   const router = useRouter();
   const { user } = useSession();
   const { showToast } = useToast();
-  const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id));
-  const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id));
+  const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id, user?.id));
+  const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id, user?.id));
   const [postError, setPostError] = useState("");
 
   const [comments, setComments] = useState<Comment[]>([]);
@@ -70,7 +74,7 @@ export function PostDetailShell({ id }: { id: string }) {
   // 1. 优先获取并展示正文（核心数据，不被评论或推荐阻塞）
   useEffect(() => {
     let mounted = true;
-    const snapshot = getPostSnapshot(id, user?.id) || getPostSnapshot(id);
+    const snapshot = getPostSnapshot(id, user?.id);
     if (snapshot) setPost(snapshot);
     setPostLoading(!snapshot);
     setPostError("");
@@ -153,7 +157,7 @@ export function PostDetailShell({ id }: { id: string }) {
   useEffect(() => {
     let mounted = true;
     setRelatedLoading(true);
-    getFeed({ sort: "hot", limit: 5 })
+    getFeed({ sort: "hot", limit: 5, accountScope: user?.id })
       .then((feedPage) => {
         if (!mounted) return;
         setRelated(feedPage.items.filter((item) => item.id !== id).slice(0, 4));
@@ -169,7 +173,7 @@ export function PostDetailShell({ id }: { id: string }) {
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, user?.id]);
 
   useEffect(() => {
     if (postLoading || typeof window === "undefined" || !window.location.hash) return;
@@ -710,6 +714,63 @@ function PostArticle({
   likePending?: boolean;
   bookmarkPending?: boolean;
 }) {
+  const router = useRouter();
+  const { showToast } = useToast();
+  const isAuthor = Boolean(user && user.id === post.author.id);
+  const isModerator = Boolean(user?.capabilities?.can_moderate || user?.capabilities?.can_manage_admins);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isRecommended, setIsRecommended] = useState(post.isRecommended === true);
+  const [isHotSuppressed, setIsHotSuppressed] = useState(false);
+
+  function handleCopyLink() {
+    setMenuOpen(false);
+    if (typeof window !== "undefined" && navigator.clipboard) {
+      void navigator.clipboard.writeText(window.location.href);
+      showToast("已复制帖子链接");
+    }
+  }
+
+  async function handleToggleRecommendation() {
+    setMenuOpen(false);
+    try {
+      if (isRecommended) {
+        await removeHomeRecommendation(post.id);
+        setIsRecommended(false);
+        showToast("已取消首页推荐");
+      } else {
+        await setHomeRecommendation(post.id);
+        setIsRecommended(true);
+        showToast("已加入首页推荐！");
+      }
+    } catch (err) {
+      showToast(formatError(err, "操作推荐失败"));
+    }
+  }
+
+  async function handleToggleHotSuppression() {
+    setMenuOpen(false);
+    try {
+      const next = !isHotSuppressed;
+      await setPostHotSuppression(post.id, next, next ? "管理员隐藏热门" : "");
+      setIsHotSuppressed(next);
+      showToast(next ? "已隐藏此帖热门展示" : "已恢复热门展示");
+    } catch (err) {
+      showToast(formatError(err, "操作热门状态失败"));
+    }
+  }
+
+  async function handleDeletePost() {
+    setMenuOpen(false);
+    if (!window.confirm("确定要删除这条帖子吗？删除后将无法恢复。")) return;
+    try {
+      await deletePost(post.id);
+      showToast("帖子已删除");
+      router.push("/");
+    } catch (err) {
+      showToast(formatError(err, "删除帖子失败，请重试"));
+    }
+  }
+
   const articleImages: GalleryImage[] = post.media.map((item) => ({
     url: item.detailUrl || item.url || item.originalUrl || "",
     alt: item.altText || post.title,
@@ -738,6 +799,82 @@ function PostArticle({
           <div className="meta">
             {post.community.name} · {relativeTime(post.createdAt)}
           </div>
+        </div>
+
+        <div className="post-card-more-wrapper" style={{ marginLeft: "auto", position: "relative" }}>
+          <button
+            type="button"
+            className="more"
+            aria-label="更多操作"
+            onClick={() => setMenuOpen((val) => !val)}
+          >
+            <Icon name="more" size={18} />
+          </button>
+          {menuOpen && (
+            <div className="post-card-menu-popover" onClick={(e) => e.stopPropagation()}>
+              <button type="button" className="post-card-menu-item" onClick={handleCopyLink}>
+                <Icon name="copy" size={14} />
+                <span>复制链接</span>
+              </button>
+              <button
+                type="button"
+                className="post-card-menu-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onToggleBookmark();
+                }}
+              >
+                <Icon name="bookmark" size={14} />
+                <span>{post.viewerState.hasBookmarked ? "取消收藏" : "收藏帖子"}</span>
+              </button>
+              <button
+                type="button"
+                className="post-card-menu-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (!user) return onRequireAuth();
+                  onOpenReport();
+                }}
+              >
+                <Icon name="info" size={14} />
+                <span>举报帖子</span>
+              </button>
+              {isModerator && (
+                <>
+                  <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
+                  <button
+                    type="button"
+                    className="post-card-menu-item"
+                    onClick={handleToggleRecommendation}
+                  >
+                    <Icon name="sparkle" size={14} />
+                    <span>{isRecommended ? "取消首页推荐" : "加入首页推荐"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="post-card-menu-item"
+                    onClick={handleToggleHotSuppression}
+                  >
+                    <Icon name="flame" size={14} />
+                    <span>{isHotSuppressed ? "取消隐藏热门" : "隐藏热门"}</span>
+                  </button>
+                </>
+              )}
+              {(isAuthor || isModerator) && (
+                <>
+                  <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
+                  <button
+                    type="button"
+                    className="post-card-menu-item danger"
+                    onClick={handleDeletePost}
+                  >
+                    <Icon name="close" size={14} />
+                    <span>删除帖子</span>
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -1300,13 +1437,58 @@ function CommentMediaThumbnail({
         )}
 
         {comment.replyPreview && comment.replyPreview.length > 0 && (
-          <div className="nested" onClick={onReply}>
-            <span className="nested-name">{comment.replyPreview[0].author.nickname}: </span>
-            <span>{comment.replyPreview[0].content}</span>
-            {comment.replyCount > 1 && (
-              <div className="more-nested">查看全部 {comment.replyCount} 条回复 &gt;</div>
-            )}
-          </div>
+          <section className="hot-replies" aria-label="二级评论热评预览">
+            <div className="hot-head">
+              <div className="hot-label">🔥 热评预览（{Math.min(4, comment.replyPreview.length)}）</div>
+              {comment.replyCount > 0 && (
+                <button
+                  type="button"
+                  className="view-all"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReply();
+                  }}
+                >
+                  查看全部 {comment.replyCount} 条回复 ›
+                </button>
+              )}
+            </div>
+            <div className="reply-preview-list">
+              {comment.replyPreview.slice(0, 4).map((rep) => (
+                <div
+                  key={rep.id}
+                  className="reply-row"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReply();
+                  }}
+                >
+                  <div className="reply-avatar">
+                    <UserAvatar
+                      userId={rep.author.id}
+                      name={rep.author.nickname}
+                      url={rep.author.avatarUrl}
+                      size="small"
+                    />
+                  </div>
+                  <div className="reply-content-box">
+                    <div className="reply-author-line">
+                      <b className="reply-author-name">{rep.author.nickname}</b>
+                      <span className="reply-author-lv">Lv.{rep.author.level || 1}</span>
+                    </div>
+                    <div className="reply-text" title={rep.content}>
+                      {rep.content}
+                    </div>
+                  </div>
+                  {rep.likeCount > 0 && (
+                    <div className="heat" title={`获赞 ${rep.likeCount}`}>
+                      {rep.likeCount}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         <div className="comm-actions">

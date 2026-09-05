@@ -5,10 +5,19 @@ const TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 100;
 const cache = new Map<string, { savedAt: number; post: Post }>();
 const inFlight = new Map<string, Promise<Post>>();
-const prefetched = new Set<string>();
+const prefetched = new Map<string, number>();
+const scopeGenerations = new Map<string, number>();
 
 function key(postId: string, accountScope?: string): string {
-  return `${accountScope || "anon"}:${postId}`;
+  return `${scopeKey(accountScope)}:${postId}`;
+}
+
+function scopeKey(accountScope?: string): string {
+  return accountScope || "anon";
+}
+
+function scopeGeneration(accountScope?: string): number {
+  return scopeGenerations.get(scopeKey(accountScope)) || 0;
 }
 
 export function setPostSnapshot(post: Post, accountScope?: string): void {
@@ -26,6 +35,7 @@ export function getPostSnapshot(postId: string, accountScope?: string): Post | n
   if (!item) return null;
   if (Date.now() - item.savedAt > TTL_MS) {
     cache.delete(cacheKey);
+    prefetched.delete(cacheKey);
     return null;
   }
   return item.post;
@@ -36,14 +46,23 @@ export function clearPostSnapshots(accountScope?: string): void {
   for (const itemKey of cache.keys()) {
     if (itemKey.startsWith(prefix)) cache.delete(itemKey);
   }
-  for (const requestKey of prefetched) {
+  for (const requestKey of prefetched.keys()) {
     if (requestKey.startsWith(prefix)) prefetched.delete(requestKey);
   }
+  for (const requestKey of inFlight.keys()) {
+    if (requestKey.startsWith(prefix)) inFlight.delete(requestKey);
+  }
+  const scope = scopeKey(accountScope);
+  scopeGenerations.set(scope, scopeGeneration(accountScope) + 1);
 }
 
 export function prefetchPost(post: Post, accountScope?: string): Promise<Post> {
   const requestKey = key(post.id, accountScope);
-  if (prefetched.has(requestKey)) return Promise.resolve(post);
+  const prefetchedAt = prefetched.get(requestKey);
+  if (prefetchedAt && Date.now() - prefetchedAt <= TTL_MS) {
+    return Promise.resolve(getPostSnapshot(post.id, accountScope) || post);
+  }
+  if (prefetchedAt) prefetched.delete(requestKey);
   setPostSnapshot(post, accountScope);
   return fetchPost(post.id, accountScope);
 }
@@ -53,14 +72,18 @@ export function fetchPost(postId: string, accountScope?: string): Promise<Post> 
   const existing = inFlight.get(requestKey);
   if (existing) return existing;
 
-  const request = getPost(postId)
+  const requestGeneration = scopeGeneration(accountScope);
+  let request: Promise<Post>;
+  request = getPost(postId)
     .then((post) => {
-      setPostSnapshot(post, accountScope);
-      prefetched.add(requestKey);
+      if (scopeGeneration(accountScope) === requestGeneration) {
+        setPostSnapshot(post, accountScope);
+        prefetched.set(requestKey, Date.now());
+      }
       return post;
     })
     .finally(() => {
-      inFlight.delete(requestKey);
+      if (inFlight.get(requestKey) === request) inFlight.delete(requestKey);
     });
   inFlight.set(requestKey, request);
   return request;

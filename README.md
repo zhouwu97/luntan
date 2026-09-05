@@ -4,8 +4,9 @@
 
 当前仓库同时包含：
 
-- Flutter 客户端：Android / iOS / Web
+- Flutter 客户端：Android / iOS
 - Go HTTP API：认证、板块、信息流、帖子、媒体、回复和互动接口
+- Next.js 网页版：`web-next/`，正式 Web 发布只使用这套实现
 - 本地 mock 数据层：仅用于离线测试和 UI 验证
 
 ## 当前状态
@@ -51,19 +52,26 @@ flutter run
 
 单元测试和离线 UI 预览可以显式构造 `ForumRepositories.mock()`；这条路径不会代表正式客户端运行时的数据来源。服务端导入脚本可以在没有客户端参与的情况下，把源站公开内容、图片和安全清洗后的作者/评论数据写入 PostgreSQL 与媒体目录。
 
-### 运行 Web
+### 运行 Web（Next.js）
+
+网页版有独立的 Next.js 实现，目录为 `web-next/`。正式 Web 开发、构建和部署都使用该目录，不使用 Flutter Web。
 
 ```bash
-flutter run -d chrome
+cd web-next
+npm ci
+npm run dev
 ```
 
-构建 Release Web：
+构建生产 standalone 包：
 
 ```bash
-flutter build web --release
+cd web-next
+npm ci
+npm run typecheck
+OUTPUT_STANDALONE=true npm run build
 ```
 
-产物位于 `build/web/`。
+部署时发布 `.next/standalone`、`.next/static` 和 `public/` 到新的 Next.js release 目录，再切换 `/opt/luntan-next/current` 并重启 `luntan-next.service`。`flutter build web` 不作为网页版发布入口。
 
 ## 启动 Go API
 
@@ -116,7 +124,7 @@ Android 模拟器访问宿主机时通常使用 `10.0.2.2`，真机请替换为�
 QA 服务器 `43.161.249.91` 运行完整后端与 Web 客户端，统一通过 `shengbeijiang.com` HTTPS 域名访问，用于联调与验收：
 
 - API：`https://shengbeijiang.com/api/v1`，健康检查 `/ready`
-- Web：`https://shengbeijiang.com/forum/`
+- Web（Next.js）：`https://shengbeijiang.com/`
 - 媒体：源站图片已全部下载到服务器本地媒体目录，由 nginx 通过 HTTPS `/imported-media/` 提供，URL 保存在 `media_assets` 表
 - 数据：帖子、评论、榜单商品与评价均来自导入快照，作者为稳定的脱敏本地账号，客户端运行时不直连源站
 
@@ -146,9 +154,6 @@ flutter build apk --debug --dart-define=API_BASE_URL=https://shengbeijiang.com
 生产构建示例：
 
 ```bash
-flutter build web --release --base-href /forum/ \
-  --dart-define=APP_ENV=production \
-  --dart-define=API_BASE_URL=https://forum.example.com
 flutter build apk --release \
   --dart-define=APP_ENV=production \
   --dart-define=API_BASE_URL=https://forum.example.com
@@ -202,14 +207,15 @@ python3 scripts/import_placeholder_content.py \
 Web 发布：
 
 ```bash
-flutter build web --release --base-href=/forum/ \
-  --dart-define=API_BASE_URL=https://shengbeijiang.com \
-  --dart-define=APP_ENV=qa
+cd web-next
+npm ci
+npm run typecheck
+OUTPUT_STANDALONE=true npm run build
 ```
 
-- QA 通过 HTTPS 域名访问，必须显式传 `APP_ENV=qa` 和 `API_BASE_URL`；不能依赖 production 的官方默认值，以免环境串线。
-- `web/flutter_bootstrap.js` 为入库的自定义引导模板，canvaskit 从应用本地目录加载而不请求 gstatic（国内拉取 wasm 易超时导致白屏），部署时不要删除。
-- 产物解压到新发布目录并切换 `/opt/luntan-qa/web` 符号链接，回滚时把链接指回旧目录即可；nginx 对 `/forum/` 已配置协商缓存，发布后浏览器直接拉到新版。
+- QA / 生产 Web 通过 `web-next/` 的 Next.js standalone 产物发布，不使用 Flutter Web。
+- 产物解压到新发布目录并切换 `/opt/luntan-next/current` 符号链接，回滚时把链接指回旧目录即可；随后重启 `luntan-next.service`。
+- API 代理目标由 systemd 环境变量 `API_PROXY_TARGET=http://127.0.0.1:18080` 注入，Web 端不要写死内网 API 地址。
 
 ## 配置速查
 

@@ -20,7 +20,7 @@ func TestStoreOrderReviewNotificationDescribesActualInvalidation(t *testing.T) {
 			decision: "approve",
 			count:    0,
 			points:   0,
-			want:     []string{"已通过审核", "已扣除 100 积分"},
+			want:     []string{"已通过审核", "已扣除 100 积分", "请填写收货信息"},
 			notWant:  []string{"无效", "未通过"},
 		},
 		{
@@ -68,5 +68,8 @@ func TestStoreOrderReviewNotificationDescribesActualInvalidation(t *testing.T) {
 func TestValidStoreOrderStatusIncludesAll(t *testing.T) {
 	if !validStoreOrderStatus("all") {
 		t.Fatal("all must be a valid admin store order status filter")
+	}
+	if !validStoreOrderStatus("ready_to_ship") {
+		t.Fatal("ready_to_ship must be a valid admin store order status filter")
 	}
 }

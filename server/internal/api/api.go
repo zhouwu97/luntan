@@ -261,6 +261,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.reviewAdminStoreOrder(w, r, orderID)
 			return
 		}
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/store/orders/") && strings.HasSuffix(path, "/ship"):
+		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/store/orders/"), "/ship")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.shipAdminStoreOrder(w, r, orderID)
+			return
+		}
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/users/"):
 		s.getManagedUser(w, r, strings.TrimPrefix(path, "/api/v1/admin/users/"))
 		return
@@ -416,6 +422,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/api/v1/store/orders":
 		s.createStoreOrder(w, r)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/me/store-orders/"):
+		orderID := strings.TrimPrefix(path, "/api/v1/me/store-orders/")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.getMyStoreOrder(w, r, orderID)
+			return
+		}
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/me/store-orders/") && strings.HasSuffix(path, "/shipping"):
+		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/me/store-orders/"), "/shipping")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.updateMyStoreOrderShipping(w, r, orderID)
+			return
+		}
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.updatePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))
 		return
@@ -1226,6 +1244,14 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_ORDER_ALREADY_REVIEWED", Message: "该兑换订单已被处理"}
 	case errors.Is(err, ErrStoreOrderReviewPending):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_ORDER_REVIEW_PENDING", Message: "已有兑换申请正在审核，请等待审核完成后再申请"}
+	case errors.Is(err, ErrInvalidStoreShipping):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STORE_SHIPPING", Message: "收货信息不合法"}
+	case errors.Is(err, ErrStoreShippingUnavailable):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_SHIPPING_UNAVAILABLE", Message: "当前订单不能填写收货信息"}
+	case errors.Is(err, ErrStoreShippingLocked):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_SHIPPING_LOCKED", Message: "订单已发货，收货信息不能再修改"}
+	case errors.Is(err, ErrStoreShippingRequired):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_SHIPPING_REQUIRED", Message: "请先提交收货信息后再发货"}
 	case errors.Is(err, ErrBookmarkFolderNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "BOOKMARK_FOLDER_NOT_FOUND", Message: "收藏夹不存在"}
 	case errors.Is(err, ErrDefaultBookmarkFolder):

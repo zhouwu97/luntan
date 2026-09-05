@@ -36,8 +36,11 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
 
   static const _statusFilters = <({String value, String label})>[
     (value: 'pending_review', label: '待审核'),
-    (value: 'approved', label: '已通过'),
-    (value: 'rejected', label: '已驳回'),
+    (value: 'awaiting_address', label: '待填地址'),
+    (value: 'ready_to_ship', label: '待发货'),
+    (value: 'shipped', label: '已发货'),
+    (value: 'completed', label: '已完成'),
+    (value: 'rejected', label: '已拒绝'),
     (value: 'all', label: '全部'),
   ];
 
@@ -158,7 +161,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       backgroundColor: AppTheme.background,
       appBar: AppBar(
         title: const Text(
-          '兑换审核',
+          '兑换订单',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         backgroundColor: AppTheme.background,
@@ -308,7 +311,7 @@ class _StoreOrderListTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '审核状态：${_statusLabel(item.status)}',
+                      '订单状态：${_statusLabel(item)}',
                       style: TextStyle(
                         color: item.status == 'rejected'
                             ? AppTheme.orange
@@ -317,6 +320,21 @@ class _StoreOrderListTile extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    if (item.shipping != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        _shippingSummary(
+                          item.shipping!,
+                          item.fulfillmentStatus,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 2),
                     Text(
                       '申请时间 ${relativeTimeLabel(item.createdAt)} · 当前积分 ${item.userPoints}',
@@ -365,16 +383,45 @@ class _StoreOrderListTile extends StatelessWidget {
     );
   }
 
-  String _statusLabel(String value) => switch (value) {
-    'pending_review' => '待审核',
-    'approved' => '审核通过 · 待领取',
-    'rejected' => '审核未通过',
-    'pending' => '待领取',
-    'claimed' => '已领取',
-    'completed' => '已完成',
-    'cancelled' => '已取消',
-    _ => value.isEmpty ? '未知状态' : value,
-  };
+  String _statusLabel(AdminStoreOrder item) {
+    if (item.status == 'approved') {
+      return switch (item.fulfillmentStatus) {
+        'awaiting_address' => '审核通过 · 待填地址',
+        'ready_to_ship' => '待发货',
+        'shipped' => '已发货',
+        'completed' => '已完成',
+        'cancelled' => '已取消',
+        _ => '审核通过',
+      };
+    }
+    return switch (item.status) {
+      'pending_review' => '待审核',
+      'rejected' => '审核未通过',
+      'pending' => '待领取（历史订单）',
+      'claimed' => '已领取',
+      'completed' => '已完成',
+      'cancelled' => '已取消',
+      _ => item.status.isEmpty ? '未知状态' : item.status,
+    };
+  }
+
+  String _shippingSummary(
+    AdminStoreOrderShipping shipping,
+    String fulfillmentStatus,
+  ) {
+    if (fulfillmentStatus == 'shipped' &&
+        shipping.carrier.isNotEmpty &&
+        shipping.trackingNo.isNotEmpty) {
+      return '物流：${shipping.carrier} ${shipping.trackingNo}';
+    }
+    final phone = shipping.maskedPhone.isEmpty
+        ? shipping.phone
+        : shipping.maskedPhone;
+    final address = shipping.maskedAddress.isEmpty
+        ? shipping.fullAddress
+        : shipping.maskedAddress;
+    return '收货：${shipping.maskedName.isEmpty ? shipping.recipientName : shipping.maskedName} · $phone · $address';
+  }
 }
 
 class StoreOrderReviewDetailScreen extends StatefulWidget {
@@ -526,6 +573,26 @@ class _StoreOrderReviewDetailScreenState
     }
   }
 
+  Future<void> _ship(AdminStoreOrderDetail order) async {
+    if (_busy) return;
+    final payload = await _confirmShip(order);
+    if (!mounted || payload == null) return;
+    setState(() => _busy = true);
+    try {
+      await widget.repository.shipStoreOrder(
+        id: order.id,
+        carrier: payload.carrier,
+        trackingNo: payload.trackingNo,
+      );
+      widget.onFeedback?.call('发货信息已提交');
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      widget.onFeedback?.call('发货失败：$error');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<bool?> _confirmReview(
     AdminStoreOrderDetail order,
     String decision,
@@ -554,6 +621,14 @@ class _StoreOrderReviewDetailScreenState
       ),
     );
   }
+
+  Future<({String carrier, String trackingNo})?> _confirmShip(
+    AdminStoreOrderDetail order,
+  ) => showDialog<({String carrier, String trackingNo})>(
+    context: context,
+    builder: (context) =>
+        _ShipOrderDialog(order: order, displayName: _displayName(order)),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -601,7 +676,8 @@ class _StoreOrderReviewDetailScreenState
                   '申请时间',
                   '${relativeTimeLabel(order.createdAt)} · ${_formatDateTime(order.createdAt)}',
                 ),
-                _detailRow('订单状态', _statusLabel(order.status)),
+                _detailRow('订单状态', _statusLabel(order)),
+                _detailRow('履约状态', _fulfillmentLabel(order.fulfillmentStatus)),
                 if (order.reviewedAt != null)
                   _detailRow('审核时间', _formatDateTime(order.reviewedAt!)),
                 if (order.reviewedAt != null)
@@ -614,8 +690,16 @@ class _StoreOrderReviewDetailScreenState
                     '本次无效奖励',
                     '${order.invalidatedCount} 笔 / ${order.invalidatedPoints} 积分',
                   ),
+                if (order.shippedAt != null)
+                  _detailRow('发货时间', _formatDateTime(order.shippedAt!)),
+                if (order.completedAt != null)
+                  _detailRow('完成时间', _formatDateTime(order.completedAt!)),
               ]),
               const SizedBox(height: 12),
+              if (order.shipping != null) ...[
+                _shippingCard(order),
+                const SizedBox(height: 12),
+              ],
               if (order.pointSources.isNotEmpty) ...[
                 _pointSourceCard(order.pointSources, order),
                 const SizedBox(height: 12),
@@ -637,10 +721,18 @@ class _StoreOrderReviewDetailScreenState
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done ||
-              snapshot.data?.status != 'pending_review') {
+              snapshot.data == null) {
             return const SizedBox.shrink();
           }
-          return _reviewActionBar(snapshot.data!);
+          final order = snapshot.data!;
+          if (order.status == 'pending_review') {
+            return _reviewActionBar(order);
+          }
+          if (order.status == 'approved' &&
+              order.fulfillmentStatus == 'ready_to_ship') {
+            return _shipActionBar(order);
+          }
+          return const SizedBox.shrink();
         },
       ),
     );
@@ -648,6 +740,25 @@ class _StoreOrderReviewDetailScreenState
 
   Widget _activityCard(AdminStoreOrderDetail order) {
     return _detailCard([_activityActions(order)]);
+  }
+
+  Widget _shippingCard(AdminStoreOrderDetail order) {
+    final shipping = order.shipping;
+    if (shipping == null) return const SizedBox.shrink();
+    return _detailCard([
+      const Text('收货与物流', style: TextStyle(fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      _detailRow('收件人', shipping.recipientName),
+      _detailRow('手机号', shipping.phone),
+      _detailRow('收货地址', shipping.fullAddress),
+      if (shipping.submittedAt != null)
+        _detailRow('提交时间', _formatDateTime(shipping.submittedAt!)),
+      if (shipping.carrier.isNotEmpty || shipping.trackingNo.isNotEmpty) ...[
+        const Divider(height: 18),
+        _detailRow('物流公司', shipping.carrier),
+        _detailRow('快递单号', shipping.trackingNo),
+      ],
+    ]);
   }
 
   Widget _pointSourceCard(
@@ -962,6 +1073,24 @@ class _StoreOrderReviewDetailScreenState
     );
   }
 
+  Widget _shipActionBar(AdminStoreOrderDetail order) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 9, 14, 9),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: AppTheme.border)),
+        ),
+        child: FilledButton.icon(
+          onPressed: _busy ? null : () => _ship(order),
+          icon: const Icon(Icons.local_shipping_outlined, size: 18),
+          label: Text(_busy ? '提交中...' : '确认发货'),
+        ),
+      ),
+    );
+  }
+
   Widget _contentText(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(top: 6),
@@ -1035,15 +1164,36 @@ class _StoreOrderReviewDetailScreenState
         '${pad(local.hour)}:${pad(local.minute)}';
   }
 
-  String _statusLabel(String value) => switch (value) {
-    'pending_review' => '待审核',
-    'approved' => '审核通过 · 待领取',
-    'rejected' => '审核未通过',
-    'pending' => '待领取（历史订单）',
-    'claimed' => '已领取',
+  String _statusLabel(AdminStoreOrder order) {
+    if (order.status == 'approved') {
+      return switch (order.fulfillmentStatus) {
+        'awaiting_address' => '审核通过 · 待填地址',
+        'ready_to_ship' => '待发货',
+        'shipped' => '已发货',
+        'completed' => '已完成',
+        'cancelled' => '已取消',
+        _ => '审核通过',
+      };
+    }
+    return switch (order.status) {
+      'pending_review' => '待审核',
+      'rejected' => '审核未通过',
+      'pending' => '待领取（历史订单）',
+      'claimed' => '已领取',
+      'completed' => '已完成',
+      'cancelled' => '已取消',
+      _ => order.status.isEmpty ? '未知状态' : order.status,
+    };
+  }
+
+  String _fulfillmentLabel(String value) => switch (value) {
+    'none' => '未进入履约',
+    'awaiting_address' => '待填写收货信息',
+    'ready_to_ship' => '待发货',
+    'shipped' => '已发货',
     'completed' => '已完成',
     'cancelled' => '已取消',
-    _ => value.isEmpty ? '未知状态' : value,
+    _ => value.isEmpty ? '未进入履约' : value,
   };
 
   String _rewardStatusLabel(String value) => switch (value) {
@@ -1060,4 +1210,93 @@ class _StoreOrderReviewDetailScreenState
     'like' => '点赞奖励',
     _ => value.isEmpty ? '其他积分' : value,
   };
+}
+
+class _ShipOrderDialog extends StatefulWidget {
+  const _ShipOrderDialog({required this.order, required this.displayName});
+
+  final AdminStoreOrderDetail order;
+  final String displayName;
+
+  @override
+  State<_ShipOrderDialog> createState() => _ShipOrderDialogState();
+}
+
+class _ShipOrderDialogState extends State<_ShipOrderDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _carrierController;
+  late final TextEditingController _trackingController;
+
+  @override
+  void initState() {
+    super.initState();
+    _carrierController = TextEditingController(
+      text: widget.order.shipping?.carrier ?? '',
+    );
+    _trackingController = TextEditingController(
+      text: widget.order.shipping?.trackingNo ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _carrierController.dispose();
+    _trackingController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('确认发货'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${widget.displayName} · ${widget.order.productName}',
+              style: const TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _carrierController,
+              decoration: const InputDecoration(
+                labelText: '物流公司',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) =>
+                  (value?.trim().isEmpty ?? true) ? '请填写物流公司' : null,
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: _trackingController,
+              decoration: const InputDecoration(
+                labelText: '快递单号',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) =>
+                  (value?.trim().isEmpty ?? true) ? '请填写快递单号' : null,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (_formKey.currentState?.validate() != true) return;
+            Navigator.of(context).pop((
+              carrier: _carrierController.text.trim(),
+              trackingNo: _trackingController.text.trim(),
+            ));
+          },
+          child: const Text('确认发货'),
+        ),
+      ],
+    );
+  }
 }

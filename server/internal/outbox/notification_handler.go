@@ -142,6 +142,10 @@ func notificationPushTitle(notificationType string, targetData map[string]any) s
 		return "社区公告"
 	case "event", "community.event":
 		return "活动通知"
+	case "store.order.reviewed":
+		return "兑换申请审核结果"
+	case "store.order.shipped":
+		return "兑换商品已发货"
 	default:
 		return "你有一条新通知"
 	}

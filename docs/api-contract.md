@@ -240,14 +240,22 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 | GET | `/me/points` | 是 | 我的积分余额与流水 |
 | POST | `/store/orders` | 是 | 兑换（需幂等键） |
 | GET | `/me/store-orders` | 是 | 我的兑换记录 |
-| GET | `/admin/store/orders` | 管理员 | 兑换申请分页；`status` 支持 `pending_review`、`approved`、`rejected`、`all` |
-| GET | `/admin/store/orders/{id}` | 管理员 | 申请快照、历史无效积分与兑换资格 |
+| GET | `/me/store-orders/{id}` | 是 | 我的兑换订单详情 |
+| PUT | `/me/store-orders/{id}/shipping` | 是 | 审核通过且未发货时提交/修改收货信息 |
+| GET | `/admin/store/orders` | 管理员 | 兑换订单分页；`status` 支持 `pending_review`、`awaiting_address`、`ready_to_ship`、`shipped`、`completed`、`rejected`、`all` |
+| GET | `/admin/store/orders/{id}` | 管理员 | 申请快照、历史无效积分、兑换资格与收货信息 |
 | GET | `/admin/store/orders/{id}/reward-content` | 管理员 | 按申请时间截止的发帖/评论奖励证据分页 |
 | POST | `/admin/store/orders/{id}/review` | 管理员 | 审核并提交不计入兑换的积分流水 |
+| POST | `/admin/store/orders/{id}/ship` | 管理员 | 待发货订单填写物流公司和快递单号 |
 
 兑换请求头 `Idempotency-Key` 与正文 `{ "product_id": "string" }` 共同保证
 幂等；重复请求返回既有订单，不重复扣分。错误码含 `INSUFFICIENT_POINTS`、
 `PRODUCT_UNAVAILABLE`。
+
+审核通过后订单保持 `status=approved`，并进入
+`fulfillment_status=awaiting_address`；用户提交收货信息后变为
+`ready_to_ship`，管理员发货后变为 `shipped`。通知 payload 只携带
+`order_id`/`action`/物流摘要，不携带完整地址。
 
 `/me/points` 响应包含：
 ```json

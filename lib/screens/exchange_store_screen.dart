@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_network_image.dart';
 import '../widgets/points_wallet_card.dart';
 import 'points_screen.dart';
+import 'store_order_shipping_screen.dart';
 
 class ExchangeStoreScreen extends StatelessWidget {
   const ExchangeStoreScreen({super.key, this.store, this.apiRepository});
@@ -159,6 +160,8 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
   bool _ordersLoading = true;
   bool _ordersLoadFailed = false;
   bool _hasPendingReview = false;
+  bool _hasShippingAction = false;
+  String? _shippingActionOrderId;
   int _reservedPoints = 0;
   int _ordersGeneration = 0;
   // 兑换幂等键按商品持久到请求成功为止，弱网重试时复用同一个键，
@@ -194,6 +197,11 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
         _hasPendingReview = orders.any(
           (order) => order.status == 'pending_review',
         );
+        final shippingOrders = orders.where((order) => order.needsShipping);
+        _hasShippingAction = shippingOrders.isNotEmpty;
+        _shippingActionOrderId = _hasShippingAction
+            ? shippingOrders.first.id
+            : null;
         _reservedPoints = orders
             .where((order) => order.status == 'pending_review')
             .fold(0, (total, order) => total + order.points);
@@ -204,6 +212,8 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
         setState(() {
           _ordersLoading = false;
           _ordersLoadFailed = true;
+          _hasShippingAction = false;
+          _shippingActionOrderId = null;
         });
       }
       rethrow;
@@ -307,38 +317,89 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                     ],
                   ),
                 )
-              else if (_hasPendingReview)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppTheme.softAmber,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(
-                        Icons.hourglass_top_rounded,
-                        size: 17,
-                        color: AppTheme.orange,
-                      ),
-                      SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          '已有兑换申请审核中，审核完成后才可再次申请。',
-                          style: TextStyle(
-                            color: AppTheme.orange,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+              else ...[
+                if (_hasShippingAction)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.softMint,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.local_shipping_outlined,
+                          size: 17,
+                          color: AppTheme.mint,
+                        ),
+                        const SizedBox(width: 7),
+                        const Expanded(
+                          child: Text(
+                            '有兑换订单等待填写收货信息',
+                            style: TextStyle(
+                              color: AppTheme.mint,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        TextButton(
+                          onPressed: _shippingActionOrderId == null
+                              ? null
+                              : () => _openShipping(_shippingActionOrderId!),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text(
+                            '去填写',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                if (_hasPendingReview)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.softAmber,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.hourglass_top_rounded,
+                          size: 17,
+                          color: AppTheme.orange,
+                        ),
+                        SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            '已有兑换申请审核中，审核完成后才可再次申请。',
+                            style: TextStyle(
+                              color: AppTheme.orange,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -401,41 +462,7 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
                       style: TextStyle(color: AppTheme.textSecondary),
                     );
                   }
-                  return Column(
-                    children: orders
-                        .map(
-                          (order) => ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(
-                              Icons.card_giftcard_outlined,
-                              color: AppTheme.primary,
-                            ),
-                            title: Text(order.productName),
-                            subtitle: Text(
-                              '${order.points} 积分 · ${relativeTimeLabel(order.createdAt)}',
-                            ),
-                            trailing: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(_orderStatus(order.status)),
-                                if (order.status == 'rejected' &&
-                                    order.reviewReason.isNotEmpty)
-                                  Text(
-                                    order.reviewReason,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 10,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  );
+                  return Column(children: orders.map(_orderTile).toList());
                 },
               ),
             ],
@@ -497,16 +524,110 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
     }
   }
 
-  String _orderStatus(String status) => switch (status) {
-    'pending_review' => '待审核',
-    'approved' => '审核通过 · 待领取',
-    'rejected' => '审核未通过',
-    'pending' => '待领取',
-    'claimed' => '已领取',
-    'completed' => '已完成',
-    'cancelled' => '已取消',
-    _ => status.isEmpty ? '处理中' : status,
-  };
+  Widget _orderTile(StoreOrder order) {
+    final canOpenShipping = order.canEditShipping;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(
+        Icons.card_giftcard_outlined,
+        color: AppTheme.primary,
+      ),
+      title: Text(order.productName),
+      subtitle: Text(_orderSubtitle(order)),
+      trailing: SizedBox(
+        width: 116,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              _orderStatus(order),
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                color: order.needsShipping ? AppTheme.mint : null,
+                fontWeight: order.needsShipping ? FontWeight.w800 : null,
+                fontSize: 12,
+              ),
+            ),
+            if (canOpenShipping)
+              TextButton(
+                onPressed: () => _openShipping(order.id),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 26),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  order.needsShipping ? '填写收货信息' : '查看/修改地址',
+                  style: const TextStyle(fontSize: 11),
+                ),
+              )
+            else if (order.status == 'rejected' &&
+                order.reviewReason.isNotEmpty)
+              Text(
+                order.reviewReason,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 10,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _orderSubtitle(StoreOrder order) {
+    final base = '${order.points} 积分 · ${relativeTimeLabel(order.createdAt)}';
+    final shipping = order.shipping;
+    if (order.fulfillmentStatus == 'shipped' &&
+        shipping != null &&
+        shipping.carrier.isNotEmpty &&
+        shipping.trackingNo.isNotEmpty) {
+      return '$base · ${shipping.carrier} ${shipping.trackingNo}';
+    }
+    return base;
+  }
+
+  Future<void> _openShipping(String orderId) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => StoreOrderShippingScreen(
+          repository: widget.repository,
+          orderId: orderId,
+        ),
+      ),
+    );
+    if (changed == true && mounted) {
+      setState(() {
+        ordersFuture = _loadOrders();
+      });
+    }
+  }
+
+  String _orderStatus(StoreOrder order) {
+    if (order.status == 'approved') {
+      return switch (order.fulfillmentStatus) {
+        'awaiting_address' => '审核通过 · 待填地址',
+        'ready_to_ship' => '待发货',
+        'shipped' => '已发货',
+        'completed' => '已完成',
+        'cancelled' => '已取消',
+        _ => '审核通过',
+      };
+    }
+    return switch (order.status) {
+      'pending_review' => '待审核',
+      'rejected' => '审核未通过',
+      'pending' => '待领取',
+      'claimed' => '已领取',
+      'completed' => '已完成',
+      'cancelled' => '已取消',
+      _ => order.status.isEmpty ? '处理中' : order.status,
+    };
+  }
 }
 
 class _ApiProductCard extends StatelessWidget {

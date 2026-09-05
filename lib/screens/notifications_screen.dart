@@ -276,7 +276,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       unawaited(_markNotificationRead(item));
     }
     if (item.type == 'system' ||
-        item.type == 'store.order.reviewed' ||
+        item.isSystem ||
         item.type == 'announcement' ||
         item.type.startsWith('community.')) {
       if (widget.onOpenNotification != null) {

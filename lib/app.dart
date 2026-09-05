@@ -39,6 +39,7 @@ import 'screens/governance_screens.dart';
 import 'screens/activity_management_screen.dart';
 import 'screens/ranking_submission_review_screen.dart';
 import 'screens/store_order_review_screen.dart';
+import 'screens/store_order_shipping_screen.dart';
 import 'screens/change_password_dialog.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
@@ -447,10 +448,14 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         ? seedPost
         : null;
     if (!apiMode && postForHistory != null) store.recordHistory(postForHistory);
-    if (apiMode && repositories.profile != null && authController?.status == AuthStatus.authenticated) {
+    if (apiMode &&
+        repositories.profile != null &&
+        authController?.status == AuthStatus.authenticated) {
       // 浏览历史是服务端事实；失败不阻塞打开帖子，详情页仍可正常阅读。
       unawaited(
-        repositories.profile!.recordHistory(normalizedPostId).catchError((error) {
+        repositories.profile!.recordHistory(normalizedPostId).catchError((
+          error,
+        ) {
           if (kDebugMode) {
             debugPrint('[History] Failed to record post visit: $error');
           }
@@ -1038,6 +1043,24 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     final platform = repositories.platform;
     if (platform == null) return;
     final data = notification.targetData;
+    if (notification.type == 'store.order.reviewed' &&
+        data['action'] == 'submit_shipping' &&
+        notification.targetId.isNotEmpty) {
+      final storeRepository = repositories.store;
+      if (storeRepository == null) {
+        _showQuickFeedback('当前模式暂不支持填写收货信息');
+        return;
+      }
+      navigatorKey.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => StoreOrderShippingScreen(
+            repository: storeRepository,
+            orderId: notification.targetId,
+          ),
+        ),
+      );
+      return;
+    }
     VoidCallback? openTarget;
     final postId = data['post_id'];
     if (postId is String && postId.isNotEmpty) {

@@ -19,7 +19,7 @@ func TestStoreProductImagesAreExposedByCatalogAndServer(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT p.id, p.name, p.description, p.emoji, p.points, p.color,
-		       COUNT(o.id) FILTER (WHERE o.status IN ('claimed', 'completed')) AS redeemed_count
+		       COUNT(o.id) FILTER (WHERE o.status IN ('approved', 'claimed', 'completed')) AS redeemed_count
 		FROM store_products p
 		LEFT JOIN store_orders o ON o.product_id = p.id
 		WHERE p.active = true

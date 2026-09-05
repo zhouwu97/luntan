@@ -422,7 +422,7 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT p.id, p.name, p.description, p.emoji, p.points, p.color,
-		       COUNT(o.id) FILTER (WHERE o.status IN ('claimed', 'completed')) AS redeemed_count
+		       COUNT(o.id) FILTER (WHERE o.status IN ('approved', 'claimed', 'completed')) AS redeemed_count
 		FROM store_products p
 		LEFT JOIN store_orders o ON o.product_id = p.id
 		WHERE p.active = true
@@ -469,7 +469,20 @@ func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT o.id, o.product_id, p.name, o.points, o.status, o.created_at, o.review_reason, o.reviewed_at FROM store_orders o JOIN store_products p ON p.id = o.product_id WHERE o.user_id = $1 ORDER BY o.created_at DESC, o.id DESC LIMIT 50`, user.ID)
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT o.id, o.product_id, p.name, o.points, o.status, o.fulfillment_status,
+		       o.created_at, o.review_reason, o.reviewed_at, o.shipped_at, o.completed_at,
+		       COALESCE(s.recipient_name, ''), COALESCE(s.phone, ''),
+		       COALESCE(s.province, ''), COALESCE(s.city, ''),
+		       COALESCE(s.district, ''), COALESCE(s.address_detail, ''),
+		       COALESCE(s.carrier, ''), COALESCE(s.tracking_no, ''),
+		       s.submitted_at, s.updated_at
+		FROM store_orders o
+		JOIN store_products p ON p.id = o.product_id
+		LEFT JOIN store_order_shipping s ON s.order_id = o.id
+		WHERE o.user_id = $1
+		ORDER BY o.created_at DESC, o.id DESC
+		LIMIT 50`, user.ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -477,17 +490,27 @@ func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := make([]map[string]any, 0)
 	for rows.Next() {
-		var id, productID, name, status, reviewReason string
+		var id, productID, name, status, fulfillmentStatus, reviewReason string
+		var recipientName, phone, province, city, district, addressDetail, carrier, trackingNo string
 		var points int64
 		var createdAt time.Time
-		var reviewedAt sql.NullTime
-		if err := rows.Scan(&id, &productID, &name, &points, &status, &createdAt, &reviewReason, &reviewedAt); err != nil {
+		var reviewedAt, shippedAt, completedAt, submittedAt, shippingUpdatedAt sql.NullTime
+		if err := rows.Scan(&id, &productID, &name, &points, &status, &fulfillmentStatus, &createdAt, &reviewReason, &reviewedAt, &shippedAt, &completedAt, &recipientName, &phone, &province, &city, &district, &addressDetail, &carrier, &trackingNo, &submittedAt, &shippingUpdatedAt); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		item := map[string]any{"id": id, "product_id": productID, "product_name": name, "points": points, "status": status, "created_at": createdAt, "review_reason": reviewReason}
+		item := map[string]any{"id": id, "product_id": productID, "product_name": name, "points": points, "status": status, "fulfillment_status": fulfillmentStatus, "created_at": createdAt, "review_reason": reviewReason}
 		if reviewedAt.Valid {
 			item["reviewed_at"] = reviewedAt.Time
+		}
+		if shippedAt.Valid {
+			item["shipped_at"] = shippedAt.Time
+		}
+		if completedAt.Valid {
+			item["completed_at"] = completedAt.Time
+		}
+		if submittedAt.Valid {
+			item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt)
 		}
 		items = append(items, item)
 	}
@@ -525,15 +548,15 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	var existingOrderID, existingProductID, existingStatus string
+	var existingOrderID, existingProductID, existingStatus, existingFulfillmentStatus string
 	var existingPoints int64
-	err = tx.QueryRowContext(r.Context(), `SELECT id, product_id, points, status FROM store_orders WHERE user_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&existingOrderID, &existingProductID, &existingPoints, &existingStatus)
+	err = tx.QueryRowContext(r.Context(), `SELECT id, product_id, points, status, fulfillment_status FROM store_orders WHERE user_id = $1 AND idempotency_key = $2`, user.ID, idempotencyKey).Scan(&existingOrderID, &existingProductID, &existingPoints, &existingStatus, &existingFulfillmentStatus)
 	if err == nil {
 		if err := tx.Commit(); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": existingOrderID, "product_id": existingProductID, "points": existingPoints, "balance": balance, "status": existingStatus})
+		httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": existingOrderID, "product_id": existingProductID, "points": existingPoints, "balance": balance, "status": existingStatus, "fulfillment_status": existingFulfillmentStatus})
 		return
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -576,7 +599,7 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orderID := newPostID()
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status, idempotency_key, balance_at_submit) VALUES ($1, $2, $3, $4, 'pending_review', $5, $6)`, orderID, user.ID, input.ProductID, points, idempotencyKey, balance); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO store_orders (id, user_id, product_id, points, status, fulfillment_status, idempotency_key, balance_at_submit) VALUES ($1, $2, $3, $4, 'pending_review', 'none', $5, $6)`, orderID, user.ID, input.ProductID, points, idempotencyKey, balance); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -584,7 +607,7 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"id": orderID, "product_id": input.ProductID, "points": points, "balance": balance, "status": "pending_review"})
+	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{"id": orderID, "product_id": input.ProductID, "points": points, "balance": balance, "status": "pending_review", "fulfillment_status": "none"})
 }
 
 func windowOrDefault(value, fallback string) string {

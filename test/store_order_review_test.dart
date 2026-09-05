@@ -111,10 +111,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('兑换审核'), findsOneWidget);
+    expect(find.text('兑换订单'), findsOneWidget);
     expect(find.text('测试用户'), findsOneWidget);
     expect(requestedStatus, 'pending_review');
-    await tester.tap(find.text('已驳回'));
+    await tester.tap(find.text('已拒绝'));
     await tester.pumpAndSettle();
     expect(requestedStatus, 'rejected');
     await tester.tap(find.text('测试用户'));
@@ -142,6 +142,7 @@ void main() {
 
   test('兑换审核仓库解析奖励分页并提交人工排除流水', () async {
     Map<String, dynamic>? reviewBody;
+    Map<String, dynamic>? shipBody;
     final client = MockClient((request) async {
       if (request.method == 'GET' &&
           request.url.path ==
@@ -177,6 +178,15 @@ void main() {
         reviewBody = jsonDecode(request.body) as Map<String, dynamic>;
         return _json({'id': 'order-1', 'status': 'approved'});
       }
+      if (request.method == 'POST' &&
+          request.url.path == '/api/v1/admin/store/orders/order-1/ship') {
+        shipBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _json({
+          'id': 'order-1',
+          'status': 'approved',
+          'fulfillment_status': 'shipped',
+        });
+      }
       return _json({'message': 'not found'}, 404);
     });
     final repository = PlatformRepository(
@@ -199,5 +209,123 @@ void main() {
       invalidTransactionIds: const ['tx-comment-1'],
     );
     expect(reviewBody?['invalid_transaction_ids'], ['tx-comment-1']);
+
+    await repository.shipStoreOrder(
+      id: 'order-1',
+      carrier: '顺丰速运',
+      trackingNo: 'SF1234567890',
+    );
+    expect(shipBody?['carrier'], '顺丰速运');
+    expect(shipBody?['tracking_no'], 'SF1234567890');
+  });
+
+  testWidgets('兑换订单待发货详情提交物流信息', (tester) async {
+    String? requestedStatus;
+    Map<String, dynamic>? shipBody;
+    final client = MockClient((request) async {
+      if (request.method == 'GET' &&
+          request.url.path == '/api/v1/admin/store/orders') {
+        requestedStatus = request.url.queryParameters['status'];
+        if (requestedStatus != 'ready_to_ship') {
+          return _json({'items': []});
+        }
+        return _json({
+          'items': [
+            {
+              'id': 'order-ship',
+              'user_id': 'user-1',
+              'username': 'user_one',
+              'nickname': '测试用户',
+              'product_id': 'badge',
+              'product_name': '论坛纪念徽章',
+              'points': 600,
+              'status': 'approved',
+              'fulfillment_status': 'ready_to_ship',
+              'user_points': 38,
+              'created_at': '2026-08-31T12:00:00Z',
+              'shipping': {
+                'recipient_name': '张三',
+                'phone': '13800000000',
+                'province': '辽宁省',
+                'city': '沈阳市',
+                'district': '浑南区',
+                'address_detail': '宿舍楼 101',
+                'masked_name': '张*',
+                'masked_phone': '138****0000',
+                'masked_address': '辽宁省沈阳市浑南区 ********',
+              },
+            },
+          ],
+        });
+      }
+      if (request.method == 'GET' &&
+          request.url.path == '/api/v1/admin/store/orders/order-ship') {
+        return _json({
+          'id': 'order-ship',
+          'user_id': 'user-1',
+          'username': 'user_one',
+          'nickname': '测试用户',
+          'product_id': 'badge',
+          'product_name': '论坛纪念徽章',
+          'points': 600,
+          'status': 'approved',
+          'fulfillment_status': 'ready_to_ship',
+          'user_points': 38,
+          'reserved_points': 0,
+          'available_points': 38,
+          'created_at': '2026-08-31T12:00:00Z',
+          'point_sources': [],
+          'shipping': {
+            'recipient_name': '张三',
+            'phone': '13800000000',
+            'province': '辽宁省',
+            'city': '沈阳市',
+            'district': '浑南区',
+            'address_detail': '宿舍楼 101',
+            'submitted_at': '2026-08-31T13:00:00Z',
+          },
+        });
+      }
+      if (request.method == 'GET' &&
+          request.url.path ==
+              '/api/v1/admin/store/orders/order-ship/reward-content') {
+        return _json({'items': []});
+      }
+      if (request.method == 'POST' &&
+          request.url.path == '/api/v1/admin/store/orders/order-ship/ship') {
+        shipBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _json({
+          'id': 'order-ship',
+          'status': 'approved',
+          'fulfillment_status': 'shipped',
+        });
+      }
+      return _json({'message': 'not found'}, 404);
+    });
+    final repository = PlatformRepository(
+      ApiClient(baseUri: Uri.parse('https://example.com'), client: client),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: StoreOrderReviewScreen(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('待发货'));
+    await tester.pumpAndSettle();
+    expect(requestedStatus, 'ready_to_ship');
+    await tester.tap(find.text('测试用户'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('收货与物流'), findsOneWidget);
+    expect(find.text('张三'), findsOneWidget);
+    await tester.tap(find.text('确认发货'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).at(0), '顺丰速运');
+    await tester.enterText(find.byType(TextFormField).at(1), 'SF1234567890');
+    await tester.tap(find.widgetWithText(FilledButton, '确认发货').last);
+    await tester.pumpAndSettle();
+
+    expect(shipBody?['carrier'], '顺丰速运');
+    expect(shipBody?['tracking_no'], 'SF1234567890');
   });
 }

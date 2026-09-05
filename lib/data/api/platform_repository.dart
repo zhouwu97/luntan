@@ -54,7 +54,8 @@ class ForumNotification {
   bool get isModeration =>
       type.startsWith('moderation.') || type.startsWith('appeal.');
 
-  bool get isSystem => type == 'store.order.reviewed';
+  bool get isSystem =>
+      type == 'store.order.reviewed' || type == 'store.order.shipped';
 
   String? get moderationActionId {
     final value = targetData['moderation_action_id'];
@@ -93,6 +94,8 @@ class ForumNotification {
         'rejected' => '申诉未通过',
         _ => '申诉结果通知',
       },
+      'store.order.reviewed' => '兑换申请审核结果',
+      'store.order.shipped' => '兑换商品已发货',
       'announcement' || 'community.announcement' => '社区公告',
       'event' || 'community.event' => '活动通知',
       _ => '你有一条新通知',
@@ -710,6 +713,7 @@ class AdminStoreOrder {
     required this.productName,
     required this.points,
     required this.status,
+    required this.fulfillmentStatus,
     required this.createdAt,
     required this.userPoints,
     this.balanceAtSubmit = 0,
@@ -720,6 +724,9 @@ class AdminStoreOrder {
     this.reviewedBy = '',
     this.reviewedAt,
     this.reviewReason = '',
+    this.shippedAt,
+    this.completedAt,
+    this.shipping,
   });
 
   final String id;
@@ -730,6 +737,7 @@ class AdminStoreOrder {
   final String productName;
   final int points;
   final String status;
+  final String fulfillmentStatus;
   final DateTime createdAt;
   final int userPoints;
   final int balanceAtSubmit;
@@ -740,6 +748,9 @@ class AdminStoreOrder {
   final String reviewedBy;
   final DateTime? reviewedAt;
   final String reviewReason;
+  final DateTime? shippedAt;
+  final DateTime? completedAt;
+  final AdminStoreOrderShipping? shipping;
 }
 
 class AdminStoreOrderDetail extends AdminStoreOrder {
@@ -752,6 +763,7 @@ class AdminStoreOrderDetail extends AdminStoreOrder {
     required super.productName,
     required super.points,
     required super.status,
+    required super.fulfillmentStatus,
     required super.createdAt,
     required super.userPoints,
     super.balanceAtSubmit,
@@ -762,6 +774,9 @@ class AdminStoreOrderDetail extends AdminStoreOrder {
     super.reviewedBy,
     super.reviewedAt,
     super.reviewReason,
+    super.shippedAt,
+    super.completedAt,
+    super.shipping,
     required this.reservedPoints,
     required this.availablePoints,
     required this.pointSources,
@@ -774,6 +789,45 @@ class AdminStoreOrderDetail extends AdminStoreOrder {
   final List<StorePointSource> pointSources;
   final int historicalInvalidatedPoints;
   final int eligiblePointsAtSubmit;
+}
+
+class AdminStoreOrderShipping {
+  const AdminStoreOrderShipping({
+    required this.recipientName,
+    required this.phone,
+    required this.province,
+    required this.city,
+    required this.district,
+    required this.addressDetail,
+    this.carrier = '',
+    this.trackingNo = '',
+    this.maskedName = '',
+    this.maskedPhone = '',
+    this.maskedAddress = '',
+    this.submittedAt,
+    this.updatedAt,
+  });
+
+  final String recipientName;
+  final String phone;
+  final String province;
+  final String city;
+  final String district;
+  final String addressDetail;
+  final String carrier;
+  final String trackingNo;
+  final String maskedName;
+  final String maskedPhone;
+  final String maskedAddress;
+  final DateTime? submittedAt;
+  final DateTime? updatedAt;
+
+  String get fullAddress => [
+    province,
+    city,
+    district,
+    addressDetail,
+  ].where((part) => part.trim().isNotEmpty).join(' ');
 }
 
 class StorePointSource {
@@ -1309,6 +1363,7 @@ class PlatformRepository {
       productName: base.productName,
       points: base.points,
       status: base.status,
+      fulfillmentStatus: base.fulfillmentStatus,
       createdAt: base.createdAt,
       userPoints: base.userPoints,
       balanceAtSubmit: base.balanceAtSubmit,
@@ -1319,6 +1374,9 @@ class PlatformRepository {
       reviewedBy: base.reviewedBy,
       reviewedAt: base.reviewedAt,
       reviewReason: base.reviewReason,
+      shippedAt: base.shippedAt,
+      completedAt: base.completedAt,
+      shipping: base.shipping,
       reservedPoints: _int(payload['reserved_points']),
       availablePoints: _int(payload['available_points']),
       pointSources: sources,
@@ -1342,6 +1400,17 @@ class PlatformRepository {
         'reason': reason,
         'invalid_transaction_ids': invalidTransactionIds,
       },
+    );
+  }
+
+  Future<void> shipStoreOrder({
+    required String id,
+    required String carrier,
+    required String trackingNo,
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/store/orders/$id/ship',
+      body: {'carrier': carrier, 'tracking_no': trackingNo},
     );
   }
 
@@ -1417,6 +1486,7 @@ class PlatformRepository {
       productName: _string(value['product_name']),
       points: _int(value['points']),
       status: _string(value['status'], fallback: 'pending_review'),
+      fulfillmentStatus: _string(value['fulfillment_status'], fallback: 'none'),
       createdAt: _date(value['created_at']),
       userPoints: _int(value['user_points']),
       balanceAtSubmit: _int(value['balance_at_submit']),
@@ -1427,6 +1497,29 @@ class PlatformRepository {
       reviewedBy: _string(value['reviewed_by']),
       reviewedAt: _nullableDate(value['reviewed_at']),
       reviewReason: _string(value['review_reason']),
+      shippedAt: _nullableDate(value['shipped_at']),
+      completedAt: _nullableDate(value['completed_at']),
+      shipping: _adminStoreOrderShippingFromJson(value['shipping']),
+    );
+  }
+
+  AdminStoreOrderShipping? _adminStoreOrderShippingFromJson(dynamic raw) {
+    if (raw is! Map) return null;
+    final value = Map<String, dynamic>.from(raw);
+    return AdminStoreOrderShipping(
+      recipientName: _string(value['recipient_name']),
+      phone: _string(value['phone']),
+      province: _string(value['province']),
+      city: _string(value['city']),
+      district: _string(value['district']),
+      addressDetail: _string(value['address_detail']),
+      carrier: _string(value['carrier']),
+      trackingNo: _string(value['tracking_no']),
+      maskedName: _string(value['masked_name']),
+      maskedPhone: _string(value['masked_phone']),
+      maskedAddress: _string(value['masked_address']),
+      submittedAt: _nullableDate(value['submitted_at']),
+      updatedAt: _nullableDate(value['updated_at']),
     );
   }
 

@@ -44,18 +44,17 @@ export function HomeCommunityTabs({
             key={community.id || community.name}
             type="button"
             role="tab"
+            aria-label={community.name}
             aria-selected={isActive}
             className={`home-community-tab${isActive ? " active" : ""}${isCampus ? " campus-art-tab" : ""}`}
             onClick={() => onSelect(community)}
           >
             {isCampus ? (
-              <>
-                <img
-                  src={`/home/tab_community_${isActive ? "active" : "inactive"}.webp`}
-                  alt="酱紫社区"
-                />
-                <span className="campus-art-label">酱紫社区</span>
-              </>
+              <img
+                src={`/home/tab_community_${isActive ? "active" : "inactive"}.webp`}
+                alt=""
+                aria-hidden="true"
+              />
             ) : (
               <span>{community.name}</span>
             )}

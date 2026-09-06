@@ -34,9 +34,9 @@ export function resolveMediaUrl(value?: string, variant: "thumb" | "feed" | "det
 
 export function mediaCandidates(asset: MediaAsset, preferred: "thumb" | "feed" | "detail" | "original" = "thumb"): string[] {
   const order = preferred === "thumb"
-    ? [[asset.thumbUrl, "thumb"], [asset.feedUrl, "feed"], [asset.detailUrl, "detail"]]
+    ? [[asset.thumbUrl, "thumb"], [asset.feedUrl, "feed"], [asset.detailUrl, "detail"], [asset.originalUrl, "original"], [asset.url, "detail"]]
     : preferred === "feed"
-      ? [[asset.feedUrl, "feed"], [asset.detailUrl, "detail"], [asset.thumbUrl, "thumb"]]
+      ? [[asset.feedUrl, "feed"], [asset.detailUrl, "detail"], [asset.thumbUrl, "thumb"], [asset.originalUrl, "original"], [asset.url, "detail"]]
     : preferred === "original"
       ? [[asset.originalUrl, "original"], [asset.detailUrl, "detail"], [asset.feedUrl, "feed"], [asset.url, "original"], [asset.thumbUrl, "thumb"]]
       : [[asset.detailUrl, "detail"], [asset.originalUrl, "original"], [asset.feedUrl, "feed"], [asset.thumbUrl, "thumb"], [asset.url, "original"]];

@@ -752,7 +752,7 @@ img { display: block; max-width: 100%; }
   .home-community-download-tab:active { transform: scale(.98); }
   .home-community-tab .community-icon { display: none; }
   .home-community-tabs-empty { height: 46px; display: grid; place-items: center; color: var(--text-faint); background: #edf5fc; border: 1px solid #dbe8f4; border-radius: 15px; font-size: 12px; }
-  .home-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+  .home-shortcuts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
   .home-shortcut { min-width: 0; display: grid; justify-items: center; gap: 6px; color: #627d96; font-size: 10px; font-weight: 650; white-space: nowrap; }
   .shortcut-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; }
   .shortcut-icon.blue { color: var(--primary); background: #e6f1ff; }
@@ -1495,7 +1495,7 @@ img { display: block; max-width: 100%; }
   .bottom-nav { display: grid !important; }
   .floating-refresh { display: grid !important; }
   .app-download-banner { display: flex !important; }
-  .home-mobile-navigation { display: block !important; }
+  .home-mobile-navigation { display: grid !important; }
   .site-header { display: none !important; }
   .home-left-col, .home-right-col { display: none !important; }
   .home-grid, .detail-grid { display: block !important; }
@@ -1626,6 +1626,11 @@ img { display: block; max-width: 100%; }
   padding: 2px 17px 10px;
   gap: 7px;
 }
+.quick-grid.home-shortcuts {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding-inline: 8px;
+  gap: 4px;
+}
 .quick {
   background: none;
   border: none;
@@ -1653,6 +1658,8 @@ img { display: block; max-width: 100%; }
 .quick:nth-child(2) .quick-icon { background: #fff0e7; color: #ff8751; }
 .quick:nth-child(3) .quick-icon { background: #ffe5ef; color: #ea6d9a; }
 .quick:nth-child(4) .quick-icon { background: #ddf6f0; color: #2cb69e; }
+.quick:nth-child(5) .quick-icon { background: #ddf6f0; color: #2cb69e; }
+.home-shortcuts .quick:nth-child(4) .quick-icon { background: #eeeaff; color: #8b78df; }
 
 /* 信息流排序工具条 */
 .feedbar {
@@ -3257,10 +3264,11 @@ img { display: block; max-width: 100%; }
   justify-content: flex-start;
   margin-top: 10px;
 }
-.media-single .media-frame {
+.post-media.media-single .media-frame {
   width: 100%;
-  height: 100%;
+  height: auto;
   max-height: 420px;
+  aspect-ratio: auto;
   display: flex;
   align-items: center;
   justify-content: flex-start;

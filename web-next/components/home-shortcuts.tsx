@@ -40,7 +40,11 @@ export function HomeShortcuts({ onFilterHot }: { onFilterHot?: () => void }) {
         <span>下载 App</span>
       </Link>
 
-      <Link href="/search?q=穿搭分享" className="quick" aria-label="穿搭分享">
+      <Link
+        href="/?community=all&sort=recommended&topic=outfit"
+        className="quick"
+        aria-label="穿搭分享"
+      >
         <span className="quick-icon">
           <Icon name="hanger" size={21} />
         </span>

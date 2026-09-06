@@ -990,10 +990,12 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
   test("14. 首页默认入口与排序语义：/ 默认进入最新且 URL 保持干净，推荐严格按管理员精选无自动回退", async ({ page }) => {
     // 监听所有 feed 流请求
     const requestedSorts: string[] = [];
+    const requestedCommunities: Array<string | null> = [];
     await page.route("**/api/v1/feed/latest*", async (route) => {
       const url = new URL(route.request().url());
       const sort = url.searchParams.get("sort") || "none";
       requestedSorts.push(sort);
+      requestedCommunities.push(url.searchParams.get("community_id"));
 
       if (sort === "latest") {
         await route.fulfill({
@@ -1088,6 +1090,8 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     // 4. 验证首次请求的 sort 参数包含 latest
     expect(requestedSorts).toContain("latest");
     expect(requestedSorts[0]).toBe("latest");
+    // 首页视觉默认选中酱紫社区时，请求也必须使用同一板块，不能展示全站混合流。
+    expect(requestedCommunities[0]).toBe("community-campus");
 
     // 5. 点击“推荐”Tab，验证切换并测试无 fallback 逻辑
     const recommendedTab = page.locator(".feed-tabs button.tab").filter({ hasText: "推荐" });
@@ -1644,7 +1648,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     // 1. 移动端 390x844 手机视口
     await page.setViewportSize({ width: 390, height: 844 });
 
+    const requestedFeedUrls: URL[] = [];
     await page.route("**/api/v1/feed/latest*", async (route) => {
+      requestedFeedUrls.push(new URL(route.request().url()));
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -1664,9 +1670,6 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
                 {
                   id: "m-single-1",
                   url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
-                  thumb_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
-                  detail_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
-                  original_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='400'%3E%3Crect width='300' height='400' fill='%233f8df7'/%3E%3C/svg%3E",
                   alt_text: "竖屏单图",
                 },
               ],
@@ -1704,9 +1707,31 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     const communityTabs = page.locator(".home-community-tabs .home-community-tab");
     await expect(communityTabs).toHaveCount(3);
     await expect(communityTabs.nth(0)).toContainText("大型拆箱");
-    await expect(communityTabs.nth(1)).toContainText("酱紫社区");
+    await expect(communityTabs.nth(1)).toHaveAttribute("aria-label", "酱紫社区");
     await expect(communityTabs.nth(2)).toContainText("杂鱼日常");
     await expect(page.locator(".home-shortcuts")).toContainText("下载 App");
+
+    // Web 专属下载入口与 App 的四个功能入口必须保持同一行，不能把“活动”挤到第二行。
+    const shortcutBoxes = await page.locator(".home-shortcuts .quick").evaluateAll((items) =>
+      items.map((item) => item.getBoundingClientRect().top),
+    );
+    expect(shortcutBoxes).toHaveLength(5);
+    expect(Math.max(...shortcutBoxes) - Math.min(...shortcutBoxes)).toBeLessThanOrEqual(2);
+
+    // 默认高亮酱紫社区时，首次请求必须携带同一社区 ID。
+    expect(requestedFeedUrls[0].searchParams.get("community_id")).toBe("community-campus");
+
+    // 穿搭入口复用真实 topic feed，不再误用全站关键词搜索。
+    const outfitLink = page.getByRole("link", { name: "穿搭分享" });
+    await expect(outfitLink).toHaveAttribute(
+      "href",
+      "/?community=all&sort=recommended&topic=outfit",
+    );
+    await outfitLink.click();
+    await expect(page).toHaveURL("/?community=all&sort=recommended&topic=outfit");
+    await expect.poll(() => requestedFeedUrls.some((url) =>
+      url.searchParams.get("topic") === "outfit" && !url.searchParams.has("community_id"),
+    )).toBe(true);
 
     // 移动端：桌面左侧与右侧侧边栏严格隐藏
     const desktopLeftRail = page.locator(".home-left-col");
@@ -1727,13 +1752,21 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(singleMediaImg).toBeVisible();
     const imgStyles = await singleMediaImg.evaluate((el) => {
       const computed = window.getComputedStyle(el);
+      const imageRect = el.getBoundingClientRect();
+      const frameRect = el.parentElement?.getBoundingClientRect();
       return {
         objectFit: computed.objectFit,
         maxHeight: computed.maxHeight,
+        imageWidth: imageRect.width,
+        imageHeight: imageRect.height,
+        frameHeight: frameRect?.height || 0,
       };
     });
     expect(imgStyles.objectFit).toBe("contain");
     expect(imgStyles.maxHeight).toBe("420px");
+    // 300x400 竖图应维持 3:4 原始比例，且容器高度不能小于图片导致裁切。
+    expect(imgStyles.imageWidth / imgStyles.imageHeight).toBeCloseTo(0.75, 2);
+    expect(imgStyles.frameHeight).toBeGreaterThanOrEqual(imgStyles.imageHeight - 1);
   });
 });
 

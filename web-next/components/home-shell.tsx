@@ -21,6 +21,8 @@ import { relativeTime } from "../lib/format";
 import { useInfiniteScroll } from "../lib/use-infinite-scroll";
 import type { Community, Post } from "../types/forum";
 
+const DEFAULT_HOME_COMMUNITY_ID = "community-campus";
+
 export function normalizeSort(value: string | null): FeedSort {
   return value === "recommended" || value === "hot" ? value : "latest";
 }
@@ -42,15 +44,17 @@ export function HomeShell() {
   const { user, isRegistered } = useSession();
   const { showToast } = useToast();
   const rawCommunity = (searchParams.get("community") || "").trim();
-  const requestedCommunityId = rawCommunity === "all" ? "" : rawCommunity;
+  const requestedCommunityId = rawCommunity === "all"
+    ? ""
+    : rawCommunity || DEFAULT_HOME_COMMUNITY_ID;
   const query = (searchParams.get("q") || "").trim();
   const topic = (searchParams.get("topic") || "").trim();
 
   const [communities, setCommunities] = useState<Community[]>(HOME_COMMUNITY_FALLBACKS);
-  const [activeCommunityId, setActiveCommunityId] = useState(requestedCommunityId);
-  const [sort, setSort] = useState<FeedSort>(() => normalizeSort(searchParams.get("sort")));
+  const activeCommunityId = requestedCommunityId;
+  const sort = normalizeSort(searchParams.get("sort"));
   const [latestOrder, setLatestOrder] = useState<LatestOrder>("comment");
-  const [hasMedia, setHasMedia] = useState(false);
+  const hasMedia = searchParams.get("media") === "1";
   const [filterOpen, setFilterOpen] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,10 +69,6 @@ export function HomeShell() {
 
   useEffect(() => {
     const rawSort = searchParams.get("sort");
-    setSort(normalizeSort(rawSort));
-    setHasMedia(searchParams.get("media") === "1");
-    const commParam = (searchParams.get("community") || "").trim();
-    setActiveCommunityId(commParam === "all" ? "" : commParam);
     setLoadMoreError(false);
 
     if (rawSort === "featured") {
@@ -208,25 +208,30 @@ export function HomeShell() {
   function chooseCommunity(community?: Community) {
     const nextParams = new URLSearchParams(searchParams.toString());
     if (!community || community.id === "all") {
-      setActiveCommunityId("");
       nextParams.delete("community");
     } else {
-      setActiveCommunityId(community.id);
       nextParams.set("community", community.id);
     }
     router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
   }
 
   function chooseSort(value: FeedSort) {
-    setSort(value);
     const nextParams = new URLSearchParams(searchParams.toString());
     if (value === "latest") nextParams.delete("sort");
     else nextParams.set("sort", value);
     router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
   }
 
+  function openGlobalHotFeed() {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("community", "all");
+    nextParams.set("sort", "hot");
+    nextParams.delete("topic");
+    nextParams.delete("q");
+    router.push(`/?${nextParams.toString()}`);
+  }
+
   function chooseMedia(checked: boolean) {
-    setHasMedia(checked);
     const nextParams = new URLSearchParams(searchParams.toString());
     if (checked) nextParams.set("media", "1");
     else nextParams.delete("media");
@@ -289,7 +294,7 @@ export function HomeShell() {
             activeId={activeCommunityId}
             onSelect={chooseCommunity}
           />
-          <HomeShortcuts onFilterHot={() => chooseSort("hot")} />
+          <HomeShortcuts onFilterHot={openGlobalHotFeed} />
         </div>
 
         {/* 响应式栅格：PC 宽屏为完整 3 列；移动端自适应为单列 */}
@@ -333,7 +338,11 @@ export function HomeShell() {
               </div>
             )}
 
-            {query && <div className="data-note" role="status">正在显示“{query}”的匹配内容</div>}
+            {(query || topic) && (
+              <div className="data-note" role="status">
+                {query ? `正在显示“${query}”的匹配内容` : "正在显示穿搭分享"}
+              </div>
+            )}
 
             {loading && !visiblePosts.length ? (
               <div className="loading-stack">

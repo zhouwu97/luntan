@@ -163,9 +163,22 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 				if item.Feed == nil {
 					item.Feed = item.Detail
 				}
-			} else if isGIF && vmap != nil && vmap["source"] != nil {
-				// GIF 的 source 是唯一保留全部动画帧的表示，不能回退静态 JPEG 变体。
-				animated := vmap["source"]
+			} else if isGIF {
+				// GIF 的 source 是唯一保留全部动画帧的表示。worker 尚未写入
+				// source 记录时也只能下发 source 网关地址，让客户端短暂重试，
+				// 绝不能错误请求 detail/feed/thumb 静态变体。
+				animated := (*mediaVariantResponse)(nil)
+				if vmap != nil {
+					animated = vmap["source"]
+				}
+				if animated == nil {
+					animated = &mediaVariantResponse{
+						URL:      mediaVariantURL(item.ID, it.objectKey, "source"),
+						Width:    item.Width,
+						Height:   item.Height,
+						MimeType: item.MimeType,
+					}
+				}
 				item.URL = animated.URL
 				item.Thumb = animated
 				item.Feed = animated

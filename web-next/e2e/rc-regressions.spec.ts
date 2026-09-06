@@ -118,7 +118,7 @@ test.describe("网页版 RC 回归链路", () => {
     await expect(page.getByText("已自动恢复上次草稿")).toHaveCount(0);
   });
 
-  test("积分接口失败时不显示假 0，点击重试后显示真实余额", async ({ page }) => {
+  test("积分接口失败时不显示假 0，积分中心仍可进入且可单独重试", async ({ page }) => {
     await mockApiFallbacks(page);
     await mockRegisteredSession(page, "user-points-rc");
     await page.route("**/api/v1/users/user-points-rc", async (route) => {
@@ -144,9 +144,15 @@ test.describe("网页版 RC 回归链路", () => {
 
     await page.goto("/me");
     const pointsCard = page.locator(".workbench-stat-points");
-    await expect(pointsCard).toContainText("积分暂时无法加载 · 重试");
-    await pointsCard.click();
+    await expect(pointsCard).toContainText("暂时无法获取");
+    await expect(pointsCard.getByRole("button", { name: "重新加载积分" })).toBeVisible();
+    await pointsCard.getByRole("button", { name: "重新加载积分" }).click();
     await expect(pointsCard).toContainText("7");
+    expect(pointsRequests).toBe(2);
+    await pointsCard.locator(".workbench-points-link").click();
+    await expect(page).toHaveURL(/\/points/);
+    // 积分中心会独立读取积分，不应影响工作台的失败恢复逻辑。
+    expect(pointsRequests).toBe(3);
   });
 
   test("发帖创建失败时回收本次已上传媒体", async ({ page }) => {

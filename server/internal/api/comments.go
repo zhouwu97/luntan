@@ -1044,26 +1044,38 @@ func enrichCommentsMedia(ctx context.Context, db databaseQueryer, items []commen
 			continue
 		}
 		m := mk.media
-		if vmap, ok := variantsMap[m.ID]; ok {
-			if strings.EqualFold(m.MimeType, "image/gif") && vmap["source"] != nil {
-				// 评论中的 GIF 始终返回源变体，避免缩略图链路把动画压成首帧。
-				animated := vmap["source"]
-				m.URL = animated.URL
-				m.Thumb = animated
-				m.Feed = animated
-				m.Detail = animated
-				m.Original = animated
-				items[idx].Media = append(items[idx].Media, m)
-				items[idx].Attachments = append(items[idx].Attachments, commentAttachmentResponse{
-					ID:           m.ID,
-					Type:         m.Type,
-					URL:          m.URL,
-					ThumbnailURL: m.URL,
-					Width:        m.Width,
-					Height:       m.Height,
-				})
-				continue
+		if strings.EqualFold(m.MimeType, "image/gif") {
+			// 与帖子正文一致：GIF 只允许 source 变体。worker 尚未完成时
+			// 下发 source 网关地址供前端有限重试，禁止落入静态变体链路。
+			animated := (*mediaVariantResponse)(nil)
+			if vmap := variantsMap[m.ID]; vmap != nil {
+				animated = vmap["source"]
 			}
+			if animated == nil {
+				animated = &mediaVariantResponse{
+					URL:      mediaVariantURL(m.ID, mk.objectKey, "source"),
+					Width:    m.Width,
+					Height:   m.Height,
+					MimeType: m.MimeType,
+				}
+			}
+			m.URL = animated.URL
+			m.Thumb = animated
+			m.Feed = animated
+			m.Detail = animated
+			m.Original = animated
+			items[idx].Media = append(items[idx].Media, m)
+			items[idx].Attachments = append(items[idx].Attachments, commentAttachmentResponse{
+				ID:           m.ID,
+				Type:         m.Type,
+				URL:          m.URL,
+				ThumbnailURL: m.URL,
+				Width:        m.Width,
+				Height:       m.Height,
+			})
+			continue
+		}
+		if vmap, ok := variantsMap[m.ID]; ok {
 			// 与 Feed 相同的 fail-closed 语义：存在打码变体就绝不回退未打码
 			// 源图/普通变体；URL 统一改指变体，backfill 后旧源地址会被拒绝。
 			m.Thumb = vmap["censored_thumb"]

@@ -294,7 +294,7 @@ dart-define 同步编入 allowlist，否则更新检查会直接拒绝该下载�
 
 ## 常用验证命令
 
-Flutter：
+Flutter（Android release；下方 Flutter Web 仅为旧实现的编译兼容门禁，绝不作为正式网站产物）：
 
 ```bash
 flutter analyze

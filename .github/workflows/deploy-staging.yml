@@ -76,7 +76,9 @@ jobs:
           flutter analyze
           flutter test
 
-      - name: Build staging Web bundle
+      # 此产物仅服务旧 Flutter Web 的 staging 兼容检查，正式独立 Web 由下方
+      # luntan-web:${release_sha} Next.js 不可变镜像提供。
+      - name: Build legacy Flutter Web compatibility bundle
         env:
           STAGING_BASE_URL: ${{ inputs.staging_base_url }}
         run: >-

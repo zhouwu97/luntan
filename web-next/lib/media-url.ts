@@ -17,7 +17,7 @@ function resolveApiPath(path: string): string {
  * 本地开发时 imported-media 与 /api/v1/media-file 都走 Next 同源代理，
  * 生产环境若配置了 API 地址则使用后端源站，避免把 objectKey 当成静态文件。
  */
-export function resolveMediaUrl(value?: string, variant: "thumb" | "feed" | "detail" | "original" = "detail"): string | undefined {
+export function resolveMediaUrl(value?: string, variant: "source" | "thumb" | "feed" | "detail" | "original" = "detail"): string | undefined {
   if (!value) return undefined;
   let clean = value.trim();
   // 兼容异步处理完成前返回的旧源地址，只映射自有媒体 ID，不开放源文件访问。
@@ -36,6 +36,15 @@ export function resolveMediaUrl(value?: string, variant: "thumb" | "feed" | "det
 }
 
 export function mediaCandidates(asset: MediaAsset, preferred: "thumb" | "feed" | "detail" | "original" = "thumb"): string[] {
+  if (asset.mimeType?.toLowerCase() === "image/gif") {
+    // GIF 只有 source 变体保留完整动画帧，不能降级到不存在的静态变体。
+    const fallbackSource = /^media(?:[-_]|$)/i.test(asset.id)
+      ? resolveMediaUrl(asset.id, "source")
+      : undefined;
+    const sourceCandidates = [asset.sourceUrl, asset.url, asset.detailUrl, asset.feedUrl, asset.thumbUrl, asset.originalUrl, fallbackSource]
+      .filter((value): value is string => Boolean(value && (value.includes("/source") || !value.includes("/api/v1/media-file/"))));
+    return [...new Set(sourceCandidates)];
+  }
   const order = preferred === "thumb"
     ? [[asset.thumbUrl, "thumb"], [asset.feedUrl, "feed"], [asset.detailUrl, "detail"], [asset.originalUrl, "original"], [asset.url, "detail"]]
     : preferred === "feed"

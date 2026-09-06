@@ -23,6 +23,7 @@ import {
   getCommentReplies,
   getComments,
   getFeed,
+  getPostPoll,
   cleanupUploadedMedia,
   recordHistory,
   recordPostView,
@@ -37,9 +38,11 @@ import {
   isDeterministicClientError,
   isPossiblySupportedImageFile,
   uploadImages,
+  webImageAccept,
+  votePostPoll,
 } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
-import type { Comment, MediaAsset, Post, SessionUser } from "../types/forum";
+import type { Comment, MediaAsset, Poll, Post, SessionUser } from "../types/forum";
 
 const ImageGalleryModal = dynamic(() => import("./image-gallery-modal").then((module) => module.ImageGalleryModal), { ssr: false });
 const ReportModal = dynamic(() => import("./report-modal").then((module) => module.ReportModal), { ssr: false });
@@ -769,7 +772,7 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                   <span>图片 ({mobilePreviews.items.length}/9)</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept={webImageAccept}
                     multiple
                     style={{ display: "none" }}
                     onChange={handleChooseMobileFiles}
@@ -1030,6 +1033,10 @@ function PostArticle({
         </div>
       )}
 
+      {post.type === "poll" && (
+        <PostPoll postId={post.id} user={user} onRequireAuth={onRequireAuth} />
+      )}
+
       <div className="detail-stats">
         <a href="#comments" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "inherit", textDecoration: "none" }}>
           <Icon name="message" size={15} />
@@ -1073,6 +1080,147 @@ function PostArticle({
         </button>
       </div>
     </article>
+  );
+}
+
+function PostPoll({
+  postId,
+  user,
+  onRequireAuth,
+}: {
+  postId: string;
+  user: SessionUser | null;
+  onRequireAuth: () => void;
+}) {
+  const router = useRouter();
+  const { showToast } = useToast();
+  const [poll, setPoll] = useState<Poll | null>(null);
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadPoll = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const next = await getPostPoll(postId);
+      setPoll(next);
+      setSelectedOptionIds(next.viewerState.hasVoted ? next.viewerState.optionIds : []);
+    } catch (requestError) {
+      setError(formatError(requestError, "投票暂时无法加载"));
+    } finally {
+      setLoading(false);
+    }
+  }, [postId]);
+
+  useEffect(() => {
+    void loadPoll();
+  }, [loadPoll]);
+
+  if (loading) {
+    return <section className="poll-card" aria-label="投票" style={{ marginTop: 18, padding: 16, border: "1px solid var(--line)", borderRadius: 12 }}>正在加载投票…</section>;
+  }
+  if (!poll) {
+    return (
+      <section className="poll-card" aria-label="投票" style={{ marginTop: 18, padding: 16, border: "1px solid var(--line)", borderRadius: 12 }}>
+        <p style={{ margin: 0 }}>{error || "投票不可用"}</p>
+        <button type="button" className="outline-button" style={{ marginTop: 10 }} onClick={() => void loadPoll()}>重新加载</button>
+      </section>
+    );
+  }
+
+  const activePoll = poll;
+
+  const totalVotes = activePoll.options.reduce((sum, option) => sum + option.voteCount, 0);
+  const hasEnded = Boolean(activePoll.endsAt && new Date(activePoll.endsAt).getTime() <= Date.now());
+  const showResults = activePoll.viewerState.hasVoted || hasEnded;
+  const needsRegistration = !activePoll.viewerState.canVote && (
+    activePoll.viewerState.authenticationRequired || user?.accountType === "guest" || user?.capabilities?.can_vote === false
+  );
+  const cannotVote = !activePoll.viewerState.canVote && !needsRegistration;
+
+  function toggleOption(optionId: string) {
+    if (activePoll.viewerState.hasVoted || hasEnded || busy) return;
+    setSelectedOptionIds((current) => {
+      if (!activePoll.allowMultiple) return [optionId];
+      return current.includes(optionId)
+        ? current.filter((id) => id !== optionId)
+        : [...current, optionId];
+    });
+  }
+
+  async function submitVote() {
+    if (hasEnded) {
+      showToast("投票已结束");
+      return;
+    }
+    if (!activePoll.viewerState.canVote) {
+      if (needsRegistration) {
+        router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${postId}`)}`);
+      } else {
+        showToast(hasEnded ? "投票已结束" : "当前账号暂时不能参与投票");
+      }
+      return;
+    }
+    if (!selectedOptionIds.length || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await votePostPoll(activePoll.id, selectedOptionIds);
+      // 投票结果以服务端返回的数据为准，避免本地乐观计数与真实票数漂移。
+      const next = await getPostPoll(postId);
+      setPoll(next);
+      setSelectedOptionIds(next.viewerState.optionIds);
+    } catch (requestError) {
+      setError(formatError(requestError, "投票失败，请稍后重试"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="poll-card" aria-label="投票" style={{ marginTop: 18, padding: 16, border: "1px solid #bfdbfe", borderRadius: 12, background: "#f8fbff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+        <h2 style={{ margin: 0, fontSize: 17 }}>{activePoll.question}</h2>
+        <span style={{ color: "#64748b", fontSize: 12 }}>{activePoll.allowMultiple ? "可多选" : "单选"}</span>
+      </div>
+      {activePoll.endsAt && <p style={{ margin: "8px 0", color: "#64748b", fontSize: 12 }}>{hasEnded ? "投票已结束" : `截止至 ${new Date(activePoll.endsAt).toLocaleString("zh-CN")}`}</p>}
+      <div role={activePoll.allowMultiple ? "group" : "radiogroup"} aria-label={activePoll.question} style={{ display: "grid", gap: 8, marginTop: 12 }}>
+        {activePoll.options.map((option) => {
+          const selected = selectedOptionIds.includes(option.id);
+          const percentage = totalVotes ? Math.round(option.voteCount / totalVotes * 100) : 0;
+          return (
+            <label key={option.id} style={{ position: "relative", display: "flex", alignItems: "center", gap: 9, minHeight: 40, padding: "9px 11px", overflow: "hidden", border: `1px solid ${selected ? "#60a5fa" : "#dbeafe"}`, borderRadius: 9, background: "#fff", cursor: poll.viewerState.hasVoted || hasEnded ? "default" : "pointer" }}>
+              {showResults && <span aria-hidden="true" style={{ position: "absolute", inset: 0, width: `${percentage}%`, background: "#dbeafe", opacity: .65 }} />}
+              <input
+                type={activePoll.allowMultiple ? "checkbox" : "radio"}
+                name={`poll-${activePoll.id}`}
+                checked={selected}
+                onChange={() => toggleOption(option.id)}
+                disabled={activePoll.viewerState.hasVoted || hasEnded || busy}
+                style={{ position: "relative", zIndex: 1 }}
+              />
+              <span style={{ position: "relative", zIndex: 1, flex: 1 }}>{option.label}</span>
+              {showResults && <span style={{ position: "relative", zIndex: 1, color: "#475569", fontSize: 12 }}>{option.voteCount} 票 · {percentage}%</span>}
+            </label>
+          );
+        })}
+      </div>
+      {error && <div className="form-error" style={{ marginTop: 10 }}>{error}</div>}
+      {!activePoll.viewerState.hasVoted && (
+        <button
+          type="button"
+          className="primary-button"
+          style={{ marginTop: 12 }}
+          onClick={() => void submitVote()}
+          disabled={busy || hasEnded || cannotVote || (activePoll.viewerState.canVote && !selectedOptionIds.length)}
+        >
+          {busy ? "提交中…" : hasEnded ? "投票已结束" : needsRegistration ? "注册后参与投票" : "提交投票"}
+        </button>
+      )}
+      {activePoll.viewerState.hasVoted && <p style={{ margin: "12px 0 0", color: "#059669", fontSize: 13 }}>你已参与投票 · 共 {totalVotes} 票</p>}
+    </section>
   );
 }
 
@@ -1298,7 +1446,7 @@ function CommentsSection({
               <span>上传图片 ({previews.items.length}/9)</span>
               <input
                 type="file"
-                accept="image/*"
+                accept={webImageAccept}
                 multiple
                 style={{ display: "none" }}
                 onChange={handleChooseFiles}
@@ -1990,7 +2138,7 @@ function CommentReplyModal({
         <form className="comment-reply-composer" onSubmit={submit}>
           {canUploadMedia && <label style={{ cursor: "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: "#64748b" }}>
             <Icon name="image" size={19} />
-            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy} />
+            <input type="file" accept={webImageAccept} multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy} />
           </label>}
           <input
             value={content}

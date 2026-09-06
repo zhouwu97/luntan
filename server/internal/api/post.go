@@ -96,6 +96,9 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
 	}
+	if input.Type == "poll" && !s.requireCapability(w, r, user, capCreatePoll) {
+		return
+	}
 
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {

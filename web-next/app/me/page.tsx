@@ -220,21 +220,29 @@ export default function MyWorkbenchPage() {
             <strong className="workbench-stat-val">{profile ? compactCount(profile.bookmarkCount) : "—"}</strong>
             <span className="workbench-stat-lbl">我的收藏</span>
           </button>
-          <button
-            type="button"
-            className="workbench-stat-card workbench-stat-points"
-            onClick={() => {
-              if (pointsError) setSummaryRetry((value) => value + 1);
-              else router.push("/points");
-            }}
-            title="进入积分中心"
-          >
-            <div className="workbench-points-val">
-              <strong style={{ color: "#d97706" }}>{points === null ? (pointsError ? "积分暂时无法加载 · 重试" : "加载中…") : compactCount(points)}</strong>
-              <Icon name="chevron-right" size={16} />
-            </div>
-            <span className="workbench-stat-lbl">我的积分 →</span>
-          </button>
+          <div className="workbench-stat-card workbench-stat-points">
+            <button
+              type="button"
+              className="workbench-points-link"
+              onClick={() => router.push("/points")}
+              title="进入积分中心"
+            >
+              <div className="workbench-points-val">
+                <strong style={{ color: "#d97706" }}>{points === null ? (pointsError ? "暂时无法获取" : "加载中…") : compactCount(points)}</strong>
+                <Icon name="chevron-right" size={16} />
+              </div>
+              <span className="workbench-stat-lbl">我的积分 →</span>
+            </button>
+            {pointsError && (
+              <button
+                type="button"
+                className="workbench-points-retry"
+                onClick={() => setSummaryRetry((value) => value + 1)}
+              >
+                重新加载积分
+              </button>
+            )}
+          </div>
         </section>
 
         {/* 内容管理区与 Tab 导航 */}

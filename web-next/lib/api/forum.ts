@@ -32,6 +32,7 @@ import type {
   StoreShippingInput,
   PointTransaction,
   MyPointsDetail,
+  Poll,
   UserSummary,
 } from "../../types/forum";
 import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
@@ -120,18 +121,24 @@ function parseMedia(raw: unknown): MediaAsset {
   const detail = asRecord(item.detail);
   const feed = asRecord(item.feed);
   const original = asRecord(item.original);
+  const source = asRecord(item.source);
+  const mimeType = asString(item.mime_type, asString(item.mimeType)).toLowerCase() || undefined;
   const thumbUrlRaw = asString(thumb.url) || asString(item.thumb_url) || asString(item.thumbUrl);
   const detailUrlRaw = asString(detail.url) || asString(item.detail_url) || asString(item.detailUrl);
   const feedUrlRaw = asString(feed.url) || asString(item.feed_url) || asString(item.feedUrl);
   const originalUrlRaw = asString(original.url) || asString(item.original_url) || asString(item.originalUrl);
+  const sourceUrlRaw = asString(source.url) || asString(item.source_url) || asString(item.sourceUrl);
   const rawUrl = asString(item.url) || detailUrlRaw || originalUrlRaw || thumbUrlRaw;
-  const resolvedUrl = resolveMediaUrl(rawUrl) || rawUrl;
   const mediaKey = rawUrl || asString(item.id);
   const canDeriveVariants = /^media(?:[-_]|$)/i.test(mediaKey);
+  const sourceUrl = resolveMediaUrl(sourceUrlRaw, "source") || (mimeType === "image/gif" && canDeriveVariants ? resolveMediaUrl(mediaKey, "source") : undefined);
+  const resolvedUrl = sourceUrl || resolveMediaUrl(rawUrl) || rawUrl;
   return {
     id: asString(item.id, rawUrl),
     type: item.type === "video" ? "video" : "image",
+    mimeType,
     url: resolvedUrl,
+    sourceUrl,
     thumbUrl: resolveMediaUrl(thumbUrlRaw, "thumb") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "thumb") : undefined),
     feedUrl: resolveMediaUrl(feedUrlRaw, "feed") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "feed") : undefined),
     detailUrl: resolveMediaUrl(detailUrlRaw, "detail") || (canDeriveVariants ? resolveMediaUrl(mediaKey, "detail") : undefined),
@@ -642,10 +649,31 @@ export async function createPost(
   title: string,
   content: string,
   mediaIds: string[] = [],
+  options: {
+    type?: "normal" | "poll" | "game_share";
+    poll?: { question: string; options: string[]; allowMultiple: boolean; endsAt?: string };
+  } = {},
 ): Promise<Post> {
+  const type = options.type ?? "normal";
   const result = await apiPost<JsonRecord>(
     "/posts",
-    { community_id: communityId, type: "normal", title, content, media_ids: mediaIds },
+    {
+      community_id: communityId,
+      type,
+      title,
+      content,
+      media_ids: mediaIds,
+      ...(type === "poll" && options.poll
+        ? {
+            poll: {
+              question: options.poll.question,
+              options: options.poll.options,
+              allow_multiple: options.poll.allowMultiple,
+              ...(options.poll.endsAt ? { ends_at: options.poll.endsAt } : {}),
+            },
+          }
+        : {}),
+    },
     { "Idempotency-Key": newIdempotencyKey("web-post") },
   );
   const id = asString(result.id);
@@ -666,7 +694,7 @@ export type UploadImagesProgress = {
   stage: "preparing" | "uploading" | "complete";
 };
 
-type SupportedImageMimeType = "image/jpeg" | "image/png" | "image/webp";
+type SupportedImageMimeType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
 type PreparedWebImage = {
   file: File;
@@ -678,19 +706,21 @@ type PreparedWebImage = {
   sha256: string;
 };
 
-const supportedImageMimeTypes = new Set<string>(["image/jpeg", "image/png", "image/webp"]);
+const supportedImageMimeTypes = new Set<string>(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const maxWebImageBytes = 15 * 1024 * 1024;
+export const webImageAccept = "image/jpeg,image/png,image/gif,image/webp";
 
 export function isPossiblySupportedImageFile(file: File): boolean {
   const type = file.type.trim().toLowerCase();
-  if (!type) return true;
-  return type.startsWith("image/");
+  if (type) return supportedImageMimeTypes.has(type);
+  return Boolean(extensionMimeType(file.name));
 }
 
 function extensionMimeType(name: string): SupportedImageMimeType | "" {
   const lower = name.toLowerCase();
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".webp")) return "image/webp";
   return "";
 }
@@ -708,6 +738,11 @@ function sniffImageMimeType(bytes: Uint8Array): SupportedImageMimeType | "image/
     bytes[6] === 0x1a &&
     bytes[7] === 0x0a
   ) return "image/png";
+  if (
+    bytes.length >= 6 &&
+    bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 &&
+    bytes[3] === 0x38 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61
+  ) return "image/gif";
   if (
     bytes.length >= 12 &&
     bytes[0] === 0x52 &&
@@ -735,14 +770,14 @@ function sniffImageMimeType(bytes: Uint8Array): SupportedImageMimeType | "image/
 function resolveUploadMimeType(file: File, bytes: Uint8Array): SupportedImageMimeType {
   const sniffed = sniffImageMimeType(bytes);
   if (sniffed === "image/heic") {
-    throw new ClientMediaError("Web 暂不支持 HEIC 图片，请先转换为 JPG、PNG 或 WebP");
+    throw new ClientMediaError("Web 暂不支持 HEIC 图片，请先转换为 JPG、PNG、GIF 或 WebP");
   }
   if (sniffed) return sniffed;
   const declared = file.type.trim().toLowerCase();
   if (supportedImageMimeTypes.has(declared)) return declared as SupportedImageMimeType;
   const ext = extensionMimeType(file.name);
   if (ext) return ext;
-  throw new ClientMediaError("仅支持 JPG、PNG、WebP 图片");
+  throw new ClientMediaError("仅支持 JPG、PNG、GIF、WebP 图片");
 }
 
 async function imageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
@@ -784,7 +819,7 @@ async function prepareWebImage(file: File): Promise<PreparedWebImage> {
   try {
     dimensions = await imageDimensions(blob);
   } catch {
-    throw new ClientMediaError("无法读取图片尺寸，请重新选择图片");
+    throw new ClientMediaError(mimeType === "image/gif" ? "GIF 数据损坏，请重新选择文件" : "无法读取图片尺寸，请重新选择图片");
   }
   if (dimensions.width <= 0 || dimensions.height <= 0) {
     throw new ClientMediaError("图片尺寸异常，请重新选择图片");
@@ -877,6 +912,46 @@ export async function uploadImages(
     await cleanupUploadedMedia(uploaded);
     throw error;
   }
+}
+
+function parsePoll(raw: unknown): Poll {
+  const item = asRecord(raw);
+  const viewer = asRecord(item.viewer_state);
+  return {
+    id: asString(item.id),
+    postId: asString(item.post_id),
+    question: asString(item.question),
+    allowMultiple: asBoolean(item.allow_multiple),
+    endsAt: asString(item.ends_at) || undefined,
+    options: Array.isArray(item.options)
+      ? item.options.map((value) => {
+          const option = asRecord(value);
+          return {
+            id: asString(option.id),
+            label: asString(option.label),
+            sortOrder: asNumber(option.sort_order),
+            voteCount: asNumber(option.vote_count),
+          };
+        })
+      : [],
+    viewerState: {
+      hasVoted: asBoolean(viewer.has_voted),
+      optionIds: Array.isArray(viewer.option_ids) ? viewer.option_ids.map(String).filter(Boolean) : [],
+      canVote: asBoolean(viewer.can_vote),
+      authenticationRequired: asBoolean(viewer.authentication_required),
+    },
+  };
+}
+
+export async function getPostPoll(postId: string): Promise<Poll> {
+  return parsePoll(await apiJson<JsonRecord>(`/posts/${encodeURIComponent(postId)}/poll`));
+}
+
+export async function votePostPoll(pollId: string, optionIds: string[]): Promise<void> {
+  await apiJson(`/polls/${encodeURIComponent(pollId)}/vote`, {
+    method: "PUT",
+    body: JSON.stringify({ option_ids: optionIds }),
+  });
 }
 
 export async function requestEmailCode(email: string, scene: "login" | "register" = "login"): Promise<EmailCodeChallenge> {

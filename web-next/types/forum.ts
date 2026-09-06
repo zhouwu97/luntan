@@ -33,7 +33,9 @@ export interface ViewerCommentState {
 export interface MediaAsset {
   id: string;
   type: "image" | "video";
+  mimeType?: string;
   url?: string;
+  sourceUrl?: string;
   thumbUrl?: string;
   feedUrl?: string;
   detailUrl?: string;
@@ -83,6 +85,30 @@ export interface Post {
   isRecommended?: boolean;
   recommendationPosition?: number;
   viewerState: ViewerPostState;
+}
+
+export interface PollOption {
+  id: string;
+  label: string;
+  sortOrder: number;
+  voteCount: number;
+}
+
+export interface PollViewerState {
+  hasVoted: boolean;
+  optionIds: string[];
+  canVote: boolean;
+  authenticationRequired: boolean;
+}
+
+export interface Poll {
+  id: string;
+  postId: string;
+  question: string;
+  allowMultiple: boolean;
+  endsAt?: string;
+  options: PollOption[];
+  viewerState: PollViewerState;
 }
 
 export interface Comment {

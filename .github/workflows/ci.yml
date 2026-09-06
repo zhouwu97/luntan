@@ -54,7 +54,9 @@ jobs:
           -dname "CN=CI Release, OU=CI, O=Luntan, C=CN"
       # Release 构建显式注入配置；客户端即使被其他入口漏传参数，也只会回退到
       # 官方 HTTPS 地址，不会退回 Mock 或明文 API。
-      - run: >-
+      # 仅保留旧 Flutter Web 的编译兼容门禁；正式网站唯一构建入口是 web-next。
+      - name: Compile legacy Flutter Web compatibility gate
+        run: >-
           flutter build web --release --base-href=/forum/
           --dart-define=APP_ENV=production
           --dart-define=API_BASE_URL=https://shengbeijiang.com
@@ -75,7 +77,7 @@ jobs:
           ANDROID_RELEASE_KEY_PASSWORD: ci-only-release-password
       - uses: actions/upload-artifact@v4
         with:
-          name: web-release
+          name: legacy-flutter-web-build
           path: build/web
       - uses: actions/upload-artifact@v4
         with:

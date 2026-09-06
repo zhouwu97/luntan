@@ -3,7 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ChangeEvent, FormEvent, MouseEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SiteHeader } from "./site-header";
 import { AppDownloadBanner } from "./app-download-banner";
 import { Icon } from "./icons";
@@ -121,8 +121,10 @@ async function createWithUploadedMediaRollback<T>(mediaIds: string[], action: ()
 }
 
 export function PostDetailShell({ id }: { id: string }) {
+  const searchParams = useSearchParams();
+  const notificationCommentId = searchParams.get("reply") || searchParams.get("comment");
   const router = useRouter();
-  const { user } = useSession();
+  const { user, ready: sessionReady } = useSession();
   const { showToast } = useToast();
   const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id, user?.id));
   const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id, user?.id));
@@ -273,60 +275,54 @@ export function PostDetailShell({ id }: { id: string }) {
     };
   }, [id, user?.id]);
 
+  const focusedNotificationRef = useRef("");
   useEffect(() => {
-    if (postLoading || typeof window === "undefined" || !window.location.hash) return;
-    const hash = window.location.hash;
+    if (postLoading || commentsLoading || typeof window === "undefined") return;
+    const hash = notificationCommentId ? `#comment-${notificationCommentId}` : window.location.hash;
+    const focusKey = `${id}|${hash}`;
+    if (!hash || focusedNotificationRef.current === focusKey) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const highlight = (commentId: string) => {
+      timer = setTimeout(() => {
+        if (!active) return;
+        const el = document.getElementById(`comment-${commentId}`);
+        if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("comment-highlight"); }
+      }, 100);
+    };
     if (hash === "#comments") {
-      const el = document.getElementById("comments");
-      if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+      document.getElementById("comments")?.scrollIntoView({ behavior: "smooth" });
+      focusedNotificationRef.current = focusKey;
     } else if (hash.startsWith("#comment-")) {
-      const commentId = hash.replace("#comment-", "");
-      const existing = document.getElementById(`comment-${commentId}`);
-      if (existing) {
-        setTimeout(() => {
-          existing.scrollIntoView({ behavior: "smooth", block: "center" });
-          existing.classList.add("comment-highlight");
-        }, 150);
-        return;
-      }
-
-      void getCommentContext(commentId)
-        .then((ctx) => {
+      const commentId = hash.slice("#comment-".length);
+      if (document.getElementById(`comment-${commentId}`)) {
+        highlight(commentId);
+        focusedNotificationRef.current = focusKey;
+      } else {
+        // 等首屏评论完成后补取目标，避免分页响应覆盖刚插入的定位楼层。
+        void getCommentContext(commentId).then((ctx) => {
+          if (!active) return;
           if (ctx.postId && ctx.postId !== id) {
-            router.replace(`/post/${encodeURIComponent(ctx.postId)}#comment-${encodeURIComponent(commentId)}`);
+            router.replace(`/post/${encodeURIComponent(ctx.postId)}?comment=${encodeURIComponent(commentId)}`);
             return;
           }
-          if (ctx.isRoot) {
-            if (ctx.rootComment) {
-              setComments((curr) => {
-                if (curr.some((c) => c.id === ctx.rootComment!.id)) return curr;
-                return [...curr, ctx.rootComment!];
-              });
-              setTimeout(() => {
-                const el = document.getElementById(`comment-${commentId}`);
-                if (el) {
-                  el.scrollIntoView({ behavior: "smooth", block: "center" });
-                  el.classList.add("comment-highlight");
-                }
-              }, 200);
-            }
-          } else {
-            if (ctx.rootComment) {
-              setComments((curr) => {
-                if (curr.some((c) => c.id === ctx.rootComment!.id)) return curr;
-                return [...curr, ctx.rootComment!];
-              });
-              setTargetChildCommentId(commentId);
-              setTargetChildComment(ctx.targetComment || null);
-              setReplyTarget(ctx.rootComment);
-            }
+          if (!ctx.rootComment) throw new Error("目标评论不可用");
+          setComments((curr) => curr.some((c) => c.id === ctx.rootComment!.id) ? curr : [...curr, ctx.rootComment!]);
+          focusedNotificationRef.current = focusKey;
+          if (ctx.isRoot) highlight(commentId);
+          else {
+            setTargetChildCommentId(commentId);
+            setTargetChildComment(ctx.targetComment || null);
+            setReplyTarget(ctx.rootComment);
           }
-        })
-        .catch(() => undefined);
+        }).catch(() => { if (active) showToastRef.current("关联评论已被移除或暂时无法查看"); });
+      }
     }
-  }, [postLoading]);
+    return () => { active = false; if (timer) clearTimeout(timer); };
+  }, [postLoading, commentsLoading, id, notificationCommentId, router]);
 
   useEffect(() => {
+    if (!sessionReady || postLoading) return;
     let active = true;
     void recordPostView(id)
       .then((result) => {
@@ -343,7 +339,7 @@ export function PostDetailShell({ id }: { id: string }) {
     return () => {
       active = false;
     };
-  }, [id]);
+  }, [id, sessionReady, postLoading, user?.id]);
 
   useEffect(() => {
     if (user?.id && post?.id) void recordHistory(post.id).catch(() => undefined);

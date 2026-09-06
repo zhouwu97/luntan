@@ -650,8 +650,8 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeInternalError(w, r, err)
 		return
 	}
-	var postExists string
-	err = tx.QueryRowContext(r.Context(), `SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`, postID).Scan(&postExists)
+	var postAuthorID string
+	err = tx.QueryRowContext(r.Context(), `SELECT author_id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`, postID).Scan(&postAuthorID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrPostNotFound)
 		return
@@ -661,6 +661,8 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	rootID := commentID
+	// 一级评论没有回复对象，避免客户端伪造 reply_to_user_id。
+	input.ReplyToUserID = ""
 	if parentID != "" {
 		var parentPostID, parentRootID, parentAuthorID string
 		err = tx.QueryRowContext(r.Context(), `SELECT post_id, COALESCE(root_id, id), author_id FROM comments WHERE id = $1 AND deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal'`, parentID).Scan(&parentPostID, &parentRootID, &parentAuthorID)
@@ -707,7 +709,12 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	if parentID != "" && input.ReplyToUserID != "" {
-		if err := enqueueNotificationWithDataTx(tx, input.ReplyToUserID, user.ID, "reply", "post", postID, map[string]any{"comment_id": parentID}, now); err != nil {
+		if err := enqueueNotificationWithDataTx(tx, input.ReplyToUserID, user.ID, "reply", "post", postID, map[string]any{"comment_id": rootID, "reply_id": commentID}, now); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	} else if parentID == "" {
+		if err := enqueueNotificationWithDataTx(tx, postAuthorID, user.ID, "comment.created", "post", postID, map[string]any{"comment_id": commentID}, now); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

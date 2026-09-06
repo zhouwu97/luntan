@@ -179,6 +179,7 @@ class _PointsCenterScreenState extends State<PointsCenterScreen> {
     final sign = positive ? '+' : '';
     final source = switch (transaction.source) {
       'store' => '兑换商店',
+      'store_refund' => '商城退款',
       'post' => '发布帖子',
       'comment' => '参与回复',
       'login' => '每日登录',

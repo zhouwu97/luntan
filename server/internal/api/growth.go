@@ -606,7 +606,7 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var balance int64
-	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, user.ID).Scan(&balance); err != nil {
+	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR NO KEY UPDATE`, user.ID).Scan(&balance); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

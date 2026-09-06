@@ -55,7 +55,7 @@ class ForumNotification {
       type.startsWith('moderation.') || type.startsWith('appeal.');
 
   bool get isSystem =>
-      type == 'store.order.reviewed' || type == 'store.order.shipped';
+      targetType == 'store_order' || type.startsWith('store.order.');
 
   String? get moderationActionId {
     final value = targetData['moderation_action_id'];
@@ -80,7 +80,8 @@ class ForumNotification {
       'like' || 'post.liked' =>
         targetType == 'comment' ? '$actorName 点赞了你的评论' : '$actorName 赞了你的帖子',
       'bookmark' || 'post.bookmarked' => '$actorName 收藏了你的帖子',
-      'comment.created' || 'comment.replied' || 'reply' => '$actorName 回复了你的评论',
+      'comment.created' => '$actorName 评论了你的帖子',
+      'comment.replied' || 'reply' => '$actorName 回复了你的评论',
       'follow' || 'user.followed' => '$actorName 关注了你',
       'moderation.action' => switch (targetData['action']) {
         'mute' => '账号禁言通知',
@@ -1405,6 +1406,21 @@ class PlatformRepository {
         'reason': reason,
         'invalid_transaction_ids': invalidTransactionIds,
       },
+    );
+  }
+
+  Future<Map<String, dynamic>> storeAftercare(String id) =>
+      _client.getJson('/api/v1/admin/store/orders/$id/aftercare');
+
+  Future<void> reverseStoreOrder(
+    String id,
+    Map<String, dynamic> body,
+    String key,
+  ) async {
+    await _client.postJson(
+      '/api/v1/admin/store/orders/$id/reverse',
+      body: body,
+      headers: {'Idempotency-Key': key},
     );
   }
 

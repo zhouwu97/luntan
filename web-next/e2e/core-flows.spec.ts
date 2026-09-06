@@ -1,4 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { mockApiFallbacks } from "./mock-api";
+
+test.beforeEach(async ({ page }) => { await mockApiFallbacks(page); });
 
 test.describe("Web-Next 核心业务链路验收套件", () => {
   test("1. PC 登录：密码登录与验证码登录切换正常", async ({ page }) => {
@@ -585,8 +588,13 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       });
     });
 
-    // 直接通过 URL 携带楼中楼回复 hash 进入帖子
-    await page.goto("/post/post-nested-10#comment-c-child-99");
+    // 从通知入口验证 URL 参数、回复线程与高亮的完整连接。
+    await page.route("**/api/v1/auth/refresh", async (route) => route.fulfill({ json: { access_token: "notification-token" } }));
+    await page.route("**/api/v1/me", async (route) => route.fulfill({ json: { id: "u-root", nickname: "根评论作者", account_type: "registered" } }));
+    await page.route("**/api/v1/notifications?*", async (route) => route.fulfill({ json: { items: [{ id: "note-nested", type: "reply", actor_name: "楼中楼辩友", target_type: "post", target_id: "post-nested-10", target_data: { title: "回复定位通知", comment_id: "c-root-10", reply_id: "c-child-99" }, created_at: new Date().toISOString(), is_read: true }] } }));
+    await page.goto("/notifications");
+    await page.getByText("回复定位通知", { exact: true }).click();
+    await expect(page).toHaveURL(/\/post\/post-nested-10\?comment=c-root-10&reply=c-child-99/);
 
     // 验证楼中楼弹窗被自动打开，且目标子回复成功呈现并获得高亮
     const childReplyEl = page.locator(".comment-reply-modal #comment-c-child-99");

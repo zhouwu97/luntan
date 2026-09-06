@@ -43,9 +43,9 @@ void main() {
     expect(find.text('主题贴纸包'), findsNothing);
     expect(find.text('校园钥匙扣'), findsNothing);
     expect(find.text('校园帆布袋'), findsNothing);
-    await tester.ensureVisible(find.text('兑换').first);
+    await tester.ensureVisible(find.byKey(const Key('store-redeem-论坛纪念徽章')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('兑换').first);
+    await tester.tap(find.byKey(const Key('store-redeem-论坛纪念徽章')));
     await tester.pumpAndSettle();
 
     expect(store.points, 3980);
@@ -116,9 +116,9 @@ void main() {
     await tester.pumpAndSettle();
 
     Future<void> tapRedeem() async {
-      await tester.ensureVisible(find.text('兑换').first);
+      await tester.ensureVisible(find.byKey(const Key('store-redeem-p1')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('兑换').first);
+      await tester.tap(find.byKey(const Key('store-redeem-p1')));
       await tester.pumpAndSettle();
     }
 

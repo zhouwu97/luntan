@@ -22,6 +22,7 @@ class NotificationTargetRouter {
     required NotificationPostOpener onOpenPost,
     ValueChanged<String>? onOpenUser,
     ValueChanged<String>? onOpenCommunity,
+    ValueChanged<String>? onOpenStoreOrder,
     VoidCallback? onOpenSystem,
     ValueChanged<String>? onFeedback,
   }) {
@@ -32,7 +33,8 @@ class NotificationTargetRouter {
           if (notification.targetId.isNotEmpty) {
             onOpenPost(
               notification.targetId,
-              _stringValue(targetData['comment_id']),
+              _stringValue(targetData['reply_id']) ??
+                  _stringValue(targetData['comment_id']),
             );
           } else {
             onFeedback?.call('关联的帖子已不存在');
@@ -51,6 +53,15 @@ class NotificationTargetRouter {
         case 'community':
           if (notification.targetId.isNotEmpty) {
             onOpenCommunity?.call(notification.targetId);
+          }
+        case 'store_order':
+          final orderId =
+              _stringValue(notification.targetId) ??
+              _stringValue(targetData['order_id']);
+          if (orderId != null && onOpenStoreOrder != null) {
+            onOpenStoreOrder(orderId);
+          } else {
+            onFeedback?.call('关联的兑换订单无法打开');
           }
         case 'system':
           onOpenSystem?.call();
@@ -88,6 +99,7 @@ class NotificationsScreen extends StatefulWidget {
     this.onOpenPost,
     this.onOpenUserId,
     this.onOpenCommunityId,
+    this.onOpenStoreOrder,
     this.onOpenSystem,
     this.onOpenNotification,
     this.onOpenModerationActionId,
@@ -99,6 +111,7 @@ class NotificationsScreen extends StatefulWidget {
   final void Function(String postId, String? commentId)? onOpenPost;
   final ValueChanged<String>? onOpenUserId;
   final ValueChanged<String>? onOpenCommunityId;
+  final ValueChanged<String>? onOpenStoreOrder;
   final VoidCallback? onOpenSystem;
   final ValueChanged<ForumNotification>? onOpenNotification;
   final ValueChanged<String>? onOpenModerationActionId;
@@ -275,10 +288,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       setState(() => item.isRead = true);
       unawaited(_markNotificationRead(item));
     }
-    if (item.type == 'system' ||
-        item.isSystem ||
-        item.type == 'announcement' ||
-        item.type.startsWith('community.')) {
+    if (item.targetType != 'store_order' &&
+        (item.type == 'system' ||
+            item.isSystem ||
+            item.type == 'announcement' ||
+            item.type.startsWith('community.'))) {
       if (widget.onOpenNotification != null) {
         widget.onOpenNotification!(item);
         return;
@@ -311,6 +325,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       },
       onOpenUser: widget.onOpenUserId,
       onOpenCommunity: widget.onOpenCommunityId,
+      onOpenStoreOrder: widget.onOpenStoreOrder,
       onOpenSystem: widget.onOpenSystem,
       onFeedback: (msg) {
         if (mounted) {

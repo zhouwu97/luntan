@@ -1,4 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mockApiFallbacks } from "./mock-api";
+
+test.beforeEach(async ({ page }) => { await mockApiFallbacks(page); });
 
 async function mockGuestSession(page: Page) {
   await page.route("**/api/v1/auth/refresh", async (route) => {
@@ -330,4 +333,44 @@ test.describe("积分商城履约链路 E2E 验收套件", () => {
     // 状态更新为已完成
     await expect(page.getByText("已完成")).toBeVisible();
   });
+});
+
+
+test("取消订单：弱网重试复用幂等键，刷新余额、库存和状态", async ({ page }) => {
+  await mockUserSession(page);
+  const order = { id: "cancel-order", product_id: "badge", product_name: "取消测试徽章", points: 60, status: "approved", fulfillment_status: "ready_to_ship", created_at: new Date().toISOString() };
+  let attempts = 0;
+  const keys: string[] = [];
+  await page.route("**/api/v1/me/store-orders?*", (route) => route.fulfill({ json: { items: [order] } }));
+  await page.route("**/api/v1/me/points", (route) => route.fulfill({ json: { balance: order.status === "cancelled" ? 100 : 40, transactions: [] } }));
+  await page.route("**/api/v1/store/products", (route) => route.fulfill({ json: { items: [] } }));
+  await page.route("**/api/v1/me/store-orders/cancel-order/aftercare", (route) => route.fulfill({ json: { status: order.status, fulfillment_status: order.fulfillment_status, refunded_points: order.status === "cancelled" ? 60 : 0 } }));
+  await page.route("**/api/v1/me/store-orders/cancel-order/reverse", (route) => {
+    keys.push(route.request().headers()["idempotency-key"]);
+    expect(route.request().postDataJSON()).toEqual({ action: "cancel", reason: "地址有误，取消重下" });
+    if (++attempts === 1) return route.fulfill({ status: 500, json: { message: "请重试" } });
+    order.status = "cancelled"; order.fulfillment_status = "cancelled";
+    return route.fulfill({ json: order });
+  });
+  await page.goto("/points?tab=orders");
+  await page.getByRole("button", { name: "取消与售后" }).click();
+  const dialog = page.getByRole("dialog", { name: "取消与售后" });
+  await dialog.getByLabel("操作说明（必填）").fill("地址有误，取消重下");
+  await dialog.getByRole("button", { name: "取消订单并返还已扣积分" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("请重试");
+  await dialog.getByRole("button", { name: "取消订单并返还已扣积分" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("#order-cancel-order .badge")).toHaveText("已取消");
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBeTruthy();
+  expect(keys[1]).toBe(keys[0]);
+});
+
+test("商城通知能加载第一页之外的旧订单", async ({ page }) => {
+  await mockUserSession(page);
+  await page.route("**/api/v1/me/store-orders?*", (route) => route.fulfill({ json: { items: [], has_more: false } }));
+  await page.route("**/api/v1/me/store-orders/old-order", (route) => route.fulfill({ json: { id: "old-order", product_id: "badge", product_name: "旧兑换订单", points: 60, status: "approved", fulfillment_status: "shipped", created_at: "2026-01-01T00:00:00Z", shipping: { carrier: "顺丰", tracking_no: "OLD123" } } }));
+  await page.goto("/points?tab=orders&order=old-order");
+  await expect(page.locator("#order-old-order")).toHaveClass(/highlighted/);
+  await expect(page.locator("#order-old-order")).toContainText("OLD123");
 });

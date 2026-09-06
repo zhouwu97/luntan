@@ -97,7 +97,7 @@ void main() {
         createdAt: DateTime.now(),
         targetData: const {'content': '支持楼主，很详细！'},
       );
-      expect(replyNotif.title, '软萌研究员 回复了你的评论');
+      expect(replyNotif.title, '软萌研究员 评论了你的帖子');
       expect(replyNotif.content, '支持楼主，很详细！');
 
       final threadReplyNotif = ForumNotification(

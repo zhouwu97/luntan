@@ -16,6 +16,7 @@ interface OrderListProps {
   highlightOrderId?: string;
   onOpenShipping: (order: StoreOrder) => void;
   onComplete: (order: StoreOrder) => void;
+  onAftercare: (order: StoreOrder) => void;
   onReload: () => void;
   onLoadMore: () => void;
   onGoStore: () => void;
@@ -32,6 +33,7 @@ export function OrderList({
   highlightOrderId,
   onOpenShipping,
   onComplete,
+  onAftercare,
   onReload,
   onLoadMore,
   onGoStore,
@@ -119,6 +121,7 @@ export function OrderList({
             isHighlighted={order.id === highlightOrderId}
             onOpenShipping={onOpenShipping}
             onComplete={onComplete}
+            onAftercare={onAftercare}
           />
         ))}
       </div>

@@ -39,7 +39,7 @@ import 'screens/governance_screens.dart';
 import 'screens/activity_management_screen.dart';
 import 'screens/ranking_submission_review_screen.dart';
 import 'screens/store_order_review_screen.dart';
-import 'screens/store_order_shipping_screen.dart';
+import 'screens/store_order_detail_screen.dart';
 import 'screens/change_password_dialog.dart';
 import 'theme/app_theme.dart';
 import 'widgets/composer_sheet.dart';
@@ -450,9 +450,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     if (!apiMode && postForHistory != null) store.recordHistory(postForHistory);
     // 浏览量不要求登录；失败不阻塞打开帖子，详情页仍可正常阅读。
     unawaited(
-      repositories.feed.recordPostView(normalizedPostId).catchError((
-        error,
-      ) {
+      repositories.feed.recordPostView(normalizedPostId).catchError((error) {
         if (kDebugMode) {
           debugPrint('[PostView] Failed to record post view: $error');
         }
@@ -1042,6 +1040,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               onOpenNotification: _openNotificationDetail,
               onOpenUserId: openUserProfile,
               onOpenCommunityId: openCommunity,
+              onOpenStoreOrder: _openStoreOrder,
               onOpenModerationActionId: openModerationAction,
               onOpenAppealId: openAppeal,
             ),
@@ -1050,26 +1049,26 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         .then((_) => _refreshUnreadCount());
   }
 
+  void _openStoreOrder(String orderId) {
+    final repository = repositories.store;
+    if (repository == null || orderId.isEmpty) {
+      _showQuickFeedback('兑换订单暂时无法打开');
+      return;
+    }
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            StoreOrderDetailScreen(repository: repository, orderId: orderId),
+      ),
+    );
+  }
+
   void _openNotificationDetail(ForumNotification notification) {
     final platform = repositories.platform;
     if (platform == null) return;
     final data = notification.targetData;
-    if (notification.type == 'store.order.reviewed' &&
-        data['action'] == 'submit_shipping' &&
-        notification.targetId.isNotEmpty) {
-      final storeRepository = repositories.store;
-      if (storeRepository == null) {
-        _showQuickFeedback('当前模式暂不支持填写收货信息');
-        return;
-      }
-      navigatorKey.currentState!.push(
-        MaterialPageRoute<void>(
-          builder: (_) => StoreOrderShippingScreen(
-            repository: storeRepository,
-            orderId: notification.targetId,
-          ),
-        ),
-      );
+    if (notification.targetType == 'store_order') {
+      _openStoreOrder(notification.targetId);
       return;
     }
     VoidCallback? openTarget;

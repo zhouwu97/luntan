@@ -191,7 +191,9 @@ class StoreRepository {
           }).toList()
         : <PointTransaction>[];
     final balance = _int(value['balance']);
-    final reservedPoints = _int(value['reserved_points'] ?? value['reservedPoints']);
+    final reservedPoints = _int(
+      value['reserved_points'] ?? value['reservedPoints'],
+    );
     final availablePoints = value['available_points'] != null
         ? _int(value['available_points'])
         : (balance - reservedPoints).clamp(0, balance);
@@ -218,6 +220,21 @@ class StoreRepository {
     return _orderFromJson(value);
   }
 
+  Future<Map<String, dynamic>> aftercare(String id) =>
+      _client.getJson('/api/v1/me/store-orders/$id/aftercare');
+
+  Future<void> reverseOrder(
+    String id,
+    Map<String, dynamic> body,
+    String key,
+  ) async {
+    await _client.postJson(
+      '/api/v1/me/store-orders/$id/reverse',
+      body: body,
+      headers: {'Idempotency-Key': key},
+    );
+  }
+
   Future<StoreOrder> submitShipping({
     required String orderId,
     required String recipientName,
@@ -242,7 +259,9 @@ class StoreRepository {
   }
 
   Future<StoreOrder> completeOrder(String orderId) async {
-    final value = await _client.postJson('/api/v1/me/store-orders/$orderId/complete');
+    final value = await _client.postJson(
+      '/api/v1/me/store-orders/$orderId/complete',
+    );
     return _orderFromJson(value);
   }
 

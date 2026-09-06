@@ -131,9 +131,16 @@ function notificationHref(item: ForumNotification): string | undefined {
   if (!item.targetType || !item.targetId) return undefined;
   switch (item.targetType) {
     case "post":
-      return `/post/${encodeURIComponent(item.targetId)}`;
-    case "comment":
-      return `/post/${encodeURIComponent(item.targetId)}#comments`;
+    case "comment": {
+      const data = item.targetData;
+      const postId = item.targetType === "post" ? item.targetId : data.post_id;
+      if (typeof postId !== "string" || !postId) return undefined;
+      const params = new URLSearchParams();
+      const commentId = data.comment_id || (item.targetType === "comment" ? item.targetId : undefined);
+      if (typeof commentId === "string" && commentId) params.set("comment", commentId);
+      if (typeof data.reply_id === "string" && data.reply_id) params.set("reply", data.reply_id);
+      return `/post/${encodeURIComponent(postId)}${params.size ? `?${params}` : ""}`;
+    }
     case "user":
       return `/user/${encodeURIComponent(item.targetId)}`;
     case "community":
@@ -270,7 +277,8 @@ function notificationBody(item: ForumNotification): { title: string; content: st
   if (item.type === "follow" || item.type === "user.followed") return { title: `${actor} 关注了你`, content };
   if (item.type === "bookmark" || item.type === "post.bookmarked") return { title: `${actor} 收藏了你的帖子`, content };
   if (item.type === "like" || item.type === "post.liked") return { title: `${actor} 赞了你的内容`, content };
-  if (item.type === "comment.created" || item.type === "comment.replied" || item.type === "reply") return { title: `${actor} 回复了你的内容`, content };
+  if (item.type === "comment.created") return { title: `${actor} 评论了你的帖子`, content };
+  if (item.type === "comment.replied" || item.type === "reply") return { title: `${actor} 回复了你的内容`, content };
   if (item.type === "moderation.action") return { title: "账号或内容处理通知", content };
   if (item.type === "appeal.result") return { title: "申诉结果通知", content };
   return { title: "你有一条新通知", content };

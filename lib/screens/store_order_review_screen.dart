@@ -1,3 +1,4 @@
+import 'store_order_aftercare_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../data/api/platform_repository.dart';
@@ -39,6 +40,10 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     (value: 'pending_review', label: '待审核'),
     (value: 'awaiting_address', label: '待填地址'),
     (value: 'ready_to_ship', label: '待发货'),
+    (value: 'return_requested', label: '退货待审核'),
+    (value: 'refund_pending', label: '待退款'),
+    (value: 'refunded', label: '已退款'),
+    (value: 'cancelled', label: '已取消'),
     (value: 'shipped', label: '已发货'),
     (value: 'completed', label: '已完成'),
     (value: 'rejected', label: '已拒绝'),
@@ -65,9 +70,9 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       _hasMore = false;
     });
     try {
-      final countsFuture = widget.repository
-          .getStoreOrderCounts()
-          .catchError((_) => const <String, int>{});
+      final countsFuture = widget.repository.getStoreOrderCounts().catchError(
+        (_) => const <String, int>{},
+      );
       final page = await widget.repository.listStoreOrderPage(
         status: requestStatus,
       );
@@ -146,7 +151,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   }
 
   Future<void> _openDetail(AdminStoreOrder item) async {
-    final changed = await Navigator.of(context).push<bool>(
+    await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => StoreOrderReviewDetailScreen(
           repository: widget.repository,
@@ -156,7 +161,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
         ),
       ),
     );
-    if (changed == true && mounted) {
+    if (mounted) {
       await _loadFirstPage();
     }
   }
@@ -401,6 +406,9 @@ class _StoreOrderListTile extends StatelessWidget {
       return switch (item.fulfillmentStatus) {
         'awaiting_address' => '审核通过 · 待填地址',
         'ready_to_ship' => '待发货',
+        'return_requested' => '退货待审核',
+        'refund_pending' => '待退款',
+        'refunded' => '已退款',
         'shipped' => '已发货',
         'completed' => '已完成',
         'cancelled' => '已取消',
@@ -720,6 +728,31 @@ class _StoreOrderReviewDetailScreenState
                 _activityCard(order),
                 const SizedBox(height: 12),
               ],
+              OutlinedButton.icon(
+                icon: const Icon(Icons.assignment_return_outlined),
+                label: const Text('取消与售后'),
+                onPressed: _busy
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => StoreOrderAftercareScreen(
+                            admin: true,
+                            load: () =>
+                                widget.repository.storeAftercare(order.id),
+                            submit: (body, key) => widget.repository
+                                .reverseStoreOrder(order.id, body, key),
+                            onChanged: () {
+                              if (mounted) {
+                                setState(
+                                  () => _future = widget.repository
+                                      .getStoreOrder(widget.orderId),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+              ),
               _rewardContentSection(),
               const SizedBox(height: 12),
               if (order.status == 'pending_review') _reviewCard(order),
@@ -1182,6 +1215,9 @@ class _StoreOrderReviewDetailScreenState
       return switch (order.fulfillmentStatus) {
         'awaiting_address' => '审核通过 · 待填地址',
         'ready_to_ship' => '待发货',
+        'return_requested' => '退货待审核',
+        'refund_pending' => '待退款',
+        'refunded' => '已退款',
         'shipped' => '已发货',
         'completed' => '已完成',
         'cancelled' => '已取消',
@@ -1201,6 +1237,9 @@ class _StoreOrderReviewDetailScreenState
 
   String _fulfillmentLabel(String value) => switch (value) {
     'none' => '未进入履约',
+    'return_requested' => '退货待审核',
+    'refund_pending' => '待退款',
+    'refunded' => '已退款',
     'awaiting_address' => '待填写收货信息',
     'ready_to_ship' => '待发货',
     'shipped' => '已发货',

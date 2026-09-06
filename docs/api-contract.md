@@ -247,6 +247,10 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 | GET | `/admin/store/orders/{id}/reward-content` | 管理员 | 按申请时间截止的发帖/评论奖励证据分页 |
 | POST | `/admin/store/orders/{id}/review` | 管理员 | 审核并提交不计入兑换的积分流水 |
 | POST | `/admin/store/orders/{id}/ship` | 管理员 | 待发货订单填写物流公司和快递单号 |
+| GET | `/me/store-orders/{id}/aftercare` | 正式用户 | 自己订单的售后状态、说明、回寄要求、回寄物流和已退款积分 |
+| POST | `/me/store-orders/{id}/reverse` | 正式用户 | `cancel`、`request_return`、`return_shipping`；只能操作自己的订单 |
+| GET | `/admin/store/orders/{id}/aftercare` | 审核/履约管理员 | 售后详情 |
+| POST | `/admin/store/orders/{id}/reverse` | 履约管理员 | 取消、申请退货、`approve_return`、`reject_return`、`refund` |
 
 兑换请求头 `Idempotency-Key` 与正文 `{ "product_id": "string" }` 共同保证
 幂等；重复请求返回既有订单，不重复扣分。错误码含 `INSUFFICIENT_POINTS`、
@@ -256,6 +260,14 @@ pending，服务端有清理接口。媒体响应不返回对象存储内部 `ob
 `fulfillment_status=awaiting_address`；用户提交收货信息后变为
 `ready_to_ship`，管理员发货后变为 `shipped`。通知 payload 只携带
 `order_id`/`action`/物流摘要，不携带完整地址。
+
+逆向请求必须提供 `Idempotency-Key`，正文含 `action` 和必填 `reason`（最多 1000 字）。
+同一订单、操作者和幂等键只能对应相同正文；重复请求不重复退款、库存变动、审计或通知。
+待审核订单可直接取消；已批准且未发货的订单取消时校验扣款流水、返还积分并释放预留库存。
+已发货/已完成订单只能申请退货：`return_requested → refund_pending → refunded`，拒绝退货恢复申请前状态。
+管理员同意退货时在 `reason` 填写回寄要求；用户随后通过 `return_shipping` 提交 `carrier` 和 `tracking_no`。
+退款要求管理员明确提交 `return_received=true`；仅在商品可重新兑换时设置 `restock=true`，默认不恢复库存。
+退款流水来源为 `store_refund`，不占每日奖励额度。售后状态和 `cancelled` 均可用于管理员列表筛选及计数。
 
 `/me/points` 响应包含：
 ```json

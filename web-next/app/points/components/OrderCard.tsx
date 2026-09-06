@@ -3,12 +3,14 @@
 import { Icon } from "../../../components/icons";
 import { relativeTime } from "../../../lib/format";
 import type { StoreOrder } from "../../../types/forum";
+import { aftercareLabels } from "./AftercareDialog";
 
 interface OrderCardProps {
   order: StoreOrder;
   isHighlighted?: boolean;
   onOpenShipping: (order: StoreOrder) => void;
   onComplete: (order: StoreOrder) => void;
+  onAftercare: (order: StoreOrder) => void;
 }
 
 export function OrderCard({
@@ -16,6 +18,7 @@ export function OrderCard({
   isHighlighted,
   onOpenShipping,
   onComplete,
+  onAftercare,
 }: OrderCardProps) {
   const isApproved = order.status === "approved";
   const canEditShipping =
@@ -35,6 +38,7 @@ export function OrderCard({
           <span className="order-date">{relativeTime(order.createdAt)} 申请</span>
         </div>
         <div className="order-status-badge-wrap">
+          {aftercareLabels[order.fulfillmentStatus] && <span className="badge neutral">{aftercareLabels[order.fulfillmentStatus]}</span>}
           {order.status === "pending_review" && (
             <span className="badge warning">审核中</span>
           )}
@@ -60,7 +64,7 @@ export function OrderCard({
 
       <div className="order-body">
         <div className="order-points-deduct">
-          {isApproved ? "已扣除" : "预计扣除"}: <strong>{order.points} 积分</strong>
+          {order.fulfillmentStatus === "refunded" ? "已返还" : order.fulfillmentStatus === "cancelled" ? "已取消，已扣积分已返还；申请积分" : isApproved ? "已扣除" : "申请积分"}: <strong>{order.points} 积分</strong>
         </div>
 
         {/* 物流发货信息 */}
@@ -84,6 +88,7 @@ export function OrderCard({
 
         {/* 操作区 */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+          <button type="button" className="order-shipping-edit-btn" onClick={() => onAftercare(order)}>取消与售后</button>
           {canEditShipping && (
             <button
               type="button"

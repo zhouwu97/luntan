@@ -30,6 +30,34 @@ class _FakePlatformRepository extends PlatformRepository {
 }
 
 void main() {
+  for (final type in ['store.order.reviewed', 'store.order.shipped', 'store.order.refund']) {
+    testWidgets('商城通知 $type 打开订单，优先于系统通知详情', (tester) async {
+      String? orderId;
+      var systemOpened = false;
+      final item = ForumNotification(id: 'store-note', type: type, actorId: 'admin', actorName: '管理员', targetType: 'store_order', targetId: 'order-42', targetData: const {'title': '商城通知测试'}, isRead: true, createdAt: DateTime.now());
+      await tester.pumpWidget(MaterialApp(home: NotificationsScreen(
+        repository: _FakePlatformRepository([item]), onOpenPostId: (_) {},
+        onOpenStoreOrder: (id) => orderId = id,
+        onOpenNotification: (_) => systemOpened = true,
+        onOpenSystem: () => systemOpened = true,
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('商城通知测试'));
+      expect(orderId, 'order-42');
+      expect(systemOpened, isFalse);
+    });
+  }
+  test('回复通知优先定位新回复，旧 payload 仍定位原楼层', () {
+    for (final hasReply in [true, false]) {
+      String? focus;
+      NotificationTargetRouter.open(
+        notification: ForumNotification(id: 'reply-note', type: 'reply', actorId: 'a', actorName: 'a', targetType: 'post', targetId: 'post-1', targetData: {'comment_id': 'root-1', if (hasReply) 'reply_id': 'reply-2'}, isRead: true, createdAt: DateTime.now()),
+        onOpenPost: (id, comment) { expect(id, 'post-1'); focus = comment; },
+      );
+      expect(focus, hasReply ? 'reply-2' : 'root-1');
+    }
+  });
+
   testWidgets('点击评论通知正确传递 postId 与 commentId', (tester) async {
     String? capturedPostId;
     String? capturedCommentId;

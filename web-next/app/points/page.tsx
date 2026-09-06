@@ -9,7 +9,7 @@ import { AppDownloadBanner } from "../../components/app-download-banner";
 import { Icon } from "../../components/icons";
 import { useSession } from "../../components/session-provider";
 import { useToast } from "../../components/toast-context";
-import { createStoreOrder, getStoreProducts } from "../../lib/api/forum";
+import { createStoreOrder, getMyStoreOrder, getStoreProducts } from "../../lib/api/forum";
 import { formatError } from "../../lib/format";
 import type { StoreOrder, StoreProduct } from "../../types/forum";
 import { usePoints } from "./hooks/usePoints";
@@ -21,6 +21,7 @@ import { OrderList } from "./components/OrderList";
 import { TransactionList } from "./components/TransactionList";
 import { RedeemDialog } from "./components/RedeemDialog";
 import { ShippingDialog } from "./components/ShippingDialog";
+import { AftercareDialog } from "./components/AftercareDialog";
 import { PointsRulesDialog } from "./components/PointsRulesDialog";
 
 function PointsCenterContent() {
@@ -92,7 +93,10 @@ function PointsCenterContent() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<StoreProduct | null>(null);
   const [redeemBusy, setRedeemBusy] = useState(false);
+  const redeemInFlight = useRef(false);
+  const redeemKeys = useRef(new Map<string, string>());
   const [shippingOrder, setShippingOrder] = useState<StoreOrder | null>(null);
+  const [aftercareOrder, setAftercareOrder] = useState<StoreOrder | null>(null);
 
   // 确认收货二次确认弹窗
   const [orderToComplete, setOrderToComplete] = useState<StoreOrder | null>(null);
@@ -100,6 +104,14 @@ function PointsCenterContent() {
 
   // Sprint 3: 追踪是否已根据 deep link 自动弹窗
   const autoOpenedOrderRef = useRef<string | null>(null);
+
+  // 通知可能指向分页之外的旧订单，按 ID 补取并保持所有权校验。
+  useEffect(() => {
+    if (!ready || !user || !orderParam || ordersLoading || orders.some((o) => o.id === orderParam)) return;
+    let active = true;
+    void getMyStoreOrder(orderParam).then((order) => { if (active) addOrder(order); }).catch((err) => { if (active) showToast(formatError(err, "关联订单无法加载")); });
+    return () => { active = false; };
+  }, [ready, user, orderParam, ordersLoading, orders, addOrder, showToast]);
 
   useEffect(() => {
     if (!orderParam || orders.length === 0) return;
@@ -117,15 +129,20 @@ function PointsCenterContent() {
 
   // 兑换提交（Sprint 1: 审核通过才扣分，此处不扣真实 balance）
   async function handleConfirmRedeem() {
-    if (!selectedProduct) return;
+    if (!selectedProduct || redeemInFlight.current) return;
     if (!isRegistered) {
       router.push(`/login?mode=register&next=${encodeURIComponent("/points")}`);
       return;
     }
 
+    const requestScope = `${user?.id}:${selectedProduct.id}`;
+    const key = redeemKeys.current.get(requestScope) || crypto.randomUUID();
+    redeemKeys.current.set(requestScope, key);
+    redeemInFlight.current = true;
     setRedeemBusy(true);
     try {
-      const order = await createStoreOrder(selectedProduct.id);
+      const order = await createStoreOrder(selectedProduct.id, key);
+      redeemKeys.current.delete(requestScope);
       showToast(`兑换申请已提交，等待管理员审核！`);
       onOrderSubmitted(selectedProduct.points);
       addOrder(order);
@@ -134,6 +151,7 @@ function PointsCenterContent() {
     } catch (err) {
       showToast(formatError(err, "兑换提交失败，请稍后再试"));
     } finally {
+      redeemInFlight.current = false;
       setRedeemBusy(false);
     }
   }
@@ -213,6 +231,7 @@ function PointsCenterContent() {
             highlightOrderId={orderParam || undefined}
             onOpenShipping={(order) => setShippingOrder(order)}
             onComplete={(order) => setOrderToComplete(order)}
+            onAftercare={setAftercareOrder}
             onReload={reloadOrders}
             onLoadMore={loadMoreOrders}
             onGoStore={() => setActiveTab("store")}
@@ -225,6 +244,8 @@ function PointsCenterContent() {
             onReload={reloadPoints}
           />
         )}
+
+        {aftercareOrder && <AftercareDialog key={aftercareOrder.id} order={aftercareOrder} onClose={() => setAftercareOrder(null)} onSuccess={() => { void reloadOrders(); void reloadPoints(); void loadProducts(); }} />}
 
         {/* 申请兑换确认弹窗 */}
         <RedeemDialog

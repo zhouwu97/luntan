@@ -194,6 +194,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.authenticateAdministrativeRoute(w, r, path) {
 		return
 	}
+	// 售后子资源先于订单详情匹配，避免 GET 详情前缀吞掉子路由。
+	for _, scope := range []struct {
+		prefix string
+		admin  bool
+	}{{"/api/v1/me/store-orders/", false}, {"/api/v1/admin/store/orders/", true}} {
+		if !strings.HasPrefix(path, scope.prefix) {
+			continue
+		}
+		parts := strings.Split(strings.TrimPrefix(path, scope.prefix), "/")
+		if len(parts) != 2 || parts[0] == "" {
+			continue
+		}
+		if r.Method == http.MethodGet && parts[1] == "aftercare" {
+			s.getStoreOrderAftercare(w, r, parts[0], scope.admin)
+			return
+		}
+		if r.Method == http.MethodPost && parts[1] == "reverse" {
+			s.reverseStoreOrder(w, r, parts[0], scope.admin)
+			return
+		}
+	}
 	switch {
 	case r.Method == http.MethodPost && path == "/api/v1/auth/register":
 		s.register(w, r)

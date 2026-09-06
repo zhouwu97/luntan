@@ -114,6 +114,7 @@ void main() {
     expect(find.text('兑换订单'), findsOneWidget);
     expect(find.text('测试用户'), findsOneWidget);
     expect(requestedStatus, 'pending_review');
+    await tester.ensureVisible(find.text('已拒绝'));
     await tester.tap(find.text('已拒绝'));
     await tester.pumpAndSettle();
     expect(requestedStatus, 'rejected');
@@ -125,6 +126,7 @@ void main() {
     expect(find.text('申请 / 截止'), findsNothing);
     expect(find.text('查看他的发帖'), findsOneWidget);
     expect(find.text('发帖奖励'), findsOneWidget);
+    await tester.ensureVisible(find.text('查看他的评论'));
     await tester.tap(find.text('查看他的评论'));
     expect(openedUserId, 'user-1');
     expect(openedTab, 1);

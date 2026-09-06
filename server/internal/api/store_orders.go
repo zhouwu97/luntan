@@ -60,7 +60,7 @@ func (s *Server) canViewFullShipping(r *http.Request, userID string) bool {
 
 func validStoreOrderStatus(status string) bool {
 	switch status {
-	case "all", "pending_review", "approved", "rejected", "pending", "claimed", "none", "awaiting_address", "ready_to_ship", "shipped", "completed", "cancelled":
+	case "all", "pending_review", "approved", "rejected", "pending", "claimed", "none", "awaiting_address", "ready_to_ship", "shipped", "completed", "cancelled", "return_requested", "refund_pending", "refunded":
 		return true
 	default:
 		return false
@@ -69,7 +69,7 @@ func validStoreOrderStatus(status string) bool {
 
 func storeOrderStatusFilterColumn(status string) string {
 	switch status {
-	case "none", "awaiting_address", "ready_to_ship", "shipped", "completed", "cancelled":
+	case "none", "awaiting_address", "ready_to_ship", "shipped", "completed", "cancelled", "return_requested", "refund_pending", "refunded":
 		return "o.fulfillment_status"
 	default:
 		return "o.status"
@@ -703,13 +703,18 @@ func (s *Server) shipAdminStoreOrder(w http.ResponseWriter, r *http.Request, ord
 		writeInternalError(w, r, err)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `
+	stockResult, err := tx.ExecContext(r.Context(), `
 		UPDATE store_products
-		SET stock_reserved = GREATEST(stock_reserved - 1, 0),
+		SET stock_reserved = stock_reserved - 1,
 		    stock_fulfilled = stock_fulfilled + 1,
 		    updated_at = $2
-		WHERE id = (SELECT product_id FROM store_orders WHERE id = $1)`, orderID, now); err != nil {
+		WHERE id = (SELECT product_id FROM store_orders WHERE id = $1) AND stock_reserved > 0`, orderID, now)
+	if err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+	if affected, _ := stockResult.RowsAffected(); affected != 1 {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusConflict, Code: "STORE_STOCK_MISMATCH", Message: "预留库存异常，发货未生效"})
 		return
 	}
 	if err := appendAdminLogTx(r.Context(), tx, operator.ID, "store.order.ship", "store_order", orderID, input.Carrier+" "+input.TrackingNo, requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
@@ -1052,7 +1057,7 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 		return
 	}
 	var balance int64
-	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&balance); err != nil {
+	if err := tx.QueryRowContext(r.Context(), `SELECT points_balance FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID).Scan(&balance); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -1434,6 +1439,7 @@ func (s *Server) getAdminStoreOrderCounts(w http.ResponseWriter, r *http.Request
 		"completed":        0,
 		"rejected":         0,
 		"all":              0,
+		"cancelled":        0, "return_requested": 0, "refund_pending": 0, "refunded": 0,
 	}
 	for rows.Next() {
 		var st, fs string
@@ -1443,7 +1449,9 @@ func (s *Server) getAdminStoreOrderCounts(w http.ResponseWriter, r *http.Request
 			return
 		}
 		counts["all"] += c
-		if st == "pending_review" {
+		if st == "cancelled" {
+			counts["cancelled"] += c
+		} else if st == "pending_review" {
 			counts["pending_review"] += c
 		} else if st == "rejected" {
 			counts["rejected"] += c
@@ -1455,10 +1463,14 @@ func (s *Server) getAdminStoreOrderCounts(w http.ResponseWriter, r *http.Request
 				counts["ready_to_ship"] += c
 			case "shipped":
 				counts["shipped"] += c
-			case "completed":
-				counts["completed"] += c
+			case "completed", "return_requested", "refund_pending", "refunded":
+				counts[fs] += c
 			}
 		}
+	}
+	if err := rows.Err(); err != nil {
+		writeInternalError(w, r, err)
+		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, counts)
 }

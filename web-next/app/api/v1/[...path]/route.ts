@@ -35,39 +35,15 @@ async function proxy(request: NextRequest, context: RouteContext) {
     : await request.arrayBuffer();
 
   try {
-    let response: Response;
-    try {
-      response = await fetch(target, {
-        method: request.method,
-        headers,
-        body,
-        redirect: "manual",
-        cache: "no-store",
-        signal: AbortSignal.timeout(8000),
-      });
-    } catch (primaryError: unknown) {
-      const errorStr = String((primaryError as { cause?: unknown })?.cause || primaryError);
-      const isConnRefused =
-        errorStr.includes("ECONNREFUSED") ||
-        (primaryError as { code?: string })?.code === "ECONNREFUSED" ||
-        (primaryError as { cause?: { code?: string } })?.cause?.code === "ECONNREFUSED";
-
-      if (isConnRefused && targetOrigin !== "https://shengbeijiang.com") {
-        const fallbackTarget = new URL(`/api/v1/${encodedPath}${request.nextUrl.search}`, "https://shengbeijiang.com");
-        const fallbackHeaders = new Headers(headers);
-        fallbackHeaders.set("origin", "https://shengbeijiang.com");
-        response = await fetch(fallbackTarget, {
-          method: request.method,
-          headers: fallbackHeaders,
-          body,
-          redirect: "manual",
-          cache: "no-store",
-          signal: AbortSignal.timeout(8000),
-        });
-      } else {
-        throw primaryError;
-      }
-    }
+    // 后端故障必须显式失败，不能把本地或测试环境的写请求转发到正式站点。
+    const response = await fetch(target, {
+      method: request.method,
+      headers,
+      body,
+      redirect: "manual",
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
 
     const responseHeaders = new Headers();
     response.headers.forEach((value, key) => {

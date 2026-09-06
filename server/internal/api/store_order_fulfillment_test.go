@@ -49,7 +49,7 @@ func TestCreateStoreOrderRespectsAvailablePointsAndStock(t *testing.T) {
 	// 第一次申请 60 分商品：余额 100，当前占用 0，可用 100 >= 60，成功创建 pending_review
 	mockAuthSession(mock, "user-1", "registered")
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR UPDATE`).
+	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR NO KEY UPDATE`).
 		WithArgs("user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(int64(100)))
 	mock.ExpectQuery(`SELECT id, product_id, points, status, fulfillment_status FROM store_orders WHERE user_id = \$1 AND idempotency_key = \$2`).
@@ -85,7 +85,7 @@ func TestCreateStoreOrderRespectsAvailablePointsAndStock(t *testing.T) {
 	// 第二次申请 50 分商品：余额 100，已有待审核占用 60，可用 40 < 50 -> 返回 INSUFFICIENT_POINTS
 	mockAuthSession(mock, "user-1", "registered")
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR UPDATE`).
+	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR NO KEY UPDATE`).
 		WithArgs("user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(int64(100)))
 	mock.ExpectQuery(`SELECT id, product_id, points, status, fulfillment_status FROM store_orders WHERE user_id = \$1 AND idempotency_key = \$2`).
@@ -127,7 +127,7 @@ func TestCreateStoreOrderRejectsOutOfStockProduct(t *testing.T) {
 
 	mockAuthSession(mock, "user-1", "registered")
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR UPDATE`).
+	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR NO KEY UPDATE`).
 		WithArgs("user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(int64(100)))
 	mock.ExpectQuery(`SELECT id, product_id, points, status, fulfillment_status FROM store_orders WHERE user_id = \$1 AND idempotency_key = \$2`).
@@ -173,7 +173,7 @@ func TestReviewStoreOrderApproveAndReject(t *testing.T) {
 	mock.ExpectQuery(`SELECT user_id FROM store_orders WHERE id = \$1`).
 		WithArgs("order-1").
 		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow("user-1"))
-	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR UPDATE`).
+	mock.ExpectQuery(`SELECT points_balance FROM users WHERE id = \$1 FOR NO KEY UPDATE`).
 		WithArgs("user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"points_balance"}).AddRow(int64(100)))
 	mock.ExpectQuery(`SELECT p\.name, o\.points, o\.status, o\.created_at, o\.balance_at_submit FROM store_orders o JOIN store_products p ON p\.id = o\.product_id WHERE o\.id = \$1 FOR UPDATE OF o`).
@@ -361,7 +361,7 @@ func TestShipStoreOrderFlow(t *testing.T) {
 		WithArgs("order-ship", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	// 库存转移
-	mock.ExpectExec(`UPDATE store_products SET stock_reserved = GREATEST\(stock_reserved - 1, 0\), stock_fulfilled = stock_fulfilled \+ 1, updated_at = \$2 WHERE id = \(SELECT product_id FROM store_orders WHERE id = \$1\)`).
+	mock.ExpectExec(`UPDATE store_products SET stock_reserved = stock_reserved - 1, stock_fulfilled = stock_fulfilled \+ 1, updated_at = \$2 WHERE id = \(SELECT product_id FROM store_orders WHERE id = \$1\) AND stock_reserved > 0`).
 		WithArgs("order-ship", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	// 审计日志 store.order.ship

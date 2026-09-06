@@ -207,7 +207,7 @@ export function HomeShell() {
 
   function chooseCommunity(community?: Community) {
     const nextParams = new URLSearchParams(searchParams.toString());
-    if (!community || community.id === "all") {
+    if (!community) {
       nextParams.delete("community");
     } else {
       nextParams.set("community", community.id);

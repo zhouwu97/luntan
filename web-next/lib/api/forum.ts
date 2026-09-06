@@ -1084,11 +1084,11 @@ export async function getStoreProducts(): Promise<StoreProduct[]> {
   return Array.isArray(payload.items) ? payload.items.map(parseStoreProduct) : [];
 }
 
-export async function createStoreOrder(productId: string): Promise<StoreOrder> {
+export async function createStoreOrder(productId: string, idempotencyKey = newIdempotencyKey("store-order")): Promise<StoreOrder> {
   const payload = await apiPost<JsonRecord>(
     "/store/orders",
     { product_id: productId },
-    { "Idempotency-Key": newIdempotencyKey("store-order") },
+    { "Idempotency-Key": idempotencyKey },
   );
   return parseStoreOrder(payload);
 }

@@ -305,9 +305,9 @@ func TestCreateCommentAndReplyMultiImageSuccess(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"comment_id"}).AddRow("comment-100"))
 
 	// 7. Post existence check
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT author_id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`)).
 		WithArgs("post-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("post-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"author_id"}).AddRow("user-1"))
 
 	// 8. Idempotency key update
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE comment_idempotency_keys SET comment_id = $1 WHERE user_id = $2 AND idempotency_key = $3`)).
@@ -478,9 +478,9 @@ func TestCreateReplyMultiImageSuccess(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"comment_id"}).AddRow("reply-200"))
 
 	// 7. Post existence check
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT author_id FROM posts WHERE id = $1 AND publication_status = 'published' AND moderation_status = 'normal' AND deleted_at IS NULL FOR UPDATE`)).
 		WithArgs("post-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("post-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"author_id"}).AddRow("user-1"))
 
 	// 8. Parent comment lookup
 	mock.ExpectQuery(`(?s)SELECT post_id, COALESCE\(root_id, id\), author_id FROM comments WHERE id = \$1 AND deleted_at IS NULL AND publication_status = 'published' AND moderation_status = 'normal'`).

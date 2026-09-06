@@ -117,7 +117,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	case "community":
 		query += " AND n.type IN (" + communityTypes + ")"
 	case "moderation":
-		query += " AND n.type IN (" + moderationTypes + ")"
+		query += " AND (n.type IN (" + moderationTypes + ") OR n.target_type = 'store_order')"
 	case "reply":
 		query += " AND n.type IN (" + replyTypes + ")"
 	case "like":

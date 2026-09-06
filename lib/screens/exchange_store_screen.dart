@@ -1,3 +1,4 @@
+import 'store_order_detail_screen.dart';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -488,6 +489,23 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
         Icons.card_giftcard_outlined,
         color: AppTheme.primary,
       ),
+      onTap: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => StoreOrderDetailScreen(
+              repository: widget.repository,
+              orderId: order.id,
+            ),
+          ),
+        );
+        if (mounted) {
+          setState(() {
+            ordersFuture = _loadOrders();
+            overviewFuture = widget.repository.overview();
+            productsFuture = widget.repository.products();
+          });
+        }
+      },
       title: Text(order.productName),
       subtitle: Text(_orderSubtitle(order)),
       trailing: SizedBox(
@@ -627,6 +645,9 @@ class _ApiExchangeStoreScreenState extends State<_ApiExchangeStoreScreen> {
         'shipped' => '已发货',
         'completed' => '已完成',
         'cancelled' => '已取消',
+        'return_requested' => '退货待审核',
+        'refund_pending' => '待退款',
+        'refunded' => '已退款',
         _ => '审核通过',
       };
     }
@@ -719,6 +740,7 @@ class _ApiProductCard extends StatelessWidget {
               SizedBox(
                 height: 30,
                 child: FilledButton(
+                  key: Key('store-redeem-${product.id}'),
                   onPressed: busy || blocked ? null : onRedeem,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -804,6 +826,7 @@ class _ProductCard extends StatelessWidget {
               SizedBox(
                 height: 30,
                 child: FilledButton(
+                  key: Key('store-redeem-${product.name}'),
                   onPressed: blocked ? null : onRedeem,
                   style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 10),

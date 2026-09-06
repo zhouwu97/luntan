@@ -27,15 +27,19 @@ func enqueueNotificationWithDataTx(tx *sql.Tx, recipientID, actorID, notificatio
 		return nil
 	}
 	notificationID := newPostID()
+	var actor any = actorID
+	if actorID == "" {
+		actor = nil
+	}
 	if targetData == nil {
 		if _, err := tx.Exec(`
 			INSERT INTO notifications (id, user_id, type, actor_id, target_type, target_id, is_read, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, false, $7)`, notificationID, recipientID, notificationType, actorID, targetType, targetID, createdAt); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, false, $7)`, notificationID, recipientID, notificationType, actor, targetType, targetID, createdAt); err != nil {
 			return err
 		}
 	} else if _, err := tx.Exec(`
 		INSERT INTO notifications (id, user_id, type, actor_id, target_type, target_id, target_data, is_read, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, false, $8)`, notificationID, recipientID, notificationType, actorID, targetType, targetID, nullableJSON(targetData), createdAt); err != nil {
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, false, $8)`, notificationID, recipientID, notificationType, actor, targetType, targetID, nullableJSON(targetData), createdAt); err != nil {
 		return err
 	}
 	return enqueueOutboxTx(tx, "notification.created", "notification", notificationID, map[string]any{

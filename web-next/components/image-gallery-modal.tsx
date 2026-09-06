@@ -83,6 +83,7 @@ export function ImageGalleryModal({
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     setMounted(true);
@@ -90,7 +91,16 @@ export function ImageGalleryModal({
 
   useEffect(() => {
     setCandidateIndex(0);
+    setRetry(0);
   }, [currentIndex]);
+
+  useEffect(() => {
+    const current = images[currentIndex];
+    const sources = current?.sources?.length ? current.sources : [current?.detailUrl, current?.originalUrl, current?.url, current?.thumbUrl].filter(Boolean);
+    if (candidateIndex < sources.length || retry >= 5 || !sources.some((url) => url?.includes("/api/v1/media-file/"))) return;
+    const timer = window.setTimeout(() => { setCandidateIndex(0); setRetry((n) => n + 1); }, 1000 * (retry + 1));
+    return () => window.clearTimeout(timer);
+  }, [images, currentIndex, candidateIndex, retry]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

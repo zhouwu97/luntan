@@ -108,6 +108,8 @@ export function RankingSubmitForm() {
   if (!ready) return <><SiteHeader /><main className="page-frame"><div className="detail-skeleton"><div /><div /></div></main></>;
   if (!user) return <><SiteHeader /><main className="page-frame"><section className="coming-page"><span className="coming-icon"><Icon name="trophy" size={26} /></span><h1>登录后才能投稿</h1><p>登录邮箱账号后，就可以把好物推荐给大家。</p><button type="button" className="primary-link" onClick={() => router.push(`/login?next=${encodeURIComponent("/ranking/submit")}`)}>去登录</button></section></main></>;
 
+  if (!user.capabilities?.can_manage_admins) return <><SiteHeader /><main className="page-frame"><p>仅超级管理员可添加榜单物品。</p></main></>;
+
   return <>
     <SiteHeader />
     <main className="page-frame ranking-submit-frame">

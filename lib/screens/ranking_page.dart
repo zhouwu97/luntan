@@ -743,7 +743,7 @@ class _RankingPageState extends State<RankingPage> {
               setState(() => _searchQuery = '');
             },
             actions: [
-              if (widget.repository != null && widget.publishRepository != null)
+              if (widget.canManageRanking && widget.repository != null && widget.publishRepository != null)
                 Tooltip(
                   message: '投稿新玩具',
                   child: IconButton(

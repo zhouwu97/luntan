@@ -86,7 +86,10 @@ func (s *Server) enrichPostResponse(ctx context.Context, r *http.Request, respon
 		// 选择 censored_* 变体。这样即使对象存储配置了公开前缀，Feed
 		// 也不会继续给出原图直链。
 		if it.moderationStatus != "censored" {
-			it.item.URL = publicMediaURL(it.objectKey)
+			it.item.URL = mediaVariantURL(it.item.ID, it.objectKey, "detail")
+			if it.item.Type == "video" {
+				it.item.URL = publicMediaURL(it.objectKey)
+			}
 		}
 		if it.rawMaskRegions != "" && it.rawMaskRegions != "[]" {
 			var regions []media.MaskRegion

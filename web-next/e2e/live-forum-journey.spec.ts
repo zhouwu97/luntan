@@ -55,6 +55,7 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   expect(sql(`SELECT view_count FROM posts WHERE id=${quote(postId)}`)).toBe("1");
   await page.locator(".detail-gallery img").first().click();
   await expect(page.getByRole("dialog", { name: "图片查看器" })).toBeVisible();
+  await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0)), { timeout: 20000 }).toBe(true);
   await page.getByRole("button", { name: "关闭查看器" }).click();
   const composer = page.locator("form").filter({ has: page.getByRole("button", { name: "发布回复", exact: true }) });
   await composer.locator("textarea").fill("游客图片评论，注册后保留");
@@ -68,6 +69,7 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   await expect(commentNode).toContainText("游客图片评论，注册后保留");
   await commentNode.locator(".comment-media-grid img").first().click();
   await expect(page.getByRole("dialog", { name: "图片查看器" })).toBeVisible();
+  await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0)), { timeout: 20000 }).toBe(true);
   await page.getByRole("button", { name: "关闭查看器" }).click();
 
   const notes = await request.get("/api/v1/notifications?category=interaction", { headers: auth });

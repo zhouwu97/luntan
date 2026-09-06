@@ -47,9 +47,14 @@ void main() {
     expect(find.byTooltip('调整榜单名次'), findsOneWidget);
   });
 
-  testWidgets('无投稿能力时隐藏投稿与调序入口', (tester) async {
+  testWidgets('普通用户即使具备上传能力也隐藏添加与调序入口', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(home: RankingPage()),
+      MaterialApp(home: RankingPage(
+        repository: _StubRankingRepository(),
+        platformRepository: _StubPlatformRepository(),
+        publishRepository: _StubPublishRepository(),
+        canManageRanking: false,
+      )),
     );
     // 本地数据模式存在持续动画，不能使用 pumpAndSettle，改为有限帧推进。
     await tester.pump();

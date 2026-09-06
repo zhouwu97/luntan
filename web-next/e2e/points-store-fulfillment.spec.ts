@@ -186,7 +186,7 @@ test.describe("积分商城履约链路 E2E 验收套件", () => {
     await expect(page.getByText("40", { exact: true })).toBeVisible();
     await expect(page.getByText("60", { exact: true })).toBeVisible();
     // 自动切到订单页，显示审核中
-    await expect(page.getByText("审核中")).toBeVisible();
+    await expect(page.getByText("审核中", { exact: true })).toBeVisible();
   });
 
   test("3. 通知深链与待填地址自动弹窗", async ({ page }) => {

@@ -442,6 +442,13 @@ img { display: block; max-width: 100%; }
 .aside-community strong { display: block; font-size: 14px; }
 .aside-community p { margin: 5px 0 0; overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .aside-community > svg { color: #91abc1; }
+.aside-panel h2 { margin: 0 0 16px; font-size: 18px; }
+.related-item { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.related-item:last-child { border-bottom: 0; }
+.related-item strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 14px; line-height: 1.6; }
+.related-item > div { display: flex; justify-content: space-between; gap: 12px; color: var(--text-faint); font-size: 12px; }
+.related-item > div span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-item > div span:last-child { flex-shrink: 0; }
 .related-panel .discovery-heading { margin-bottom: 10px; }
 .related-post { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #edf2f7; }
 .related-post:last-child { border-bottom: 0; }

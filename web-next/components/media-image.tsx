@@ -32,11 +32,21 @@ export function MediaImage({
     ? mediaCandidates(asset, preferred)
     : [...new Set((sources || []).filter((source): source is string => Boolean(source)))];
   const [index, setIndex] = useState(0);
+  const [retry, setRetry] = useState(0);
   const source = candidates[index];
+  const candidateKey = candidates.join("|");
 
   useEffect(() => {
     setIndex(0);
-  }, [asset?.id, asset?.url, preferred]);
+    setRetry(0);
+  }, [candidateKey]);
+
+  useEffect(() => {
+    // 新图片变体异步生成，有限重试避免短暂 404 永久停在占位图。
+    if (source || retry >= 5 || !candidateKey.includes("/api/v1/media-file/")) return;
+    const timer = window.setTimeout(() => { setIndex(0); setRetry((n) => n + 1); }, 1000 * (retry + 1));
+    return () => window.clearTimeout(timer);
+  }, [source, retry, candidateKey]);
 
   if (!source) {
     return <span className={`media-image-placeholder${className ? ` ${className}` : ""}`} role="img" aria-label={`${alt}加载失败`}><Icon name="image" size={24} /></span>;

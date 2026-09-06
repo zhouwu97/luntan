@@ -196,6 +196,7 @@ export default function AdminRankingPage() {
       <main className="page-frame admin-ranking-page">
         <header className="admin-ranking-head">
           <h1>榜单排序管理</h1>
+          <p><Link href="/ranking/submit">添加物品</Link></p>
           <p>原始榜单名次始终保留，这里只调整展示顺序；重新同步不会覆盖人工排序。</p>
           <div className="admin-ranking-meta">
             <span>原始榜单已同步：{formatDay(syncedAt)}</span>

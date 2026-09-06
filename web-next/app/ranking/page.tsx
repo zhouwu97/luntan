@@ -10,7 +10,7 @@ import { CommunityRail } from "../../components/community-rail";
 import { AppDownloadBanner } from "../../components/app-download-banner";
 import { BottomNav } from "../../components/bottom-nav";
 import { useSession } from "../../components/session-provider";
-import { useToast } from "../../components/toast-context";
+
 import { getCommunities, getRankingView } from "../../lib/api/forum";
 import { selectHomeCommunities } from "../../lib/home-communities";
 import { compactCount, formatError } from "../../lib/format";
@@ -49,7 +49,7 @@ export default function RankingPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { user } = useSession();
-  const { showToast } = useToast();
+  const canManage = user?.capabilities?.can_manage_admins === true;
 
   const tabParam = searchParams.get("tab") || "";
   const categoryParam = searchParams.get("category") || "";
@@ -70,7 +70,7 @@ export default function RankingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [communities, setCommunities] = useState<Community[]>([]);
-  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+
 
   useEffect(() => {
     let active = true;
@@ -197,22 +197,7 @@ export default function RankingPage() {
           />
         </form>
 
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="提交榜单商品"
-          onClick={openSubmission}
-        >
-          <Icon name="plus" size={18} />
-        </button>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="切换排序模式"
-          onClick={() => showToast("已按热度智能排序")}
-        >
-          <Icon name="refresh" size={17} />
-        </button>
+        {canManage && <><button type="button" className="icon-btn" aria-label="添加物品" onClick={openSubmission}><Icon name="plus" size={18} /></button><Link className="icon-btn" href="/admin/ranking" aria-label="调整物品顺序"><Icon name="refresh" size={17} /></Link></>}
       </header>
 
       {/* 移动端/竖屏分类导航条 (对齐 Flutter ranking_page.dart) */}
@@ -265,7 +250,6 @@ export default function RankingPage() {
                 returnPath={returnPath}
                 scoreText={scoreText}
                 compactCount={compactCount}
-                onOpenRules={() => setRuleModalOpen(true)}
               />
             ) : null
           }
@@ -277,15 +261,8 @@ export default function RankingPage() {
               <h1 className={styles.title}>本周好物榜</h1>
               <p className={styles.subtitle}>根据同好真实拆箱、测评评分与互动热度排序</p>
             </div>
-            <button
-              type="button"
-              className={styles.ruleBtn}
-              onClick={() => setRuleModalOpen(true)}
-              data-testid="ranking-rule-btn"
-            >
-              <Icon name="info" size={14} />
-              <span>榜单规则</span>
-            </button>
+            {canManage && <div className="row gap-2"><Link href="/ranking/submit">添加物品</Link><Link href="/admin/ranking">调整物品顺序</Link></div>}
+
           </div>
 
           {/* 分类筛选工具栏 */}
@@ -476,46 +453,6 @@ export default function RankingPage() {
           )}
         </div>
       </main>
-
-      {/* 榜单规则弹窗 */}
-      {ruleModalOpen && (
-        <div
-          className="modal-backdrop show"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setRuleModalOpen(false);
-          }}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="modal" style={{ width: "min(520px, 90vw)", background: "#fff", borderRadius: 16, padding: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h3 style={{ margin: 0, fontSize: 18 }}>🏆 圣杯排行榜规则</h3>
-              <button
-                type="button"
-                onClick={() => setRuleModalOpen(false)}
-                style={{ background: "transparent", border: 0, fontSize: 20, cursor: "pointer", color: "#94a3b8" }}
-              >
-                ✕
-              </button>
-            </div>
-            <div style={{ color: "#475569", lineHeight: 1.8, fontSize: 14 }}>
-              <p><strong>1. 数据来源</strong>：排名基于同好真实拆箱打分、长篇测评评价数、想要拥有数及活跃讨论热度综合计算。</p>
-              <p><strong>2. 排行顺序</strong>：前端严格按照系统给出的热度与管理员人工维护顺序展现，不篡改评分排序。</p>
-              <p><strong>3. 诚信原则</strong>：杜绝虚假刷单与批量刷分，异常数据将被算法识别并过滤，保持客观真实。</p>
-            </div>
-            <div style={{ textAlign: "right", marginTop: 18 }}>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => setRuleModalOpen(false)}
-                style={{ height: 36, padding: "0 18px" }}
-              >
-                我知道了
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 底部导航栏上方的下载 App 窗口（移动端严格保留） */}
       <AppDownloadBanner />

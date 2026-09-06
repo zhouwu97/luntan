@@ -19,7 +19,10 @@ function resolveApiPath(path: string): string {
  */
 export function resolveMediaUrl(value?: string, variant: "thumb" | "feed" | "detail" | "original" = "detail"): string | undefined {
   if (!value) return undefined;
-  const clean = value.trim();
+  let clean = value.trim();
+  // 兼容异步处理完成前返回的旧源地址，只映射自有媒体 ID，不开放源文件访问。
+  const legacy = clean.match(/^\/api\/v1\/media-file\/media\/[^/]+\/(media_[a-f0-9]+)$/i);
+  if (legacy) clean = `/api/v1/media-file/${legacy[1]}/${variant}`;
   if (!clean) return undefined;
   if (/^data:/i.test(clean) || /^blob:/i.test(clean)) return clean;
   if (/^https?:\/\//i.test(clean)) return normalizeHttpUrl(clean);

@@ -992,7 +992,8 @@ func enrichCommentsMedia(ctx context.Context, db databaseQueryer, items []commen
 		} else {
 			mk.media.Type = "image"
 		}
-		mk.media.URL = publicMediaURL(mk.objectKey)
+		// 变体由 worker 异步生成，刚发布时也必须返回稳定网关地址，不能退回被禁用的图片源地址。
+		mk.media.URL = mediaVariantURL(mk.media.ID, mk.objectKey, "detail")
 		mediaList = append(mediaList, mk)
 		if _, ok := seenMedia[mk.media.ID]; !ok {
 			seenMedia[mk.media.ID] = struct{}{}

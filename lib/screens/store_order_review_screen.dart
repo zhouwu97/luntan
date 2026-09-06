@@ -33,6 +33,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   bool _hasMore = false;
   String _selectedStatus = 'pending_review';
   int _requestGeneration = 0;
+  Map<String, int> _counts = const <String, int>{};
 
   static const _statusFilters = <({String value, String label})>[
     (value: 'pending_review', label: '待审核'),
@@ -64,9 +65,13 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       _hasMore = false;
     });
     try {
+      final countsFuture = widget.repository
+          .getStoreOrderCounts()
+          .catchError((_) => const <String, int>{});
       final page = await widget.repository.listStoreOrderPage(
         status: requestStatus,
       );
+      final counts = await countsFuture;
       if (!mounted ||
           generation != _requestGeneration ||
           requestStatus != _selectedStatus) {
@@ -76,6 +81,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
         _items.addAll(page.items);
         _nextCursor = page.nextCursor;
         _hasMore = page.hasMore;
+        _counts = counts;
         _loading = false;
       });
     } catch (error) {
@@ -185,10 +191,17 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       child: Row(
         children: [
           for (final filter in _statusFilters) ...[
-            ChoiceChip(
-              label: Text(filter.label),
-              selected: filter.value == _selectedStatus,
-              onSelected: (_) => _selectStatus(filter.value),
+            Builder(
+              builder: (context) {
+                final count = _counts[filter.value];
+                final hasCount = count != null && count > 0;
+                final labelText = hasCount ? '${filter.label} $count' : filter.label;
+                return ChoiceChip(
+                  label: Text(labelText),
+                  selected: filter.value == _selectedStatus,
+                  onSelected: (_) => _selectStatus(filter.value),
+                );
+              },
             ),
             const SizedBox(width: 8),
           ],

@@ -397,6 +397,15 @@ func (s *Server) points(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	var reservedPoints int64
+	if err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(SUM(points), 0) FROM store_orders WHERE user_id = $1 AND status = 'pending_review'`, user.ID).Scan(&reservedPoints); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	availablePoints := balance - reservedPoints
+	if availablePoints < 0 {
+		availablePoints = 0
+	}
 	rows, err := s.db.QueryContext(r.Context(), `SELECT id, source, delta, balance_after, reason, created_at FROM point_transactions WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 50`, user.ID)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -414,7 +423,12 @@ func (s *Server) points(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"id": id, "source": source, "delta": delta, "balance_after": balanceAfter, "reason": reason, "created_at": createdAt})
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"balance": balance, "transactions": items})
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"balance":          balance,
+		"reserved_points":  reservedPoints,
+		"available_points": availablePoints,
+		"transactions":     items,
+	})
 }
 
 func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
@@ -423,11 +437,12 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT p.id, p.name, p.description, p.emoji, p.points, p.color,
+		       p.stock_total, p.stock_reserved, p.stock_fulfilled,
 		       COUNT(o.id) FILTER (WHERE o.status IN ('approved', 'claimed', 'completed')) AS redeemed_count
 		FROM store_products p
 		LEFT JOIN store_orders o ON o.product_id = p.id
 		WHERE p.active = true
-		GROUP BY p.id, p.name, p.description, p.emoji, p.points, p.color
+		GROUP BY p.id, p.name, p.description, p.emoji, p.points, p.color, p.stock_total, p.stock_reserved, p.stock_fulfilled
 		ORDER BY redeemed_count DESC, p.points ASC, p.id ASC`)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -439,20 +454,28 @@ func (s *Server) storeProducts(w http.ResponseWriter, r *http.Request) {
 		var id, name, description, emoji string
 		var points int64
 		var color int
-		var redeemedCount int64
-		if err := rows.Scan(&id, &name, &description, &emoji, &points, &color, &redeemedCount); err != nil {
+		var stockTotal, stockReserved, stockFulfilled, redeemedCount int64
+		if err := rows.Scan(&id, &name, &description, &emoji, &points, &color, &stockTotal, &stockReserved, &stockFulfilled, &redeemedCount); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
+		stock := stockTotal - stockReserved - stockFulfilled
+		if stock < 0 {
+			stock = 0
+		}
 		items = append(items, map[string]any{
-			"id":             id,
-			"name":           name,
-			"description":    description,
-			"emoji":          emoji,
-			"points":         points,
-			"color":          color,
-			"image_url":      storeProductImageURL(id),
-			"redeemed_count": redeemedCount,
+			"id":              id,
+			"name":            name,
+			"description":     description,
+			"emoji":           emoji,
+			"points":          points,
+			"color":           color,
+			"stock":           stock,
+			"stock_total":     stockTotal,
+			"stock_reserved":  stockReserved,
+			"stock_fulfilled": stockFulfilled,
+			"image_url":       storeProductImageURL(id),
+			"redeemed_count":  redeemedCount,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -532,7 +555,7 @@ func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
 			item["completed_at"] = completedAt.Time
 		}
 		if submittedAt.Valid {
-			item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt)
+			item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt, true)
 		}
 		items = append(items, item)
 	}
@@ -602,27 +625,17 @@ func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	var pendingOrderID string
-	err = tx.QueryRowContext(r.Context(), `
-		SELECT id
-		FROM store_orders
-		WHERE user_id = $1 AND status = 'pending_review'
-		LIMIT 1`, user.ID).Scan(&pendingOrderID)
-	if err == nil {
-		writeAuthError(w, r, ErrStoreOrderReviewPending)
-		return
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		writeInternalError(w, r, err)
-		return
-	}
 	var productName string
-	var points int64
-	if err := tx.QueryRowContext(r.Context(), `SELECT name, points FROM store_products WHERE id = $1 AND active = true FOR UPDATE`, input.ProductID).Scan(&productName, &points); err == sql.ErrNoRows {
+	var points, stockTotal, stockReserved, stockFulfilled int64
+	if err := tx.QueryRowContext(r.Context(), `SELECT name, points, stock_total, stock_reserved, stock_fulfilled FROM store_products WHERE id = $1 AND active = true FOR UPDATE`, input.ProductID).Scan(&productName, &points, &stockTotal, &stockReserved, &stockFulfilled); err == sql.ErrNoRows {
 		writeAuthError(w, r, ErrInvalidPost)
 		return
 	} else if err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+	if stockTotal-stockReserved-stockFulfilled <= 0 {
+		writeAuthError(w, r, ErrStoreProductOutOfStock)
 		return
 	}
 	var reserved int64

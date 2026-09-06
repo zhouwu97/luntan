@@ -33,6 +33,13 @@ export function HomeShortcuts({ onFilterHot }: { onFilterHot?: () => void }) {
         <span>热门帖子</span>
       </button>
 
+      <Link href="/download" className="quick" aria-label="下载 App">
+        <span className="quick-icon">
+          <Icon name="download" size={21} />
+        </span>
+        <span>下载 App</span>
+      </Link>
+
       <Link href="/search?q=穿搭分享" className="quick" aria-label="穿搭分享">
         <span className="quick-icon">
           <Icon name="hanger" size={21} />

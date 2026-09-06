@@ -143,6 +143,8 @@ function notificationHref(item: ForumNotification): string | undefined {
       return `/ranking/${encodeURIComponent(item.targetId)}`;
     case "activity":
       return "/activities";
+    case "store_order":
+      return `/points?tab=orders&order=${encodeURIComponent(item.targetId)}`;
     default:
       return undefined;
   }
@@ -152,8 +154,44 @@ function NotificationRow({ item, onRead }: { item: ForumNotification; onRead: (i
   const href = notificationHref(item);
   const body = notificationBody(item);
   const kind = notificationKind(item);
-  const content = <><span className={`notification-icon notification-icon-${kind}`}><Icon name={notificationIconName(item)} size={18} /></span><span className="notification-copy"><strong>{body.title}</strong>{body.content && <span>{body.content}</span>}<time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time></span>{!item.isRead && <span className="notification-unread" aria-label="未读" />}</>;
-  return href ? <Link href={href} className={`notification-row${item.isRead ? "" : " unread"}`} onClick={() => { if (!item.isRead) void onRead(item.id); }}>{content}</Link> : <div className={`notification-row${item.isRead ? "" : " unread"}`} onClick={() => { if (!item.isRead) void onRead(item.id); }}>{content}</div>;
+  const content = (
+    <>
+      <span className={`notification-icon notification-icon-${kind}`}>
+        <Icon name={notificationIconName(item)} size={18} />
+      </span>
+      <span className="notification-copy">
+        <strong>{body.title}</strong>
+        {body.content && <span>{body.content}</span>}
+        {body.actionLabel && (
+          <span style={{ fontSize: "0.75rem", color: "var(--brand, #3b82f6)", fontWeight: 500, marginTop: 4 }}>
+            {body.actionLabel} &rarr;
+          </span>
+        )}
+        <time dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time>
+      </span>
+      {!item.isRead && <span className="notification-unread" aria-label="未读" />}
+    </>
+  );
+  return href ? (
+    <Link
+      href={href}
+      className={`notification-row${item.isRead ? "" : " unread"}`}
+      onClick={() => {
+        if (!item.isRead) void onRead(item.id);
+      }}
+    >
+      {content}
+    </Link>
+  ) : (
+    <div
+      className={`notification-row${item.isRead ? "" : " unread"}`}
+      onClick={() => {
+        if (!item.isRead) void onRead(item.id);
+      }}
+    >
+      {content}
+    </div>
+  );
 }
 
 function groupNotifications(items: ForumNotification[]): Array<{ label: string; items: ForumNotification[] }> {
@@ -169,12 +207,17 @@ function groupNotifications(items: ForumNotification[]): Array<{ label: string; 
 }
 
 function notificationKind(item: ForumNotification): string {
+  if (item.type.startsWith("store.order.") || item.targetType === "store_order") return "moderation";
   if (item.type.startsWith("moderation.") || item.type.startsWith("appeal.")) return "moderation";
   if (item.type.startsWith("community.") || item.type === "announcement" || item.type === "event") return "community";
   return "interaction";
 }
 
 function notificationIconName(item: ForumNotification): IconName {
+  if (item.type.startsWith("store.order.") || item.targetType === "store_order") {
+    if (item.type === "store.order.shipped") return "sparkle";
+    return "filter";
+  }
   const kind = notificationKind(item);
   if (kind === "moderation") return "filter";
   if (kind === "community") return "sparkle";
@@ -184,12 +227,45 @@ function notificationIconName(item: ForumNotification): IconName {
   return "heart";
 }
 
-function notificationBody(item: ForumNotification): { title: string; content: string } {
+function notificationBody(item: ForumNotification): { title: string; content: string; actionLabel?: string } {
   const actor = item.actor.nickname || item.actor.username || "有人";
   const data = item.targetData;
   const customTitle = typeof data.title === "string" ? data.title : "";
   const contentValue = data.content ?? data.snippet ?? data.message ?? data.reason ?? data.post_title;
   const content = typeof contentValue === "string" ? contentValue : "";
+
+  if (item.type === "store.order.reviewed") {
+    const isApproved = data.status === "approved";
+    const productName = typeof data.product_name === "string" ? data.product_name : "商品";
+    const points = typeof data.points === "number" ? data.points : 0;
+    const reason = typeof data.reason === "string" ? data.reason : "";
+    if (isApproved) {
+      return {
+        title: "兑换申请已通过",
+        content: `你兑换的「${productName}」已审核通过${points > 0 ? `，已扣除 ${points} 积分` : ""}。`,
+        actionLabel: "填写收货信息",
+      };
+    } else {
+      return {
+        title: "兑换申请未通过",
+        content: `你兑换的「${productName}」未通过审核${reason ? `。原因：${reason}` : "。"}`,
+        actionLabel: "查看兑换记录",
+      };
+    }
+  }
+
+  if (item.type === "store.order.shipped") {
+    const productName = typeof data.product_name === "string" ? data.product_name : "商品";
+    const carrier = typeof data.carrier === "string" ? data.carrier : "";
+    const trackingNo = typeof data.tracking_no === "string" ? data.tracking_no : "";
+    const trackingInfo = [carrier, trackingNo].filter(Boolean).join(" ");
+    return {
+      title: "商品已发货",
+      content: `你兑换的「${productName}」已经发出${trackingInfo ? `（${trackingInfo}）` : ""}。`,
+      actionLabel: "查看物流",
+    };
+  }
+
   if (customTitle) return { title: customTitle, content };
   if (item.type === "follow" || item.type === "user.followed") return { title: `${actor} 关注了你`, content };
   if (item.type === "bookmark" || item.type === "post.bookmarked") return { title: `${actor} 收藏了你的帖子`, content };

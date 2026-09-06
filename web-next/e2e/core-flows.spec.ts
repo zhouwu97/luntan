@@ -1640,7 +1640,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.locator(".app-download-banner")).toBeHidden();
   });
 
-  test("18. 手机与 PC 竖屏架构隔离：390x844 手机保留三项顶部槽位与居中下载入口，PC 1440x900 完整呈现桌面三栏", async ({ page }) => {
+  test("18. 手机与 PC 竖屏架构隔离：390x844 手机保留三项社区板块与下载入口，PC 1440x900 完整呈现桌面三栏", async ({ page }) => {
     // 1. 移动端 390x844 手机视口
     await page.setViewportSize({ width: 390, height: 844 });
 
@@ -1700,14 +1700,13 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     const mobileBottomNav = page.locator("nav.bottom-nav");
     await expect(mobileBottomNav).toBeVisible();
 
-    // 移动端：三项顶部槽位为大型拆箱 | 下载 App | 杂鱼日常，下载入口固定居中。
+    // 移动端：严格只有 3 个社区 Tab（大型拆箱 | 酱紫社区 | 杂鱼日常），下载入口位于下方快捷区。
     const communityTabs = page.locator(".home-community-tabs .home-community-tab");
-    await expect(communityTabs).toHaveCount(2);
+    await expect(communityTabs).toHaveCount(3);
     await expect(communityTabs.nth(0)).toContainText("大型拆箱");
-    await expect(communityTabs.nth(1)).toContainText("杂鱼日常");
-    const downloadTab = page.locator(".home-community-tabs .home-community-download-tab");
-    await expect(downloadTab).toHaveCount(1);
-    await expect(downloadTab).toContainText("下载 App");
+    await expect(communityTabs.nth(1)).toContainText("酱紫社区");
+    await expect(communityTabs.nth(2)).toContainText("杂鱼日常");
+    await expect(page.locator(".home-shortcuts")).toContainText("下载 App");
 
     // 移动端：桌面左侧与右侧侧边栏严格隐藏
     const desktopLeftRail = page.locator(".home-left-col");

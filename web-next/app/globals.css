@@ -3797,23 +3797,37 @@ img { display: block; max-width: 100%; }
 .product-media-frame {
   position: relative;
   width: 100%;
-  height: 180px;
-  background: #f1f5f9;
+  height: 220px;
+  background: radial-gradient(circle at 50% 45%, #ffffff 0%, #f1f5f9 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  padding: 16px;
+  box-sizing: border-box;
 }
 .product-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.08));
+  transition: transform .25s cubic-bezier(0.2, 0, 0, 1);
+}
+.store-product-card:hover .product-img {
+  transform: scale(1.05);
 }
 .product-emoji-placeholder {
   font-size: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform .25s ease;
+}
+.store-product-card:hover .product-emoji-placeholder {
+  transform: scale(1.08);
 }
 .product-points-tag {
   position: absolute;
@@ -3826,6 +3840,9 @@ img { display: block; max-width: 100%; }
   font-weight: 700;
   padding: 4px 10px;
   border-radius: 8px;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
 }
 .product-info {
   padding: 16px 18px;
@@ -3981,6 +3998,41 @@ img { display: block; max-width: 100%; }
 }
 .order-shipping-edit-btn:hover {
   background: #dbeafe;
+}
+.order-complete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  cursor: pointer;
+  transition: all .16s ease;
+}
+.order-complete-btn:hover {
+  background: #dcfce7;
+}
+.order-card.highlighted {
+  border-color: var(--primary-deep, #1e40af);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+.points-error-box {
+  padding: 32px 20px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  margin: 16px 0;
+}
+.points-error-box p {
+  margin: 0 0 12px;
+  color: var(--text-soft);
+  font-size: 14px;
 }
 
 /* 积分流水明细 */

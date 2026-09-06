@@ -442,8 +442,8 @@ func TestStoreProductsOrdersByRedeemedCount(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(`(?s)SELECT p\.id, p\.name.*COUNT\(o\.id\) FILTER \(WHERE o\.status IN \('approved', 'claimed', 'completed'\)\).*ORDER BY redeemed_count DESC`).
 		WithArgs().
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "emoji", "points", "color", "redeemed_count"}).
-			AddRow("p1", "校园徽章", "纪念品", "🏅", int64(120), 16766842, int64(42)))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "description", "emoji", "points", "color", "stock_total", "stock_reserved", "stock_fulfilled", "redeemed_count"}).
+			AddRow("p1", "校园徽章", "纪念品", "🏅", int64(120), 16766842, int64(100), int64(0), int64(0), int64(42)))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/store/products", nil)
 	res := httptest.NewRecorder()

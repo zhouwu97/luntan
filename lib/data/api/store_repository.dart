@@ -19,9 +19,16 @@ class PointTransaction {
 }
 
 class PointsOverview {
-  const PointsOverview({required this.balance, required this.transactions});
+  const PointsOverview({
+    required this.balance,
+    this.reservedPoints = 0,
+    this.availablePoints = 0,
+    required this.transactions,
+  });
 
   final int balance;
+  final int reservedPoints;
+  final int availablePoints;
   final List<PointTransaction> transactions;
 }
 
@@ -35,6 +42,10 @@ class ApiStoreProduct {
     required this.color,
     required this.redeemedCount,
     this.imageUrl = '',
+    this.stock,
+    this.stockTotal,
+    this.stockReserved,
+    this.stockFulfilled,
   });
   final String id;
   final String name;
@@ -44,6 +55,10 @@ class ApiStoreProduct {
   final int color;
   final int redeemedCount;
   final String imageUrl;
+  final int? stock;
+  final int? stockTotal;
+  final int? stockReserved;
+  final int? stockFulfilled;
 }
 
 class StoreOrder {
@@ -82,6 +97,9 @@ class StoreOrder {
       status == 'approved' &&
       (fulfillmentStatus == 'awaiting_address' ||
           fulfillmentStatus == 'ready_to_ship');
+
+  bool get canComplete =>
+      status == 'approved' && fulfillmentStatus == 'shipped';
 }
 
 class StoreOrderShipping {
@@ -142,6 +160,10 @@ class StoreRepository {
         color: _int(data['color']),
         redeemedCount: _int(data['redeemed_count']),
         imageUrl: _string(data['image_url']),
+        stock: data['stock'] is num ? _int(data['stock']) : null,
+        stockTotal: data['stock_total'] is num ? _int(data['stock_total']) : null,
+        stockReserved: data['stock_reserved'] is num ? _int(data['stock_reserved']) : null,
+        stockFulfilled: data['stock_fulfilled'] is num ? _int(data['stock_fulfilled']) : null,
       );
     }).toList();
   }
@@ -168,8 +190,15 @@ class StoreRepository {
             );
           }).toList()
         : <PointTransaction>[];
+    final balance = _int(value['balance']);
+    final reservedPoints = _int(value['reserved_points'] ?? value['reservedPoints']);
+    final availablePoints = value['available_points'] != null
+        ? _int(value['available_points'])
+        : (balance - reservedPoints).clamp(0, balance);
     return PointsOverview(
-      balance: _int(value['balance']),
+      balance: balance,
+      reservedPoints: reservedPoints,
+      availablePoints: availablePoints,
       transactions: transactions,
     );
   }
@@ -209,6 +238,11 @@ class StoreRepository {
         'address_detail': addressDetail,
       },
     );
+    return _orderFromJson(value);
+  }
+
+  Future<StoreOrder> completeOrder(String orderId) async {
+    final value = await _client.postJson('/api/v1/me/store-orders/$orderId/complete');
     return _orderFromJson(value);
   }
 

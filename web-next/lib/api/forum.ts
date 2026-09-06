@@ -1026,6 +1026,10 @@ function parseStoreProduct(raw: unknown): StoreProduct {
     color: asNumber(item.color),
     imageUrl: resolveMediaUrl(rawImg, "detail"),
     redeemedCount: asNumber(item.redeemed_count ?? item.redeemedCount),
+    stock: item.stock !== undefined ? asNumber(item.stock) : undefined,
+    stockTotal: item.stock_total !== undefined ? asNumber(item.stock_total ?? item.stockTotal) : undefined,
+    stockReserved: item.stock_reserved !== undefined ? asNumber(item.stock_reserved ?? item.stockReserved) : undefined,
+    stockFulfilled: item.stock_fulfilled !== undefined ? asNumber(item.stock_fulfilled ?? item.stockFulfilled) : undefined,
   };
 }
 
@@ -1125,10 +1129,32 @@ export async function updateStoreOrderShipping(
   return parseStoreOrder(payload);
 }
 
+export async function completeMyStoreOrder(orderId: string): Promise<StoreOrder> {
+  const payload = await apiJson<JsonRecord>(`/me/store-orders/${encodeURIComponent(orderId)}/complete`, {
+    method: "POST",
+  });
+  return parseStoreOrder(payload);
+}
+
 export async function getMyPointsDetail(): Promise<MyPointsDetail> {
-  const payload = await apiJson<{ balance?: unknown; transactions?: unknown[] }>("/me/points");
+  const payload = await apiJson<{
+    balance?: unknown;
+    reserved_points?: unknown;
+    reservedPoints?: unknown;
+    available_points?: unknown;
+    availablePoints?: unknown;
+    transactions?: unknown[];
+  }>("/me/points");
+  const balance = asNumber(payload.balance);
+  const reservedPoints = asNumber(payload.reserved_points ?? payload.reservedPoints, 0);
+  const availablePoints = asNumber(
+    payload.available_points ?? payload.availablePoints,
+    Math.max(0, balance - reservedPoints),
+  );
   return {
-    balance: asNumber(payload.balance),
+    balance,
+    reservedPoints,
+    availablePoints,
     transactions: Array.isArray(payload.transactions) ? payload.transactions.map(parsePointTransaction) : [],
   };
 }

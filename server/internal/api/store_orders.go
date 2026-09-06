@@ -26,6 +26,7 @@ var (
 	ErrStoreShippingUnavailable = errors.New("store order shipping unavailable")
 	ErrStoreShippingLocked      = errors.New("store order shipping locked")
 	ErrStoreShippingRequired    = errors.New("store order shipping required")
+	ErrStoreProductOutOfStock   = errors.New("store product out of stock")
 )
 
 func (s *Server) requireStoreOrderReviewer(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
@@ -33,11 +34,28 @@ func (s *Server) requireStoreOrderReviewer(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return auth.User{}, false
 	}
-	if !s.hasGlobalPermission(r, user.ID, "store.order.review") {
+	if !s.hasGlobalPermission(r, user.ID, "store.order.review") && !s.hasGlobalPermission(r, user.ID, "store.order.fulfill") {
 		writeAuthError(w, r, ErrPermissionDenied)
 		return auth.User{}, false
 	}
 	return user, true
+}
+
+func (s *Server) requireStoreOrderFulfiller(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return auth.User{}, false
+	}
+	if !s.hasGlobalPermission(r, user.ID, "store.order.fulfill") {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return auth.User{}, false
+	}
+	return user, true
+}
+
+func (s *Server) canViewFullShipping(r *http.Request, userID string) bool {
+	return s.hasGlobalPermission(r, userID, "store.order.shipping.view_full") ||
+		s.hasGlobalPermission(r, userID, "store.order.fulfill")
 }
 
 func validStoreOrderStatus(status string) bool {
@@ -133,7 +151,8 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	if _, ok := s.requireStoreOrderReviewer(w, r); !ok {
+	user, ok := s.requireStoreOrderReviewer(w, r)
+	if !ok {
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
@@ -200,8 +219,9 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := make([]map[string]any, 0, limit+1)
 	var lastCursor storeOrderCursor
+	canViewFullList := s.canViewFullShipping(r, user.ID)
 	for rows.Next() {
-		item, err := scanAdminStoreOrder(rows)
+		item, err := scanAdminStoreOrder(rows, canViewFullList)
 		if err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -233,7 +253,7 @@ type storeOrderRowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanAdminStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
+func scanAdminStoreOrder(scanner storeOrderRowScanner, fullShipping bool) (map[string]any, error) {
 	var id, userID, username, nickname, productID, productName, status, fulfillmentStatus, reviewedBy, reviewReason string
 	var recipientName, phone, province, city, district, addressDetail, carrier, trackingNo string
 	var points, userPoints, balanceAtSubmit, invalidatedCount, invalidatedPoints int64
@@ -263,19 +283,27 @@ func scanAdminStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
 		item["reviewed_at"] = reviewedAt.Time
 	}
 	if submittedAt.Valid {
-		item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt)
+		item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt, fullShipping)
 	}
 	return item, nil
 }
 
-func storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo string, submittedAt, updatedAt sql.NullTime) map[string]any {
+func storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo string, submittedAt, updatedAt sql.NullTime, full bool) map[string]any {
+	nameVal := recipientName
+	phoneVal := phone
+	addrVal := addressDetail
+	if !full {
+		nameVal = maskRecipientName(recipientName)
+		phoneVal = maskPhone(phone)
+		addrVal = maskAddressDetail(addressDetail)
+	}
 	item := map[string]any{
-		"recipient_name": recipientName,
-		"phone":          phone,
+		"recipient_name": nameVal,
+		"phone":          phoneVal,
 		"province":       province,
 		"city":           city,
 		"district":       district,
-		"address_detail": addressDetail,
+		"address_detail": addrVal,
 		"carrier":        carrier,
 		"tracking_no":    trackingNo,
 		"masked_name":    maskRecipientName(recipientName),
@@ -289,6 +317,14 @@ func storeOrderShippingPayload(recipientName, phone, province, city, district, a
 		item["updated_at"] = updatedAt.Time
 	}
 	return item
+}
+
+func maskAddressDetail(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	return strings.Repeat("*", min(len([]rune(detail)), 8))
 }
 
 func maskRecipientName(name string) string {
@@ -325,13 +361,22 @@ func (s *Server) getAdminStoreOrder(w http.ResponseWriter, r *http.Request, orde
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	if _, ok := s.requireStoreOrderReviewer(w, r); !ok {
+	operator, ok := s.requireStoreOrderReviewer(w, r)
+	if !ok {
 		return
 	}
-	order, err := s.loadAdminStoreOrder(r.Context(), s.db, orderID)
+	canViewFull := s.canViewFullShipping(r, operator.ID)
+	order, err := s.loadAdminStoreOrder(r.Context(), s.db, orderID, canViewFull)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrStoreOrderNotFound)
 		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if canViewFull && order["shipping"] != nil {
+		_ = appendAdminLog(r.Context(), s.db, operator.ID, "store.shipping.view", "store_order", orderID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{"order_id": orderID}, time.Now().UTC())
 	}
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -488,7 +533,7 @@ func scanMyStoreOrder(scanner storeOrderRowScanner) (map[string]any, error) {
 		item["completed_at"] = completedAt.Time
 	}
 	if submittedAt.Valid {
-		item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt)
+		item["shipping"] = storeOrderShippingPayload(recipientName, phone, province, city, district, addressDetail, carrier, trackingNo, submittedAt, shippingUpdatedAt, true)
 	}
 	return item, nil
 }
@@ -586,7 +631,7 @@ func (s *Server) shipAdminStoreOrder(w http.ResponseWriter, r *http.Request, ord
 	if !s.requireDatabase(w, r) {
 		return
 	}
-	operator, ok := s.requireStoreOrderReviewer(w, r)
+	operator, ok := s.requireStoreOrderFulfiller(w, r)
 	if !ok {
 		return
 	}
@@ -658,7 +703,17 @@ func (s *Server) shipAdminStoreOrder(w http.ResponseWriter, r *http.Request, ord
 		writeInternalError(w, r, err)
 		return
 	}
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE store_products
+		SET stock_reserved = GREATEST(stock_reserved - 1, 0),
+		    stock_fulfilled = stock_fulfilled + 1,
+		    updated_at = $2
+		WHERE id = (SELECT product_id FROM store_orders WHERE id = $1)`, orderID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	if err := appendAdminLogTx(r.Context(), tx, operator.ID, "store.order.ship", "store_order", orderID, input.Carrier+" "+input.TrackingNo, requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+		"order_id":     orderID,
 		"user_id":      userID,
 		"product_name": productName,
 		"carrier":      input.Carrier,
@@ -684,7 +739,7 @@ func (s *Server) shipAdminStoreOrder(w http.ResponseWriter, r *http.Request, ord
 		writeInternalError(w, r, err)
 		return
 	}
-	item, err := s.loadAdminStoreOrder(r.Context(), tx, orderID)
+	item, err := s.loadAdminStoreOrder(r.Context(), tx, orderID, true)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -915,7 +970,7 @@ func (s *Server) getAdminStoreOrderRewardContent(w http.ResponseWriter, r *http.
 
 func (s *Server) loadAdminStoreOrder(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, orderID string) (map[string]any, error) {
+}, orderID string, fullShipping bool) (map[string]any, error) {
 	// 该辅助函数只用于复用列表字段；context 类型由调用方保证为 request.Context。
 	row := queryer.QueryRowContext(ctx, `
 		SELECT o.id, o.user_id, u.username, COALESCE(up.nickname, u.username),
@@ -940,7 +995,7 @@ func (s *Server) loadAdminStoreOrder(ctx context.Context, queryer interface {
 		JOIN store_products p ON p.id = o.product_id
 		LEFT JOIN store_order_shipping s ON s.order_id = o.id
 		WHERE o.id = $1`, orderID)
-	return scanAdminStoreOrder(row)
+	return scanAdminStoreOrder(row, fullShipping)
 }
 
 func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, orderID string) {
@@ -1085,6 +1140,20 @@ func (s *Server) reviewAdminStoreOrder(w http.ResponseWriter, r *http.Request, o
 			writeInternalError(w, r, err)
 			return
 		}
+		stockRes, stockErr := tx.ExecContext(r.Context(), `
+			UPDATE store_products
+			SET stock_reserved = stock_reserved + 1, updated_at = $2
+			WHERE id = (SELECT product_id FROM store_orders WHERE id = $1)
+			  AND (stock_total - stock_reserved - stock_fulfilled) >= 1`, orderID, now)
+		if stockErr != nil {
+			writeInternalError(w, r, stockErr)
+			return
+		}
+		affected, _ := stockRes.RowsAffected()
+		if affected == 0 {
+			writeAuthError(w, r, ErrStoreProductOutOfStock)
+			return
+		}
 	}
 	if _, err := tx.ExecContext(r.Context(), `
 		UPDATE store_orders
@@ -1213,4 +1282,183 @@ func insertStorePointInvalidations(ctx context.Context, tx *sql.Tx, userID, orde
 		WHERE pt.user_id = $1 AND pt.id IN (`+strings.Join(placeholders, ",")+`)
 		ON CONFLICT (point_transaction_id) DO NOTHING`, args...)
 	return err
+}
+
+func (s *Server) completeMyStoreOrder(w http.ResponseWriter, r *http.Request, orderID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.requireRegisteredUser(w, r)
+	if !ok {
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	var status, fulfillmentStatus string
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT status, fulfillment_status
+		FROM store_orders
+		WHERE id = $1 AND user_id = $2
+		FOR UPDATE`, orderID, user.ID).Scan(&status, &fulfillmentStatus); errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrStoreOrderNotFound)
+		return
+	} else if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	if status != "approved" || fulfillmentStatus != "shipped" {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusConflict,
+			Code:    "STORE_ORDER_NOT_SHIPPED",
+			Message: "订单尚未发货或已处于完成状态",
+		})
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE store_orders
+		SET fulfillment_status = 'completed', completed_at = $2, updated_at = $2
+		WHERE id = $1 AND fulfillment_status = 'shipped'`, orderID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	item, err := s.loadMyStoreOrder(r.Context(), tx, user.ID, orderID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) completeAdminStoreOrder(w http.ResponseWriter, r *http.Request, orderID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	operator, ok := s.requireStoreOrderFulfiller(w, r)
+	if !ok {
+		return
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	var status, fulfillmentStatus string
+	if err := tx.QueryRowContext(r.Context(), `
+		SELECT status, fulfillment_status
+		FROM store_orders
+		WHERE id = $1
+		FOR UPDATE`, orderID).Scan(&status, &fulfillmentStatus); errors.Is(err, sql.ErrNoRows) {
+		writeAuthError(w, r, ErrStoreOrderNotFound)
+		return
+	} else if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	if status != "approved" || fulfillmentStatus != "shipped" {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusConflict,
+			Code:    "STORE_ORDER_NOT_SHIPPED",
+			Message: "订单尚未发货或已处于完成状态",
+		})
+		return
+	}
+
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE store_orders
+		SET fulfillment_status = 'completed', completed_at = $2, updated_at = $2
+		WHERE id = $1 AND fulfillment_status = 'shipped'`, orderID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	if err := appendAdminLogTx(r.Context(), tx, operator.ID, "store.order.complete", "store_order", orderID, "管理员手动完成订单", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+		"order_id":    orderID,
+		"from_status": "shipped",
+		"to_status":   "completed",
+	}, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	item, err := s.loadAdminStoreOrder(r.Context(), tx, orderID, true)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) getAdminStoreOrderCounts(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	if _, ok := s.requireStoreOrderReviewer(w, r); !ok {
+		return
+	}
+	rows, err := s.db.QueryContext(r.Context(), `
+		SELECT status, fulfillment_status, COUNT(*)
+		FROM store_orders
+		GROUP BY status, fulfillment_status`)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer rows.Close()
+
+	counts := map[string]int64{
+		"pending_review":   0,
+		"awaiting_address": 0,
+		"ready_to_ship":    0,
+		"shipped":          0,
+		"completed":        0,
+		"rejected":         0,
+		"all":              0,
+	}
+	for rows.Next() {
+		var st, fs string
+		var c int64
+		if err := rows.Scan(&st, &fs, &c); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		counts["all"] += c
+		if st == "pending_review" {
+			counts["pending_review"] += c
+		} else if st == "rejected" {
+			counts["rejected"] += c
+		} else if st == "approved" {
+			switch fs {
+			case "awaiting_address":
+				counts["awaiting_address"] += c
+			case "ready_to_ship":
+				counts["ready_to_ship"] += c
+			case "shipped":
+				counts["shipped"] += c
+			case "completed":
+				counts["completed"] += c
+			}
+		}
+	}
+	httpserver.WriteJSON(w, http.StatusOK, counts)
 }

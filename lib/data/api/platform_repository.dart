@@ -1339,6 +1339,11 @@ class PlatformRepository {
     );
   }
 
+  Future<Map<String, int>> getStoreOrderCounts() async {
+    final payload = await _client.getJson('/api/v1/admin/store/orders/counts');
+    return payload.map((key, value) => MapEntry(key, _int(value)));
+  }
+
   Future<AdminStoreOrderDetail> getStoreOrder(String id) async {
     final payload = await _client.getJson('/api/v1/admin/store/orders/$id');
     final rawSources = payload['point_sources'];

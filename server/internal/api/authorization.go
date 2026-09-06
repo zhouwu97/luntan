@@ -31,6 +31,8 @@ const (
 	capViewAdminLogs     = "can_view_admin_logs"
 	capManageUsers       = "can_manage_users"
 	capReviewStoreOrders = "can_review_store_orders"
+	capFulfillStoreOrders = "can_fulfill_store_orders"
+	capViewFullShipping   = "can_view_full_shipping"
 )
 
 // capabilitiesForUser 是未查询角色权限前的基础能力集合。
@@ -40,23 +42,25 @@ const (
 func capabilitiesForUser(user auth.User) map[string]bool {
 	if user.ID == "" && user.Username == "" && user.AccountType == "" {
 		return map[string]bool{
-			capPublish:           false,
-			capCreatePoll:        false,
-			capManageBookmarks:   false,
-			capBookmark:          false,
-			capComment:           false,
-			capLike:              false,
-			capReport:            false,
-			capFollow:            false,
-			capUploadMedia:       false,
-			capVote:              false,
-			capManageProfile:     false,
-			capModerate:          false,
-			capManageAdmins:      false,
-			capBanIP:             false,
-			capViewAdminLogs:     false,
-			capManageUsers:       false,
-			capReviewStoreOrders: false,
+			capPublish:            false,
+			capCreatePoll:         false,
+			capManageBookmarks:    false,
+			capBookmark:           false,
+			capComment:            false,
+			capLike:               false,
+			capReport:             false,
+			capFollow:             false,
+			capUploadMedia:        false,
+			capVote:               false,
+			capManageProfile:      false,
+			capModerate:           false,
+			capManageAdmins:       false,
+			capBanIP:              false,
+			capViewAdminLogs:      false,
+			capManageUsers:        false,
+			capReviewStoreOrders:  false,
+			capFulfillStoreOrders: false,
+			capViewFullShipping:   false,
 		}
 	}
 	registered := user.AccountType != "guest"
@@ -68,18 +72,20 @@ func capabilitiesForUser(user auth.User) map[string]bool {
 		capComment:         true,
 		// 游客点赞属于低风险参与行为，保留历史产品规则；发布、收藏、关注等
 		// 会形成长期账户资产或扩散关系的能力仍需邮箱账号。
-		capLike:              true,
-		capReport:            true,
-		capFollow:            registered,
-		capUploadMedia:       registered,
-		capVote:              registered,
-		capManageProfile:     registered,
-		capModerate:          false,
-		capManageAdmins:      false,
-		capBanIP:             false,
-		capViewAdminLogs:     false,
-		capManageUsers:       false,
-		capReviewStoreOrders: false,
+		capLike:               true,
+		capReport:             true,
+		capFollow:             registered,
+		capUploadMedia:        registered,
+		capVote:               registered,
+		capManageProfile:      registered,
+		capModerate:           false,
+		capManageAdmins:       false,
+		capBanIP:              false,
+		capViewAdminLogs:      false,
+		capManageUsers:        false,
+		capReviewStoreOrders:  false,
+		capFulfillStoreOrders: false,
+		capViewFullShipping:   false,
 	}
 }
 
@@ -100,6 +106,11 @@ func applyPermissionCapability(caps map[string]bool, role, permission string) {
 		caps[capManageUsers] = caps[capManageUsers] || role == "platform_admin" || role == "super_admin"
 	case "store.order.review":
 		caps[capReviewStoreOrders] = true
+	case "store.order.fulfill":
+		caps[capFulfillStoreOrders] = true
+		caps[capViewFullShipping] = true
+	case "store.order.shipping.view_full":
+		caps[capViewFullShipping] = true
 	}
 	if role == "super_admin" {
 		caps[capManageAdmins] = true

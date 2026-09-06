@@ -19,15 +19,16 @@ func TestStoreProductImagesAreExposedByCatalogAndServer(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT p.id, p.name, p.description, p.emoji, p.points, p.color,
+		       p.stock_total, p.stock_reserved, p.stock_fulfilled,
 		       COUNT(o.id) FILTER (WHERE o.status IN ('approved', 'claimed', 'completed')) AS redeemed_count
 		FROM store_products p
 		LEFT JOIN store_orders o ON o.product_id = p.id
 		WHERE p.active = true
-		GROUP BY p.id, p.name, p.description, p.emoji, p.points, p.color
+		GROUP BY p.id, p.name, p.description, p.emoji, p.points, p.color, p.stock_total, p.stock_reserved, p.stock_fulfilled
 		ORDER BY redeemed_count DESC, p.points ASC, p.id ASC`)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "description", "emoji", "points", "color", "redeemed_count",
-		}).AddRow("badge", "论坛纪念徽章", "论坛限定周边", "🏅", 60, 16766842, 0))
+			"id", "name", "description", "emoji", "points", "color", "stock_total", "stock_reserved", "stock_fulfilled", "redeemed_count",
+		}).AddRow("badge", "论坛纪念徽章", "论坛限定周边", "🏅", 60, 16766842, 100, 0, 0, 0))
 
 	handler := NewHandler(db)
 	catalogResponse := httptest.NewRecorder()

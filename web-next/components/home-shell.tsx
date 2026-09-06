@@ -284,7 +284,6 @@ export function HomeShell() {
       <main className="page-frame home-page-frame">
         {/* 移动端专属快捷分段栏与入口金刚区 */}
         <div className="home-mobile-navigation">
-          {/* 顶部三项的中间槽位固定用于下载入口，快捷区保持四项。 */}
           <HomeCommunityTabs
             communities={communities}
             activeId={activeCommunityId}

@@ -240,6 +240,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/admin/users":
 		s.listManagedUsers(w, r)
 		return
+	case r.Method == http.MethodGet && path == "/api/v1/admin/store/orders/counts":
+		s.getAdminStoreOrderCounts(w, r)
+		return
 	case r.Method == http.MethodGet && path == "/api/v1/admin/store/orders":
 		s.listAdminStoreOrders(w, r)
 		return
@@ -265,6 +268,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/store/orders/"), "/ship")
 		if orderID != "" && !strings.Contains(orderID, "/") {
 			s.shipAdminStoreOrder(w, r, orderID)
+			return
+		}
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/admin/store/orders/") && strings.HasSuffix(path, "/complete"):
+		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/store/orders/"), "/complete")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.completeAdminStoreOrder(w, r, orderID)
 			return
 		}
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/admin/users/"):
@@ -422,16 +431,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "/api/v1/store/orders":
 		s.createStoreOrder(w, r)
 		return
-	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/me/store-orders/"):
-		orderID := strings.TrimPrefix(path, "/api/v1/me/store-orders/")
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/me/store-orders/") && strings.HasSuffix(path, "/complete"):
+		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/me/store-orders/"), "/complete")
 		if orderID != "" && !strings.Contains(orderID, "/") {
-			s.getMyStoreOrder(w, r, orderID)
+			s.completeMyStoreOrder(w, r, orderID)
 			return
 		}
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/me/store-orders/") && strings.HasSuffix(path, "/shipping"):
 		orderID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/me/store-orders/"), "/shipping")
 		if orderID != "" && !strings.Contains(orderID, "/") {
 			s.updateMyStoreOrderShipping(w, r, orderID)
+			return
+		}
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/me/store-orders/"):
+		orderID := strings.TrimPrefix(path, "/api/v1/me/store-orders/")
+		if orderID != "" && !strings.Contains(orderID, "/") {
+			s.getMyStoreOrder(w, r, orderID)
 			return
 		}
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/posts/"):
@@ -1256,6 +1271,8 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_SHIPPING_LOCKED", Message: "订单已发货，收货信息不能再修改"}
 	case errors.Is(err, ErrStoreShippingRequired):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_SHIPPING_REQUIRED", Message: "请先提交收货信息后再发货"}
+	case errors.Is(err, ErrStoreProductOutOfStock):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "STORE_PRODUCT_OUT_OF_STOCK", Message: "该商品暂无可用库存"}
 	case errors.Is(err, ErrBookmarkFolderNotFound):
 		appErr = httpserver.AppError{Status: http.StatusNotFound, Code: "BOOKMARK_FOLDER_NOT_FOUND", Message: "收藏夹不存在"}
 	case errors.Is(err, ErrDefaultBookmarkFolder):

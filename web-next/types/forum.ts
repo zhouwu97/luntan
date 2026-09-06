@@ -348,6 +348,10 @@ export interface StoreProduct {
   color: number;
   imageUrl?: string;
   redeemedCount: number;
+  stock?: number;
+  stockTotal?: number;
+  stockReserved?: number;
+  stockFulfilled?: number;
 }
 
 export interface StoreOrderShipping {
@@ -404,5 +408,7 @@ export interface PointTransaction {
 
 export interface MyPointsDetail {
   balance: number;
+  reservedPoints: number;
+  availablePoints: number;
   transactions: PointTransaction[];
 }

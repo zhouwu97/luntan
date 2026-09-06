@@ -46,6 +46,10 @@ class _RecordingFeed implements FeedRepository, QueryableFeedRepository {
     index += 1;
     return Future.value(page);
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }
 
 class _PendingFeedRequest {
@@ -81,6 +85,10 @@ class _PendingFeed implements FeedRepository, QueryableFeedRepository {
     requests.add(request);
     return request.completer.future;
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }
 
 class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
@@ -113,6 +121,10 @@ class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
     }
     return Future.error(StateError('模拟下一页网络失败'));
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }
 
 Post _post(String id, String communityId) => Post(

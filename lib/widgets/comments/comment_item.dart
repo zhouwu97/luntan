@@ -17,13 +17,14 @@ import 'emoji/sticker_catalog.dart';
 /// - 顶部单据行：头像、昵称、等级标签、楼主专属徽章、相对时间与楼层序号。
 /// - 内容区：正文（支持网址点击）、多图网格 / 单图等比缩放、贴纸表情。
 /// - 操作栏：点赞、踩、回复、更多按钮，具备舒适的触控热区（>= 36dp）。
-/// - 嵌套：展开/折叠式二级回复内嵌预览（`CommentReplyPreview`）。
+/// - 嵌套：默认展示二级回复预览；帖子详情可关闭预览，统一从回复入口进入楼中楼。
 class CommentItem extends StatefulWidget {
   const CommentItem({
     super.key,
     required this.comment,
     required this.floor,
     this.replies = const [],
+    this.showReplyPreview = true,
     this.isHighlighted = false,
     this.isPostAuthor = false,
     this.onReply,
@@ -41,6 +42,7 @@ class CommentItem extends StatefulWidget {
   final Comment comment;
   final int floor;
   final List<Comment> replies;
+  final bool showReplyPreview;
   final bool isHighlighted;
   final bool isPostAuthor;
   final VoidCallback? onReply;
@@ -70,15 +72,13 @@ class _CommentItemState extends State<CommentItem>
       vsync: this,
       duration: AppMotion.highlightFade,
     );
-    _highlightAnimation = ColorTween(
-      begin: const Color(0xFFEDF6FF),
-      end: Colors.white,
-    ).animate(
-      CurvedAnimation(
-        parent: _highlightController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    _highlightAnimation =
+        ColorTween(begin: const Color(0xFFEDF6FF), end: Colors.white).animate(
+          CurvedAnimation(
+            parent: _highlightController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
     if (widget.isHighlighted) {
       _highlightController.forward();
     }
@@ -150,10 +150,7 @@ class _CommentItemState extends State<CommentItem>
             decoration: BoxDecoration(
               color: cardColor,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: const Color(0xFFE3EAF2),
-                width: 1.0,
-              ),
+              border: Border.all(color: const Color(0xFFE3EAF2), width: 1.0),
             ),
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             child: child,
@@ -348,7 +345,8 @@ class _CommentItemState extends State<CommentItem>
             ),
 
           // 二级评论预览
-          if (widget.replies.isNotEmpty || comment.replyCount > 0)
+          if (widget.showReplyPreview &&
+              (widget.replies.isNotEmpty || comment.replyCount > 0))
             CommentReplyPreview(
               replies: widget.replies,
               totalReplyCount: comment.replyCount,
@@ -395,15 +393,12 @@ class _CommentItemState extends State<CommentItem>
     final height = media.height;
     final double? aspectRatio =
         (width != null && height != null && width > 0 && height > 0)
-            ? (width / height)
-            : null;
+        ? (width / height)
+        : null;
 
     return GestureDetector(
-      onTap: () => _openImageGallery(
-        context,
-        mediaList: gallery,
-        initialIndex: index,
-      ),
+      onTap: () =>
+          _openImageGallery(context, mediaList: gallery, initialIndex: index),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Container(

@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import type { Community } from "../types/forum";
+import { Icon } from "./icons";
 
 const preferredOrder = ["大型拆箱", "酱紫社区", "杂鱼日常"];
 
@@ -32,7 +34,20 @@ export function HomeCommunityTabs({
 
   return (
     <div className="home-community-tabs" role="tablist" aria-label="首页社区板块切换">
-      {displayList.map((community) => {
+      {displayList.map((community, index) => {
+        if (index === 1) {
+          return (
+            <Link
+              key="download-app"
+              href="/download"
+              className="home-community-download-tab"
+              aria-label="下载 App"
+            >
+              <Icon name="download" size={17} />
+              <span>下载 App</span>
+            </Link>
+          );
+        }
         const isCampus = community.name.trim() === "酱紫社区";
         // 若没有显式指定 activeId，在移动端语义上高亮“酱紫社区”
         const isActive = activeId

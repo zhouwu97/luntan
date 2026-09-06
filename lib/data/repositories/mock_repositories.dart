@@ -340,6 +340,24 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
       hasMore: end < posts.length,
     );
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async {
+    final matches = _store.posts.where((p) => p.id == postId);
+    if (matches.isNotEmpty) {
+      final post = matches.first;
+      post.viewCount += 1;
+      return PostViewResult(
+        postId: postId,
+        recorded: true,
+        viewCount: post.viewCount,
+      );
+    }
+    return PostViewResult(
+      postId: postId,
+      recorded: false,
+    );
+  }
 }
 
 class MockPostRepository implements PostRepository, PostMutationRepository {

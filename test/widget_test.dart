@@ -15,6 +15,7 @@ import 'package:luntan/screens/profile_screen.dart';
 import 'package:luntan/screens/settings_screen.dart';
 import 'package:luntan/widgets/app_network_image.dart';
 import 'package:luntan/widgets/comments/comment_item.dart';
+import 'package:luntan/widgets/comments/comment_reply_preview.dart';
 import 'package:luntan/widgets/forum_post_card.dart';
 import 'package:luntan/widgets/post_media_preview.dart';
 import 'package:luntan/widgets/search/search_post_row.dart';
@@ -103,7 +104,7 @@ void main() {
     expect(find.byType(PostDetailScreen), findsOneWidget);
   });
 
-  testWidgets('开箱帖子详情显示评论并保留楼中楼入口', (tester) async {
+  testWidgets('开箱帖子详情显示评论并保留楼中楼入口且不展示回复预览', (tester) async {
     await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
@@ -114,6 +115,7 @@ void main() {
 
     expect(find.text('评论 24'), findsOneWidget);
     expect(find.byType(CommentItem), findsWidgets);
+    expect(find.byType(CommentReplyPreview), findsNothing);
   });
 
   testWidgets('首页最新排序下显示按回复与按发帖胶囊并支持切换', (tester) async {

@@ -5,6 +5,7 @@ import 'package:luntan/controllers/post_detail_controller.dart';
 import 'package:luntan/data/mock_forum_data.dart';
 import 'package:luntan/data/repository_provider.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
+import 'package:luntan/domain/models.dart';
 import 'package:luntan/domain/repositories.dart';
 
 void main() {
@@ -77,4 +78,8 @@ class _EmptyFeedRepository implements FeedRepository {
   @override
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) async =>
       const FeedPage(items: []);
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }

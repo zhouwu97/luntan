@@ -54,7 +54,9 @@ export function AuthForm() {
   }, [seconds]);
 
   useEffect(() => {
-    if (user) router.replace(destination);
+    if (user && user.accountType !== "guest") {
+      router.replace(destination);
+    }
   }, [destination, router, user]);
 
   function clearFeedback() {
@@ -161,6 +163,10 @@ export function AuthForm() {
   }
 
   async function handleGuest() {
+    if (user?.accountType === "guest") {
+      router.replace(destination);
+      return;
+    }
     setGuestBusy(true);
     setError("");
     try {
@@ -216,6 +222,27 @@ export function AuthForm() {
               : "和同好聊聊最近的新发现"}
           </p>
         </div>
+
+        {user?.accountType === "guest" && (
+          <div
+            className="auth-guest-notice"
+            style={{
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: 12,
+              padding: "10px 14px",
+              fontSize: 13,
+              color: "#1e40af",
+              marginBottom: 16,
+              lineHeight: 1.5,
+            }}
+          >
+            <strong>当前处于游客模式：</strong>
+            {mode === "register"
+              ? "注册正式账号后，将自动继承当前游客身份产生的浏览、评论与经验数据。"
+              : "若已有正式账号，登录后将切换至正式账号身份。"}
+          </div>
+        )}
 
         {/* 模式切换 Tabs（登录 / 注册） */}
         <div className="auth-mode-tabs" role="tablist" aria-label="登录或注册">
@@ -510,7 +537,11 @@ export function AuthForm() {
           onClick={handleGuest}
         >
           <Icon name="eye" size={17} />
-          {guestBusy ? "正在创建游客身份…" : "先逛逛，使用游客身份体验"}
+          {guestBusy
+            ? "正在创建游客身份…"
+            : user?.accountType === "guest"
+            ? "以当前游客身份继续"
+            : "先逛逛，使用游客身份体验"}
         </button>
         <p className="auth-footnote">
           游客可以浏览和评论，注册邮箱账号后可解锁等级、发帖与收藏。

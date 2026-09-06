@@ -10,7 +10,7 @@ export function BottomNav({
   activeNav?: "home" | "profile";
 }) {
   const router = useRouter();
-  const { user } = useSession();
+  const { user, isRegistered } = useSession();
 
   return (
     <nav className="bottom-nav" aria-label="底部导航">
@@ -28,8 +28,8 @@ export function BottomNav({
         className="publish-fab"
         aria-label="发布"
         onClick={() => {
-          if (!user) {
-            router.push(`/login?next=${encodeURIComponent("/publish")}`);
+          if (!isRegistered) {
+            router.push(`/login?mode=register&next=${encodeURIComponent("/publish")}`);
           } else {
             router.push("/publish");
           }

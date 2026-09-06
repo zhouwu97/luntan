@@ -185,6 +185,9 @@ class ProfileRepository {
   Future<void> recordHistory(String postId) =>
       _client.postJson('/api/v1/posts/$postId/history').then((_) {});
 
+  Future<void> recordPostView(String postId) =>
+      _client.postJson('/api/v1/posts/$postId/view').then((_) {});
+
   Future<void> clearHistory() => _client.deleteJson('/api/v1/me/history');
 
   Future<ProfileSummary> updateProfile({

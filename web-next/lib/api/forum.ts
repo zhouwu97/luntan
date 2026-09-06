@@ -25,6 +25,13 @@ import type {
   ReportResult,
   SearchResults,
   SessionUser,
+  StoreOrder,
+  StoreOrderPage,
+  StoreOrderShipping,
+  StoreProduct,
+  StoreShippingInput,
+  PointTransaction,
+  MyPointsDetail,
   UserSummary,
 } from "../../types/forum";
 import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
@@ -1004,6 +1011,125 @@ export async function getMyPoints(): Promise<{ points: number; experience: numbe
   return {
     points: asNumber(payload.balance ?? payload.points),
     experience: asNumber(payload.experience),
+  };
+}
+
+function parseStoreProduct(raw: unknown): StoreProduct {
+  const item = asRecord(raw);
+  const rawImg = asString(item.image_url) || asString(item.imageUrl);
+  return {
+    id: asString(item.id),
+    name: asString(item.name, "未命名商品"),
+    description: asString(item.description),
+    emoji: asString(item.emoji, "🎁"),
+    points: asNumber(item.points),
+    color: asNumber(item.color),
+    imageUrl: resolveMediaUrl(rawImg, "detail"),
+    redeemedCount: asNumber(item.redeemed_count ?? item.redeemedCount),
+  };
+}
+
+function parseStoreOrder(raw: unknown): StoreOrder {
+  const item = asRecord(raw);
+  const shippingRaw = item.shipping ? asRecord(item.shipping) : undefined;
+  let shipping: StoreOrderShipping | undefined;
+  if (shippingRaw) {
+    shipping = {
+      recipientName: asString(shippingRaw.recipient_name ?? shippingRaw.recipientName),
+      phone: asString(shippingRaw.phone),
+      province: asString(shippingRaw.province),
+      city: asString(shippingRaw.city),
+      district: asString(shippingRaw.district) || undefined,
+      addressDetail: asString(shippingRaw.address_detail ?? shippingRaw.addressDetail),
+      carrier: asString(shippingRaw.carrier) || undefined,
+      trackingNo: asString(shippingRaw.tracking_no ?? shippingRaw.trackingNo) || undefined,
+      submittedAt: asString(shippingRaw.submitted_at ?? shippingRaw.submittedAt) || undefined,
+      updatedAt: asString(shippingRaw.updated_at ?? shippingRaw.updatedAt) || undefined,
+    };
+  }
+  return {
+    id: asString(item.id),
+    productId: asString(item.product_id ?? item.productId),
+    productName: asString(item.product_name ?? item.productName, "社区商品"),
+    points: asNumber(item.points),
+    status: asString(item.status, "pending_review"),
+    fulfillmentStatus: asString(item.fulfillment_status ?? item.fulfillmentStatus, "none"),
+    createdAt: asString(item.created_at ?? item.createdAt),
+    reviewReason: asString(item.review_reason ?? item.reviewReason) || undefined,
+    reviewedAt: asString(item.reviewed_at ?? item.reviewedAt) || undefined,
+    shippedAt: asString(item.shipped_at ?? item.shippedAt) || undefined,
+    completedAt: asString(item.completed_at ?? item.completedAt) || undefined,
+    shipping,
+  };
+}
+
+function parsePointTransaction(raw: unknown): PointTransaction {
+  const item = asRecord(raw);
+  return {
+    id: asString(item.id),
+    source: asString(item.source),
+    delta: asNumber(item.delta),
+    balanceAfter: asNumber(item.balance_after ?? item.balanceAfter),
+    reason: asString(item.reason),
+    createdAt: asString(item.created_at ?? item.createdAt),
+  };
+}
+
+export async function getStoreProducts(): Promise<StoreProduct[]> {
+  const payload = await apiJson<{ items?: unknown[] }>("/store/products");
+  return Array.isArray(payload.items) ? payload.items.map(parseStoreProduct) : [];
+}
+
+export async function createStoreOrder(productId: string): Promise<StoreOrder> {
+  const payload = await apiPost<JsonRecord>(
+    "/store/orders",
+    { product_id: productId },
+    { "Idempotency-Key": newIdempotencyKey("store-order") },
+  );
+  return parseStoreOrder(payload);
+}
+
+export async function getMyStoreOrders(cursor?: string, limit = 20): Promise<StoreOrderPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const payload = await apiJson<{ items?: unknown[]; next_cursor?: string; has_more?: boolean }>(
+    `/me/store-orders?${params.toString()}`,
+  );
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseStoreOrder) : [],
+    nextCursor: asString(payload.next_cursor) || undefined,
+    hasMore: payload.has_more === true,
+  };
+}
+
+export async function getMyStoreOrder(orderId: string): Promise<StoreOrder> {
+  return parseStoreOrder(await apiJson<JsonRecord>(`/me/store-orders/${encodeURIComponent(orderId)}`));
+}
+
+export async function updateStoreOrderShipping(
+  orderId: string,
+  input: StoreShippingInput,
+): Promise<StoreOrder> {
+  const payload = await apiJson<JsonRecord>(`/me/store-orders/${encodeURIComponent(orderId)}/shipping`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipient_name: input.recipientName.trim(),
+      phone: input.phone.trim(),
+      province: input.province.trim(),
+      city: input.city.trim(),
+      district: input.district?.trim() || "",
+      address_detail: input.addressDetail.trim(),
+    }),
+  });
+  return parseStoreOrder(payload);
+}
+
+export async function getMyPointsDetail(): Promise<MyPointsDetail> {
+  const payload = await apiJson<{ balance?: unknown; transactions?: unknown[] }>("/me/points");
+  return {
+    balance: asNumber(payload.balance),
+    transactions: Array.isArray(payload.transactions) ? payload.transactions.map(parsePointTransaction) : [],
   };
 }
 

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -14,6 +13,7 @@ import '../data/api/comment_repository.dart';
 import '../data/api/platform_repository.dart';
 import '../data/api/poll_repository.dart';
 import '../data/api/publish_repository.dart';
+import '../services/media_upload_service.dart';
 import '../data/app_links.dart';
 import '../domain/models.dart';
 import '../theme/app_motion.dart';
@@ -134,55 +134,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   Future<List<String>> _uploadCommentImages(List<XFile> files) async {
     if (files.isEmpty) return const [];
-    final List<String> mediaIds = [];
-    try {
-      for (final file in files) {
-        final bytes = await file.readAsBytes();
-        final lower = file.name.toLowerCase();
-        final mimeType = lower.endsWith('.png')
-            ? 'image/png'
-            : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-        final digest = sha256.convert(bytes).toString();
-        if (widget.publishRepository != null) {
-          final ticket = await widget.publishRepository!.requestMediaUpload(
-            fileName: file.name,
-            mimeType: mimeType,
-            size: bytes.length,
-            sha256: digest,
-          );
-          await widget.publishRepository!.uploadMedia(
-            ticket: ticket,
-            bytes: bytes,
-            size: bytes.length,
-            sha256: digest,
-          );
-          mediaIds.add(ticket.mediaId);
-        } else {
-          mediaIds.add(file.path);
-        }
-      }
-      return mediaIds;
-    } catch (uploadError) {
-      // 若中途第 N 张上传失败，主动清理已上传的前 N-1 张孤儿媒体，避免占用存储配额
-      if (widget.publishRepository != null) {
-        for (final mid in mediaIds) {
-          try {
-            await widget.publishRepository!.deleteMedia(mid);
-          } catch (_) {
-            // 忽略回滚阶段单个媒体删除异常，优先向上抛出原始上传错误
-          }
-        }
-      }
-      rethrow;
-    }
+    final repository = widget.publishRepository;
+    if (repository == null) return files.map((file) => file.path).toList();
+    return MediaUploadService(repository).uploadImages(files);
   }
 
   /// 当评论创建明确因客户端错误 (4xx) 失败时，安全清理已就绪但未关联的孤儿媒体；
   /// 若为超时、网络不可达或 5xx 服务端错误，由于服务端事务可能已提交但响应丢失，
   /// 禁止立即删除，交由服务端定期未引用媒体 GC 机制兜底。
-  Future<void> _cleanupUnattachedCommentMedia(List<String> mediaIds, Object error) async {
+  Future<void> _cleanupUnattachedCommentMedia(
+    List<String> mediaIds,
+    Object error,
+  ) async {
     if (widget.publishRepository == null || mediaIds.isEmpty) return;
-    final isDeterministicClientError = error is ApiException &&
+    final isDeterministicClientError =
+        error is ApiException &&
         error.statusCode != null &&
         error.statusCode! >= 400 &&
         error.statusCode! < 500;
@@ -386,9 +352,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   void _ensureFocusedCommentVisible(String commentId) {
     if (!mounted) return;
-    final targetContext = GlobalObjectKey(
-      'comment:$commentId',
-    ).currentContext;
+    final targetContext = GlobalObjectKey('comment:$commentId').currentContext;
     if (targetContext == null) return;
     Scrollable.ensureVisible(
       targetContext,
@@ -420,49 +384,53 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              Expanded(child: CommentThreadScreen(
-          rootComment: comment,
-          repository: widget.commentsController.repository,
-          postAuthorId: post?.authorId,
-          focusReplyId: focusReplyId,
-          isAuthenticated: widget.isAuthenticated,
-        onRequireAuth: widget.onRequireAuth,
-        canComment: widget.canComment ?? widget.isAuthenticated,
-        blockedMessage: _commentBlockedMessage,
-        onAuthorTap: widget.onOpenUserId,
-        onReplyDraft: (target, draft) async {
-          final mediaIds = await _uploadCommentImages(draft.localImages);
-          final stickerId = draft.sticker?.id;
-          try {
-            return await widget.commentsController.replyTo(
-              target,
-              draft.text,
-              replyToUserId: target.authorId,
-              mediaIds: mediaIds,
-              stickerId: stickerId,
-            );
-          } catch (replyError) {
-            await _cleanupUnattachedCommentMedia(mediaIds, replyError);
-            rethrow;
-          }
-        },
-        onReply: (target, content) => widget.commentsController.replyTo(
-          target,
-          content,
-          replyToUserId: target.authorId,
-        ),
-        onToggleLike: (reply) => _likeComment(reply),
-        onToggleDislike: (reply) => _dislikeComment(reply),
-        onMore: (reply) => _showCommentMenu(reply),
-        onMoreAction: (target, onDeleted) =>
-            _showCommentMenu(target, onDeleted: onDeleted),
-              )),
+              Expanded(
+                child: CommentThreadScreen(
+                  rootComment: comment,
+                  repository: widget.commentsController.repository,
+                  postAuthorId: post?.authorId,
+                  focusReplyId: focusReplyId,
+                  isAuthenticated: widget.isAuthenticated,
+                  onRequireAuth: widget.onRequireAuth,
+                  canComment: widget.canComment ?? widget.isAuthenticated,
+                  blockedMessage: _commentBlockedMessage,
+                  onAuthorTap: widget.onOpenUserId,
+                  onReplyDraft: (target, draft) async {
+                    final mediaIds = await _uploadCommentImages(
+                      draft.localImages,
+                    );
+                    final stickerId = draft.sticker?.id;
+                    try {
+                      return await widget.commentsController.replyTo(
+                        target,
+                        draft.text,
+                        replyToUserId: target.authorId,
+                        mediaIds: mediaIds,
+                        stickerId: stickerId,
+                      );
+                    } catch (replyError) {
+                      await _cleanupUnattachedCommentMedia(
+                        mediaIds,
+                        replyError,
+                      );
+                      rethrow;
+                    }
+                  },
+                  onReply: (target, content) => widget.commentsController
+                      .replyTo(target, content, replyToUserId: target.authorId),
+                  onToggleLike: (reply) => _likeComment(reply),
+                  onToggleDislike: (reply) => _dislikeComment(reply),
+                  onMore: (reply) => _showCommentMenu(reply),
+                  onMoreAction: (target, onDeleted) =>
+                      _showCommentMenu(target, onDeleted: onDeleted),
+                ),
+              ),
             ],
-        ),
+          ),
         ),
       ),
-  );
-}
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -819,8 +787,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     // 一级评论列表
                     if (allComments.isNotEmpty)
                       SliverPadding(
-                        padding:
-                            const EdgeInsets.fromLTRB(12, 10, 12, 16),
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
                         sliver: SliverList.separated(
                           itemCount: allComments.length,
                           separatorBuilder: (context, index) =>
@@ -835,6 +802,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               comment: comment,
                               floor: index + 2,
                               replies: comment.replyPreview,
+                              // 帖子楼层保持紧凑，二级回复统一从“回复”入口进入。
+                              showReplyPreview: false,
                               isHighlighted: isHighlighted,
                               isPostAuthor: post.authorId == comment.authorId,
                               onAuthorTap: widget.onOpenUserId,
@@ -859,10 +828,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               onMore: () => _showCommentMenu(comment),
                               onReplyMore: (reply) => _showCommentMenu(reply),
                               onLongPress: () => _showCommentMenu(comment),
-                              onReplyTap: (reply) =>
-                                  _openReplyThread(comment, focusReplyId: reply.id),
-                              onViewAllReplies: () =>
-                                  _openReplyThread(comment),
+                              onReplyTap: (reply) => _openReplyThread(
+                                comment,
+                                focusReplyId: reply.id,
+                              ),
+                              onViewAllReplies: () => _openReplyThread(comment),
                             );
                           },
                         ),
@@ -1042,9 +1012,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         final mediaQuery = MediaQuery.of(sheetContext);
 
         return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: mediaQuery.size.height * 0.85,
-          ),
+          constraints: BoxConstraints(maxHeight: mediaQuery.size.height * 0.85),
           child: SafeArea(
             top: false,
             minimum: EdgeInsets.only(bottom: math.max(bottomInset, 8)),
@@ -1057,7 +1025,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       post.isLiked
                           ? Icons.favorite_rounded
                           : Icons.favorite_border_rounded,
-                      color: post.isLiked ? AppTheme.pink : AppTheme.textSecondary,
+                      color: post.isLiked
+                          ? AppTheme.pink
+                          : AppTheme.textSecondary,
                     ),
                     title: Text(post.isLiked ? '取消点赞' : '点赞帖子'),
                     onTap: () {
@@ -1107,13 +1077,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         Navigator.pop(sheetContext);
                         try {
                           if (post.isRecommended) {
-                            await widget.platformRepository!.removeHomeRecommendation(
-                              post.id,
-                            );
+                            await widget.platformRepository!
+                                .removeHomeRecommendation(post.id);
                           } else {
-                            await widget.platformRepository!.setHomeRecommendation(
-                              postId: post.id,
-                            );
+                            await widget.platformRepository!
+                                .setHomeRecommendation(postId: post.id);
                           }
                           if (!mounted) return;
                           widget.onFeedback(
@@ -1123,7 +1091,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         } catch (error) {
                           if (mounted) {
                             widget.onFeedback(
-                              userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
+                              userFacingApiMessage(
+                                error,
+                                fallback: '推荐操作失败，请稍后重试',
+                              ),
                             );
                           }
                         }
@@ -1177,7 +1148,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                   if (canDelete)
                     ListTile(
-                      leading: const Icon(Icons.delete_outline, color: AppTheme.pink),
+                      leading: const Icon(
+                        Icons.delete_outline,
+                        color: AppTheme.pink,
+                      ),
                       title: const Text('删除帖子'),
                       onTap: () {
                         Navigator.pop(sheetContext);

@@ -404,7 +404,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.getByText("520", { exact: true })).toBeVisible();
 
     // 切换至“我的回复”
-    await page.getByRole("button", { name: "我的回复" }).click();
+    await page.getByRole("button", { name: "我的回复", exact: true }).click();
 
     // 验证两条回复链接均携带对应的 comment_id 锚点
     const firstLink = page.getByRole("link", { name: /同一个帖子的第一条回复/ });
@@ -1273,11 +1273,11 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.getByText("已从首页推荐中移除")).toBeVisible();
   });
 
-  test("16. 评论系统：一级评论外露最多 4 条热评预览，点击查看全部恢复楼层时间顺序", async ({ page }) => {
+  test("16. 评论系统：取消热评预览，改为外露最多 2 条紧凑回复并提供展开其余入口", async ({ page }) => {
     const mockPost = {
       id: "post-hot-replies-1",
       title: "四条热评外露结构测试帖",
-      content: "测试一级评论外露 4 条高赞热评，点击后恢复时间正序",
+      content: "测试一级评论外露 2 条高赞回复，点击展开其余后恢复时间正序",
       comment_count: 10,
       like_count: 20,
       bookmark_count: 5,
@@ -1332,12 +1332,32 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
             },
           ],
         },
+        {
+          id: "comm-root-single",
+          post_id: "post-hot-replies-1",
+          author: { id: "u-comm-single", nickname: "单回复楼主", level: 1 },
+          content: "这是只有一条二级回复的一级主评论",
+          floor: 2,
+          reply_count: 1,
+          created_at: new Date().toISOString(),
+          media: [],
+          viewer_state: { has_liked: false, has_disliked: false },
+          reply_preview: [
+            {
+              id: "rep-single-1",
+              content: "这是唯一的单条回复内容",
+              author: { id: "u-rep-s", nickname: "单回复人", level: 2 },
+              like_count: 5,
+              created_at: "2026-09-05T08:35:00Z",
+            },
+          ],
+        },
       ],
-      total: 1,
+      total: 2,
       has_more: false,
     };
 
-    // 楼中楼完整回复列表（恢复按时间/楼层顺序 asc）
+    // 楼中楼完整回复列表按时间/楼层顺序 asc
     const mockThreadReplies = [
       {
         id: "rep-hot-3",
@@ -1418,33 +1438,43 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.getByRole("heading", { name: "四条热评外露结构测试帖" })).toBeVisible();
     await expect(page.getByText("这是具有多条二级回复的一级主评论")).toBeVisible();
 
-    // 1. 验证一级评论外露 4 条热评预览
-    const hotRepliesBox = page.locator("#comment-comm-root-1 .hot-replies");
-    await expect(hotRepliesBox).toBeVisible();
-    await expect(hotRepliesBox.locator(".reply-row")).toHaveCount(4);
+    // 1. 验证取消热评预览，改为最多紧凑展示 2 条回复
+    const nested = page.locator("#comment-comm-root-1 .nested");
+    await expect(nested).toBeVisible();
+    await expect(page.locator("#comment-comm-root-1 .hot-replies")).toHaveCount(0);
+    await expect(nested.locator(".nested-reply-line")).toHaveCount(2);
+    await expect(nested).toContainText("第一条热评回复，点赞最高");
+    await expect(nested).toContainText("第二条热评回复");
 
-    // 验证热评第一名内容和热度数值呈现
-    await expect(hotRepliesBox).toContainText("第一条热评回复，点赞最高");
-    await expect(hotRepliesBox).toContainText("68");
-    await expect(hotRepliesBox).toContainText("第四条热评回复");
+    // 2. 验证多余回复展示“展开其余 4 条回复 ›”
+    const moreNested = nested.locator(".more-nested");
+    await expect(moreNested).toHaveText("展开其余 4 条回复 ›");
 
-    // 2. 点击“查看全部 6 条回复 ›”
-    const viewAllBtn = hotRepliesBox.getByRole("button", { name: /查看全部 6 条回复/ });
-    await expect(viewAllBtn).toBeVisible();
-    await viewAllBtn.click();
+    // 3. 点击“展开其余 4 条回复 ›”
+    await moreNested.click();
 
-    // 3. 验证楼中楼模态框弹出
+    // 4. 验证楼中楼模态框弹出
     const replyModal = page.getByRole("dialog", { name: /评论回复/ });
     await expect(replyModal).toBeVisible();
 
-    // 4. 验证接口调用指定了 sort=asc
+    // 5. 验证接口调用指定了 sort=asc
     expect(repliesRequestedSort).toBe("asc");
 
-    // 5. 验证在模态框中按时间第一条的“第三条热评回复（最早发言）”排在首位，且第 5、6 条按时间正常追加展示
+    // 6. 验证在模态框中按时间第一条的“第三条热评回复（最早发言）”排在首位，且第 5、6 条按时间正常追加展示
     const threadItems = replyModal.locator(".comment-reply-item");
     await expect(threadItems).toHaveCount(6);
     await expect(threadItems.first()).toContainText("第三条热评回复（最早发言）");
     await expect(threadItems.last()).toContainText("第六条最新回复");
+
+    // 7. 验证单条回复（reply_count=1）时：直接显示 1 条，无“热评预览”、无“展开其余”、无“查看全部 1 条”
+    const singleNested = page.locator("#comment-comm-root-single .nested");
+    await expect(singleNested).toBeVisible();
+    await expect(singleNested.locator(".nested-reply-line")).toHaveCount(1);
+    await expect(singleNested).toContainText("这是唯一的单条回复内容");
+    await expect(singleNested.locator(".more-nested")).toHaveCount(0);
+    await expect(page.locator("#comment-comm-root-single .hot-replies")).toHaveCount(0);
+    await expect(page.locator("#comment-comm-root-single")).not.toContainText("热评预览");
+    await expect(page.locator("#comment-comm-root-single")).not.toContainText("查看全部 1 条");
   });
 
   test("17. PC 排行榜 beiyoujiang 架构与多视口布局：display:grid、列宽、Top2/3同行、Rank4+行高及右栏智能扩展", async ({ page }) => {
@@ -1610,7 +1640,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.locator(".app-download-banner")).toBeHidden();
   });
 
-  test("18. 手机与 PC 竖屏架构隔离：390x844 手机仅保留 3 个主社区板块，PC 1440x900 完整呈现桌面三栏", async ({ page }) => {
+  test("18. 手机与 PC 竖屏架构隔离：390x844 手机保留三项顶部槽位与居中下载入口，PC 1440x900 完整呈现桌面三栏", async ({ page }) => {
     // 1. 移动端 390x844 手机视口
     await page.setViewportSize({ width: 390, height: 844 });
 
@@ -1670,12 +1700,14 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     const mobileBottomNav = page.locator("nav.bottom-nav");
     await expect(mobileBottomNav).toBeVisible();
 
-    // 移动端：严格只有 3 个社区 Tab（大型拆箱 | 酱紫社区 | 杂鱼日常），没有冗余的“全部”
+    // 移动端：三项顶部槽位为大型拆箱 | 下载 App | 杂鱼日常，下载入口固定居中。
     const communityTabs = page.locator(".home-community-tabs .home-community-tab");
-    await expect(communityTabs).toHaveCount(3);
+    await expect(communityTabs).toHaveCount(2);
     await expect(communityTabs.nth(0)).toContainText("大型拆箱");
-    await expect(communityTabs.nth(1)).toContainText("酱紫社区");
-    await expect(communityTabs.nth(2)).toContainText("杂鱼日常");
+    await expect(communityTabs.nth(1)).toContainText("杂鱼日常");
+    const downloadTab = page.locator(".home-community-tabs .home-community-download-tab");
+    await expect(downloadTab).toHaveCount(1);
+    await expect(downloadTab).toContainText("下载 App");
 
     // 移动端：桌面左侧与右侧侧边栏严格隐藏
     const desktopLeftRail = page.locator(".home-left-col");

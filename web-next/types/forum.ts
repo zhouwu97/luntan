@@ -339,3 +339,70 @@ export interface HomeRecommendationItem {
   post?: Post;
 }
 
+export interface StoreProduct {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  points: number;
+  color: number;
+  imageUrl?: string;
+  redeemedCount: number;
+}
+
+export interface StoreOrderShipping {
+  recipientName: string;
+  phone: string;
+  province: string;
+  city: string;
+  district?: string;
+  addressDetail: string;
+  carrier?: string;
+  trackingNo?: string;
+  submittedAt?: string;
+  updatedAt?: string;
+}
+
+export interface StoreShippingInput {
+  recipientName: string;
+  phone: string;
+  province: string;
+  city: string;
+  district?: string;
+  addressDetail: string;
+}
+
+export interface StoreOrder {
+  id: string;
+  productId: string;
+  productName: string;
+  points: number;
+  status: "pending_review" | "approved" | "rejected" | string;
+  fulfillmentStatus: "none" | "awaiting_address" | "ready_to_ship" | "shipped" | "completed" | "cancelled" | string;
+  createdAt: string;
+  reviewReason?: string;
+  reviewedAt?: string;
+  shippedAt?: string;
+  completedAt?: string;
+  shipping?: StoreOrderShipping;
+}
+
+export interface StoreOrderPage {
+  items: StoreOrder[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
+export interface PointTransaction {
+  id: string;
+  source: string;
+  delta: number;
+  balanceAfter: number;
+  reason: string;
+  createdAt: string;
+}
+
+export interface MyPointsDetail {
+  balance: number;
+  transactions: PointTransaction[];
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -469,7 +470,26 @@ func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), `
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_LIMIT", Message: "limit 必须是 1 到 50 之间的整数"})
+		return
+	}
+	args := []any{user.ID}
+	where := "o.user_id = $1"
+	if rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor")); rawCursor != "" {
+		cursor, decodeErr := decodeStoreOrderCursor(rawCursor)
+		if decodeErr != nil {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "兑换订单游标无效"})
+			return
+		}
+		where += " AND (o.created_at, o.id) < ($2, $3)"
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+	limitPosition := len(args) + 1
+	args = append(args, limit+1)
+
+	query := fmt.Sprintf(`
 		SELECT o.id, o.product_id, p.name, o.points, o.status, o.fulfillment_status,
 		       o.created_at, o.review_reason, o.reviewed_at, o.shipped_at, o.completed_at,
 		       COALESCE(s.recipient_name, ''), COALESCE(s.phone, ''),
@@ -480,9 +500,11 @@ func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
 		FROM store_orders o
 		JOIN store_products p ON p.id = o.product_id
 		LEFT JOIN store_order_shipping s ON s.order_id = o.id
-		WHERE o.user_id = $1
+		WHERE %s
 		ORDER BY o.created_at DESC, o.id DESC
-		LIMIT 50`, user.ID)
+		LIMIT $%d`, where, limitPosition)
+
+	rows, err := s.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -514,7 +536,24 @@ func (s *Server) storeOrders(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+
+	hasMore := len(items) > limit
+	var nextCursor string
+	if hasMore {
+		items = items[:limit]
+		lastItem := items[limit-1]
+		if ca, ok := lastItem["created_at"].(time.Time); ok {
+			nextCursor = encodeStoreOrderCursor(storeOrderCursor{
+				CreatedAt: ca,
+				ID:        lastItem["id"].(string),
+			})
+		}
+	}
+	resp := map[string]any{"items": items, "has_more": hasMore}
+	if nextCursor != "" {
+		resp["next_cursor"] = nextCursor
+	}
+	httpserver.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) createStoreOrder(w http.ResponseWriter, r *http.Request) {

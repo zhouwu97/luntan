@@ -15,9 +15,14 @@ import { refreshSession } from "../lib/api/client";
 import { clearFeedCache } from "../lib/feed-cache";
 import { clearPostSnapshots } from "../lib/post-memory-cache";
 
+export type AuthState = "anonymous" | "guest" | "registered";
+
 interface SessionContextValue {
   user: SessionUser | null;
   ready: boolean;
+  authState: AuthState;
+  isGuest: boolean;
+  isRegistered: boolean;
   unreadCount: number;
   refreshUnreadCount: () => Promise<void>;
   signInWithCode: (email: string, code: string) => Promise<void>;
@@ -38,7 +43,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     void refreshSession()
       .then(async (restored) => {
-        if (!restored) return;
+        if (!restored) {
+          try {
+            const guestSession = await loginAsGuest();
+            if (active) setUser(guestSession.user);
+          } catch {
+            // 离线或后端服务不可用时保持 anonymous
+          }
+          return;
+        }
         const currentUser = await getMe();
         if (!active) return;
         setUser(currentUser);
@@ -57,10 +70,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const isGuest = Boolean(user && user.accountType === "guest");
+  const isRegistered = Boolean(user && user.accountType !== "guest");
+  const authState: AuthState = !user ? "anonymous" : isGuest ? "guest" : "registered";
+
   const value = useMemo<SessionContextValue>(
     () => ({
       user,
       ready,
+      authState,
+      isGuest,
+      isRegistered,
       unreadCount,
       refreshUnreadCount: async () => {
         try {
@@ -94,11 +114,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         await logout();
         clearFeedCache(accountScope);
         clearPostSnapshots(accountScope);
-        setUser(null);
         setUnreadCount(0);
+        try {
+          const guestSession = await loginAsGuest();
+          setUser(guestSession.user);
+        } catch {
+          setUser(null);
+        }
       },
     }),
-    [ready, unreadCount, user],
+    [authState, isGuest, isRegistered, ready, unreadCount, user],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

@@ -1,12 +1,12 @@
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/api/appeal_repository.dart';
 import '../data/api/api_client.dart';
 import '../data/api/publish_repository.dart';
+import '../services/media_upload_service.dart';
 import '../theme/app_theme.dart';
 
 class AppealFormScreen extends StatefulWidget {
@@ -147,27 +147,13 @@ class _AppealFormScreenState extends State<AppealFormScreen> {
       evidence.error = null;
     });
     try {
-      final bytes = evidence.bytes ??= await evidence.file.readAsBytes();
-      final fileName = evidence.file.name.isEmpty
-          ? 'appeal.jpg'
-          : evidence.file.name;
-      final ticket = await widget.publishRepository.requestMediaUpload(
-        fileName: fileName,
-        mimeType: _mimeType(fileName),
-        size: bytes.length,
-        sha256: sha256.convert(bytes).toString(),
-      );
-      final payload = await widget.publishRepository.uploadMedia(
-        ticket: ticket,
-        bytes: bytes,
-        size: bytes.length,
-        sha256: sha256.convert(bytes).toString(),
-      );
+      final prepared = await MediaUploadService.prepareImage(evidence.file);
+      evidence.bytes = prepared.bytes;
+      final mediaId = await MediaUploadService(widget.publishRepository)
+          .uploadPreparedImage(prepared);
       if (!mounted) return;
       setState(() {
-        evidence.mediaId = payload['id'] is String
-            ? payload['id'] as String
-            : ticket.mediaId;
+        evidence.mediaId = mediaId;
         evidence.uploading = false;
       });
     } catch (error) {
@@ -380,14 +366,6 @@ class _EvidenceGrid extends StatelessWidget {
         ),
     ],
   );
-}
-
-String _mimeType(String name) {
-  final lower = name.toLowerCase();
-  if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.webp')) return 'image/webp';
-  if (lower.endsWith('.heic') || lower.endsWith('.heif')) return 'image/heic';
-  return 'image/jpeg';
 }
 
 String _actionLabel(String action) => switch (action) {

@@ -448,10 +448,21 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         ? seedPost
         : null;
     if (!apiMode && postForHistory != null) store.recordHistory(postForHistory);
+    // 浏览量不要求登录；失败不阻塞打开帖子，详情页仍可正常阅读。
+    unawaited(
+      repositories.feed.recordPostView(normalizedPostId).catchError((
+        error,
+      ) {
+        if (kDebugMode) {
+          debugPrint('[PostView] Failed to record post view: $error');
+        }
+        return PostViewResult(postId: normalizedPostId, recorded: false);
+      }),
+    );
     if (apiMode &&
         repositories.profile != null &&
         authController?.status == AuthStatus.authenticated) {
-      // 浏览历史是服务端事实；失败不阻塞打开帖子，详情页仍可正常阅读。
+      // 浏览历史只记录登录用户；浏览量与历史是两条独立能力。
       unawaited(
         repositories.profile!.recordHistory(normalizedPostId).catchError((
           error,

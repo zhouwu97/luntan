@@ -43,6 +43,10 @@ class _RetryFeatureFeed implements FeedRepository, QueryableFeedRepository {
     if (calls == 1) throw StateError('temporary failure');
     return const FeedPage(items: []);
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }
 
 class _ActivityFeatureFeed implements FeedRepository, QueryableFeedRepository {
@@ -74,6 +78,10 @@ class _ActivityFeatureFeed implements FeedRepository, QueryableFeedRepository {
       ),
     ]);
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }
 
 void main() {

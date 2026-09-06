@@ -108,6 +108,12 @@ class ApiFeedRepository implements FeedRepository, QueryableFeedRepository {
       hasMore: payload['has_more'] == true,
     );
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async {
+    final payload = await _client.postJson('/api/v1/posts/$postId/view');
+    return PostViewResult.fromJson(payload);
+  }
 }
 
 class ApiPostRepository implements PostRepository, PostMutationRepository {

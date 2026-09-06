@@ -38,9 +38,11 @@ export type IconName =
   | "compass"
   | "swap"
   | "reply"
+  | "history"
   | "dislike";
 
 const paths: Record<IconName, React.ReactNode> = {
+  history: <><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></>,
   swap: <><path d="M7 7h11l-3-3M17 17H6l3 3M18 7l-3 3M6 17l3-3" /></>,
   reply: <path d="m9 8-5 4 5 4v-3c7 0 9 2 11 5-1-6-4-9-11-9V8Z" />,
   dislike: <path d="M7 3h10l2 8-6 1v6a2 2 0 0 1-2 2l-2-7H5V5a2 2 0 0 1 2-2Z" />,

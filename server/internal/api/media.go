@@ -411,9 +411,6 @@ func validMediaInput(input mediaUploadInput) bool {
 	return validateMediaInput(input) == nil
 }
 
-	return true
-}
-
 func isHex(value string) bool {
 	_, err := hex.DecodeString(value)
 	return err == nil

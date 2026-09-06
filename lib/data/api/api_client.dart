@@ -75,6 +75,26 @@ String userFacingApiMessage(Object error, {String fallback = '操作失败，请
       return '账号当前处于禁言状态，暂不能发表评论；请在账号状态查看解除时间';
     case 'STORE_ORDER_REVIEW_PENDING':
       return '已有兑换申请正在审核，请等待审核完成后再申请';
+    case 'MEDIA_UNSUPPORTED_TYPE':
+      return '仅支持 JPG、PNG、WEBP 图片';
+    case 'MEDIA_TOO_LARGE':
+      return '图片不能超过 15 MB';
+    case 'MEDIA_TOO_MANY_PIXELS':
+      return '图片像素过大，请选择较小的图片';
+    case 'MEDIA_CHECKSUM_MISMATCH':
+      return '图片校验失败，请重新选择后再试';
+    case 'MEDIA_DIMENSION_INVALID':
+      return '图片尺寸无效，请重新选择图片';
+    case 'MEDIA_UPLOAD_MISMATCH':
+      return '图片上传内容不一致，请重新选择后再试';
+    case 'MEDIA_NOT_READY':
+      return '图片仍在处理中，请稍后再试';
+    case 'MEDIA_NOT_OWNED':
+      return '这张图片不属于当前账号';
+    case 'MEDIA_NOT_FOUND':
+      return '图片不存在或已被删除';
+    case 'STORAGE_UNAVAILABLE':
+      return '图片存储暂时不可用，请稍后再试';
   }
   return switch (error.type) {
     ApiErrorType.unauthorized => '登录状态已失效，请重新登录',

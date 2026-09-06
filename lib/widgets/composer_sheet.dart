@@ -4,7 +4,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:crypto/crypto.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../controllers/publish_controller.dart';
@@ -12,6 +11,7 @@ import '../data/composer_draft_storage.dart';
 import '../data/draft_media_store/draft_media_store.dart';
 import '../data/api/publish_repository.dart';
 import '../data/mock_forum_data.dart';
+import '../services/media_upload_service.dart';
 import '../theme/app_theme.dart';
 import 'post_media_preview.dart';
 
@@ -548,9 +548,15 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       image.error = null;
     });
     try {
-      final bytes = image.bytes = await image.file.readAsBytes();
-      _assertValidImage(image.file.name, bytes);
-      image.sizeBytes = bytes.length;
+      final prepared = await MediaUploadService.prepareImage(
+        image.file,
+        maxBytes: maxFileBytes,
+      );
+      image.bytes = prepared.bytes;
+      image.sizeBytes = prepared.bytes.length;
+      image.mimeType = prepared.mimeType;
+      image.width = prepared.width;
+      image.height = prepared.height;
       final totalBytes = images.fold<int>(
         0,
         (sum, item) => sum + item.sizeBytes,
@@ -558,14 +564,13 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       if (totalBytes > maxTotalBytes) {
         throw const PublishException('图片总量不能超过 30 MB');
       }
-      final digest = await compute(_sha256Hex, bytes);
       final mediaId = await publisher.uploadMedia(
-        fileName: image.file.name,
-        mimeType: image.mimeType ??= _mimeType(image.file.name),
-        bytes: bytes,
-        sha256: digest,
-        width: image.width ?? 0,
-        height: image.height ?? 0,
+        fileName: prepared.fileName,
+        mimeType: prepared.mimeType,
+        bytes: prepared.bytes,
+        sha256: prepared.sha256,
+        width: prepared.width,
+        height: prepared.height,
       );
       if (!mounted) {
         await publisher.deleteMedia(mediaId).catchError((error) {
@@ -615,30 +620,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     _scheduleDraftSave();
   }
 
-  void _assertValidImage(String fileName, List<int> bytes) {
-    if (bytes.length > maxFileBytes) {
-      throw const PublishException('单张图片不能超过 10 MB');
-    }
-    final extension = fileName.toLowerCase();
-    if (!(extension.endsWith('.jpg') ||
-        extension.endsWith('.jpeg') ||
-        extension.endsWith('.png') ||
-        extension.endsWith('.webp'))) {
-      throw const PublishException('仅支持 JPG、PNG、WEBP 图片');
-    }
-  }
-
   Future<void> _addSampleImage() async {
     final additions = [...sampleMedia.take(maxImages - selectedMedia.length)];
     setState(() => selectedMedia = [...selectedMedia, ...additions]);
     _scheduleDraftSave();
-  }
-
-  String _mimeType(String fileName) {
-    final lower = fileName.toLowerCase();
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    return 'image/jpeg';
   }
 
   @override
@@ -1200,7 +1185,6 @@ class _SampleMediaGridThumb extends StatelessWidget {
   }
 }
 
-String _sha256Hex(Uint8List bytes) => sha256.convert(bytes).toString();
 
 ForumSection _sectionForCommunityId(String? communityId) =>
     switch (communityId) {

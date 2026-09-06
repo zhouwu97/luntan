@@ -624,6 +624,24 @@ class PostDetail {
   final List<Comment> comments;
 }
 
+class PostViewResult {
+  const PostViewResult({
+    required this.postId,
+    required this.recorded,
+    this.viewCount,
+  });
+
+  final String postId;
+  final bool recorded;
+  final int? viewCount;
+
+  factory PostViewResult.fromJson(Map<String, dynamic> json) => PostViewResult(
+    postId: json['post_id'] as String? ?? '',
+    recorded: json['recorded'] == true,
+    viewCount: (json['view_count'] as num?)?.toInt(),
+  );
+}
+
 String relativeTimeLabel(DateTime value, {DateTime? now}) {
   // 服务端时间统一表示同一个时间点；显示口径固定为北京时间，
   // 避免设备时区设置影响“昨天/几天前”等帖子时间文案。

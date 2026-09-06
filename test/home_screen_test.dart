@@ -50,6 +50,10 @@ class _PagedHomeFeed implements FeedRepository, QueryableFeedRepository {
     ));
     return pages[calls.length - 1];
   }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }
 
 class _ControlledCommunityRepository implements CommunityRepository {

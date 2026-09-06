@@ -36,6 +36,7 @@ dependencies:
   shared_preferences: ^2.5.3
   flutter_secure_storage: ^9.2.4
   image_picker: ^1.2.3
+  image: ^4.9.2
   crypto: ^3.0.7
   share_plus: ^10.1.4
   url_launcher: ^6.3.2

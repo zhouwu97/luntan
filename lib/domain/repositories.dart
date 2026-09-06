@@ -21,6 +21,7 @@ abstract interface class CommunityMutationRepository {
 
 abstract interface class FeedRepository {
   Future<FeedPage> getLatestFeed({String? cursor, int limit = 20});
+  Future<PostViewResult> recordPostView(String postId);
 }
 
 /// 过滤后的 Feed 能力是可选扩展，保留 FeedRepository 旧接口以兼容离线

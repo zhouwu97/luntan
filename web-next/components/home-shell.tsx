@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CommunityRail } from "./community-rail";
 import { DiscoveryRail } from "./discovery-rail";
@@ -18,6 +18,7 @@ import { getCommunities, getFeed } from "../lib/api/forum";
 import { readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
 import { selectHomeCommunities, HOME_COMMUNITY_FALLBACKS } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
+import { useInfiniteScroll } from "../lib/use-infinite-scroll";
 import type { Community, Post } from "../types/forum";
 
 export function normalizeSort(value: string | null): FeedSort {
@@ -38,7 +39,7 @@ function cacheOptions(
 export function HomeShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useSession();
+  const { user, isRegistered } = useSession();
   const { showToast } = useToast();
   const rawCommunity = (searchParams.get("community") || "").trim();
   const requestedCommunityId = rawCommunity === "all" ? "" : rawCommunity;
@@ -54,6 +55,7 @@ export function HomeShell() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
   const [nextCursor, setNextCursor] = useState<string>();
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
@@ -67,6 +69,7 @@ export function HomeShell() {
     setHasMedia(searchParams.get("media") === "1");
     const commParam = (searchParams.get("community") || "").trim();
     setActiveCommunityId(commParam === "all" ? "" : commParam);
+    setLoadMoreError(false);
 
     if (rawSort === "featured") {
       const nextParams = new URLSearchParams(searchParams.toString());
@@ -154,10 +157,10 @@ export function HomeShell() {
     };
   }, [activeCommunityId, currentCacheOptions, hasMedia, latestOrder, refreshVersion, sort, topic]);
 
-  async function loadMore() {
+  const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
-    setError("");
+    setLoadMoreError(false);
     try {
       const page = await getFeed({
         sort,
@@ -177,11 +180,18 @@ export function HomeShell() {
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch {
-      setError("加载更多失败，请稍后再试");
+      setLoadMoreError(true);
     } finally {
       setLoadingMore(false);
     }
-  }
+  }, [activeCommunityId, currentCacheOptions, hasMedia, latestOrder, loadingMore, nextCursor, sort, topic, user?.id]);
+
+  const sentinelRef = useInfiniteScroll({
+    hasMore,
+    loading: loading || loadingMore,
+    onLoadMore: loadMore,
+    disabled: loadMoreError,
+  });
 
   const visiblePosts = useMemo(() => {
     const source = hasMedia ? posts.filter((post) => post.media.length > 0) : posts;
@@ -274,6 +284,7 @@ export function HomeShell() {
       <main className="page-frame home-page-frame">
         {/* 移动端专属快捷分段栏与入口金刚区 */}
         <div className="home-mobile-navigation">
+          {/* 顶部三项的中间槽位固定用于下载入口，快捷区保持四项。 */}
           <HomeCommunityTabs
             communities={communities}
             activeId={activeCommunityId}
@@ -302,7 +313,7 @@ export function HomeShell() {
               onLatestOrderChange={setLatestOrder}
               onFilterToggle={() => setFilterOpen((v) => !v)}
               onMediaChange={chooseMedia}
-              canPublish={Boolean(user)}
+              canPublish={isRegistered}
             />
 
             {(error || communityError) && (
@@ -357,14 +368,30 @@ export function HomeShell() {
             )}
 
             {hasMore && (
-              <button
-                type="button"
-                className="load-more-button"
-                onClick={loadMore}
-                disabled={loadingMore}
-              >
-                {loadingMore ? "正在加载…" : "加载更多"}
-              </button>
+              <div ref={sentinelRef} className="feed-load-sentinel">
+                {loadingMore && (
+                  <div className="feed-load-indicator">
+                    <span className="feed-spinner" />
+                    <span>正在加载更多…</span>
+                  </div>
+                )}
+                {loadMoreError && (
+                  <button
+                    type="button"
+                    className="feed-load-retry"
+                    onClick={() => {
+                      setLoadMoreError(false);
+                      void loadMore();
+                    }}
+                  >
+                    加载失败 · 点击重试
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!hasMore && visiblePosts.length > 0 && (
+              <div className="feed-end">已经到底啦</div>
             )}
           </section>
 

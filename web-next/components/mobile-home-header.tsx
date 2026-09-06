@@ -37,6 +37,7 @@ export function MobileHomeHeader() {
           name={user?.nickname || "圣"}
           url={user?.avatarUrl}
           className="header-avatar"
+          loading="eager"
         />
       </button>
 

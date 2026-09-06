@@ -120,15 +120,15 @@ async function createWithUploadedMediaRollback<T>(mediaIds: string[], action: ()
   }
 }
 
-export function PostDetailShell({ id }: { id: string }) {
+export function PostDetailShell({ id, initialPost = null }: { id: string; initialPost?: Post | null }) {
   const searchParams = useSearchParams();
   const notificationCommentId = searchParams.get("reply") || searchParams.get("comment");
   const router = useRouter();
   const { user, ready: sessionReady, isRegistered } = useSession();
   const canUploadMedia = isRegistered && user?.capabilities?.can_upload_media !== false;
   const { showToast } = useToast();
-  const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id, user?.id));
-  const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id, user?.id));
+  const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id, user?.id) || initialPost);
+  const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id, user?.id) && !initialPost);
   const [postError, setPostError] = useState("");
 
   const [comments, setComments] = useState<Comment[]>([]);
@@ -160,7 +160,8 @@ export function PostDetailShell({ id }: { id: string }) {
     let mounted = true;
     const snapshot = getPostSnapshot(id, user?.id);
     if (snapshot) setPost(snapshot);
-    setPostLoading(!snapshot);
+    else if (initialPost) setPost(initialPost);
+    setPostLoading(!snapshot && !initialPost);
     setPostError("");
 
     fetchPost(id, user?.id)
@@ -171,7 +172,7 @@ export function PostDetailShell({ id }: { id: string }) {
       })
       .catch((requestError: unknown) => {
         if (!mounted) return;
-        if (!snapshot) setPost(null);
+        if (!snapshot && !initialPost) setPost(null);
         setPostError(formatError(requestError, "帖子暂时无法加载，请稍后再试"));
       })
       .finally(() => {
@@ -181,7 +182,7 @@ export function PostDetailShell({ id }: { id: string }) {
     return () => {
       mounted = false;
     };
-  }, [id, user?.id]);
+  }, [id, initialPost, user?.id]);
 
   // 2. 独立并发加载评论（带 requestId 防竞态、单一数据触发源，绝不阻塞正文）
   const commentsRequestIdRef = useRef(0);

@@ -804,23 +804,24 @@ async function prepareWebImage(file: File): Promise<PreparedWebImage> {
 }
 
 async function uploadPreparedImage(prepared: PreparedWebImage): Promise<string> {
-  const token = await apiPost<JsonRecord>("/media/upload-token", {
-    file_name: prepared.fileName,
-    mime_type: prepared.mimeType,
-    width: prepared.width,
-    height: prepared.height,
-    size: prepared.bytes.byteLength,
-    sha256: prepared.sha256,
-  });
-  const mediaId = asString(token.media_id);
-  const uploadUrl = asString(token.upload_url);
-  const uploadMethod = asString(token.upload_method, "PUT");
-  if (!mediaId || !uploadUrl) throw new Error("媒体上传凭证格式错误");
-
-  const target = /^https?:\/\//i.test(uploadUrl)
-    ? uploadUrl
-    : new URL(uploadUrl, window.location.origin).toString();
+  let mediaId = "";
   try {
+    const token = await apiPost<JsonRecord>("/media/upload-token", {
+      file_name: prepared.fileName,
+      mime_type: prepared.mimeType,
+      width: prepared.width,
+      height: prepared.height,
+      size: prepared.bytes.byteLength,
+      sha256: prepared.sha256,
+    });
+    mediaId = asString(token.media_id);
+    const uploadUrl = asString(token.upload_url);
+    const uploadMethod = asString(token.upload_method, "PUT");
+    if (!mediaId || !uploadUrl) throw new Error("媒体上传凭证格式错误");
+
+    const target = /^https?:\/\//i.test(uploadUrl)
+      ? uploadUrl
+      : new URL(uploadUrl, window.location.origin).toString();
     const uploadResponse = await fetch(target, {
       method: uploadMethod,
       body: prepared.bytes,
@@ -836,21 +837,15 @@ async function uploadPreparedImage(prepared: PreparedWebImage): Promise<string> 
     });
     return mediaId;
   } catch (error) {
-    if (isDeterministicClientError(error)) await cleanupUploadedMedia([mediaId]);
+    // upload-token 已经创建媒体记录后，网络错误也可能留下未被业务引用的媒体，统一尝试回收。
+    if (mediaId) await cleanupUploadedMedia([mediaId]);
     throw error;
   }
 }
 
 export async function uploadImage(file: File): Promise<string> {
   const prepared = await prepareWebImage(file);
-  let mediaId = "";
-  try {
-    mediaId = await uploadPreparedImage(prepared);
-    return mediaId;
-  } catch (error) {
-    if (mediaId && isDeterministicClientError(error)) await cleanupUploadedMedia([mediaId]);
-    throw error;
-  }
+  return uploadPreparedImage(prepared);
 }
 
 export function isDeterministicClientError(error: unknown): boolean {
@@ -878,7 +873,8 @@ export async function uploadImages(
     onProgress?.({ current: files.length, total: files.length, stage: "complete" });
     return uploaded;
   } catch (error) {
-    if (isDeterministicClientError(error)) await cleanupUploadedMedia(uploaded);
+    // 批量中任一图片失败时，已完成的图片都尚未挂到业务对象，不能留在媒体表中。
+    await cleanupUploadedMedia(uploaded);
     throw error;
   }
 }

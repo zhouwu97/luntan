@@ -85,7 +85,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     // 注入已登录 Session
     await page.addInitScript(() => {
       window.localStorage.setItem(
-        "shengbeijiang_post_draft",
+        "shengbeijiang_post_draft:u1",
         JSON.stringify({
           title: "测试草稿标题 - 自动保存",
           content: "这是草稿正文内容，页面刷新后应自动恢复",

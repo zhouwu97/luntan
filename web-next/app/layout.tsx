@@ -3,26 +3,26 @@ import { Suspense } from "react";
 import "./globals.css";
 import { SessionProvider } from "../components/session-provider";
 import { ToastProvider } from "../components/toast-context";
+import { publicSiteOrigin } from "../lib/public-site";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(`${publicSiteOrigin}/`),
   title: "圣杯酱 · 玩具交流轻社区",
   description: "分享设备、桌搭、校园生活和真实使用体验。",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
       { url: "/favicon.png", type: "image/png", sizes: "192x192" },
-      { url: "/app-icon.png", type: "image/png", sizes: "512x512" },
+      { url: "/apple-icon.png", type: "image/png", sizes: "180x180" },
     ],
-    shortcut: "/app-icon.png",
-    apple: [{ url: "/app-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/apple-icon.png",
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: "cover",
 };
 

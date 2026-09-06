@@ -213,7 +213,7 @@ export function AuthForm() {
 
         <div className="auth-card-brand">
           <div className="auth-mark">
-            <img src="/app-icon.png" alt="圣杯酱" className="auth-mark-img" />
+            <img src="/apple-icon.png" alt="圣杯酱" className="auth-mark-img" />
           </div>
           <h1>{mode === "register" ? "注册圣杯酱账号" : "登录圣杯酱"}</h1>
           <p className="auth-lead">

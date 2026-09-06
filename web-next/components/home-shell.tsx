@@ -19,9 +19,19 @@ import { readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "..
 import { selectHomeCommunities, HOME_COMMUNITY_FALLBACKS } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
 import { useInfiniteScroll } from "../lib/use-infinite-scroll";
+import { useMediaQuery } from "../lib/use-media-query";
 import type { Community, Post } from "../types/forum";
 
 const DEFAULT_HOME_COMMUNITY_ID = "community-campus";
+const DESKTOP_DISCOVERY_QUERY = "(min-width: 821px) and (orientation: landscape), (min-width: 1201px)";
+const TOPIC_LABELS: Record<string, string> = {
+  outfit: "穿搭分享",
+  programming: "编程交流",
+  campus: "校园生活",
+  photography: "摄影分享",
+  secondhand: "二手闲置",
+  exam: "考研交流",
+};
 
 export function normalizeSort(value: string | null): FeedSort {
   return value === "recommended" || value === "hot" ? value : "latest";
@@ -42,6 +52,7 @@ export function HomeShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isRegistered } = useSession();
+  const showDiscoveryRail = useMediaQuery(DESKTOP_DISCOVERY_QUERY);
   const { showToast } = useToast();
   const rawCommunity = (searchParams.get("community") || "").trim();
   const requestedCommunityId = rawCommunity === "all"
@@ -347,7 +358,7 @@ export function HomeShell() {
 
             {(query || topic) && (
               <div className="data-note" role="status">
-                {query ? `正在显示“${query}”的匹配内容` : "正在显示穿搭分享"}
+                {query ? `正在显示“${query}”的匹配内容` : `正在浏览“${TOPIC_LABELS[topic] || "该主题"}”`}
               </div>
             )}
 
@@ -410,13 +421,15 @@ export function HomeShell() {
             )}
           </section>
 
-          <div className="home-right-col">
-            <DiscoveryRail
-              posts={visiblePosts}
-              user={user}
-              onLogin={() => router.push(user ? "/" : "/login")}
-            />
-          </div>
+          {showDiscoveryRail && (
+            <div className="home-right-col">
+              <DiscoveryRail
+                posts={visiblePosts}
+                user={user}
+                onLogin={() => router.push(user ? "/" : "/login")}
+              />
+            </div>
+          )}
         </div>
       </main>
 

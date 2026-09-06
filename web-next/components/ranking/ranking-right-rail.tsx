@@ -34,7 +34,7 @@ export function RankingRightRail({
         >
           <div className={styles.championThumb}>
             <img
-              src={weeklyTop.coverUrl || weeklyTop.heroUrl || "/default-avatar.webp"}
+              src={weeklyTop.coverUrl || weeklyTop.heroUrl || "/avatars/byj_avatar102.webp"}
               alt={weeklyTop.name}
             />
           </div>

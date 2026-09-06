@@ -53,7 +53,7 @@ export function SearchShell() {
             <div>
               <span className="feature-kicker"><Icon name="search" size={16} /> 全站搜索</span>
               <h1>{query ? `“${query}”` : "搜索"}</h1>
-              <p>直接查询 Go 后端 `/api/v1/search`，不再只过滤首页已加载帖子。</p>
+              <p>搜索帖子、用户、社区和榜单，找到你感兴趣的内容。</p>
             </div>
           </div>
 

@@ -36,7 +36,7 @@ export function RankingList({
               <div className={styles.rowNum}>{rankNum}</div>
               <div className={styles.rowThumb}>
                 <img
-                  src={item.coverUrl || item.heroUrl || "/default-avatar.webp"}
+                  src={item.coverUrl || item.heroUrl || "/avatars/byj_avatar102.webp"}
                   alt={item.name}
                 />
               </div>

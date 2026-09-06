@@ -15,15 +15,24 @@ const passthroughHeaders = [
   "accept-ranges",
   "content-disposition",
 ];
+const requestHeaderAllowlist = ["accept", "if-none-match", "if-modified-since", "range", "user-agent"];
+
+function buildUpstreamHeaders(request: NextRequest, origin: string): Headers {
+  const headers = new Headers();
+  for (const name of requestHeaderAllowlist) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  headers.set("origin", origin);
+  return headers;
+}
 
 async function proxy(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
   const encodedPath = path.map((part) => encodeURIComponent(part)).join("/");
   const target = new URL(`/imported-media/${encodedPath}${request.nextUrl.search}`, targetOrigin);
-  const headers = new Headers(request.headers);
-  headers.delete("host");
-  headers.delete("content-length");
-  headers.set("origin", process.env.API_PROXY_ORIGIN?.trim() || "https://shengbeijiang.com");
+  const origin = process.env.API_PROXY_ORIGIN?.trim() || "https://shengbeijiang.com";
+  const headers = buildUpstreamHeaders(request, origin);
 
   try {
     let response: Response;
@@ -45,8 +54,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
 
       if (isConnRefused && targetOrigin !== "https://shengbeijiang.com") {
         const fallbackTarget = new URL(`/imported-media/${encodedPath}${request.nextUrl.search}`, "https://shengbeijiang.com");
-        const fallbackHeaders = new Headers(headers);
-        fallbackHeaders.set("origin", "https://shengbeijiang.com");
+        const fallbackHeaders = buildUpstreamHeaders(request, "https://shengbeijiang.com");
         response = await fetch(fallbackTarget, {
           method: request.method,
           headers: fallbackHeaders,
@@ -74,4 +82,3 @@ async function proxy(request: NextRequest, context: RouteContext) {
 
 export const GET = proxy;
 export const HEAD = proxy;
-

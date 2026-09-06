@@ -5,26 +5,22 @@ import { initials } from "../lib/format";
 
 const avatarCache = new Map<string, string>();
 const avatarTones = ["blue", "lilac", "mint", "peach"] as const;
+const DEFAULT_AVATAR_URL = "/avatars/byj_avatar102.webp";
+const avatarPixels = { small: 30, default: 40, large: 46, header: 38, profile: 76 } as const;
 
-const defaultAvatars = [
-  "/default-avatar.webp",
-  "/avatars/byj_avatar100219.webp",
-  "/avatars/byj_avatar100692.webp",
-  "/avatars/byj_avatar101249.webp",
-  "/avatars/byj_avatar101253.webp",
-  "/avatars/byj_avatar101586.webp",
-  "/avatars/byj_avatar101735.webp",
-  "/avatars/byj_avatar101927.webp",
-  "/avatars/byj_avatar101936.webp",
-  "/avatars/byj_avatar102.webp",
-  "/avatars/byj_avatar102036.webp",
-  "/avatars/byj_avatar102138.webp",
-  "/avatars/byj_avatar102185.webp",
-];
+function normalizeAvatarUrl(value?: string): string | undefined {
+  const clean = value?.trim();
+  if (!clean) return undefined;
+  const path = clean.replace(/^https?:\/\/[^/]+/i, "").split("?", 1)[0];
+  // 旧默认头像文件体积过大且内容重复，统一指向唯一的小尺寸资源。
+  if (path === "/default-avatar.webp" || /^\/avatars\/byj_avatar\d+\.webp$/i.test(path)) {
+    return DEFAULT_AVATAR_URL;
+  }
+  return clean;
+}
 
 function getDeterministicAvatar(key: string): string {
-  const hash = Array.from(key).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return defaultAvatars[hash % defaultAvatars.length];
+  return DEFAULT_AVATAR_URL;
 }
 
 export function UserAvatar({
@@ -33,24 +29,27 @@ export function UserAvatar({
   url,
   size = "default",
   className = "",
+  loading = "lazy",
 }: {
   userId?: string;
   name: string;
   url?: string;
   size?: "small" | "default" | "large" | "header" | "profile";
   className?: string;
+  loading?: "eager" | "lazy";
 }) {
   const cacheKey = userId || name;
   const cachedUrl = cacheKey ? avatarCache.get(cacheKey) : undefined;
+  const normalizedUrl = normalizeAvatarUrl(url);
   const [imgFailed, setImgFailed] = useState(false);
 
   useEffect(() => {
-    if (url && cacheKey) avatarCache.set(cacheKey, url);
+    if (normalizedUrl && cacheKey) avatarCache.set(cacheKey, normalizedUrl);
     setImgFailed(false);
-  }, [cacheKey, url]);
+  }, [cacheKey, normalizedUrl]);
 
   const fallbackAvatar = useMemo(() => getDeterministicAvatar(cacheKey || "user"), [cacheKey]);
-  const activeUrl = url || cachedUrl || fallbackAvatar;
+  const activeUrl = normalizedUrl || cachedUrl || fallbackAvatar;
   const tone = avatarTones[(Array.from(cacheKey).reduce((sum, char) => sum + char.charCodeAt(0), 0) || 0) % avatarTones.length];
 
   return (
@@ -59,6 +58,9 @@ export function UserAvatar({
         <img
           src={activeUrl}
           alt={name}
+          width={avatarPixels[size]}
+          height={avatarPixels[size]}
+          loading={loading}
           onError={() => setImgFailed(true)}
         />
       ) : (
@@ -67,4 +69,3 @@ export function UserAvatar({
     </span>
   );
 }
-

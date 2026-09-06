@@ -57,7 +57,7 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
         <div className="brand-wrap" style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <Link href="/" className="brand" aria-label="圣杯酱首页">
             <span className="brand-mark">
-              <img src="/app-icon.png" alt="圣杯酱" className="brand-icon-img" />
+              <img src="/apple-icon.png" alt="圣杯酱" className="brand-icon-img" />
             </span>
             <span className="brand-word">圣杯酱</span>
             <span className="brand-dot" aria-hidden="true" />
@@ -109,7 +109,7 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
           {ready && user ? (
             <div className="profile-menu-wrap">
               <button type="button" className="profile-avatar-button" aria-label="打开个人菜单" onClick={() => setMenuOpen((value) => !value)}>
-                <UserAvatar userId={user.id} name={user.nickname} url={user.avatarUrl} size="header" />
+                <UserAvatar userId={user.id} name={user.nickname} url={user.avatarUrl} size="header" loading="eager" />
               </button>
               {menuOpen && (
                 <div className="profile-menu">
@@ -149,8 +149,10 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
                 </div>
               )}
             </div>
-          ) : (
+          ) : ready ? (
             <button className="login-link" type="button" onClick={() => router.push("/login")}>登录</button>
+          ) : (
+            <span className="profile-session-placeholder" aria-hidden="true" />
           )}
         </div>
       </div>

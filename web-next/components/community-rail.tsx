@@ -95,7 +95,7 @@ export function CommunityRail({
         ) : (
           <div className="profile-guest-card">
             <div className="profile-card-top" onClick={() => router.push("/login")} style={{ cursor: "pointer" }} role="button" tabIndex={0}>
-              <UserAvatar name="杂鱼萌新" url="/default-avatar.webp" size="large" className="profile-avatar-frame" />
+              <UserAvatar name="杂鱼萌新" size="large" className="profile-avatar-frame" />
               <div className="profile-card-info">
                 <div className="profile-card-greeting">
                   <span className="profile-greeting-text">{greetingTime()}</span>

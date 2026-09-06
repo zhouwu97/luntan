@@ -1,17 +1,23 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "./site-header";
 import { Icon } from "./icons";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
-import { createPost, getCommunities, uploadImage } from "../lib/api/forum";
+import {
+  cleanupUploadedMedia,
+  createPost,
+  getCommunities,
+  isDeterministicClientError,
+  uploadImages,
+} from "../lib/api/forum";
 import { formatError } from "../lib/format";
 import type { Community } from "../types/forum";
 
 const MAX_IMAGES = 9;
-const DRAFT_KEY = "shengbeijiang_post_draft";
+const DRAFT_KEY_PREFIX = "shengbeijiang_post_draft";
 
 export function PublishForm() {
   const router = useRouter();
@@ -26,6 +32,10 @@ export function PublishForm() {
   const [loadingCommunities, setLoadingCommunities] = useState(true);
   const [error, setError] = useState("");
   const [hasDraftRestored, setHasDraftRestored] = useState(false);
+  const restoringDraftRef = useRef(false);
+  const restoredDraftKeyRef = useRef<string | null>(null);
+  const autoSaveDraftKeyRef = useRef<string | null>(null);
+  const draftKey = ready && user?.id ? `${DRAFT_KEY_PREFIX}:${user.id}` : null;
 
   const selectedCommunity = useMemo(
     () => communities.find((community) => community.id === communityId),
@@ -41,8 +51,23 @@ export function PublishForm() {
 
   // 加载草稿
   useEffect(() => {
+    if (!ready || !draftKey) {
+      restoringDraftRef.current = false;
+      restoredDraftKeyRef.current = null;
+      autoSaveDraftKeyRef.current = null;
+      return;
+    }
+
+    restoringDraftRef.current = true;
+    restoredDraftKeyRef.current = null;
+    autoSaveDraftKeyRef.current = null;
+    setTitle("");
+    setContent("");
+    setCommunityId("");
+    setFiles([]);
+    setHasDraftRestored(false);
     try {
-      const saved = localStorage.getItem(DRAFT_KEY);
+      const saved = localStorage.getItem(draftKey);
       if (saved) {
         const data = JSON.parse(saved);
         if (data.title || data.content) {
@@ -54,23 +79,33 @@ export function PublishForm() {
       }
     } catch {
       // Ignore storage read error
+    } finally {
+      restoredDraftKeyRef.current = draftKey;
+      restoringDraftRef.current = false;
     }
-  }, []);
+  }, [draftKey, ready]);
 
   // 自动保存草稿
   useEffect(() => {
-    if (busy) return;
+    if (busy || !ready || !draftKey || restoringDraftRef.current || restoredDraftKeyRef.current !== draftKey) return;
+    // 账号切换后的第一次 effect 只建立新账号的保存上下文，避免把旧账号的 React 状态写入新 key。
+    if (autoSaveDraftKeyRef.current !== draftKey) {
+      autoSaveDraftKeyRef.current = draftKey;
+      return;
+    }
     try {
       if (title.trim() || content.trim()) {
         localStorage.setItem(
-          DRAFT_KEY,
+          draftKey,
           JSON.stringify({ title, content, communityId, updatedAt: Date.now() }),
         );
+      } else {
+        localStorage.removeItem(draftKey);
       }
     } catch {
       // Ignore storage write error
     }
-  }, [busy, communityId, content, title]);
+  }, [busy, communityId, content, draftKey, ready, title]);
 
   // 页面离开防丢保护
   useEffect(() => {
@@ -86,7 +121,7 @@ export function PublishForm() {
 
   useEffect(() => {
     if (!ready) return;
-    if (!user) {
+    if (!user || user.accountType === "guest") {
       setLoadingCommunities(false);
       return;
     }
@@ -117,7 +152,7 @@ export function PublishForm() {
     setFiles([]);
     setHasDraftRestored(false);
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      if (draftKey) localStorage.removeItem(draftKey);
     } catch {
       // Ignore
     }
@@ -157,18 +192,22 @@ export function PublishForm() {
 
     setBusy(true);
     setError("");
+    let mediaIds: string[] = [];
     try {
-      const mediaIds: string[] = [];
-      for (const file of files) mediaIds.push(await uploadImage(file));
+      mediaIds = files.length ? await uploadImages(files) : [];
       const post = await createPost(communityId, title.trim(), content.trim(), mediaIds);
       try {
-        localStorage.removeItem(DRAFT_KEY);
+        if (draftKey) localStorage.removeItem(draftKey);
       } catch {
         // Ignore
       }
       showToast("帖子发布成功！");
       router.replace(`/post/${encodeURIComponent(post.id)}`);
     } catch (requestError) {
+      // 仅在服务端明确拒绝时回收；网络超时可能对应服务端已成功创建，不能误删已关联媒体。
+      if (mediaIds.length > 0 && isDeterministicClientError(requestError)) {
+        await cleanupUploadedMedia(mediaIds);
+      }
       setError(formatError(requestError, "发布失败，请稍后再试"));
     } finally {
       setBusy(false);
@@ -206,6 +245,28 @@ export function PublishForm() {
               onClick={() => router.push("/login")}
             >
               去登录
+            </button>
+          </section>
+        </main>
+      </>
+    );
+  }
+
+  if (user.accountType === "guest") {
+    return (
+      <>
+        <SiteHeader />
+        <main className="page-frame">
+          <section className="coming-page">
+            <span className="coming-icon"><Icon name="user" size={26} /></span>
+            <h1>注册后才能发布内容</h1>
+            <p>注册正式账号后即可发布帖子，当前游客浏览、评论与经验会继续保留。</p>
+            <button
+              type="button"
+              className="primary-link"
+              onClick={() => router.push(`/login?mode=register&next=${encodeURIComponent("/publish")}`)}
+            >
+              注册正式账号
             </button>
           </section>
         </main>

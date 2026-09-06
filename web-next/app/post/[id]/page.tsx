@@ -1,6 +1,65 @@
+import type { Metadata } from "next";
 import { PostDetailShell } from "../../../components/post-detail-shell";
+import { getPublicPost } from "../../../lib/server-post";
+import { publicSiteUrl } from "../../../lib/public-site";
 
-export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
+type PostPageProps = { params: Promise<{ id: string }> };
+
+function decodePostId(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function excerpt(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 160 ? `${normalized.slice(0, 157)}…` : normalized;
+}
+
+export async function generateMetadata({ params }: PostPageProps): Promise<Metadata> {
   const { id } = await params;
-  return <PostDetailShell id={decodeURIComponent(id)} />;
+  const postId = decodePostId(id);
+  const post = await getPublicPost(postId);
+  if (!post) {
+    return {
+      title: "帖子不存在 - 圣杯酱",
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const canonical = publicSiteUrl(`/post/${encodeURIComponent(post.id)}`);
+  const description = excerpt(post.content) || `${post.author.nickname} 发布于 ${post.community.name} 的分享`;
+  const image = post.media[0]?.detailUrl || post.media[0]?.url || post.media[0]?.originalUrl;
+  const images = image ? [publicSiteUrl(image)] : [publicSiteUrl("/apple-icon.png")];
+
+  return {
+    title: { absolute: `${post.title} - 圣杯酱` },
+    description,
+    alternates: { canonical },
+    openGraph: {
+      title: post.title,
+      description,
+      url: canonical,
+      siteName: "圣杯酱",
+      type: "article",
+      publishedTime: post.publishedAt || post.createdAt || undefined,
+      authors: [post.author.nickname],
+      images,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: post.title,
+      description,
+      images,
+    },
+  };
+}
+
+export default async function PostPage({ params }: PostPageProps) {
+  const { id } = await params;
+  const postId = decodePostId(id);
+  const initialPost = await getPublicPost(postId);
+  return <PostDetailShell id={postId} initialPost={initialPost} />;
 }

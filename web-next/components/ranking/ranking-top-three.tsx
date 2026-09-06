@@ -42,7 +42,7 @@ export function RankingTopThree({
 
             <div className={styles.top1ImgBox}>
               <img
-                src={top1.coverUrl || top1.heroUrl || "/default-avatar.webp"}
+                src={top1.coverUrl || top1.heroUrl || "/avatars/byj_avatar102.webp"}
                 alt={top1.name}
               />
             </div>
@@ -96,7 +96,7 @@ export function RankingTopThree({
                 <div className={`${styles.top23Badge} ${styles.rank2}`}>02</div>
                 <div className={styles.top23Thumb}>
                   <img
-                    src={top2.coverUrl || top2.heroUrl || "/default-avatar.webp"}
+                    src={top2.coverUrl || top2.heroUrl || "/avatars/byj_avatar102.webp"}
                     alt={top2.name}
                   />
                 </div>
@@ -126,7 +126,7 @@ export function RankingTopThree({
                 <div className={`${styles.top23Badge} ${styles.rank3}`}>03</div>
                 <div className={styles.top23Thumb}>
                   <img
-                    src={top3.coverUrl || top3.heroUrl || "/default-avatar.webp"}
+                    src={top3.coverUrl || top3.heroUrl || "/avatars/byj_avatar102.webp"}
                     alt={top3.name}
                   />
                 </div>

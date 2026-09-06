@@ -27,7 +27,9 @@ export default function MyWorkbenchPage() {
   const router = useRouter();
   const { user, ready, isGuest, isRegistered } = useSession();
   const [profile, setProfile] = useState<ProfileSummary | null>(null);
-  const [points, setPoints] = useState<number>(0);
+  const [points, setPoints] = useState<number | null>(null);
+  const [pointsError, setPointsError] = useState(false);
+  const [summaryRetry, setSummaryRetry] = useState(0);
   const [activeTab, setActiveTab] = useState<TabKind>("posts");
   const [items, setItems] = useState<ProfilePost[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
@@ -46,21 +48,24 @@ export default function MyWorkbenchPage() {
     }
 
     let active = true;
-    Promise.all([
-      getUserProfile(user.id).catch(() => null),
-      getMyPoints().catch(() => ({ points: 0, experience: 0 })),
-    ])
-      .then(([nextProfile, pointsData]) => {
-        if (!active) return;
-        setProfile(nextProfile);
-        setPoints(pointsData.points);
-      })
-      .catch(() => undefined);
+    setProfile(null);
+    setPoints(null);
+    setPointsError(false);
+    void Promise.allSettled([getUserProfile(user.id), getMyPoints()]).then(([profileResult, pointsResult]) => {
+      if (!active) return;
+      setProfile(profileResult.status === "fulfilled" ? profileResult.value : null);
+      if (pointsResult.status === "fulfilled") {
+        setPoints(pointsResult.value.points);
+      } else {
+        setPoints(null);
+        setPointsError(true);
+      }
+    });
 
     return () => {
       active = false;
     };
-  }, [ready, router, user]);
+  }, [ready, router, summaryRetry, user]);
 
   useEffect(() => {
     if (!ready || !user) return;
@@ -196,7 +201,7 @@ export default function MyWorkbenchPage() {
             className={`workbench-stat-card ${activeTab === "posts" ? "active" : ""}`}
             onClick={() => handleTabChange("posts")}
           >
-            <strong className="workbench-stat-val">{compactCount(profile?.postCount || 0)}</strong>
+            <strong className="workbench-stat-val">{profile ? compactCount(profile.postCount) : "—"}</strong>
             <span className="workbench-stat-lbl">我的发帖</span>
           </button>
           <button
@@ -204,7 +209,7 @@ export default function MyWorkbenchPage() {
             className={`workbench-stat-card ${activeTab === "comments" ? "active" : ""}`}
             onClick={() => handleTabChange("comments")}
           >
-            <strong className="workbench-stat-val">{compactCount(profile?.commentCount || 0)}</strong>
+            <strong className="workbench-stat-val">{profile ? compactCount(profile.commentCount) : "—"}</strong>
             <span className="workbench-stat-lbl">我的回复</span>
           </button>
           <button
@@ -212,17 +217,20 @@ export default function MyWorkbenchPage() {
             className={`workbench-stat-card ${activeTab === "bookmarks" ? "active" : ""}`}
             onClick={() => handleTabChange("bookmarks")}
           >
-            <strong className="workbench-stat-val">{compactCount(profile?.bookmarkCount || 0)}</strong>
+            <strong className="workbench-stat-val">{profile ? compactCount(profile.bookmarkCount) : "—"}</strong>
             <span className="workbench-stat-lbl">我的收藏</span>
           </button>
           <button
             type="button"
             className="workbench-stat-card workbench-stat-points"
-            onClick={() => router.push("/points")}
+            onClick={() => {
+              if (pointsError) setSummaryRetry((value) => value + 1);
+              else router.push("/points");
+            }}
             title="进入积分中心"
           >
             <div className="workbench-points-val">
-              <strong style={{ color: "#d97706" }}>{compactCount(points)}</strong>
+              <strong style={{ color: "#d97706" }}>{points === null ? (pointsError ? "积分暂时无法加载 · 重试" : "加载中…") : compactCount(points)}</strong>
               <Icon name="chevron-right" size={16} />
             </div>
             <span className="workbench-stat-lbl">我的积分 →</span>

@@ -208,12 +208,6 @@ export function PostCard({
     }, 160);
   }
 
-  function prefetchDetailImmediately() {
-    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
-    void prefetchPost(post, user?.id);
-    router.prefetch(`/post/${encodeURIComponent(post.id)}`);
-  }
-
   function cancelDetailPrefetch() {
     if (prefetchTimerRef.current) {
       clearTimeout(prefetchTimerRef.current);
@@ -229,13 +223,11 @@ export function PostCard({
         tabIndex={0}
         role="article"
         aria-label={post.title}
-        onPointerEnter={() => {
+        onPointerEnter={(event) => {
+          if (event.pointerType === "touch") return;
           prepareDetail();
         }}
         onPointerLeave={cancelDetailPrefetch}
-        onTouchStart={() => {
-          prefetchDetailImmediately();
-        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && event.target === event.currentTarget) {
             event.preventDefault();
@@ -257,6 +249,7 @@ export function PostCard({
               name={post.author.nickname}
               url={post.author.avatarUrl}
               className="card-author-avatar"
+              loading={feedIndex === 0 ? "eager" : "lazy"}
             />
           </Link>
           <div className="post-author">

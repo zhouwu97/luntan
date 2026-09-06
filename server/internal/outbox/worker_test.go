@@ -182,9 +182,9 @@ func TestMediaHandlerProcessDecodesAndGeneratesRealVariants(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'detail'`).
 		WithArgs("m123", sourceKey+"_detail.jpg", 1440, 960, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	// 7. 写入 thumb (640x427)
+	// 7. 写入 thumb (480x320)
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'thumb'`).
-		WithArgs("m123", sourceKey+"_thumb.jpg", 640, 427, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("m123", sourceKey+"_thumb.jpg", 480, 320, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	// 8. 事务 Commit
 	mock.ExpectCommit()

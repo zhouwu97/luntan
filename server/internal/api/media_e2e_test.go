@@ -130,7 +130,7 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 		WithArgs("media_e2e_123", objectKey+"_detail.jpg", 1440, 960, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'thumb'`).
-		WithArgs("media_e2e_123", objectKey+"_thumb.jpg", 640, 427, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("media_e2e_123", objectKey+"_thumb.jpg", 480, 320, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -181,7 +181,7 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 	mock.ExpectQuery(`SELECT mv\.media_id, mv\.variant, mv\.object_key, mv\.mime_type, mv\.width, mv\.height, mv\.size_bytes, COALESCE\(mv\.sha256, ''\)`).
 		WithArgs("post-1").
 		WillReturnRows(sqlmock.NewRows([]string{"media_id", "variant", "object_key", "mime_type", "width", "height", "size_bytes", "sha256"}).
-			AddRow("media_e2e_123", "thumb", objectKey+"_thumb.jpg", "image/jpeg", 640, 427, int64(len(thumbBytes)), strings.Repeat("a", 64)).
+			AddRow("media_e2e_123", "thumb", objectKey+"_thumb.jpg", "image/jpeg", 480, 320, int64(len(thumbBytes)), strings.Repeat("a", 64)).
 			AddRow("media_e2e_123", "feed", objectKey+"_feed.jpg", "image/jpeg", 1080, 720, int64(len(detailBytes)), strings.Repeat("b", 64)).
 			AddRow("media_e2e_123", "detail", objectKey+"_detail.jpg", "image/jpeg", 1440, 960, int64(len(detailBytes)), strings.Repeat("c", 64)).
 			AddRow("media_e2e_123", "original", objectKey+"_original.jpg", "image/jpeg", 2400, 1600, int64(len(origBytes)), strings.Repeat("d", 64)))
@@ -211,8 +211,8 @@ func TestMediaLifecycleAndVariantsEndToEnd(t *testing.T) {
 	}
 
 	// 严格断言返回的变体尺寸与属性
-	if m.Thumb.Width != 640 || m.Thumb.Height != 427 {
-		t.Errorf("expected thumb 640x427, got %dx%d", m.Thumb.Width, m.Thumb.Height)
+	if m.Thumb.Width != 480 || m.Thumb.Height != 320 {
+		t.Errorf("expected thumb 480x320, got %dx%d", m.Thumb.Width, m.Thumb.Height)
 	}
 	if m.Detail.Width != 1440 || m.Detail.Height != 960 {
 		t.Errorf("expected detail 1440x960, got %dx%d", m.Detail.Width, m.Detail.Height)

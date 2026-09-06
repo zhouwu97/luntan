@@ -274,4 +274,33 @@ void main() {
     // 状态依旧保持为“已买过”
     expect(find.text('已买过'), findsOneWidget);
   });
+
+  testWidgets('游客点击想冲、买过或评分时只引导注册且不写入榜单状态', (tester) async {
+    final client = _OwnedRatingFakeApiClient();
+    final repo = RankingRepository(client);
+    var requireAuthCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RankingItemDetailPage(
+          item: testItem,
+          repository: repo,
+          isAuthenticated: true,
+          canVote: false,
+          onRequireAuth: () => requireAuthCalls++,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('想冲'));
+    await tester.tap(find.text('买过'));
+    await tester.tap(find.text('酱友评分'));
+    await tester.pump();
+
+    expect(requireAuthCalls, 3);
+    expect(client.setOwnedCalls, 0);
+    expect(client.rateCalls, 0);
+    expect(find.text('给这款玩具评分'), findsNothing);
+  });
 }

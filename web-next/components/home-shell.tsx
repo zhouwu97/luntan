@@ -222,6 +222,12 @@ export function HomeShell() {
     router.replace(nextParams.toString() ? `/?${nextParams.toString()}` : "/", { scroll: false });
   }
 
+  function chooseAllCommunities() {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("community", "all");
+    router.replace(`/?${nextParams.toString()}`, { scroll: false });
+  }
+
   function openGlobalHotFeed() {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set("community", "all");
@@ -304,6 +310,7 @@ export function HomeShell() {
               communities={communities}
               activeId={activeCommunityId}
               onSelect={chooseCommunity}
+              onSelectAll={chooseAllCommunities}
             />
           </div>
 

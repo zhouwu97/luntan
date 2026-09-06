@@ -445,6 +445,7 @@ class RankingPage extends StatefulWidget {
     this.canComment = false,
     this.canLike = false,
     this.canVote = false,
+    this.canSubmitRanking = false,
     this.canManageRanking = false,
     this.onRequireAuth,
     this.cache,
@@ -457,6 +458,7 @@ class RankingPage extends StatefulWidget {
   final bool canComment;
   final bool canLike;
   final bool canVote;
+  final bool canSubmitRanking;
   final bool canManageRanking;
   final VoidCallback? onRequireAuth;
   final RankingCacheStore? cache;
@@ -691,7 +693,7 @@ class _RankingPageState extends State<RankingPage> {
   }
 
   void _openSubmissionForm() {
-    if (!widget.isAuthenticated) {
+    if (!widget.canSubmitRanking) {
       widget.onRequireAuth?.call();
       return;
     }
@@ -743,7 +745,7 @@ class _RankingPageState extends State<RankingPage> {
               setState(() => _searchQuery = '');
             },
             actions: [
-              if (widget.canManageRanking && widget.repository != null && widget.publishRepository != null)
+              if (widget.canSubmitRanking && widget.repository != null && widget.publishRepository != null)
                 Tooltip(
                   message: '投稿新玩具',
                   child: IconButton(
@@ -1645,6 +1647,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
 
   Future<void> _setWanted() async {
     if (_wantedSaving) return;
+    if (!widget.canVote) {
+      widget.onRequireAuth?.call();
+      return;
+    }
     final nextWanted = !_wanted;
     // 登录态可能在本页面创建后才建立（弹层登录不会重建已推入的路由），
     // 因此不用构造时的登录快照预判：直接尝试服务器，401/403 再回退本机清单。
@@ -1694,6 +1700,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
 
   Future<bool> _setOwnedState(bool active) async {
     if (_ownedSaving) return false;
+    if (!widget.canVote) {
+      widget.onRequireAuth?.call();
+      return false;
+    }
     if (!_hasServer) {
       setState(() => _owned = active);
       return true;
@@ -1829,6 +1839,10 @@ class _RankingItemDetailPageState extends State<RankingItemDetailPage> {
   }
 
   Future<void> _openRatingDialog({bool justMarkedOwned = false}) async {
+    if (!widget.canVote) {
+      widget.onRequireAuth?.call();
+      return;
+    }
     if (!_hasServer) {
       ScaffoldMessenger.of(
         context,

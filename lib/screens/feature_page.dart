@@ -45,6 +45,7 @@ class FeaturePage extends StatefulWidget {
     this.canComment = false,
     this.canLike = false,
     this.canVote = false,
+    this.canSubmitRanking = false,
     this.canManageRanking = false,
     this.onRequireAuth,
     this.onOpenUserId,
@@ -67,6 +68,7 @@ class FeaturePage extends StatefulWidget {
   final bool canComment;
   final bool canLike;
   final bool canVote;
+  final bool canSubmitRanking;
   final bool canManageRanking;
   final VoidCallback? onRequireAuth;
   final ValueChanged<String>? onOpenUserId;
@@ -174,6 +176,7 @@ class _FeaturePageState extends State<FeaturePage> {
         canComment: canComment,
         canLike: canLike,
         canVote: canVote,
+        canSubmitRanking: widget.canSubmitRanking,
         canManageRanking: widget.canManageRanking,
         onRequireAuth: onRequireAuth,
       );

@@ -95,8 +95,9 @@ export function PostCard({
 
   async function handleBookmark(event: MouseEvent<HTMLButtonElement>) {
     stop(event);
-    if (!user) {
-      router.push("/login");
+    if (!user || user.accountType === "guest" || user.capabilities?.can_manage_bookmarks === false) {
+      showToast("注册正式账号后即可收藏，当前浏览与评论会保留");
+      router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${post.id}`)}`);
       return;
     }
     if (busy) return;

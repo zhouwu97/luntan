@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 export type FeedSort = "recommended" | "latest" | "hot";
 export type LatestOrder = "comment" | "post";
 
@@ -48,27 +50,41 @@ export function FeedToolbar({
           ))}
         </div>
 
-        <div className="sort-switch order-pill" role="group" aria-label="最新排序方式">
-          <button
-            type="button"
-            className={latestOrder === "comment" ? "active" : ""}
-            onClick={() => {
-              if (sort !== "latest") onSortChange("latest");
-              onLatestOrderChange("comment");
-            }}
-          >
-            按回复
-          </button>
-          <button
-            type="button"
-            className={latestOrder === "post" ? "active" : ""}
-            onClick={() => {
-              if (sort !== "latest") onSortChange("latest");
-              onLatestOrderChange("post");
-            }}
-          >
-            按发帖
-          </button>
+        <div className="feed-toolbar-actions">
+          <div className="sort-switch order-pill" role="group" aria-label="最新排序方式">
+            <button
+              type="button"
+              className={latestOrder === "comment" ? "active" : ""}
+              onClick={() => {
+                if (sort !== "latest") onSortChange("latest");
+                onLatestOrderChange("comment");
+              }}
+            >
+              按回复
+            </button>
+            <button
+              type="button"
+              className={latestOrder === "post" ? "active" : ""}
+              onClick={() => {
+                if (sort !== "latest") onSortChange("latest");
+                onLatestOrderChange("post");
+              }}
+            >
+              按发帖
+            </button>
+          </div>
+          {onFilterToggle && (
+            <button type="button" className="feed-filter-toggle" aria-expanded={filterOpen} onClick={onFilterToggle}>
+              筛选
+            </button>
+          )}
+          {filterOpen && onMediaChange && (
+            <label className="feed-media-filter">
+              <input type="checkbox" checked={hasMedia} onChange={(event) => onMediaChange(event.target.checked)} />
+              <span>只看图片</span>
+            </label>
+          )}
+          {canPublish && <Link href="/publish" className="feed-publish-link">发布</Link>}
         </div>
       </div>
     </div>

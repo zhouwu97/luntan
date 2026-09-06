@@ -32,6 +32,7 @@ class CommentThreadScreen extends StatefulWidget {
     this.isAuthenticated = true,
     this.onRequireAuth,
     this.canComment = true,
+    this.canUploadMedia = true,
     required this.blockedMessage,
     required this.onReply,
     this.onReplyDraft,
@@ -49,6 +50,7 @@ class CommentThreadScreen extends StatefulWidget {
   final bool isAuthenticated;
   final VoidCallback? onRequireAuth;
   final bool canComment;
+  final bool canUploadMedia;
   final String blockedMessage;
   final Future<Comment> Function(Comment target, String content) onReply;
   final Future<Comment> Function(Comment target, CommentDraft draft)?
@@ -625,6 +627,7 @@ class _CommentThreadScreenState extends State<CommentThreadScreen> {
                 sending: sending,
                 isAuthenticated: widget.isAuthenticated,
                 canComment: widget.canComment,
+                canUploadMedia: widget.canUploadMedia,
                 onRequireAuth: widget.onRequireAuth,
                 blockedMessage: widget.blockedMessage,
                 isSheetMode: true,

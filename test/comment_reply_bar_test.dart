@@ -34,4 +34,33 @@ void main() {
     await tester.tap(sendButton);
     expect(submitted, isTrue);
   });
+
+  testWidgets('游客点击评论图片时先引导注册，不打开系统图片选择器', (tester) async {
+    var requireAuthCalls = 0;
+    String? feedback;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          bottomNavigationBar: CommentReplyBar(
+            isSheetMode: true,
+            isAuthenticated: true,
+            canComment: true,
+            canUploadMedia: false,
+            onRequireAuth: () => requireAuthCalls++,
+            blockedMessage: '当前身份暂不能评论',
+            onFeedback: (message) => feedback = message,
+            onCancelTarget: () {},
+            onSubmit: () {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('添加图片'));
+    await tester.pump();
+
+    expect(requireAuthCalls, 1);
+    expect(feedback, '注册正式账号后即可添加评论图片');
+  });
 }

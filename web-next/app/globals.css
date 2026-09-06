@@ -1693,6 +1693,11 @@ img { display: block; max-width: 100%; }
   align-items: center;
   gap: 16px;
 }
+.feed-toolbar-actions { display: flex; align-items: center; gap: 8px; }
+.feed-filter-toggle { height: 30px; padding: 0 10px; color: #60758b; background: #fff; border: 1px solid #dbe6f0; border-radius: 8px; font-size: 12px; cursor: pointer; }
+.feed-filter-toggle[aria-expanded="true"] { color: var(--primary-deep); border-color: #a9cbed; background: #eef6ff; }
+.feed-media-filter { display: inline-flex; align-items: center; gap: 5px; color: #60758b; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.feed-publish-link { color: var(--primary-deep); font-size: 12px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 .feed-tab {
   background: none;
   border: none;

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "../../components/site-header";
 import { AppDownloadBanner } from "../../components/app-download-banner";
@@ -36,6 +36,7 @@ export default function MyWorkbenchPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [error, setError] = useState("");
+  const listGeneration = useRef(0);
 
   useEffect(() => {
     if (!ready) return;
@@ -45,66 +46,69 @@ export default function MyWorkbenchPage() {
     }
 
     let active = true;
-    setLoading(true);
-    setError("");
-
     Promise.all([
       getUserProfile(user.id).catch(() => null),
       getMyPoints().catch(() => ({ points: 0, experience: 0 })),
-      getMyProfileList(activeTab),
     ])
-      .then(([nextProfile, pointsData, listData]) => {
+      .then(([nextProfile, pointsData]) => {
         if (!active) return;
         setProfile(nextProfile);
         setPoints(pointsData.points);
-        setItems(listData.items);
-        setNextCursor(listData.nextCursor);
-        setHasMore(listData.hasMore);
       })
-      .catch((err: unknown) => {
-        if (!active) return;
-        setError(formatError(err, "数据加载失败，请稍后重试"));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+      .catch(() => undefined);
 
     return () => {
       active = false;
     };
-  }, [activeTab, ready, router, user]);
+  }, [ready, router, user]);
+
+  useEffect(() => {
+    if (!ready || !user) return;
+    let active = true;
+    const generation = ++listGeneration.current;
+    setLoading(true);
+    setLoadingMore(false);
+    setLoadMoreError(false);
+    setError("");
+    void getMyProfileList(activeTab)
+      .then((res) => {
+        if (!active || generation !== listGeneration.current) return;
+        setItems(res.items);
+        setNextCursor(res.nextCursor);
+        setHasMore(res.hasMore);
+      })
+      .catch((err: unknown) => {
+        if (active && generation === listGeneration.current) setError(formatError(err, "列表加载失败，请稍后重试"));
+      })
+      .finally(() => {
+        if (active && generation === listGeneration.current) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, ready, user]);
 
   async function handleTabChange(tab: TabKind) {
     if (tab === activeTab) return;
+    listGeneration.current += 1;
     setActiveTab(tab);
-    setLoading(true);
-    setLoadMoreError(false);
-    setError("");
-    try {
-      const res = await getMyProfileList(tab);
-      setItems(res.items);
-      setNextCursor(res.nextCursor);
-      setHasMore(res.hasMore);
-    } catch (err: unknown) {
-      setError(formatError(err, "列表加载失败，请稍后重试"));
-    } finally {
-      setLoading(false);
-    }
   }
 
   const handleLoadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
+    const generation = listGeneration.current;
     setLoadingMore(true);
     setLoadMoreError(false);
     try {
       const res = await getMyProfileList(activeTab, nextCursor);
+      if (generation !== listGeneration.current) return;
       setItems((curr) => [...curr, ...res.items]);
       setNextCursor(res.nextCursor);
       setHasMore(res.hasMore);
     } catch {
-      setLoadMoreError(true);
+      if (generation === listGeneration.current) setLoadMoreError(true);
     } finally {
-      setLoadingMore(false);
+      if (generation === listGeneration.current) setLoadingMore(false);
     }
   }, [activeTab, loadingMore, nextCursor]);
 
@@ -208,8 +212,8 @@ export default function MyWorkbenchPage() {
             className={`workbench-stat-card ${activeTab === "bookmarks" ? "active" : ""}`}
             onClick={() => handleTabChange("bookmarks")}
           >
-            <strong className="workbench-stat-val">{compactCount(profile?.followerCount || 0)}</strong>
-            <span className="workbench-stat-lbl">我的关注</span>
+            <strong className="workbench-stat-val">{compactCount(profile?.bookmarkCount || 0)}</strong>
+            <span className="workbench-stat-lbl">我的收藏</span>
           </button>
           <button
             type="button"

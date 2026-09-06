@@ -11,7 +11,7 @@ import {
   logout,
   registerWithEmail,
 } from "../lib/api/forum";
-import { refreshSession } from "../lib/api/client";
+import { ApiError, refreshSession } from "../lib/api/client";
 import { clearFeedCache } from "../lib/feed-cache";
 import { clearPostSnapshots } from "../lib/post-memory-cache";
 
@@ -34,6 +34,25 @@ interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
+function waitBeforeSessionRetry(delayMs: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+}
+
+async function restoreCurrentUser(): Promise<SessionUser> {
+  const delays = [0, 200, 600];
+  let lastError: unknown;
+  for (const delay of delays) {
+    if (delay > 0) await waitBeforeSessionRetry(delay);
+    try {
+      return await getMe();
+    } catch (error) {
+      lastError = error;
+      if (error instanceof ApiError && error.status < 500 && error.status !== 408 && error.status !== 429) throw error;
+    }
+  }
+  throw lastError;
+}
+
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [ready, setReady] = useState(false);
@@ -53,7 +72,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           }
           return;
         }
-        const currentUser = await getMe();
+        const currentUser = await restoreCurrentUser();
         if (!active) return;
         setUser(currentUser);
 

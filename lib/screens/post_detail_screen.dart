@@ -44,6 +44,7 @@ class PostDetailScreen extends StatefulWidget {
     this.canBookmark,
     this.canReport,
     this.canVote,
+    this.canUploadMedia,
     this.onRequireAuth,
     this.focusComments = false,
     this.focusCommentId,
@@ -75,6 +76,7 @@ class PostDetailScreen extends StatefulWidget {
   final bool? canBookmark;
   final bool? canReport;
   final bool? canVote;
+  final bool? canUploadMedia;
   final VoidCallback? onRequireAuth;
   final bool focusComments;
   final String? focusCommentId;
@@ -393,6 +395,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   isAuthenticated: widget.isAuthenticated,
                   onRequireAuth: widget.onRequireAuth,
                   canComment: widget.canComment ?? widget.isAuthenticated,
+                  canUploadMedia:
+                      widget.canUploadMedia ?? widget.isAuthenticated,
                   blockedMessage: _commentBlockedMessage,
                   onAuthorTap: widget.onOpenUserId,
                   onReplyDraft: (target, draft) async {
@@ -895,6 +899,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 sending: isSending,
                 isAuthenticated: widget.isAuthenticated,
                 canComment: widget.canComment ?? widget.isAuthenticated,
+                canUploadMedia:
+                    widget.canUploadMedia ?? widget.isAuthenticated,
                 onRequireAuth: widget.onRequireAuth,
                 blockedMessage: _commentBlockedMessage,
                 onFeedback: widget.onFeedback,

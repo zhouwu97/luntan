@@ -18,6 +18,7 @@ class CommentReplyBar extends StatefulWidget {
     this.sending = false,
     this.isAuthenticated = true,
     this.canComment = true,
+    this.canUploadMedia = true,
     this.onRequireAuth,
     required this.blockedMessage,
     required this.onFeedback,
@@ -40,6 +41,7 @@ class CommentReplyBar extends StatefulWidget {
   final bool sending;
   final bool isAuthenticated;
   final bool canComment;
+  final bool canUploadMedia;
   final VoidCallback? onRequireAuth;
   final String blockedMessage;
   final ValueChanged<String> onFeedback;
@@ -160,6 +162,11 @@ class _CommentReplyBarState extends State<CommentReplyBar> with WidgetsBindingOb
     }
     if (!widget.canComment) {
       widget.onFeedback(widget.blockedMessage);
+      return;
+    }
+    if (!widget.canUploadMedia) {
+      widget.onFeedback('注册正式账号后即可添加评论图片');
+      widget.onRequireAuth?.call();
       return;
     }
     final remaining = 9 - _composer.localImages.length;

@@ -54,7 +54,7 @@ flutter run
 
 ### 运行 Web（Next.js）
 
-网页版有独立的 Next.js 实现，目录为 `web-next/`。正式 Web 开发、构建和部署都使用该目录，不使用 Flutter Web。
+网页版有独立的 Next.js 实现，目录为 `web-next/`。正式 Web 开发、构建、测试和部署都必须使用该目录；禁止用 Flutter Web 替代或发布网页版。Flutter 工程仅面向 Android/iOS 客户端。
 
 ```bash
 cd web-next

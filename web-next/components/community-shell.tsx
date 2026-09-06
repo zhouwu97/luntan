@@ -21,7 +21,7 @@ function normalizeSort(value: string | null): FeedSort {
 export function CommunityShell({ communityId }: { communityId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useSession();
+  const { user, isRegistered } = useSession();
   const { showToast } = useToast();
   const query = (searchParams.get("q") || "").trim();
   const [community, setCommunity] = useState<Community | null>(null);
@@ -153,7 +153,7 @@ export function CommunityShell({ communityId }: { communityId: string }) {
         {communityError && <div className="data-note" role="status">{communityError}</div>}
         {community && <section className="feature-hero compact-hero community-detail-hero"><div className="community-detail-heading"><span className="community-detail-icon"><Icon name="box" size={24} /></span><div><span className="feature-kicker">社区板块</span><h1>{community.name}</h1><p>{community.description || "和同好聊聊最近的新发现"}</p><div className="community-detail-stats"><span>{community.postCount} 帖子</span><span>{community.followerCount} 关注</span></div></div></div></section>}
         <section className="community-detail-feed" aria-label={`${title}帖子流`}>
-          <FeedToolbar sort={sort} latestOrder={latestOrder} hasMedia={hasMedia} filterOpen={filterOpen} onSortChange={(nextSort) => updateQuery(nextSort)} onLatestOrderChange={setLatestOrder} onFilterToggle={() => setFilterOpen((value) => !value)} onMediaChange={(value) => updateQuery(sort, value)} canPublish={Boolean(user)} />
+          <FeedToolbar sort={sort} latestOrder={latestOrder} hasMedia={hasMedia} filterOpen={filterOpen} onSortChange={(nextSort) => updateQuery(nextSort)} onLatestOrderChange={setLatestOrder} onFilterToggle={() => setFilterOpen((value) => !value)} onMediaChange={(value) => updateQuery(sort, value)} canPublish={isRegistered} />
           {loading && visiblePosts.length > 0 && <div className="feed-refreshing" role="status">正在更新内容…</div>}
           {error && <div className="data-note" role="status">{error}</div>}
           {loading && !visiblePosts.length ? <div className="loading-stack community-detail-loading"><div className="skeleton-card" /><div className="skeleton-card short" /></div> : visiblePosts.length ? <div className="post-list community-detail-post-list">{visiblePosts.map((post, index) => <PostCard key={post.id} post={post} user={user} feedIndex={index} contextMeta={sort === "latest" && latestOrder === "comment" && post.activityAt ? `最近回复 ${relativeTime(post.activityAt)}` : undefined} />)}</div> : <div className="empty-state community-detail-empty"><span className="empty-icon"><Icon name="box" size={24} /></span><h2>{emptyTitle}</h2><p>{query ? `没有找到与“${query}”匹配的内容` : "稍后再来看看吧。"}</p></div>}

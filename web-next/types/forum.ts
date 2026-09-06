@@ -170,6 +170,7 @@ export interface ProfileSummary extends UserSummary {
   likeReceivedCount: number;
   followerCount: number;
   followingCount: number;
+  bookmarkCount: number;
   publicId?: string;
   createdAt?: string;
   isFollowing: boolean;

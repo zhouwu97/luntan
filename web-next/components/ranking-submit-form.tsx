@@ -25,7 +25,7 @@ const intensityOptions = [
 
 export function RankingSubmitForm() {
   const router = useRouter();
-  const { user, ready } = useSession();
+  const { user, ready, isRegistered } = useSession();
   const [name, setName] = useState("");
   const [merchant, setMerchant] = useState("");
   const [year, setYear] = useState("");
@@ -106,9 +106,7 @@ export function RankingSubmitForm() {
   }
 
   if (!ready) return <><SiteHeader /><main className="page-frame"><div className="detail-skeleton"><div /><div /></div></main></>;
-  if (!user) return <><SiteHeader /><main className="page-frame"><section className="coming-page"><span className="coming-icon"><Icon name="trophy" size={26} /></span><h1>登录后才能投稿</h1><p>登录邮箱账号后，就可以把好物推荐给大家。</p><button type="button" className="primary-link" onClick={() => router.push(`/login?next=${encodeURIComponent("/ranking/submit")}`)}>去登录</button></section></main></>;
-
-  if (!user.capabilities?.can_manage_admins) return <><SiteHeader /><main className="page-frame"><p>仅超级管理员可添加榜单物品。</p></main></>;
+  if (!isRegistered || !user) return <><SiteHeader /><main className="page-frame"><section className="coming-page"><span className="coming-icon"><Icon name="trophy" size={26} /></span><h1>注册后才能投稿</h1><p>注册正式账号后，就可以把好物推荐给大家并等待管理员审核。</p><button type="button" className="primary-link" onClick={() => router.push(`/login?mode=register&next=${encodeURIComponent("/ranking/submit")}`)}>注册正式账号</button></section></main></>;
 
   return <>
     <SiteHeader />

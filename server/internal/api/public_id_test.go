@@ -23,12 +23,12 @@ func TestGetUserProfileReturnsRegisteredPublicID(t *testing.T) {
 			"id", "public_id", "username", "nickname", "avatar_media_id",
 			"avatar_object_key", "background_media_id", "background_object_key", "bio", "level",
 			"trust_level", "status", "created_at", "experience", "account_type",
-			"post_count", "comment_count", "follower_count", "following_count",
+			"post_count", "comment_count", "follower_count", "following_count", "bookmark_count",
 		}).AddRow(
 			"u1", "10000", "cup_master", "杯友老张", "",
 			"avatars/u1.webp", "", "", "评测老手",
 			1, "new", "active", time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC),
-			0, "email", 0, 7, 0, 0,
+			0, "email", 0, 7, 0, 0, 0,
 		))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/u1", nil)

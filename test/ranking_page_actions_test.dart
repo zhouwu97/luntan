@@ -35,6 +35,7 @@ void main() {
           repository: _StubRankingRepository(),
           platformRepository: _StubPlatformRepository(),
           publishRepository: _StubPublishRepository(),
+          canSubmitRanking: true,
           canManageRanking: true,
         ),
       ),
@@ -47,12 +48,13 @@ void main() {
     expect(find.byTooltip('调整榜单名次'), findsOneWidget);
   });
 
-  testWidgets('普通用户即使具备上传能力也隐藏添加与调序入口', (tester) async {
+  testWidgets('普通注册用户显示投稿入口但不显示调序入口', (tester) async {
     await tester.pumpWidget(
       MaterialApp(home: RankingPage(
         repository: _StubRankingRepository(),
         platformRepository: _StubPlatformRepository(),
         publishRepository: _StubPublishRepository(),
+        canSubmitRanking: true,
         canManageRanking: false,
       )),
     );
@@ -60,7 +62,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.byTooltip('投稿新玩具'), findsNothing);
+    expect(find.byTooltip('投稿新玩具'), findsOneWidget);
     expect(find.byTooltip('调整榜单名次'), findsNothing);
   });
 }

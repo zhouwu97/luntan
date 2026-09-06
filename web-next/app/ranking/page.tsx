@@ -48,8 +48,9 @@ export default function RankingPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { user } = useSession();
+  const { user, isRegistered } = useSession();
   const canManage = user?.capabilities?.can_manage_admins === true;
+  const canSubmit = isRegistered && user?.capabilities?.can_upload_media !== false;
 
   const tabParam = searchParams.get("tab") || "";
   const categoryParam = searchParams.get("category") || "";
@@ -197,7 +198,8 @@ export default function RankingPage() {
           />
         </form>
 
-        {canManage && <><button type="button" className="icon-btn" aria-label="添加物品" onClick={openSubmission}><Icon name="plus" size={18} /></button><Link className="icon-btn" href="/admin/ranking" aria-label="调整物品顺序"><Icon name="refresh" size={17} /></Link></>}
+        {canSubmit && <button type="button" className="icon-btn" aria-label="添加物品" onClick={openSubmission}><Icon name="plus" size={18} /></button>}
+        {canManage && <Link className="icon-btn" href="/admin/ranking" aria-label="调整物品顺序"><Icon name="refresh" size={17} /></Link>}
       </header>
 
       {/* 移动端/竖屏分类导航条 (对齐 Flutter ranking_page.dart) */}
@@ -241,6 +243,7 @@ export default function RankingPage() {
               onSelect={(comm) => {
                 router.push(comm ? `/?community=${encodeURIComponent(comm.id)}` : "/");
               }}
+              onSelectAll={() => router.push("/?community=all")}
             />
           }
           rightRail={
@@ -261,7 +264,7 @@ export default function RankingPage() {
               <h1 className={styles.title}>本周好物榜</h1>
               <p className={styles.subtitle}>根据同好真实拆箱、测评评分与互动热度排序</p>
             </div>
-            {canManage && <div className="row gap-2"><Link href="/ranking/submit">添加物品</Link><Link href="/admin/ranking">调整物品顺序</Link></div>}
+            {(canSubmit || canManage) && <div className="row gap-2">{canSubmit && <Link href="/ranking/submit">添加物品</Link>}{canManage && <Link href="/admin/ranking">调整物品顺序</Link>}</div>}
 
           </div>
 

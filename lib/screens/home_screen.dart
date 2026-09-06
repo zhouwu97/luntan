@@ -114,6 +114,7 @@ class HomeScreen extends StatefulWidget {
     this.rankingRepository,
     this.storeRepository,
     this.publishRepository,
+    this.canSubmitRanking = false,
     this.canManageRanking = false,
     this.currentUser,
     this.onRefreshCompleted,
@@ -147,6 +148,7 @@ class HomeScreen extends StatefulWidget {
   final RankingRepository? rankingRepository;
   final StoreRepository? storeRepository;
   final PublishRepository? publishRepository;
+  final bool canSubmitRanking;
   final bool canManageRanking;
   final AuthUser? currentUser;
 
@@ -514,6 +516,7 @@ class _HomeScreenState extends State<HomeScreen> {
           rankingRepository: widget.rankingRepository,
           storeRepository: widget.storeRepository,
           publishRepository: widget.publishRepository,
+          canSubmitRanking: widget.canSubmitRanking,
           canManageRanking: widget.canManageRanking,
           isAuthenticated: widget.isAuthenticated,
           canComment: widget.canComment,

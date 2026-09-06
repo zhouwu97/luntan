@@ -124,7 +124,8 @@ export function PostDetailShell({ id }: { id: string }) {
   const searchParams = useSearchParams();
   const notificationCommentId = searchParams.get("reply") || searchParams.get("comment");
   const router = useRouter();
-  const { user, ready: sessionReady } = useSession();
+  const { user, ready: sessionReady, isRegistered } = useSession();
+  const canUploadMedia = isRegistered && user?.capabilities?.can_upload_media !== false;
   const { showToast } = useToast();
   const [post, setPost] = useState<Post | null>(() => getPostSnapshot(id, user?.id));
   const [postLoading, setPostLoading] = useState(() => !getPostSnapshot(id, user?.id));
@@ -402,8 +403,9 @@ export function PostDetailShell({ id }: { id: string }) {
   }
 
   async function handleToggleBookmark() {
-    if (!user) {
-      router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
+    if (!isRegistered || user?.capabilities?.can_manage_bookmarks === false) {
+      showToast("注册正式账号后即可收藏，当前浏览与评论会保留");
+      router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${id}`)}`);
       return;
     }
     if (!post || bookmarkPending) return;
@@ -752,7 +754,7 @@ export function PostDetailShell({ id }: { id: string }) {
                   marginTop: 10,
                 }}
               >
-                <label
+                {canUploadMedia && <label
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -772,7 +774,7 @@ export function PostDetailShell({ id }: { id: string }) {
                     onChange={handleChooseMobileFiles}
                     disabled={mobilePreviews.items.length >= 9 || sendingComment}
                   />
-                </label>
+                </label>}
                 <div style={{ display: "flex", gap: 10 }}>
                   <button
                     type="button"
@@ -1126,6 +1128,7 @@ function CommentsSection({
   const previews = useLocalImagePreviews(9);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
     const result = previews.append(Array.from(e.target.files || []));
@@ -1279,7 +1282,7 @@ function CommentsSection({
           )}
 
           <div className="composer-footer">
-            <label
+            {canUploadMedia && <label
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1300,7 +1303,7 @@ function CommentsSection({
                 onChange={handleChooseFiles}
                 disabled={previews.items.length >= 9 || busy}
               />
-            </label>
+            </label>}
             <button
               type="submit"
               className="reply-submit"
@@ -1703,6 +1706,7 @@ function CommentReplyModal({
   const previews = useLocalImagePreviews(9);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
 
   useEffect(() => {
     let active = true;
@@ -1983,10 +1987,10 @@ function CommentReplyModal({
         )}
 
         <form className="comment-reply-composer" onSubmit={submit}>
-          <label style={{ cursor: "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: "#64748b" }}>
+          {canUploadMedia && <label style={{ cursor: "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: "#64748b" }}>
             <Icon name="image" size={19} />
             <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy} />
-          </label>
+          </label>}
           <input
             value={content}
             onChange={(event) => setContent(event.target.value)}
@@ -2009,8 +2013,9 @@ function DetailAside({ post, related, user }: { post: Post; related: Post[]; use
   const [followBusy, setFollowBusy] = useState(false);
 
   async function handleToggleFollow() {
-    if (!user) {
-      router.push(`/login?next=${encodeURIComponent(`/post/${post.id}`)}`);
+    if (!user || user.accountType === "guest" || user.capabilities?.can_follow === false) {
+      showToast("注册正式账号后即可关注作者");
+      router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${post.id}`)}`);
       return;
     }
     if (followBusy) return;

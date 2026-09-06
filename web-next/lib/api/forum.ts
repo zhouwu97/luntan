@@ -949,6 +949,7 @@ export async function getUserProfile(id: string): Promise<ProfileSummary> {
     likeReceivedCount: asNumber(item.like_received_count),
     followerCount: asNumber(item.follower_count),
     followingCount: asNumber(item.following_count),
+    bookmarkCount: asNumber(item.bookmark_count),
     publicId: asString(item.public_id) || undefined,
     createdAt: asString(item.created_at) || undefined,
     isFollowing: asBoolean(viewer.is_following),

@@ -23,14 +23,14 @@ test("新评论的旧源地址转换为网关，异步生成后自动显示并�
   await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
 });
 
-test("普通用户不显示榜单管理入口及规则说明，直达添加页面也不能操作", async ({ page }) => {
+test("游客不显示榜单管理入口，直达投稿页时引导注册", async ({ page }) => {
   await page.goto("/ranking");
   await expect(page.getByRole("heading", { name: "本周好物榜" })).toBeVisible();
   await expect(page.getByText("榜单规则", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "调整物品顺序" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "添加物品" })).toHaveCount(0);
   await page.goto("/ranking/submit");
-  await expect(page.getByText("仅超级管理员可添加榜单物品。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "注册后才能投稿" })).toBeVisible();
 });
 
 for (const width of [1440, 390]) {

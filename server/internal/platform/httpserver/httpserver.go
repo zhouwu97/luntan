@@ -190,7 +190,7 @@ func securityHeadersMiddleware(next http.Handler, secure bool) http.Handler {
 	})
 }
 
-// corsMiddleware 让公开 Feed、榜单和媒体元数据可以被 Flutter Web 跨域读取。
+// corsMiddleware 让独立网页版读取公开 Feed、榜单和媒体元数据。
 // 互动请求仍由 API 自身的认证与权限逻辑保护；这里仅处理浏览器预检和响应头。
 func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

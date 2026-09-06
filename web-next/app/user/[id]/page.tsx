@@ -27,6 +27,7 @@ function guestProfile(user: SessionUser | null): ProfileSummary {
     likeReceivedCount: 0,
     followerCount: 0,
     followingCount: 0,
+    bookmarkCount: 0,
     isFollowing: false,
     canFollow: false,
   };
@@ -103,8 +104,8 @@ export default function UserPage() {
 
   async function toggleFollow() {
     if (!profile || followBusy) return;
-    if (!user || user.accountType === "guest") {
-      router.push(`/login?next=${encodeURIComponent(`/user/${id}`)}`);
+    if (!user || user.accountType === "guest" || user.capabilities?.can_follow === false) {
+      router.push(`/login?mode=register&next=${encodeURIComponent(`/user/${id}`)}`);
       return;
     }
     const next = !profile.isFollowing;
@@ -339,7 +340,7 @@ export default function UserPage() {
               </div>
               <div className="stat-box">
                 <span className="stat-num orange">{compactCount(profile.commentCount || 0)}</span>
-                <span className="stat-label">评论与收藏</span>
+                <span className="stat-label">评论</span>
               </div>
             </div>
 

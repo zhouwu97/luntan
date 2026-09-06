@@ -29,6 +29,7 @@ type userProfileResponse struct {
 	CommentCount      int64          `json:"comment_count"`
 	FollowerCount     int64          `json:"follower_count"`
 	FollowingCount    int64          `json:"following_count"`
+	BookmarkCount     int64          `json:"bookmark_count,omitempty"`
 	CreatedAt         string         `json:"created_at"`
 	ViewerState       map[string]any `json:"viewer_state"`
 }
@@ -58,14 +59,15 @@ func (s *Server) getUserProfile(w http.ResponseWriter, r *http.Request, id strin
 		       (SELECT count(*) FROM posts p WHERE p.author_id = u.id AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.type <> 'market' AND (p.moderation_status = 'normal' OR (p.author_id = $2 AND p.moderation_status = 'pending'))),
 		       (SELECT count(*) FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.author_id = u.id AND c.deleted_at IS NULL AND c.publication_status = 'published' AND c.moderation_status = 'normal' AND p.deleted_at IS NULL AND p.publication_status = 'published' AND p.moderation_status = 'normal' AND p.type <> 'market'),
 		       (SELECT count(*) FROM user_follows f WHERE f.followee_id = u.id),
-		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id)
+		       (SELECT count(*) FROM user_follows f WHERE f.follower_id = u.id),
+		       CASE WHEN u.id = $2 THEN (SELECT count(*) FROM bookmarks b WHERE b.user_id = u.id) ELSE 0 END
 		FROM users u
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets avatar ON avatar.id = up.avatar_media_id AND avatar.status = 'ready' AND avatar.deleted_at IS NULL
 		LEFT JOIN media_assets background ON background.id = up.background_media_id AND background.status = 'ready' AND background.deleted_at IS NULL
 		WHERE u.id = $1 AND u.deleted_at IS NULL`, id, viewerID).
 		Scan(&item.ID, &item.PublicID, &item.Username, &item.Nickname, &item.AvatarMediaID, &avatarObjectKey, &item.BackgroundMediaID, &backgroundObjectKey, &item.Bio,
-			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.CommentCount, &item.FollowerCount, &item.FollowingCount)
+			&rawLevel, &item.TrustLevel, &item.Status, &createdAt, &exp, &accountType, &item.PostCount, &item.CommentCount, &item.FollowerCount, &item.FollowingCount, &item.BookmarkCount)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "用户不存在"})
 		return

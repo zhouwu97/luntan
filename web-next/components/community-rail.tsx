@@ -19,17 +19,19 @@ export function CommunityRail({
   communities,
   activeId,
   onSelect,
+  onSelectAll,
 }: {
   communities: Community[];
   activeId?: string;
   onSelect: (community: Community | undefined) => void;
+  onSelectAll?: () => void;
 }) {
   const router = useRouter();
-  const { user, unreadCount } = useSession();
+  const { user, isRegistered, unreadCount } = useSession();
   const [profile, setProfile] = useState<ProfileSummary | null>(null);
 
   useEffect(() => {
-    if (!user?.id) {
+    if (!isRegistered || !user?.id) {
       setProfile(null);
       return;
     }
@@ -44,7 +46,7 @@ export function CommunityRail({
     return () => {
       mounted = false;
     };
-  }, [user?.id]);
+  }, [isRegistered, user?.id]);
 
   const greetingTime = () => {
     const hour = new Date().getHours();
@@ -59,7 +61,7 @@ export function CommunityRail({
     <aside className="desktop-sidebar-rail" aria-label="社区侧边导航">
       {/* 个人状态卡片 */}
       <section className="profile-card">
-        {user ? (
+        {isRegistered && user ? (
           <>
             <Link href={`/user/${user.id}`} className="profile-card-top" aria-label="查看个人主页">
               <UserAvatar userId={user.id} name={user.nickname} url={user.avatarUrl} size="large" className="profile-avatar-frame" />
@@ -138,9 +140,9 @@ export function CommunityRail({
         <div className="sidebar-nav-list">
           <button
             type="button"
-            className={`sidebar-nav-item${!activeId ? " active" : ""}`}
-            onClick={() => onSelect(undefined)}
-            aria-current={!activeId ? "page" : undefined}
+            className={`sidebar-nav-item${!activeId || activeId === "all" ? " active" : ""}`}
+            onClick={() => onSelectAll ? onSelectAll() : onSelect(undefined)}
+            aria-current={!activeId || activeId === "all" ? "page" : undefined}
           >
             <span className="sidebar-item-icon blue">
               <Icon name="grid" size={18} />
@@ -225,7 +227,7 @@ export function CommunityRail({
       <button
         type="button"
         className="sidebar-compose-button"
-        onClick={() => router.push(user ? "/publish" : "/login")}
+        onClick={() => router.push(isRegistered ? "/publish" : `/login?mode=register&next=${encodeURIComponent("/publish")}`)}
         aria-label="发布新帖"
       >
         <Icon name="edit" size={18} />

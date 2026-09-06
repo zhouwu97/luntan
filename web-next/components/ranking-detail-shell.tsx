@@ -38,7 +38,8 @@ export function RankingDetailShell({ id }: { id: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { user } = useSession();
+  const { user, isRegistered } = useSession();
+  const canVote = isRegistered && user?.capabilities?.can_vote !== false;
   const returnPath = safeRankingReturn(searchParams.get("from"));
   const [detail, setDetail] = useState<RankingToyDetail | null>(null);
   const [sort, setSort] = useState<"weight" | "latest">("weight");
@@ -96,6 +97,10 @@ export function RankingDetailShell({ id }: { id: string }) {
     router.push(`/login?next=${encodeURIComponent(currentLocalPath(pathname, window.location.search))}`);
   }
 
+  function registerForCurrentPage() {
+    router.push(`/login?mode=register&next=${encodeURIComponent(currentLocalPath(pathname, window.location.search))}`);
+  }
+
   function updateCachedDetail(next: RankingToyDetail) {
     setDetail(next);
     writeRankingToyCache(next);
@@ -103,8 +108,8 @@ export function RankingDetailShell({ id }: { id: string }) {
 
   function toggleWanted() {
     if (!detail) return;
-    if (!user) {
-      loginForCurrentPage();
+    if (!canVote) {
+      registerForCurrentPage();
       return;
     }
     const next = !wanted;
@@ -134,8 +139,8 @@ export function RankingDetailShell({ id }: { id: string }) {
 
   async function toggleOwned() {
     if (!detail) return;
-    if (!user) {
-      loginForCurrentPage();
+    if (!canVote) {
+      registerForCurrentPage();
       return;
     }
     const next = !owned;
@@ -239,8 +244,8 @@ export function RankingDetailShell({ id }: { id: string }) {
   async function submitRating(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detail || ratingBusy) return;
-    if (!user) {
-      loginForCurrentPage();
+    if (!canVote) {
+      registerForCurrentPage();
       return;
     }
     setRatingBusy(true);
@@ -294,7 +299,7 @@ export function RankingDetailShell({ id }: { id: string }) {
             <div className="ranking-detail-product-copy"><h1>{detail.name}</h1><p>{detail.merchant}{detail.releaseYear ? ` · ${detail.releaseYear}` : ""}</p><div className="ranking-detail-tags">{detail.tags.slice(0, 3).map((tag) => <span key={tag}>#{tag}</span>)}</div></div>
           </div>
           <p className="ranking-detail-description">{detail.description || "暂无产品介绍"}</p>
-          <RatingSummary detail={detail} onRate={() => { setRatingSelection(detail.viewerState?.rating ?? 10); setRatingOpen(true); }} />
+          <RatingSummary detail={detail} onRate={() => { if (!canVote) { registerForCurrentPage(); return; } setRatingSelection(detail.viewerState?.rating ?? 10); setRatingOpen(true); }} />
           <div className="ranking-detail-actions"><button type="button" className={`ranking-want-button${wanted ? " active" : ""}`} onClick={toggleWanted}><Icon name="heart" size={18} fill={wanted ? "currentColor" : "none"} />{wanted ? "已想冲" : "想冲"}<small>{compactCount(detail.wantCount)} 人想冲</small></button><button type="button" className={`ranking-owned-button${owned ? " active" : ""}`} onClick={() => void toggleOwned()}><Icon name="sparkle" size={17} />{owned ? "已买过" : "买过"}<small>{detail.ratingCount} 人评分</small></button></div>
         </section>
         <section className="ranking-reviews-section">

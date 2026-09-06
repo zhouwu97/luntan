@@ -1412,8 +1412,18 @@ function CommentMediaThumbnail({
     ...mediaCandidates(asset, "original"),
   ])];
   const [candidateIdx, setCandidateIdx] = useState(0);
+  const [mediaRetry, setMediaRetry] = useState(0);
+  const mediaKey = candidates.join("|");
   const src = candidates[candidateIdx] || asset.thumbUrl || asset.url;
   const isFailed = candidateIdx >= candidates.length && candidates.length > 0;
+
+  useEffect(() => { setCandidateIdx(0); setMediaRetry(0); }, [mediaKey]);
+  useEffect(() => {
+    // 评论缩略图与正文使用不同组件，异步生成后的恢复也必须覆盖这条渲染链。
+    if (!isFailed || mediaRetry >= 5 || !mediaKey.includes("/api/v1/media-file/")) return;
+    const timer = window.setTimeout(() => { setCandidateIdx(0); setMediaRetry((n) => n + 1); }, 1000 * (mediaRetry + 1));
+    return () => window.clearTimeout(timer);
+  }, [isFailed, mediaRetry, mediaKey]);
 
   if (isFailed) {
     return (

@@ -5,6 +5,7 @@ const basePath = process.env.NEXT_PUBLIC_APP_BASE_PATH?.trim() || "";
 
 function getGitSha(): string {
   const envSha =
+    process.env.NEXT_PUBLIC_RELEASE_SHA ||
     process.env.NEXT_PUBLIC_GIT_SHA ||
     process.env.GIT_SHA ||
     process.env.RELEASE_SHA ||
@@ -19,6 +20,7 @@ function getGitSha(): string {
 
 const gitSha = getGitSha();
 const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString();
+const releaseSha = process.env.NEXT_PUBLIC_RELEASE_SHA || process.env.RELEASE_SHA || gitSha;
 
 const nextConfig: NextConfig = {
   basePath,
@@ -26,10 +28,19 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   env: {
+    NEXT_PUBLIC_RELEASE_SHA: releaseSha,
     NEXT_PUBLIC_GIT_SHA: gitSha,
     NEXT_PUBLIC_BUILD_TIME: buildTime,
+  },
+  async redirects() {
+    return [
+      {
+        source: "/auth",
+        destination: "/login",
+        permanent: false,
+      },
+    ];
   },
 };
 
 export default nextConfig;
-

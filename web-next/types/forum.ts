@@ -91,6 +91,11 @@ export interface Comment {
   author: UserSummary;
   content: string;
   media?: MediaAsset[];
+  publicationStatus?: string;
+  moderationStatus?: string;
+  rootId?: string;
+  parentId?: string;
+  replyToUserId?: string;
   likeCount: number;
   dislikeCount: number;
   replyCount: number;

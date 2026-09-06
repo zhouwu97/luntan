@@ -27,7 +27,7 @@ import type {
   SessionUser,
   UserSummary,
 } from "../../types/forum";
-import { apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
+import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
 
 type JsonRecord = Record<string, unknown>;
 const feedRequests = new Map<string, Promise<FeedPage>>();
@@ -192,6 +192,11 @@ export function parseComment(raw: unknown): Comment {
     author: parseUser(item.author),
     content: asString(item.content),
     media: parseMediaList(item),
+    publicationStatus: asString(item.publication_status) || undefined,
+    moderationStatus: asString(item.moderation_status) || undefined,
+    rootId: asString(item.root_id) || undefined,
+    parentId: asString(item.parent_id) || undefined,
+    replyToUserId: asString(item.reply_to_user_id) || undefined,
     likeCount: asNumber(item.like_count),
     dislikeCount: asNumber(item.dislike_count),
     replyCount: asNumber(item.reply_count),
@@ -543,6 +548,14 @@ export async function recordHistory(postId: string): Promise<void> {
   await apiPost(`/posts/${encodeURIComponent(postId)}/history`);
 }
 
+export async function recordPostView(postId: string): Promise<{ recorded: boolean; viewCount?: number }> {
+  const payload = await apiPost<JsonRecord>(`/posts/${encodeURIComponent(postId)}/view`);
+  return {
+    recorded: payload.recorded === true,
+    viewCount: typeof payload.view_count === "number" ? payload.view_count : undefined,
+  };
+}
+
 export async function setPostLike(postId: string, active: boolean): Promise<void> {
   await apiFetch(`/posts/${encodeURIComponent(postId)}/like`, { method: active ? "PUT" : "DELETE" });
 }
@@ -569,6 +582,10 @@ export async function deletePost(postId: string): Promise<void> {
 
 export async function deleteComment(commentId: string): Promise<void> {
   await apiFetch(`/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" });
+}
+
+export async function deleteMedia(mediaId: string): Promise<void> {
+  await apiFetch(`/media/${encodeURIComponent(mediaId)}`, { method: "DELETE" });
 }
 
 function newIdempotencyKey(prefix: string): string {
@@ -629,9 +646,101 @@ export async function createPost(
   return getPost(id);
 }
 
-async function imageDimensions(file: File): Promise<{ width: number; height: number }> {
+class ClientMediaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientMediaError";
+  }
+}
+
+export type UploadImagesProgress = {
+  current: number;
+  total: number;
+  stage: "preparing" | "uploading" | "complete";
+};
+
+type SupportedImageMimeType = "image/jpeg" | "image/png" | "image/webp";
+
+type PreparedWebImage = {
+  file: File;
+  bytes: ArrayBuffer;
+  fileName: string;
+  mimeType: SupportedImageMimeType;
+  width: number;
+  height: number;
+  sha256: string;
+};
+
+const supportedImageMimeTypes = new Set<string>(["image/jpeg", "image/png", "image/webp"]);
+const maxWebImageBytes = 15 * 1024 * 1024;
+
+export function isPossiblySupportedImageFile(file: File): boolean {
+  const type = file.type.trim().toLowerCase();
+  if (!type) return true;
+  return type.startsWith("image/");
+}
+
+function extensionMimeType(name: string): SupportedImageMimeType | "" {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "";
+}
+
+function sniffImageMimeType(bytes: Uint8Array): SupportedImageMimeType | "image/heic" | "" {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) return "image/png";
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) return "image/webp";
+  if (
+    bytes.length >= 12 &&
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70
+  ) {
+    const brand = String.fromCharCode(...bytes.slice(8, Math.min(bytes.length, 24))).toLowerCase();
+    if (/(heic|heix|hevc|hevx|mif1|msf1|heif)/.test(brand)) return "image/heic";
+  }
+  return "";
+}
+
+function resolveUploadMimeType(file: File, bytes: Uint8Array): SupportedImageMimeType {
+  const sniffed = sniffImageMimeType(bytes);
+  if (sniffed === "image/heic") {
+    throw new ClientMediaError("Web 暂不支持 HEIC 图片，请先转换为 JPG、PNG 或 WebP");
+  }
+  if (sniffed) return sniffed;
+  const declared = file.type.trim().toLowerCase();
+  if (supportedImageMimeTypes.has(declared)) return declared as SupportedImageMimeType;
+  const ext = extensionMimeType(file.name);
+  if (ext) return ext;
+  throw new ClientMediaError("仅支持 JPG、PNG、WebP 图片");
+}
+
+async function imageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
   if (typeof createImageBitmap === "function") {
-    const bitmap = await createImageBitmap(file);
+    const bitmap = await createImageBitmap(blob);
     try {
       return { width: bitmap.width, height: bitmap.height };
     } finally {
@@ -640,7 +749,7 @@ async function imageDimensions(file: File): Promise<{ width: number; height: num
   }
   return new Promise((resolve, reject) => {
     const image = new Image();
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(blob);
     image.onload = () => {
       URL.revokeObjectURL(url);
       resolve({ width: image.naturalWidth, height: image.naturalHeight });
@@ -653,22 +762,48 @@ async function imageDimensions(file: File): Promise<{ width: number; height: num
   });
 }
 
-async function sha256(file: File): Promise<string> {
-  const bytes = await file.arrayBuffer();
+async function sha256Bytes(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-export async function uploadImage(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) throw new Error("只能上传图片文件");
-  const [{ width, height }, hash] = await Promise.all([imageDimensions(file), sha256(file)]);
+async function prepareWebImage(file: File): Promise<PreparedWebImage> {
+  const bytes = await file.arrayBuffer();
+  if (bytes.byteLength <= 0) throw new ClientMediaError("图片文件为空");
+  if (bytes.byteLength > maxWebImageBytes) throw new ClientMediaError("单张图片不能超过 15 MB");
+  const mimeType = resolveUploadMimeType(file, new Uint8Array(bytes.slice(0, 32)));
+  const blob = new Blob([bytes], { type: mimeType });
+  let dimensions: { width: number; height: number };
+  try {
+    dimensions = await imageDimensions(blob);
+  } catch {
+    throw new ClientMediaError("无法读取图片尺寸，请重新选择图片");
+  }
+  if (dimensions.width <= 0 || dimensions.height <= 0) {
+    throw new ClientMediaError("图片尺寸异常，请重新选择图片");
+  }
+  if (dimensions.width * dimensions.height > 40_000_000) {
+    throw new ClientMediaError("图片像素过大，请压缩后再上传");
+  }
+  return {
+    file,
+    bytes,
+    fileName: file.name || `image.${mimeType.split("/")[1]}`,
+    mimeType,
+    width: dimensions.width,
+    height: dimensions.height,
+    sha256: await sha256Bytes(bytes),
+  };
+}
+
+async function uploadPreparedImage(prepared: PreparedWebImage): Promise<string> {
   const token = await apiPost<JsonRecord>("/media/upload-token", {
-    file_name: file.name,
-    mime_type: file.type,
-    width,
-    height,
-    size: file.size,
-    sha256: hash,
+    file_name: prepared.fileName,
+    mime_type: prepared.mimeType,
+    width: prepared.width,
+    height: prepared.height,
+    size: prepared.bytes.byteLength,
+    sha256: prepared.sha256,
   });
   const mediaId = asString(token.media_id);
   const uploadUrl = asString(token.upload_url);
@@ -678,18 +813,67 @@ export async function uploadImage(file: File): Promise<string> {
   const target = /^https?:\/\//i.test(uploadUrl)
     ? uploadUrl
     : new URL(uploadUrl, window.location.origin).toString();
-  const uploadResponse = await fetch(target, {
-    method: uploadMethod,
-    body: file,
-    headers: file.type ? { "Content-Type": file.type } : undefined,
-  });
-  if (!uploadResponse.ok) throw new Error(`图片上传失败（HTTP ${uploadResponse.status}）`);
+  try {
+    const uploadResponse = await fetch(target, {
+      method: uploadMethod,
+      body: prepared.bytes,
+      headers: { "Content-Type": prepared.mimeType },
+    });
+    if (!uploadResponse.ok) {
+      throw new ApiError(`图片上传失败（HTTP ${uploadResponse.status}）`, uploadResponse.status);
+    }
 
-  await apiPost(`/media/${encodeURIComponent(mediaId)}/complete`, {
-    size: file.size,
-    sha256: hash,
-  });
-  return mediaId;
+    await apiPost(`/media/${encodeURIComponent(mediaId)}/complete`, {
+      size: prepared.bytes.byteLength,
+      sha256: prepared.sha256,
+    });
+    return mediaId;
+  } catch (error) {
+    if (isDeterministicClientError(error)) await cleanupUploadedMedia([mediaId]);
+    throw error;
+  }
+}
+
+export async function uploadImage(file: File): Promise<string> {
+  const prepared = await prepareWebImage(file);
+  let mediaId = "";
+  try {
+    mediaId = await uploadPreparedImage(prepared);
+    return mediaId;
+  } catch (error) {
+    if (mediaId && isDeterministicClientError(error)) await cleanupUploadedMedia([mediaId]);
+    throw error;
+  }
+}
+
+export function isDeterministicClientError(error: unknown): boolean {
+  if (error instanceof ClientMediaError) return true;
+  return error instanceof ApiError && error.status >= 400 && error.status < 500;
+}
+
+export async function cleanupUploadedMedia(mediaIds: string[]): Promise<void> {
+  const ids = [...new Set(mediaIds.map((id) => id.trim()).filter(Boolean))];
+  await Promise.allSettled(ids.map((id) => deleteMedia(id)));
+}
+
+export async function uploadImages(
+  files: File[],
+  onProgress?: (progress: UploadImagesProgress) => void,
+): Promise<string[]> {
+  const uploaded: string[] = [];
+  try {
+    for (const [index, file] of files.entries()) {
+      onProgress?.({ current: index + 1, total: files.length, stage: "preparing" });
+      const prepared = await prepareWebImage(file);
+      onProgress?.({ current: index + 1, total: files.length, stage: "uploading" });
+      uploaded.push(await uploadPreparedImage(prepared));
+    }
+    onProgress?.({ current: files.length, total: files.length, stage: "complete" });
+    return uploaded;
+  } catch (error) {
+    if (isDeterministicClientError(error)) await cleanupUploadedMedia(uploaded);
+    throw error;
+  }
 }
 
 export async function requestEmailCode(email: string, scene: "login" | "register" = "login"): Promise<EmailCodeChallenge> {

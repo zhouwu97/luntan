@@ -74,33 +74,57 @@ jobs:
         working-directory: server
         run: |
           set -eu
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LUNTAN_LDFLAGS="-s -w -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildVersion=${RELEASE_SHA} -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildCommit=${RELEASE_SHA} -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildTime=${BUILD_TIME}"
           mkdir -p ../release/migrations ../release/web
-          go build -trimpath -ldflags="-s -w -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildVersion=${RELEASE_SHA} -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildCommit=${RELEASE_SHA}" -o ../release/luntan-api ./cmd/api
-          go build -trimpath -ldflags="-s -w -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildVersion=${RELEASE_SHA} -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildCommit=${RELEASE_SHA}" -o ../release/luntan-worker ./cmd/worker
-          go build -trimpath -ldflags="-s -w -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildVersion=${RELEASE_SHA} -X github.com/zhouwu97/luntan/server/internal/platform/httpserver.BuildCommit=${RELEASE_SHA}" -o ../release/luntan-migrate ./cmd/migrate
+          go build -trimpath -ldflags="$LUNTAN_LDFLAGS" -o ../release/luntan-api ./cmd/api
+          go build -trimpath -ldflags="$LUNTAN_LDFLAGS" -o ../release/luntan-worker ./cmd/worker
+          go build -trimpath -ldflags="$LUNTAN_LDFLAGS" -o ../release/luntan-migrate ./cmd/migrate
           cp -R migrations/. ../release/migrations/
           cp -R ../build/web/. ../release/web/
           install -m 0755 ../scripts/staging-smoke.sh ../release/staging-smoke.sh
-          printf 'commit=%s\n' "$RELEASE_SHA" > ../release/release-metadata.txt
+          printf 'commit=%s\nbuild_time=%s\n' "$RELEASE_SHA" "$BUILD_TIME" > ../release/release-metadata.txt
           test -x ../release/luntan-api
           test -x ../release/luntan-worker
           test -x ../release/luntan-migrate
           test -f ../release/web/index.html
           (cd .. && tar -czf "staging-release-${RELEASE_SHA}.tar.gz" release)
 
-      - name: Build and push immutable GHCR image
+      - name: Build and push immutable API image
         env:
           IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -eu
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           case "$IMAGE_TAG" in
             *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
           esac
           docker build \
             --build-arg BUILD_VERSION="$RELEASE_SHA" \
             --build-arg BUILD_COMMIT="$RELEASE_SHA" \
+            --build-arg BUILD_TIME="$BUILD_TIME" \
             --tag "$IMAGE_TAG" server
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE_TAG"
+
+      - name: Build and push immutable Web image
+        env:
+          IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-web:${{ inputs.release_sha }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          STAGING_BASE_URL: ${{ inputs.staging_base_url }}
+        run: |
+          set -eu
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          case "$IMAGE_TAG" in
+            *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
+          esac
+          docker build \
+            --build-arg NEXT_PUBLIC_RELEASE_SHA="$RELEASE_SHA" \
+            --build-arg NEXT_PUBLIC_GIT_SHA="$RELEASE_SHA" \
+            --build-arg NEXT_PUBLIC_BUILD_TIME="$BUILD_TIME" \
+            --build-arg API_PROXY_TARGET="$STAGING_BASE_URL" \
+            --tag "$IMAGE_TAG" web-next
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           docker push "$IMAGE_TAG"
 

@@ -23,7 +23,9 @@ import {
   getCommentReplies,
   getComments,
   getFeed,
+  cleanupUploadedMedia,
   recordHistory,
+  recordPostView,
   removeHomeRecommendation,
   setCommentDislike,
   setCommentLike,
@@ -32,13 +34,91 @@ import {
   setPostHotSuppression,
   setPostLike,
   setUserFollow,
-  uploadImage,
+  isDeterministicClientError,
+  isPossiblySupportedImageFile,
+  uploadImages,
 } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
 import type { Comment, MediaAsset, Post, SessionUser } from "../types/forum";
 
 const ImageGalleryModal = dynamic(() => import("./image-gallery-modal").then((module) => module.ImageGalleryModal), { ssr: false });
 const ReportModal = dynamic(() => import("./report-modal").then((module) => module.ReportModal), { ssr: false });
+
+type LocalImagePreview = {
+  id: string;
+  file: File;
+  url: string;
+};
+
+function newLocalPreview(file: File): LocalImagePreview {
+  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return { id: suffix, file, url: URL.createObjectURL(file) };
+}
+
+function revokeLocalPreviews(items: LocalImagePreview[]) {
+  for (const item of items) URL.revokeObjectURL(item.url);
+}
+
+function useLocalImagePreviews(maxCount = 9) {
+  const [items, setItems] = useState<LocalImagePreview[]>([]);
+  const itemsRef = useRef(items);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => () => revokeLocalPreviews(itemsRef.current), []);
+
+  const append = useCallback((files: File[]) => {
+    const supported = files.filter(isPossiblySupportedImageFile);
+    const skippedUnsupported = files.length - supported.length;
+    const slots = Math.max(0, maxCount - itemsRef.current.length);
+    const additions = supported.slice(0, slots).map(newLocalPreview);
+    const next = [...itemsRef.current, ...additions];
+    itemsRef.current = next;
+    setItems(next);
+    return {
+      added: additions.length,
+      skippedUnsupported,
+      skippedLimit: Math.max(0, supported.length - slots),
+    };
+  }, [maxCount]);
+
+  const removeAt = useCallback((index: number) => {
+    const current = itemsRef.current;
+    const removed = current[index];
+    if (removed) URL.revokeObjectURL(removed.url);
+    const next = current.filter((_, idx) => idx !== index);
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+
+  const clear = useCallback(() => {
+    revokeLocalPreviews(itemsRef.current);
+    itemsRef.current = [];
+    setItems([]);
+  }, []);
+
+  return { items, append, removeAt, clear };
+}
+
+function uploadProgressText(current: number, total: number, stage: "preparing" | "uploading" | "complete") {
+  if (stage === "complete") return "";
+  return `${stage === "preparing" ? "正在处理" : "正在上传"}图片 ${current}/${total}`;
+}
+
+async function createWithUploadedMediaRollback<T>(mediaIds: string[], action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (mediaIds.length > 0 && isDeterministicClientError(error)) {
+      await cleanupUploadedMedia(mediaIds);
+    }
+    throw error;
+  }
+}
 
 export function PostDetailShell({ id }: { id: string }) {
   const router = useRouter();
@@ -62,8 +142,9 @@ export function PostDetailShell({ id }: { id: string }) {
 
   const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
   const [mobileComposerText, setMobileComposerText] = useState("");
-  const [mobileFiles, setMobileFiles] = useState<File[]>([]);
+  const mobilePreviews = useLocalImagePreviews(9);
   const [sendingComment, setSendingComment] = useState(false);
+  const [mobileUploadMessage, setMobileUploadMessage] = useState("");
   const [galleryImages, setGalleryImages] = useState<GalleryImage[] | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [reportTarget, setReportTarget] = useState<{ type: "post" | "comment"; id: string; title?: string } | null>(null);
@@ -152,9 +233,23 @@ export function PostDetailShell({ id }: { id: string }) {
     [id, sortOrder, landlordOnly, landlordOnly ? post?.author.id : undefined],
   );
 
+  const commentsFetchKey = `${id}|${sortOrder}|${landlordOnly ? post?.author.id || "pending" : "all"}`;
+  const commentsFetchKeyRef = useRef("");
+
+  const refreshPost = useCallback(() => {
+    void fetchPost(id, user?.id)
+      .then((nextPost) => {
+        setPost(nextPost);
+        setPostSnapshot(nextPost, user?.id);
+      })
+      .catch(() => undefined);
+  }, [id, user?.id]);
+
   useEffect(() => {
+    if (commentsFetchKeyRef.current === commentsFetchKey) return;
+    commentsFetchKeyRef.current = commentsFetchKey;
     fetchComments(0, false);
-  }, [fetchComments]);
+  }, [commentsFetchKey, fetchComments]);
 
   // 3. 异步加载相关推荐（最低优先级，静默容错）
   useEffect(() => {
@@ -232,8 +327,27 @@ export function PostDetailShell({ id }: { id: string }) {
   }, [postLoading]);
 
   useEffect(() => {
-    if (user && post) void recordHistory(post.id).catch(() => undefined);
-  }, [post, user]);
+    let active = true;
+    void recordPostView(id)
+      .then((result) => {
+        if (!active) return;
+        setPost((current) => {
+          if (!current || current.id !== id) return current;
+          if (typeof result.viewCount === "number") {
+            return { ...current, viewCount: result.viewCount };
+          }
+          return result.recorded ? { ...current, viewCount: current.viewCount + 1 } : current;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    if (user?.id && post?.id) void recordHistory(post.id).catch(() => undefined);
+  }, [post?.id, user?.id]);
 
   function handleSortOrFilterChange(nextSort: "hot" | "asc" | "desc", nextLandlord: boolean) {
     // 状态变更驱动单一 effect 发起请求，不再手动二次拉取，彻底杜绝竞态与双重请求
@@ -338,9 +452,10 @@ export function PostDetailShell({ id }: { id: string }) {
   }
 
   function handleChooseMobileFiles(event: ChangeEvent<HTMLInputElement>) {
-    const next = Array.from(event.target.files || []).filter((f) => f.type.startsWith("image/"));
+    const result = mobilePreviews.append(Array.from(event.target.files || []));
     event.target.value = "";
-    setMobileFiles((curr) => [...curr, ...next].slice(0, 9));
+    if (result.skippedUnsupported > 0) showToast("已跳过不支持的文件");
+    if (result.skippedLimit > 0) showToast("最多上传 9 张图片");
   }
 
   async function handleMobileSubmitComment(event: FormEvent<HTMLFormElement>) {
@@ -349,23 +464,28 @@ export function PostDetailShell({ id }: { id: string }) {
       router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
       return;
     }
-    if ((!mobileComposerText.trim() && mobileFiles.length === 0) || sendingComment) return;
+    if ((!mobileComposerText.trim() && mobilePreviews.items.length === 0) || sendingComment) return;
     setSendingComment(true);
+    setMobileUploadMessage("");
     try {
-      const mediaIds: string[] = [];
-      for (const file of mobileFiles) {
-        mediaIds.push(await uploadImage(file));
-      }
-      const newComment = await createComment(id, mobileComposerText.trim(), mediaIds);
+      const mediaIds = await uploadImages(mobilePreviews.items.map((preview) => preview.file), (progress) => {
+        setMobileUploadMessage(uploadProgressText(progress.current, progress.total, progress.stage));
+      });
+      const newComment = await createWithUploadedMediaRollback(
+        mediaIds,
+        () => createComment(id, mobileComposerText.trim(), mediaIds),
+      );
       setComments((curr) => [newComment, ...curr]);
       setTotalComments((t) => t + 1);
+      setPost((current) => current ? { ...current, commentCount: current.commentCount + 1 } : current);
       setMobileComposerText("");
-      setMobileFiles([]);
+      mobilePreviews.clear();
       setMobileComposerOpen(false);
       showToast("回复发布成功！");
     } catch (reqErr) {
       showToast(formatError(reqErr, "回复失败，请重试"));
     } finally {
+      setMobileUploadMessage("");
       setSendingComment(false);
     }
   }
@@ -504,6 +624,7 @@ export function PostDetailShell({ id }: { id: string }) {
               setReplyTarget={setReplyTarget}
               targetChildCommentId={targetChildCommentId}
               targetChildComment={targetChildComment}
+              onRefreshPost={refreshPost}
             />
           </section>
 
@@ -525,7 +646,7 @@ export function PostDetailShell({ id }: { id: string }) {
         <div className="composer-side">
           <a href="#comments" className="comp-stat" aria-label="查看评论">
             <Icon name="message" size={18} />
-            {compactCount(totalComments)}
+            {compactCount(post.commentCount)}
           </a>
           <button
             type="button"
@@ -577,11 +698,11 @@ export function PostDetailShell({ id }: { id: string }) {
                 onChange={(e) => setMobileComposerText(e.target.value)}
               />
 
-              {mobileFiles.length > 0 && (
+              {mobilePreviews.items.length > 0 && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                  {mobileFiles.map((file, idx) => (
+                  {mobilePreviews.items.map((preview, idx) => (
                     <div
-                      key={idx}
+                      key={preview.id}
                       style={{
                         position: "relative",
                         width: 54,
@@ -591,13 +712,14 @@ export function PostDetailShell({ id }: { id: string }) {
                       }}
                     >
                       <img
-                        src={URL.createObjectURL(file)}
+                        src={preview.url}
                         alt=""
                         style={{ width: "100%", height: "100%", objectFit: "cover" }}
                       />
                       <button
                         type="button"
-                        onClick={() => setMobileFiles((files) => files.filter((_, i) => i !== idx))}
+                        onClick={() => mobilePreviews.removeAt(idx)}
+                        disabled={sendingComment}
                         style={{
                           position: "absolute",
                           top: 2,
@@ -620,6 +742,11 @@ export function PostDetailShell({ id }: { id: string }) {
                   ))}
                 </div>
               )}
+              {mobileUploadMessage && (
+                <div className="form-error" style={{ marginTop: 8, color: "#64748b" }}>
+                  {mobileUploadMessage}
+                </div>
+              )}
 
               <div
                 style={{
@@ -640,14 +767,14 @@ export function PostDetailShell({ id }: { id: string }) {
                   }}
                 >
                   <Icon name="image" size={18} />
-                  <span>图片 ({mobileFiles.length}/9)</span>
+                  <span>图片 ({mobilePreviews.items.length}/9)</span>
                   <input
                     type="file"
                     accept="image/*"
                     multiple
                     style={{ display: "none" }}
                     onChange={handleChooseMobileFiles}
-                    disabled={mobileFiles.length >= 9}
+                    disabled={mobilePreviews.items.length >= 9 || sendingComment}
                   />
                 </label>
                 <div style={{ display: "flex", gap: 10 }}>
@@ -655,13 +782,14 @@ export function PostDetailShell({ id }: { id: string }) {
                     type="button"
                     className="outline-button"
                     onClick={() => setMobileComposerOpen(false)}
+                    disabled={sendingComment}
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     className="primary-button"
-                    disabled={(!mobileComposerText.trim() && mobileFiles.length === 0) || sendingComment}
+                    disabled={(!mobileComposerText.trim() && mobilePreviews.items.length === 0) || sendingComment}
                   >
                     {sendingComment ? "发送中…" : "发送"}
                   </button>
@@ -972,6 +1100,7 @@ function CommentsSection({
   setReplyTarget,
   targetChildCommentId,
   targetChildComment,
+  onRefreshPost,
 }: {
   post: Post;
   comments: Comment[];
@@ -995,34 +1124,40 @@ function CommentsSection({
   setReplyTarget: React.Dispatch<React.SetStateAction<Comment | null>>;
   targetChildCommentId?: string | null;
   targetChildComment?: Comment | null;
+  onRefreshPost?: () => void;
 }) {
   const [content, setContent] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const previews = useLocalImagePreviews(9);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
-    const next = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    const result = previews.append(Array.from(e.target.files || []));
     e.target.value = "";
-    setFiles((curr) => [...curr, ...next].slice(0, 9));
+    if (result.skippedUnsupported > 0) setMessage("已跳过不支持的文件");
+    if (result.skippedLimit > 0) setMessage("最多上传 9 张图片");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return onRequireAuth();
-    if ((!content.trim() && files.length === 0) || busy) return;
+    if ((!content.trim() && previews.items.length === 0) || busy) return;
     setBusy(true);
     setMessage("");
     try {
-      const mediaIds: string[] = [];
-      for (const file of files) {
-        mediaIds.push(await uploadImage(file));
-      }
-      const next = await createComment(post.id, content.trim(), mediaIds);
+      const mediaIds = await uploadImages(previews.items.map((preview) => preview.file), (progress) => {
+        setMessage(uploadProgressText(progress.current, progress.total, progress.stage));
+      });
+      const next = await createWithUploadedMediaRollback(
+        mediaIds,
+        () => createComment(post.id, content.trim(), mediaIds),
+      );
       setComments((current) => [next, ...current]);
       setTotalComments((t) => t + 1);
+      onRefreshPost?.();
       setContent("");
-      setFiles([]);
+      previews.clear();
+      setMessage("");
     } catch (requestError) {
       setMessage(formatError(requestError, "评论发送失败，请稍后重试"));
     } finally {
@@ -1030,12 +1165,12 @@ function CommentsSection({
     }
   }
 
-  async function handleDeleteComment(commentId: string) {
+  async function handleDeleteComment(comment: Comment) {
     if (!window.confirm("确定要删除这条评论吗？")) return;
     try {
-      await deleteComment(commentId);
-      setComments((curr) => curr.filter((c) => c.id !== commentId));
-      setTotalComments((t) => Math.max(0, t - 1));
+      await deleteComment(comment.id);
+      onRetryComments?.();
+      onRefreshPost?.();
     } catch {
       alert("删除评论失败，请重试");
     }
@@ -1044,7 +1179,7 @@ function CommentsSection({
   return (
     <section className="comments-wrap" id="comments" aria-label="帖子评论区">
       <div className="comments-head">
-        <h2 className="comm-title">评论 ({totalComments})</h2>
+        <h2 className="comm-title">评论 ({post.commentCount})</h2>
         <span className="comm-sub">全部讨论</span>
       </div>
 
@@ -1101,11 +1236,11 @@ function CommentsSection({
             }}
           />
 
-          {files.length > 0 && (
+          {previews.items.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "6px 12px" }}>
-              {files.map((file, idx) => (
+              {previews.items.map((preview, idx) => (
                 <div
-                  key={idx}
+                  key={preview.id}
                   style={{
                     position: "relative",
                     width: 52,
@@ -1116,13 +1251,14 @@ function CommentsSection({
                   }}
                 >
                   <img
-                    src={URL.createObjectURL(file)}
+                    src={preview.url}
                     alt=""
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
                   <button
                     type="button"
-                    onClick={() => setFiles((curr) => curr.filter((_, i) => i !== idx))}
+                    onClick={() => previews.removeAt(idx)}
+                    disabled={busy}
                     style={{
                       position: "absolute",
                       top: 2,
@@ -1159,20 +1295,20 @@ function CommentsSection({
               }}
             >
               <Icon name="image" size={17} />
-              <span>上传图片 ({files.length}/9)</span>
+              <span>上传图片 ({previews.items.length}/9)</span>
               <input
                 type="file"
                 accept="image/*"
                 multiple
                 style={{ display: "none" }}
                 onChange={handleChooseFiles}
-                disabled={files.length >= 9}
+                disabled={previews.items.length >= 9 || busy}
               />
             </label>
             <button
               type="submit"
               className="reply-submit"
-              disabled={(!content.trim() && files.length === 0) || busy}
+              disabled={(!content.trim() && previews.items.length === 0) || busy}
             >
               {busy ? "发送中…" : "发布回复"}
             </button>
@@ -1211,7 +1347,7 @@ function CommentsSection({
               user={user}
               onRequireAuth={onRequireAuth}
               onReply={() => setReplyTarget(comment)}
-              onDelete={() => handleDeleteComment(comment.id)}
+              onDelete={() => handleDeleteComment(comment)}
               onOpenGallery={onOpenGallery}
               onReport={() => {
                 if (!user) return onRequireAuth();
@@ -1250,69 +1386,19 @@ function CommentsSection({
           onRequireAuth={onRequireAuth}
           onClose={() => setReplyTarget(null)}
           onOpenGallery={onOpenGallery}
+          onReplyCreated={(reply) => {
+            onRetryComments?.();
+            onRefreshPost?.();
+          }}
+          onReplyDeleted={(replyId) => {
+            onRetryComments?.();
+            onRefreshPost?.();
+          }}
         />
       )}
     </section>
   );
 }
-
-function CommentRow({
-  comment,
-  user,
-  onRequireAuth,
-  onReply,
-  onDelete,
-  onOpenGallery,
-  onReport,
-}: {
-  comment: Comment;
-  user: SessionUser | null;
-  onRequireAuth: () => void;
-  onReply: () => void;
-  onDelete: () => void;
-  onOpenGallery: (images: GalleryImage[], index?: number) => void;
-  onReport: () => void;
-}) {
-  const [liked, setLiked] = useState(comment.viewerState.hasLiked);
-  const [disliked, setDisliked] = useState(comment.viewerState.hasDisliked);
-  const [count, setCount] = useState(comment.likeCount);
-  const [dislikeCount, setDislikeCount] = useState(comment.dislikeCount || 0);
-
-  async function like(event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    if (!user) return onRequireAuth();
-    const next = !liked;
-    setLiked(next);
-    setCount((value) => value + (next ? 1 : -1));
-    if (next && disliked) {
-      setDisliked(false);
-      setDislikeCount((val) => Math.max(0, val - 1));
-    }
-    try {
-      await setCommentLike(comment.id, next);
-    } catch {
-      setLiked(!next);
-      setCount((value) => value + (next ? -1 : 1));
-    }
-  }
-
-  async function dislike(event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    if (!user) return onRequireAuth();
-    const next = !disliked;
-    setDisliked(next);
-    setDislikeCount((value) => value + (next ? 1 : -1));
-    if (next && liked) {
-      setLiked(false);
-      setCount((val) => Math.max(0, val - 1));
-    }
-    try {
-      await setCommentDislike(comment.id, next);
-    } catch {
-      setDisliked(!next);
-      setDislikeCount((value) => value + (next ? -1 : 1));
-    }
-  }
 
 function CommentMediaThumbnail({
   asset,
@@ -1379,7 +1465,70 @@ function CommentMediaThumbnail({
   );
 }
 
-  const commentImages: GalleryImage[] = (comment.media || []).map((item) => ({
+function CommentRow({
+  comment,
+  user,
+  onRequireAuth,
+  onReply,
+  onDelete,
+  onOpenGallery,
+  onReport,
+}: {
+  comment: Comment;
+  user: SessionUser | null;
+  onRequireAuth: () => void;
+  onReply: () => void;
+  onDelete: () => void;
+  onOpenGallery: (images: GalleryImage[], index?: number) => void;
+  onReport: () => void;
+}) {
+  const [liked, setLiked] = useState(comment.viewerState.hasLiked);
+  const [disliked, setDisliked] = useState(comment.viewerState.hasDisliked);
+  const [count, setCount] = useState(comment.likeCount);
+  const [dislikeCount, setDislikeCount] = useState(comment.dislikeCount || 0);
+  const isDeleted = comment.publicationStatus === "deleted";
+  const previewReplies = (comment.replyPreview || []).slice(0, 2);
+  const hiddenReplyCount = Math.max(0, comment.replyCount - previewReplies.length);
+
+  async function like(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (isDeleted) return;
+    if (!user) return onRequireAuth();
+    const next = !liked;
+    setLiked(next);
+    setCount((value) => value + (next ? 1 : -1));
+    if (next && disliked) {
+      setDisliked(false);
+      setDislikeCount((val) => Math.max(0, val - 1));
+    }
+    try {
+      await setCommentLike(comment.id, next);
+    } catch {
+      setLiked(!next);
+      setCount((value) => value + (next ? -1 : 1));
+    }
+  }
+
+  async function dislike(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (isDeleted) return;
+    if (!user) return onRequireAuth();
+    const next = !disliked;
+    setDisliked(next);
+    setDislikeCount((value) => value + (next ? 1 : -1));
+    if (next && liked) {
+      setLiked(false);
+      setCount((val) => Math.max(0, val - 1));
+    }
+    try {
+      await setCommentDislike(comment.id, next);
+    } catch {
+      setDisliked(!next);
+      setDislikeCount((value) => value + (next ? -1 : 1));
+    }
+  }
+
+  const commentImages: GalleryImage[] = (isDeleted ? [] : comment.media || []).map((item) => ({
     url: item.detailUrl || item.url || item.originalUrl || "",
     alt: item.altText || "评论配图",
     detailUrl: item.detailUrl,
@@ -1389,7 +1538,8 @@ function CommentMediaThumbnail({
   }));
 
   const canDelete = Boolean(
-    user &&
+    !isDeleted &&
+      user &&
       (user.id === comment.author.id || user.role === "admin" || user.role === "moderator"),
   );
 
@@ -1412,9 +1562,9 @@ function CommentMediaThumbnail({
           <span className="comm-floor">#{comment.floor || "1"}</span>
         </div>
         <div className="comm-time">{relativeTime(comment.createdAt)}</div>
-        <p className="comm-text">{comment.content}</p>
+        <p className={`comm-text${isDeleted ? " deleted" : ""}`}>{isDeleted ? "该评论已删除" : comment.content}</p>
 
-        {comment.media && comment.media.length > 0 && (
+        {!isDeleted && comment.media && comment.media.length > 0 && (
           <div
             className="comment-media-grid"
             style={{
@@ -1439,59 +1589,37 @@ function CommentMediaThumbnail({
           </div>
         )}
 
-        {comment.replyPreview && comment.replyPreview.length > 0 && (
-          <section className="hot-replies" aria-label="二级评论热评预览">
-            <div className="hot-head">
-              <div className="hot-label">🔥 热评预览（{Math.min(4, comment.replyPreview.length)}）</div>
-              {comment.replyCount > 0 && (
-                <button
-                  type="button"
-                  className="view-all"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onReply();
-                  }}
-                >
-                  查看全部 {comment.replyCount} 条回复 ›
-                </button>
-              )}
-            </div>
-            <div className="reply-preview-list">
-              {comment.replyPreview.slice(0, 4).map((rep) => (
-                <div
-                  key={rep.id}
-                  className="reply-row"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onReply();
-                  }}
-                >
-                  <div className="reply-avatar">
-                    <UserAvatar
-                      userId={rep.author.id}
-                      name={rep.author.nickname}
-                      url={rep.author.avatarUrl}
-                      size="small"
-                    />
+        {!isDeleted && previewReplies.length > 0 && (
+          <div
+            className="nested"
+            onClick={(event) => {
+              event.stopPropagation();
+              onReply();
+            }}
+          >
+            {previewReplies.map((reply) => (
+              <div className="nested-reply-line" key={reply.id}>
+                <UserAvatar
+                  userId={reply.author.id}
+                  name={reply.author.nickname}
+                  url={reply.author.avatarUrl}
+                  size="small"
+                />
+                <div className="nested-reply-content">
+                  <div className="nested-reply-author">
+                    <span className="nested-name">{reply.author.nickname}</span>
+                    <span className="nested-reply-level">Lv.{reply.author.level || 1}</span>
                   </div>
-                  <div className="reply-content-box">
-                    <div className="reply-author-line">
-                      <b className="reply-author-name">{rep.author.nickname}</b>
-                      <span className="reply-author-lv">Lv.{rep.author.level || 1}</span>
-                    </div>
-                    <div className="reply-text" title={rep.content}>
-                      {rep.content}
-                    </div>
+                  <div className={reply.publicationStatus === "deleted" ? "deleted" : undefined}>
+                    {reply.publicationStatus === "deleted" ? "该回复已删除" : reply.content}
                   </div>
-                  {rep.likeCount > 0 && (
-                    <div className="heat" title={`获赞 ${rep.likeCount}`}>
-                      {rep.likeCount}
-                    </div>
-                  )}
                 </div>
-              ))}
-            </div>
-          </section>
+              </div>
+            ))}
+            {hiddenReplyCount > 0 && (
+              <div className="more-nested">展开其余 {hiddenReplyCount} 条回复 ›</div>
+            )}
+          </div>
         )}
 
         <div className="comm-actions">
@@ -1499,6 +1627,7 @@ function CommentMediaThumbnail({
             type="button"
             className={`comm-act${liked ? " selected" : ""}`}
             onClick={like}
+            disabled={isDeleted}
             aria-label={liked ? "取消赞" : "点赞"}
           >
             <Icon name="heart" size={14} />
@@ -1508,6 +1637,7 @@ function CommentMediaThumbnail({
             type="button"
             className={`comm-act${disliked ? " selected" : ""}`}
             onClick={dislike}
+            disabled={isDeleted}
             aria-label={disliked ? "取消踩" : "点踩"}
           >
             <Icon name="dislike" size={14} />
@@ -1517,7 +1647,7 @@ function CommentMediaThumbnail({
             <Icon name="message" size={14} />
             <span>回复</span>
           </button>
-          <button type="button" className="comm-act" onClick={onReport}>
+          <button type="button" className="comm-act" onClick={onReport} disabled={isDeleted}>
             <Icon name="info" size={13} />
             <span>举报</span>
           </button>
@@ -1546,6 +1676,8 @@ function CommentReplyModal({
   onRequireAuth,
   onClose,
   onOpenGallery,
+  onReplyCreated,
+  onReplyDeleted,
 }: {
   root: Comment;
   targetCommentId?: string;
@@ -1554,6 +1686,8 @@ function CommentReplyModal({
   onRequireAuth: () => void;
   onClose: () => void;
   onOpenGallery: (images: GalleryImage[], index?: number) => void;
+  onReplyCreated?: (reply: Comment) => void;
+  onReplyDeleted?: (replyId: string) => void;
 }) {
   const [replies, setReplies] = useState<Comment[]>([]);
   const [nextCursor, setNextCursor] = useState<string>();
@@ -1561,7 +1695,7 @@ function CommentReplyModal({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [content, setContent] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const previews = useLocalImagePreviews(9);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -1627,25 +1761,31 @@ function CommentReplyModal({
   }
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
-    const next = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    const result = previews.append(Array.from(e.target.files || []));
     e.target.value = "";
-    setFiles((curr) => [...curr, ...next].slice(0, 9));
+    if (result.skippedUnsupported > 0) setMessage("已跳过不支持的文件");
+    if (result.skippedLimit > 0) setMessage("最多上传 9 张图片");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return onRequireAuth();
-    if ((!content.trim() && files.length === 0) || busy) return;
+    if ((!content.trim() && previews.items.length === 0) || busy) return;
     setBusy(true);
+    setMessage("");
     try {
-      const mediaIds: string[] = [];
-      for (const file of files) {
-        mediaIds.push(await uploadImage(file));
-      }
-      const next = await createReply(root.id, content.trim(), undefined, mediaIds);
+      const mediaIds = await uploadImages(previews.items.map((preview) => preview.file), (progress) => {
+        setMessage(uploadProgressText(progress.current, progress.total, progress.stage));
+      });
+      const next = await createWithUploadedMediaRollback(
+        mediaIds,
+        () => createReply(root.id, content.trim(), undefined, mediaIds),
+      );
       setReplies((current) => [...current, next]);
+      onReplyCreated?.(next);
       setContent("");
-      setFiles([]);
+      previews.clear();
+      setMessage("");
     } catch (requestError) {
       setMessage(formatError(requestError, "回复发送失败，请稍后重试"));
     } finally {
@@ -1658,6 +1798,7 @@ function CommentReplyModal({
     try {
       await deleteComment(replyId);
       setReplies((curr) => curr.filter((r) => r.id !== replyId));
+      onReplyDeleted?.(replyId);
     } catch {
       alert("删除回复失败，请重试");
     }
@@ -1666,8 +1807,12 @@ function CommentReplyModal({
   const rootImages: GalleryImage[] = (root.media || []).map((item) => ({
     url: item.detailUrl || item.url || "",
     alt: "楼层配图",
+    detailUrl: item.detailUrl,
     originalUrl: item.originalUrl || item.url,
+    thumbUrl: item.thumbUrl,
+    sources: mediaCandidates(item, "detail"),
   }));
+  const isRootDeleted = root.publicationStatus === "deleted";
 
   return (
     <div
@@ -1705,15 +1850,14 @@ function CommentReplyModal({
               <Link href={`/user/${encodeURIComponent(root.author.id)}`}>
                 <strong>{root.author.nickname}</strong>
               </Link>
-              <p>{root.content}</p>
-              {rootImages.length > 0 && (
+              <p className={isRootDeleted ? "comm-text deleted" : undefined}>{isRootDeleted ? "该评论已删除" : root.content}</p>
+              {!isRootDeleted && root.media && root.media.length > 0 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                  {rootImages.map((img, idx) => (
-                    <img
-                      key={idx}
-                      src={img.url}
-                      alt=""
-                      style={{ width: 64, height: 64, borderRadius: 6, objectFit: "cover", cursor: "pointer" }}
+                  {root.media.map((asset, idx) => (
+                    <CommentMediaThumbnail
+                      key={asset.id || idx}
+                      asset={asset}
+                      alt={asset.altText || `楼层配图 ${idx + 1}`}
                       onClick={() => onOpenGallery(rootImages, idx)}
                     />
                   ))}
@@ -1726,13 +1870,18 @@ function CommentReplyModal({
             <div className="comment-empty">正在加载回复…</div>
           ) : (
             replies.map((reply) => {
-              const replyImages: GalleryImage[] = (reply.media || []).map((item) => ({
+              const isReplyDeleted = reply.publicationStatus === "deleted";
+              const replyImages: GalleryImage[] = (isReplyDeleted ? [] : reply.media || []).map((item) => ({
                 url: item.detailUrl || item.url || "",
                 alt: "回复配图",
+                detailUrl: item.detailUrl,
                 originalUrl: item.originalUrl || item.url,
+                thumbUrl: item.thumbUrl,
+                sources: mediaCandidates(item, "detail"),
               }));
               const canDelete = Boolean(
-                user &&
+                !isReplyDeleted &&
+                  user &&
                   (user.id === reply.author.id || user.role === "admin" || user.role === "moderator"),
               );
 
@@ -1764,15 +1913,14 @@ function CommentReplyModal({
                         </button>
                       )}
                     </div>
-                    <p>{reply.content}</p>
-                    {replyImages.length > 0 && (
+                    <p className={isReplyDeleted ? "comm-text deleted" : undefined}>{isReplyDeleted ? "该回复已删除" : reply.content}</p>
+                    {!isReplyDeleted && reply.media && reply.media.length > 0 && (
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-                        {replyImages.map((img, idx) => (
-                          <img
-                            key={idx}
-                            src={img.url}
-                            alt=""
-                            style={{ width: 60, height: 60, borderRadius: 6, objectFit: "cover", cursor: "pointer" }}
+                        {reply.media.map((asset, idx) => (
+                          <CommentMediaThumbnail
+                            key={asset.id || idx}
+                            asset={asset}
+                            alt={asset.altText || `回复配图 ${idx + 1}`}
                             onClick={() => onOpenGallery(replyImages, idx)}
                           />
                         ))}
@@ -1799,14 +1947,15 @@ function CommentReplyModal({
           )}
         </div>
 
-        {files.length > 0 && (
+        {previews.items.length > 0 && (
           <div style={{ display: "flex", gap: 6, padding: "4px 16px" }}>
-            {files.map((file, idx) => (
-              <div key={idx} style={{ position: "relative", width: 44, height: 44, borderRadius: 6, overflow: "hidden" }}>
-                <img src={URL.createObjectURL(file)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            {previews.items.map((preview, idx) => (
+              <div key={preview.id} style={{ position: "relative", width: 44, height: 44, borderRadius: 6, overflow: "hidden" }}>
+                <img src={preview.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 <button
                   type="button"
-                  onClick={() => setFiles((f) => f.filter((_, i) => i !== idx))}
+                  onClick={() => previews.removeAt(idx)}
+                  disabled={busy}
                   style={{
                     position: "absolute",
                     top: 1,
@@ -1831,14 +1980,14 @@ function CommentReplyModal({
         <form className="comment-reply-composer" onSubmit={submit}>
           <label style={{ cursor: "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: "#64748b" }}>
             <Icon name="image" size={19} />
-            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={files.length >= 9} />
+            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy} />
           </label>
           <input
             value={content}
             onChange={(event) => setContent(event.target.value)}
             placeholder="友善地回复一句…"
           />
-          <button type="submit" disabled={(!content.trim() && files.length === 0) || busy}>
+          <button type="submit" disabled={(!content.trim() && previews.items.length === 0) || busy}>
             {busy ? "发送中" : "发送"}
           </button>
         </form>

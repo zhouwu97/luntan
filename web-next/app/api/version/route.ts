@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { webBuildInfo } from "../../../lib/build-info";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const webSha = process.env.NEXT_PUBLIC_GIT_SHA || "dev";
-  const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME || new Date().toISOString();
+  const web = webBuildInfo();
 
   let apiVersion: Record<string, unknown> | null = null;
   const targetOrigin = (process.env.API_PROXY_TARGET?.trim() || "https://shengbeijiang.com")
@@ -25,11 +25,7 @@ export async function GET() {
 
   return NextResponse.json({
     status: "ok",
-    web: {
-      version: "0.1.0",
-      commit: webSha,
-      build_time: buildTime,
-    },
+    web,
     api: apiVersion,
   });
 }

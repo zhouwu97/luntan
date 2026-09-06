@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { CommunityRail } from "./community-rail";
 import { DiscoveryRail } from "./discovery-rail";
 import { SiteHeader } from "./site-header";
-import { AppDownloadBanner } from "./app-download-banner";
 import { BottomNav } from "./bottom-nav";
 import { FeedToolbar, type FeedSort, type LatestOrder } from "./feed-toolbar";
 import { HomeCommunityTabs } from "./home-community-tabs";
@@ -388,9 +387,6 @@ export function HomeShell() {
       >
         <Icon name="refresh" size={22} />
       </button>
-
-      {/* 底部下载 App 窗口（移动端底部导航栏上方严格保留） */}
-      <AppDownloadBanner />
 
       {/* 移动端底部导航栏 */}
       <BottomNav activeNav="home" />

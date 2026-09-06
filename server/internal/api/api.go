@@ -466,6 +466,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/history")
 		s.recordHistory(w, r, postID)
 		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/view"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/view")
+		s.recordPostView(w, r, postID)
+		return
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/poll"):
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/poll")
 		s.createPoll(w, r, postID)
@@ -1260,6 +1264,20 @@ func writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BOOKMARK_FOLDER_NAME", Message: "收藏夹名称不能为空且不能超过 40 个字"}
 	case errors.Is(err, ErrBookmarkFolderNameTaken):
 		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "BOOKMARK_FOLDER_NAME_TAKEN", Message: "收藏夹名称已存在"}
+	case errors.Is(err, ErrMediaUnsupportedType):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "MEDIA_UNSUPPORTED_TYPE", Message: "仅支持 JPG、PNG、WEBP 图片"}
+	case errors.Is(err, ErrMediaTooLarge):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "MEDIA_TOO_LARGE", Message: "媒体文件过大"}
+	case errors.Is(err, ErrMediaTooManyPixels):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "MEDIA_TOO_MANY_PIXELS", Message: "图片像素过大"}
+	case errors.Is(err, ErrMediaChecksumMismatch):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "MEDIA_CHECKSUM_MISMATCH", Message: "媒体校验不一致，请重新选择文件"}
+	case errors.Is(err, ErrMediaDimensionInvalid):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "MEDIA_DIMENSION_INVALID", Message: "图片尺寸参数不合法"}
+	case errors.Is(err, ErrMediaUploadMismatch):
+		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "MEDIA_UPLOAD_MISMATCH", Message: "媒体内容与上传参数不一致，请重新选择文件"}
+	case errors.Is(err, ErrMediaNotReady):
+		appErr = httpserver.AppError{Status: http.StatusConflict, Code: "MEDIA_NOT_READY", Message: "媒体尚未上传完成，请稍后重试"}
 	case errors.Is(err, ErrInvalidMedia):
 		appErr = httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_MEDIA", Message: "媒体参数不合法"}
 	case errors.Is(err, ErrMediaNotFound):

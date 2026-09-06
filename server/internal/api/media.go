@@ -27,11 +27,18 @@ import (
 )
 
 var (
-	ErrInvalidMedia       = storage.ErrInvalidMedia
-	ErrMediaNotFound      = errors.New("media not found")
-	ErrStorageUnavailable = storage.ErrStorageUnavailable
-	ErrMediaNotOwned      = errors.New("media is not owned by user")
-	ErrMediaInUse         = errors.New("media is referenced by a business resource")
+	ErrInvalidMedia          = storage.ErrInvalidMedia
+	ErrMediaUnsupportedType  = errors.New("media type unsupported")
+	ErrMediaTooLarge         = errors.New("media is too large")
+	ErrMediaTooManyPixels    = errors.New("media has too many pixels")
+	ErrMediaChecksumMismatch = errors.New("media checksum mismatch")
+	ErrMediaDimensionInvalid = errors.New("media dimensions invalid")
+	ErrMediaUploadMismatch   = errors.New("media upload does not match declared metadata")
+	ErrMediaNotReady         = errors.New("media is not ready")
+	ErrMediaNotFound         = errors.New("media not found")
+	ErrStorageUnavailable    = storage.ErrStorageUnavailable
+	ErrMediaNotOwned         = errors.New("media is not owned by user")
+	ErrMediaInUse            = errors.New("media is referenced by a business resource")
 )
 
 type mediaStorage = storage.ObjectStorage
@@ -96,8 +103,12 @@ func (s *Server) createMediaUploadToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var input mediaUploadInput
-	if err := decodeJSON(r, &input); err != nil || !validMediaInput(input) {
+	if err := decodeJSON(r, &input); err != nil {
 		writeAuthError(w, r, ErrInvalidMedia)
+		return
+	}
+	if err := validateMediaInput(input); err != nil {
+		writeAuthError(w, r, err)
 		return
 	}
 	mediaID, err := newMediaID()
@@ -167,8 +178,12 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		httpserver.WriteJSON(w, http.StatusOK, mediaResponse(asset))
 		return
 	}
-	if input.Size != 0 && input.Size != asset.Size || input.SHA256 != "" && !strings.EqualFold(input.SHA256, asset.SHA256) {
-		writeAuthError(w, r, ErrInvalidMedia)
+	if input.Size != 0 && input.Size != asset.Size {
+		writeAuthError(w, r, ErrMediaUploadMismatch)
+		return
+	}
+	if input.SHA256 != "" && !strings.EqualFold(input.SHA256, asset.SHA256) {
+		writeAuthError(w, r, ErrMediaChecksumMismatch)
 		return
 	}
 	storageBackend := s.mediaStorage
@@ -186,7 +201,11 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 		Status:    asset.Status,
 	}
 	if err := storageBackend.VerifyUploaded(r.Context(), storageAsset); err != nil {
-		writeAuthError(w, r, err)
+		if errors.Is(err, storage.ErrInvalidMedia) {
+			writeAuthError(w, r, ErrMediaUploadMismatch)
+		} else {
+			writeAuthError(w, r, err)
+		}
 		return
 	}
 	asset.Width = storageAsset.Width
@@ -227,7 +246,7 @@ func (s *Server) completeMedia(w http.ResponseWriter, r *http.Request, mediaID s
 			return
 		}
 		if currentStatus != "ready" {
-			writeAuthError(w, r, ErrInvalidMedia)
+			writeAuthError(w, r, ErrMediaNotReady)
 			return
 		}
 		asset.Status = currentStatus
@@ -360,31 +379,38 @@ func nullableTime(value sql.NullTime) any {
 	return value.Time
 }
 
-func validMediaInput(input mediaUploadInput) bool {
+func validateMediaInput(input mediaUploadInput) error {
 	if input.Size <= 0 || strings.TrimSpace(input.FileName) == "" {
-		return false
+		return ErrInvalidMedia
 	}
 	switch input.MimeType {
 	case "image/jpeg", "image/png", "image/webp":
 		if input.Size > 15*1024*1024 {
-			return false
+			return ErrMediaTooLarge
 		}
 	case "video/mp4":
 		if input.Size > 100*1024*1024 {
-			return false
+			return ErrMediaTooLarge
 		}
 	default:
-		return false
+		return ErrMediaUnsupportedType
 	}
 	if input.Width < 0 || input.Height < 0 || input.Width > 10000 || input.Height > 10000 {
-		return false
+		return ErrMediaDimensionInvalid
 	}
 	if input.Width > 0 && input.Height > 0 && int64(input.Width)*int64(input.Height) > 40_000_000 {
-		return false
+		return ErrMediaTooManyPixels
 	}
 	if len(input.SHA256) != 64 || !isHex(input.SHA256) {
-		return false
+		return ErrMediaChecksumMismatch
 	}
+	return nil
+}
+
+func validMediaInput(input mediaUploadInput) bool {
+	return validateMediaInput(input) == nil
+}
+
 	return true
 }
 

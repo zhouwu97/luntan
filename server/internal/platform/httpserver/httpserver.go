@@ -46,6 +46,7 @@ type Options struct {
 var (
 	BuildVersion = "dev"
 	BuildCommit  = "unknown"
+	BuildTime    = ""
 )
 
 func (e AppError) Error() string { return e.Code }
@@ -217,9 +218,10 @@ func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 
 func buildInfoPayload(status string) map[string]string {
 	return map[string]string{
-		"status":  status,
-		"version": BuildVersion,
-		"commit":  BuildCommit,
+		"status":     status,
+		"version":    BuildVersion,
+		"commit":     BuildCommit,
+		"build_time": BuildTime,
 	}
 }
 

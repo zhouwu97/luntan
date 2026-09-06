@@ -569,12 +569,24 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 	for _, mid := range mediaIDs {
 		var ownerID, status, mimeType string
 		err := s.db.QueryRowContext(r.Context(), `SELECT owner_id, status, mime_type FROM media_assets WHERE id = $1 AND deleted_at IS NULL`, mid).Scan(&ownerID, &status, &mimeType)
-		if errors.Is(err, sql.ErrNoRows) || ownerID != user.ID || status != "ready" || !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
-			writeAuthError(w, r, ErrInvalidMedia)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeAuthError(w, r, ErrMediaNotFound)
 			return
 		}
 		if err != nil {
 			writeInternalError(w, r, err)
+			return
+		}
+		if ownerID != user.ID {
+			writeAuthError(w, r, ErrMediaNotOwned)
+			return
+		}
+		if status != "ready" {
+			writeAuthError(w, r, ErrMediaNotReady)
+			return
+		}
+		if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+			writeAuthError(w, r, ErrMediaUnsupportedType)
 			return
 		}
 	}

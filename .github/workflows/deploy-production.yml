@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      production_base_url:
+        description: Public HTTPS base URL used by the production rollout gate
+        required: true
+        default: https://shengbeijiang.com
+        type: string
 
 permissions:
   contents: read
@@ -44,15 +49,18 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
 
-      - name: Verify immutable release image exists
+      - name: Verify immutable release images exist
         env:
-          IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
+          API_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
+          WEB_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-web:${{ inputs.release_sha }}
         run: |
           set -eu
-          case "$IMAGE_TAG" in
-            *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
-          esac
-          docker manifest inspect "$IMAGE_TAG" > /dev/null
+          for image in "$API_IMAGE_TAG" "$WEB_IMAGE_TAG"; do
+            case "$image" in
+              *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
+            esac
+            docker manifest inspect "$image" > /dev/null
+          done
 
   deploy:
     name: Deploy production
@@ -71,14 +79,48 @@ jobs:
         env:
           PRODUCTION_DEPLOY_COMMAND: ${{ secrets.PRODUCTION_DEPLOY_COMMAND }}
           IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
+          API_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
+          WEB_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-web:${{ inputs.release_sha }}
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -eu
           test -n "$PRODUCTION_DEPLOY_COMMAND"
-          test -n "$IMAGE_TAG"
+          test -n "$API_IMAGE_TAG"
+          test -n "$WEB_IMAGE_TAG"
           test -n "$RELEASE_SHA"
-          case "$IMAGE_TAG" in
-            *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
-          esac
-          export IMAGE_TAG RELEASE_SHA
+          for image in "$API_IMAGE_TAG" "$WEB_IMAGE_TAG"; do
+            case "$image" in
+              *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
+            esac
+          done
+          export IMAGE_TAG API_IMAGE_TAG WEB_IMAGE_TAG RELEASE_SHA
           sh -c "$PRODUCTION_DEPLOY_COMMAND"
+
+      - name: Verify production rollout versions
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          PRODUCTION_BASE_URL: ${{ inputs.production_base_url }}
+        run: |
+          set -eu
+          case "$PRODUCTION_BASE_URL" in
+            https://*) ;;
+            *) echo "production_base_url must use HTTPS" >&2; exit 1 ;;
+          esac
+          node <<'NODE'
+          const base = process.env.PRODUCTION_BASE_URL.replace(/\/+$/, "");
+          const release = process.env.RELEASE_SHA;
+          async function json(path) {
+            const response = await fetch(`${base}${path}`, { cache: "no-store" });
+            if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
+            return response.json();
+          }
+          const version = await json("/api/version");
+          const build = await json("/__build");
+          const apiCommit = version.api?.commit || version.api?.version;
+          const webCommit = version.web?.commit;
+          const buildCommit = build.web_sha || build.commit;
+          if (apiCommit !== release) throw new Error(`API SHA mismatch: ${apiCommit} !== ${release}`);
+          if (webCommit !== release) throw new Error(`Web SHA mismatch: ${webCommit} !== ${release}`);
+          if (buildCommit !== release) throw new Error(`/__build SHA mismatch: ${buildCommit} !== ${release}`);
+          console.log(`Verified production API/Web rollout at ${release}`);
+          NODE

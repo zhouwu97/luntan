@@ -49,9 +49,13 @@ export function HomeCommunityTabs({
             onClick={() => onSelect(community)}
           >
             {isCampus ? (
-              <span className="campus-art-label">
-                <span className="campus-star">✦</span> 酱紫社区
-              </span>
+              <>
+                <img
+                  src={`/home/tab_community_${isActive ? "active" : "inactive"}.webp`}
+                  alt="酱紫社区"
+                />
+                <span className="campus-art-label">酱紫社区</span>
+              </>
             ) : (
               <span>{community.name}</span>
             )}

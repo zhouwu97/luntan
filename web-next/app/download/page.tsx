@@ -68,7 +68,9 @@ export default function DownloadPage() {
       <SiteHeader />
       <main className="page-frame download-page">
         <section className="download-hero">
-          <span className="download-app-icon" aria-hidden="true"><Icon name="download" size={26} /></span>
+          <span className="download-app-icon" aria-hidden="true">
+            <img src="/app-icon.png" alt="圣杯酱" className="download-icon-img" />
+          </span>
           <h1>把圣杯酱装进手机</h1>
           <p>Android 客户端与网页使用同一账号体系，消息提醒更及时，浏览社区与榜单也更顺畅。</p>
         </section>

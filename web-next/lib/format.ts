@@ -26,5 +26,29 @@ export function initials(value: string): string {
 }
 
 export function formatError(error: unknown, fallback = "操作失败，请稍后重试"): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case "MEDIA_UNSUPPORTED_TYPE":
+        return "仅支持 JPG、PNG、WebP 图片";
+      case "MEDIA_TOO_LARGE":
+        return "图片文件过大，请压缩后再上传";
+      case "MEDIA_TOO_MANY_PIXELS":
+        return "图片像素过大，请压缩后再上传";
+      case "MEDIA_CHECKSUM_MISMATCH":
+      case "MEDIA_UPLOAD_MISMATCH":
+        return "图片校验失败，请重新选择后上传";
+      case "MEDIA_NOT_READY":
+        return "图片还没有上传完成，请稍后重试";
+      case "MEDIA_NOT_OWNED":
+        return "只能使用自己上传的图片";
+      case "MEDIA_NOT_FOUND":
+        return "图片已失效，请重新选择";
+      case "STORAGE_UNAVAILABLE":
+        return "媒体存储暂时不可用，请稍后再试";
+      default:
+        break;
+    }
+  }
   return error instanceof Error && error.message ? error.message : fallback;
 }
+import { ApiError } from "./api/client";

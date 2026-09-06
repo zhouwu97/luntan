@@ -76,9 +76,9 @@ func TestProcessImage_2400x1600(t *testing.T) {
 	if res.Feed.Width != 1080 || res.Feed.Height != 720 {
 		t.Errorf("expected feed 1080x720, got %dx%d", res.Feed.Width, res.Feed.Height)
 	}
-	// 验证 Thumb 变体 (长边 <= 640)
-	if res.Thumb.Width != 640 || (res.Thumb.Height != 426 && res.Thumb.Height != 427) {
-		t.Errorf("expected thumb 640x427, got %dx%d", res.Thumb.Width, res.Thumb.Height)
+	// 验证 Thumb 变体 (长边 <= 480)
+	if res.Thumb.Width != 480 || res.Thumb.Height != 320 {
+		t.Errorf("expected thumb 480x320, got %dx%d", res.Thumb.Width, res.Thumb.Height)
 	}
 
 	// 断言尺寸递进关系
@@ -122,8 +122,8 @@ func TestProcessImage_4032x3024(t *testing.T) {
 	if res.Detail.Width != 1440 || res.Detail.Height != 1080 {
 		t.Errorf("expected detail 1440x1080, got %dx%d", res.Detail.Width, res.Detail.Height)
 	}
-	if res.Thumb.Width != 640 || res.Thumb.Height != 480 {
-		t.Errorf("expected thumb 640x480, got %dx%d", res.Thumb.Width, res.Thumb.Height)
+	if res.Thumb.Width != 480 || res.Thumb.Height != 360 {
+		t.Errorf("expected thumb 480x360, got %dx%d", res.Thumb.Width, res.Thumb.Height)
 	}
 
 	t.Logf("4032x3024 processed successfully: original=%dx%d (%d B), detail=%dx%d (%d B), thumb=%dx%d (%d B)",
@@ -270,8 +270,8 @@ func TestProcessImage_AppliesEXIFOrientation(t *testing.T) {
 			t.Errorf("expected detail 400x800, got %dx%d", res.Detail.Width, res.Detail.Height)
 		}
 		// thumb 长边压到 640：320x640
-		if res.Thumb.Width != 320 || res.Thumb.Height != 640 {
-			t.Errorf("expected thumb 320x640, got %dx%d", res.Thumb.Width, res.Thumb.Height)
+		if res.Thumb.Width != 240 || res.Thumb.Height != 480 {
+			t.Errorf("expected thumb 240x480, got %dx%d", res.Thumb.Width, res.Thumb.Height)
 		}
 		orig := mustDecodeImage(t, res.Original.Data)
 		rTop, _, bTop := avgRegion(orig, image.Rect(150, 10, 250, 70))

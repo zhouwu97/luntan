@@ -44,7 +44,10 @@ export function mediaCandidates(asset: MediaAsset, preferred: "thumb" | "feed" |
       ? [[asset.originalUrl, "original"], [asset.detailUrl, "detail"], [asset.feedUrl, "feed"], [asset.url, "original"], [asset.thumbUrl, "thumb"]]
       : [[asset.detailUrl, "detail"], [asset.originalUrl, "original"], [asset.feedUrl, "feed"], [asset.thumbUrl, "thumb"], [asset.url, "original"]];
 
+  // 预览只在压缩版本之间降级，原图由用户主动加载；兼容旧数据多个字段共用同一地址。
+  const hasPreview = Boolean(asset.thumbUrl || asset.feedUrl || asset.detailUrl);
   const values = order
+    .filter(([value, variant]) => preferred === "original" || !hasPreview || (variant !== "original" && (value !== asset.originalUrl || value === asset.thumbUrl || value === asset.feedUrl || value === asset.detailUrl)))
     .map(([value, variant]) => resolveMediaUrl(value, variant as "thumb" | "feed" | "detail" | "original"))
     .filter((value): value is string => Boolean(value));
   return [...new Set(values)];

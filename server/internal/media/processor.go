@@ -57,7 +57,7 @@ type ProcessResult struct {
 }
 
 // ProcessImage 真实解码图像源文件，剔除 EXIF/GPS 元数据并按分辨率生成
-// thumb (<= 640px)、feed (宽 <= 1080px 且高 <= 1920px)、detail (<= 1440px) 与 original 变体。
+// thumb (<= 480px)、feed (宽 <= 1080px 且高 <= 1920px)、detail (<= 1440px) 与 original 变体。
 func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -106,18 +106,18 @@ func ProcessImage(r io.Reader) (*ProcessResult, error) {
 	if detailW != origW || detailH != origH {
 		detailImg = resizeCatmullRom(srcImg, detailW, detailH)
 	}
-	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "detail", 90)
+	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "detail", 86)
 	if err != nil {
 		return nil, fmt.Errorf("encode detail variant: %w", err)
 	}
 
-	// 4. 生成 thumb 变体（长边 <= 640px）
-	thumbW, thumbH := calcScaledDimensions(origW, origH, 640)
+	// 4. 生成 thumb 变体（长边 <= 480px）
+	thumbW, thumbH := calcScaledDimensions(origW, origH, 480)
 	var thumbImg image.Image = srcImg
 	if thumbW != origW || thumbH != origH {
 		thumbImg = resizeCatmullRom(srcImg, thumbW, thumbH)
 	}
-	thumbVariant, err := encodeVariant(thumbImg, thumbW, thumbH, "thumb", 80)
+	thumbVariant, err := encodeVariant(thumbImg, thumbW, thumbH, "thumb", 76)
 	if err != nil {
 		return nil, fmt.Errorf("encode thumb variant: %w", err)
 	}
@@ -779,18 +779,18 @@ func ProcessCensoredImageBytes(data []byte, regions []MaskRegion) (*ProcessResul
 	if detailW != origW || detailH != origH {
 		detailImg = resizeCatmullRom(censoredImg, detailW, detailH)
 	}
-	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "censored_detail", 90)
+	detailVariant, err := encodeVariant(detailImg, detailW, detailH, "censored_detail", 86)
 	if err != nil {
 		return nil, fmt.Errorf("encode censored detail variant: %w", err)
 	}
 
-	// 4. 生成 censored_thumb (长边 <= 640px)
-	thumbW, thumbH := calcScaledDimensions(origW, origH, 640)
+	// 4. 生成 censored_thumb (长边 <= 480px)
+	thumbW, thumbH := calcScaledDimensions(origW, origH, 480)
 	var thumbImg image.Image = censoredImg
 	if thumbW != origW || thumbH != origH {
 		thumbImg = resizeCatmullRom(censoredImg, thumbW, thumbH)
 	}
-	thumbVariant, err := encodeVariant(thumbImg, thumbW, thumbH, "censored_thumb", 80)
+	thumbVariant, err := encodeVariant(thumbImg, thumbW, thumbH, "censored_thumb", 76)
 	if err != nil {
 		return nil, fmt.Errorf("encode censored thumb variant: %w", err)
 	}

@@ -675,33 +675,33 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     expect(body.web.build_time).toBeDefined();
   });
 
-  test("10. 真实媒体网关与 Fallback 容灾：detail 返回 404 时正文画廊与评论图自动回退至 original 并正常渲染", async ({ page }) => {
-    const validSvgOriginal = "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect fill='#3b82f6' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='24' text-anchor='middle'>Original Fallback Success</text></svg>";
-    const validSvgCommOriginal = "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><rect fill='#10b981' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='20' text-anchor='middle'>Comm Original Fallback Success</text></svg>";
+  test("10. 真实媒体网关与 Fallback 容灾：detail 返回 404 时正文画廊与评论图自动回退至 feed 并正常渲染", async ({ page }) => {
+    const validSvgFeed = "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect fill='#3b82f6' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='24' text-anchor='middle'>Feed Fallback Success</text></svg>";
+    const validSvgCommFeed = "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400'><rect fill='#10b981' width='100%' height='100%'/><text x='50%' y='50%' fill='#ffffff' font-size='20' text-anchor='middle'>Comm Feed Fallback Success</text></svg>";
 
-    // 1. 正文媒体：detail 返回 404 异常，original 返回 200
+    // 1. 正文媒体：detail 返回 404 异常，feed 返回 200
     await page.route("**/api/v1/media-file/media_test_fallback/detail", async (route) => {
       await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Variant not found" }) });
     });
-    await page.route("**/api/v1/media-file/media_test_fallback/original", async (route) => {
-      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgOriginal });
+    await page.route("**/api/v1/media-file/media_test_fallback/feed", async (route) => {
+      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgFeed });
     });
 
-    // 2. 评论媒体：thumb 404，detail 404，original 返回 200
+    // 2. 评论媒体：thumb 404，detail 404，feed 返回 200
     await page.route("**/api/v1/media-file/media_comm_fallback/thumb", async (route) => {
       await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Thumb variant not found" }) });
     });
     await page.route("**/api/v1/media-file/media_comm_fallback/detail", async (route) => {
       await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: "Detail variant not found" }) });
     });
-    await page.route("**/api/v1/media-file/media_comm_fallback/original", async (route) => {
-      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgCommOriginal });
+    await page.route("**/api/v1/media-file/media_comm_fallback/feed", async (route) => {
+      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: validSvgCommFeed });
     });
 
     const mockPostWithFallback = {
       id: "post-fallback-1",
       title: "媒体网关回退测试贴",
-      content: "测试详情图与评论图 404 情况下自动回退至原图渲染",
+      content: "测试详情图与评论图 404 情况下自动回退至压缩预览图渲染",
       comment_count: 1,
       like_count: 3,
       bookmark_count: 1,
@@ -714,7 +714,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
           id: "media_test_fallback",
           url: "/api/v1/media-file/media_test_fallback/detail",
           detail_url: "/api/v1/media-file/media_test_fallback/detail",
-          original_url: "/api/v1/media-file/media_test_fallback/original",
+          feed_url: "/api/v1/media-file/media_test_fallback/feed",
           thumb_url: "/api/v1/media-file/media_test_fallback/detail",
           alt_text: "需容灾回退的大图",
         },
@@ -737,7 +737,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
               url: "/api/v1/media-file/media_comm_fallback/detail",
               thumb_url: "/api/v1/media-file/media_comm_fallback/thumb",
               detail_url: "/api/v1/media-file/media_comm_fallback/detail",
-              original_url: "/api/v1/media-file/media_comm_fallback/original",
+              feed_url: "/api/v1/media-file/media_comm_fallback/feed",
               alt_text: "评论需容灾图",
             },
           ],
@@ -771,21 +771,21 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(modal).toBeVisible();
 
     const mainImg = modal.locator(".gallery-main-image");
-    await expect(mainImg).toHaveAttribute("src", /media_test_fallback\/original/);
+    await expect(mainImg).toHaveAttribute("src", /media_test_fallback\/feed/);
     await expect(mainImg).toBeVisible();
 
     await page.keyboard.press("Escape");
     await expect(modal).toBeHidden();
 
-    // 2. 验证评论图片缩略图与画廊回退（thumb 404 / detail 404 → original 200）
+    // 2. 验证评论图片缩略图与画廊回退（thumb 404 / detail 404 → feed 200）
     const commentImg = page.locator("#comment-comm-fb-1 .comment-media-grid img").first();
     await expect(commentImg).toBeVisible();
-    await expect(commentImg).toHaveAttribute("src", /media_comm_fallback\/original/);
+    await expect(commentImg).toHaveAttribute("src", /media_comm_fallback\/feed/);
 
-    // 点击评论缩略图，验证评论画廊大图同样回退到 original
+    // 点击评论缩略图，验证评论画廊大图同样回退到 feed
     await commentImg.click();
     await expect(modal).toBeVisible();
-    await expect(modal.locator(".gallery-main-image")).toHaveAttribute("src", /media_comm_fallback\/original/);
+    await expect(modal.locator(".gallery-main-image")).toHaveAttribute("src", /media_comm_fallback\/feed/);
     await page.keyboard.press("Escape");
     await expect(modal).toBeHidden();
   });
@@ -812,9 +812,11 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockPost) });
     });
 
-    // 评论接口 2000ms 高延迟响应
+    // 明确控制评论返回时机，避免机器速度和公网资源延迟影响非阻塞断言。
+    let releaseComments!: () => void;
+    const commentsReady = new Promise<void>((resolve) => { releaseComments = resolve; });
     await page.route("**/api/v1/posts/post-async-delay-1/comments*", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await commentsReady;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -832,17 +834,18 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
     });
 
-    await page.goto("/post/post-async-delay-1");
+    await page.goto("/post/post-async-delay-1", { waitUntil: "domcontentloaded" });
 
-    // 核心断言 1：正文在进入页面后 600ms 内优先渲染展示
-    await expect(page.getByRole("heading", { name: "高延迟异步隔离测试帖" })).toBeVisible({ timeout: 600 });
-    await expect(page.getByText("正文必须先秒开展示，评论在 1 秒多后慢速到达")).toBeVisible({ timeout: 600 });
+    // 评论尚未返回时正文已经可见，验证真正的先后关系。
+    await expect(page.getByRole("heading", { name: "高延迟异步隔离测试帖" })).toBeVisible();
+    await expect(page.getByText("正文必须先秒开展示，评论在 1 秒多后慢速到达")).toBeVisible();
 
     // 核心断言 2：正文已就绪时，设置了 1200ms 高延迟的评论绝对尚未呈现（证明非阻塞异步解耦）
     await expect(page.getByText("这是一条慢速到达的评论")).toBeHidden();
     await expect(page.locator("#comments")).toBeVisible();
 
     // 核心断言 3：最终慢速评论到达并成功呈现
+    releaseComments();
     await expect(page.getByText("这是一条慢速到达的评论")).toBeVisible({ timeout: 3500 });
   });
 

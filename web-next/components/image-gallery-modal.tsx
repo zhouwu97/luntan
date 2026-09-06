@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 
@@ -24,10 +24,12 @@ function GalleryThumb({
   onClick: () => void;
   index: number;
 }) {
-  const thumbCandidates =
+  const allThumbCandidates =
     img.sources && img.sources.length > 0
       ? [img.thumbUrl, ...img.sources].filter((s): s is string => Boolean(s && s.trim()))
       : ([img.thumbUrl, img.url, img.detailUrl, img.originalUrl].filter((s): s is string => Boolean(s && s.trim())));
+  const previewThumbs = allThumbCandidates.filter((url) => url !== img.originalUrl);
+  const thumbCandidates = previewThumbs.length ? previewThumbs : allThumbCandidates;
   const [thumbIdx, setThumbIdx] = useState(0);
   const src = thumbCandidates[thumbIdx] || (img.url ? img.url.trim() : "");
   const isThumbFailed = !src || thumbIdx >= thumbCandidates.length;
@@ -58,6 +60,8 @@ function GalleryThumb({
         <img
           src={src}
           alt=""
+          loading="lazy"
+          decoding="async"
           onError={() => {
             if (thumbIdx + 1 < thumbCandidates.length) {
               setThumbIdx((i) => i + 1);
@@ -84,6 +88,21 @@ export function ImageGalleryModal({
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [original, setOriginal] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const current = images[currentIndex] || images[0] || { url: "" };
+
+  const rawPreviewCandidates =
+    current.sources && current.sources.length > 0
+      ? current.sources.filter((s): s is string => Boolean(s && s.trim()))
+      : ([current.detailUrl, current.originalUrl, current.url, current.thumbUrl].filter((s): s is string => Boolean(s && s.trim())));
+  const compressedCandidates = rawPreviewCandidates.filter((url) => url !== current.originalUrl);
+  const previewCandidates = compressedCandidates.length ? compressedCandidates : rawPreviewCandidates;
+  const candidates = original && current.originalUrl ? [current.originalUrl] : previewCandidates;
+  const candidateKey = candidates.join("\n");
+  useEffect(() => { if (scale === 1) setPan({ x: 0, y: 0 }); }, [scale]);
 
   useEffect(() => {
     setMounted(true);
@@ -92,15 +111,18 @@ export function ImageGalleryModal({
   useEffect(() => {
     setCandidateIndex(0);
     setRetry(0);
+    setOriginal(false);
+    setScale(1);
+    setPan({ x: 0, y: 0 });
+    pointers.current.clear();
   }, [currentIndex]);
 
   useEffect(() => {
-    const current = images[currentIndex];
-    const sources = current?.sources?.length ? current.sources : [current?.detailUrl, current?.originalUrl, current?.url, current?.thumbUrl].filter(Boolean);
-    if (candidateIndex < sources.length || retry >= 5 || !sources.some((url) => url?.includes("/api/v1/media-file/"))) return;
+    const sources = candidateKey.split("\n").filter(Boolean);
+    if (candidateIndex < sources.length || retry >= 5 || !sources.some((url) => url.includes("/api/v1/media-file/"))) return;
     const timer = window.setTimeout(() => { setCandidateIndex(0); setRetry((n) => n + 1); }, 1000 * (retry + 1));
     return () => window.clearTimeout(timer);
-  }, [images, currentIndex, candidateIndex, retry]);
+  }, [candidateKey, candidateIndex, retry]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -124,12 +146,6 @@ export function ImageGalleryModal({
   }, [images.length, onClose]);
 
   if (!mounted || !images.length) return null;
-  const current = images[currentIndex] || images[0];
-
-  const candidates =
-    current.sources && current.sources.length > 0
-      ? current.sources.filter((s): s is string => Boolean(s && s.trim()))
-      : ([current.detailUrl, current.originalUrl, current.url, current.thumbUrl].filter((s): s is string => Boolean(s && s.trim())));
   const currentSrc = candidates[candidateIndex] || (current.url ? current.url.trim() : "");
   const isFailed = !currentSrc || candidateIndex >= candidates.length;
 
@@ -148,18 +164,19 @@ export function ImageGalleryModal({
           {currentIndex + 1} / {images.length}
         </span>
         <div className="gallery-actions">
+          <button type="button" className="gallery-action-btn" aria-label="缩小图片" disabled={scale <= 1} onClick={() => { setScale((v) => Math.max(1, v - 0.5)); setPan({ x: 0, y: 0 }); }}>−</button>
+          <button type="button" className="gallery-action-btn" aria-label="重置缩放" onClick={() => { setScale(1); setPan({ x: 0, y: 0 }); }}>{Math.round(scale * 100)}%</button>
+          <button type="button" className="gallery-action-btn" aria-label="放大图片" disabled={scale >= 4} onClick={() => setScale((v) => Math.min(4, v + 0.5))}>+</button>
           {(current.originalUrl || (!isFailed && currentSrc)) && (
-            <a
-              href={current.originalUrl || currentSrc}
-              target="_blank"
-              rel="noreferrer"
+            <button type="button"
+              onClick={() => { setOriginal((v) => !v); setCandidateIndex(0); setRetry(0); }}
               className="gallery-action-btn"
               title="查看原图"
               aria-label="查看原图"
             >
               <Icon name="arrow-up-right" size={17} />
-              <span>原图</span>
-            </a>
+              <span>{original ? "返回预览" : "原图"}</span>
+            </button>
           )}
           <button
             type="button"
@@ -192,7 +209,28 @@ export function ImageGalleryModal({
           </button>
         )}
 
-        <div className="gallery-image-container">
+        <div className="gallery-image-container" style={{ overflow: "hidden", touchAction: "none" }}
+          onDoubleClick={() => { setScale((v) => v > 1 ? 1 : 2); setPan({ x: 0, y: 0 }); }}
+          onPointerDown={(e) => { if (!(e.target instanceof HTMLImageElement)) return; pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY }); e.currentTarget.setPointerCapture(e.pointerId); }}
+          onPointerUp={(e) => pointers.current.delete(e.pointerId)}
+          onPointerCancel={(e) => pointers.current.delete(e.pointerId)}
+          onPointerMove={(e) => {
+            const previous = pointers.current.get(e.pointerId);
+            if (!previous) return;
+            const next = { x: e.clientX, y: e.clientY };
+            const other = [...pointers.current.entries()].find(([id]) => id !== e.pointerId)?.[1];
+            if (other) {
+              const before = Math.hypot(previous.x - other.x, previous.y - other.y);
+              const after = Math.hypot(next.x - other.x, next.y - other.y);
+              if (before > 0) setScale((v) => Math.min(4, Math.max(1, v * after / before)));
+            } else if (scale > 1) {
+              const bounds = e.currentTarget.getBoundingClientRect();
+              const maxX = bounds.width * (scale - 1) / 2;
+              const maxY = bounds.height * (scale - 1) / 2;
+              setPan((v) => ({ x: Math.min(maxX, Math.max(-maxX, v.x + next.x - previous.x)), y: Math.min(maxY, Math.max(-maxY, v.y + next.y - previous.y)) }));
+            }
+            pointers.current.set(e.pointerId, next);
+          }}>
           {isFailed ? (
             <div
               className="gallery-failed-placeholder"
@@ -207,6 +245,7 @@ export function ImageGalleryModal({
               }}
             >
               <Icon name="image" size={48} />
+              <button type="button" className="gallery-action-btn" onClick={() => { setCandidateIndex(0); setRetry(0); }}>重新加载</button>
               <span>{current.url || (current.sources && current.sources.length > 0) ? "图片加载失败" : "图片不可用或已被设为私密"}</span>
               {current.originalUrl && (
                 <a
@@ -232,6 +271,9 @@ export function ImageGalleryModal({
               src={currentSrc}
               alt={current.alt || "查看大图"}
               className="gallery-main-image"
+              draggable={false}
+              decoding="async"
+              style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, cursor: scale > 1 ? "grab" : "zoom-in" }}
               onError={() => {
                 if (candidateIndex + 1 < candidates.length) {
                   setCandidateIndex((idx) => idx + 1);

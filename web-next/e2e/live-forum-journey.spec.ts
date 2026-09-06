@@ -7,12 +7,13 @@ import path from "node:path";
 // 该用例连接真实 API、媒体存储和数据库；常规模拟测试不启用它。
 test("真实论坛旅程：游客、浏览、图片评论、回复定位和原身份注册", async ({ page, request }) => {
   test.skip(process.env.LUNTAN_LIVE_JOURNEY !== "1", "需要独立的本地 API 与 PostgreSQL");
-  test.setTimeout(90000);
+  test.setTimeout(150000);
+  page.setDefaultTimeout(15000);
   const databaseUrl = process.env.DATABASE_URL || "";
   const databaseHost = new URL(databaseUrl).hostname;
   expect(["127.0.0.1", "localhost", "postgres"]).toContain(databaseHost);
   expect(new URL(databaseUrl).pathname).toMatch(/_test$/);
-  const sql = (statement: string) => execFileSync(process.env.PSQL_BIN || "psql", [databaseUrl, "-X", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", statement], { encoding: "utf8" }).trim();
+  const sql = (statement: string) => execFileSync(process.env.PSQL_BIN || "psql", ["-X", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-d", databaseUrl], { encoding: "utf8", input: statement, env: { ...process.env, PGCLIENTENCODING: "UTF8" } }).trim();
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
   const suffix = randomUUID();
   const categoryId = `journey-cat-${suffix}`;
@@ -23,6 +24,18 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   const marker = await request.get(`/api/v1/communities/${markerId}`);
   expect(marker.ok()).toBeTruthy();
   expect((await marker.json()).id).toBe(markerId);
+  const webOrigin = process.env.LUNTAN_JOURNEY_WEB_ORIGIN;
+  if (webOrigin) {
+    // 可复用已部署的前端，但所有业务请求强制转入本地测试 API，不在生产库写入测试数据。
+    const apiOrigin = process.env.PLAYWRIGHT_TEST_BASE_URL || "";
+    expect(new URL(apiOrigin).hostname).toBe("127.0.0.1");
+    await page.route("**/api/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({ url: new URL(url.pathname + url.search, apiOrigin).toString() });
+      await route.fulfill({ response });
+    });
+  }
+  const navigate = (route: string) => page.goto(webOrigin ? new URL(route, webOrigin).toString() : route, { waitUntil: "domcontentloaded", timeout: 30000 });
   const authorResponse = await request.post("/api/v1/auth/register", { data: { username: `journey_${suffix}`, password: "TestPassword123!", nickname: "旅程楼主" } });
   expect(authorResponse.status()).toBe(201);
   const author = await authorResponse.json();
@@ -45,12 +58,12 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const guestResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/auth/guest") && response.request().method() === "POST");
-  await page.goto("/");
+  await navigate("/");
   const guest = await (await guestResponse).json();
   expect(guest.user.account_type).toBe("guest");
   const guestId = guest.user.id;
   const viewResponse = page.waitForResponse((response) => response.url().endsWith(`/posts/${postId}/view`));
-  await page.getByRole("link", { name: title, exact: true }).first().click();
+  await page.getByRole("heading", { name: title, exact: true }).first().click();
   expect((await (await viewResponse).json()).recorded).toBe(true);
   expect(sql(`SELECT view_count FROM posts WHERE id=${quote(postId)}`)).toBe("1");
   await page.locator(".detail-gallery img").first().click();
@@ -58,26 +71,20 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0)), { timeout: 20000 }).toBe(true);
   await page.getByRole("button", { name: "关闭查看器" }).click();
   const composer = page.locator("form").filter({ has: page.getByRole("button", { name: "发布回复", exact: true }) });
-  await composer.locator("textarea").fill("游客图片评论，注册后保留");
-  await composer.locator('input[type="file"]').setInputFiles(photoPath);
+  await composer.locator("textarea").fill("游客评论，注册后保留");
   const commentResponse = page.waitForResponse((response) => response.url().endsWith(`/posts/${postId}/comments`) && response.request().method() === "POST");
   await composer.getByRole("button", { name: "发布回复", exact: true }).click();
   const createdResponse = await commentResponse;
   expect(createdResponse.status()).toBe(201);
   const comment = await createdResponse.json();
   const commentNode = page.locator(`#comment-${comment.id}`);
-  await expect(commentNode).toContainText("游客图片评论，注册后保留");
-  await commentNode.locator(".comment-media-grid img").first().click();
-  await expect(page.getByRole("dialog", { name: "图片查看器" })).toBeVisible();
-  await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0)), { timeout: 20000 }).toBe(true);
-  await page.getByRole("button", { name: "关闭查看器" }).click();
-
+  await expect(commentNode).toContainText("游客评论，注册后保留");
   const notes = await request.get("/api/v1/notifications?category=interaction", { headers: auth });
   expect((await notes.json()).items.some((item: { type: string; target_id: string }) => item.type === "comment.created" && item.target_id === postId)).toBe(true);
   const replyResponse = await request.post(`/api/v1/comments/${comment.id}/replies`, { headers: { ...auth, "Idempotency-Key": randomUUID() }, data: { content: "楼主回复游客，准确定位这一条" } });
   expect(replyResponse.status()).toBe(201);
   const reply = await replyResponse.json();
-  await page.goto("/notifications");
+  await navigate("/notifications");
   const notification = page.locator(`a[href="/post/${postId}?comment=${comment.id}&reply=${reply.id}"]`);
   await notification.click();
   const focusedReply = page.locator(`.comment-reply-modal #comment-${reply.id}`);
@@ -85,7 +92,7 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   await expect(focusedReply).toHaveClass(/comment-highlight/);
   await page.getByRole("button", { name: "关闭回复", exact: true }).click();
 
-  await page.goto("/login?mode=register");
+  await navigate("/login?mode=register");
   await page.getByPlaceholder("请输入邮箱地址").fill(`journey-${suffix}@example.com`);
   await page.getByPlaceholder("至少 8 位密码").fill("TestPassword123!");
   await page.getByPlaceholder("再次输入密码").fill("TestPassword123!");
@@ -95,11 +102,54 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   expect(registeredResponse.ok()).toBeTruthy();
   const registered = await registeredResponse.json();
   expect(registered.user.id).toBe(guestId);
-  expect(registered.user.account_type).toBe("registered");
+  expect(registered.user.account_type).toBe("email");
   expect(sql(`SELECT author_id FROM comments WHERE id=${quote(comment.id)}`)).toBe(guestId);
-  expect(sql(`SELECT COUNT(*) FROM comment_media WHERE comment_id=${quote(comment.id)}`)).toBe("1");
+  expect(sql(`SELECT COUNT(*) FROM comment_media WHERE comment_id=${quote(comment.id)}`)).toBe("0");
   expect(sql(`SELECT COUNT(*) FROM post_view_events WHERE post_id=${quote(postId)} AND viewer_key=${quote("u:" + guestId)}`)).toBe("1");
-  await page.goto(`/post/${postId}?comment=${comment.id}`);
-  await expect(page.locator(`#comment-${comment.id}`)).toContainText("游客图片评论，注册后保留");
+  await navigate(`/post/${postId}?comment=${comment.id}`);
+  await expect(page.locator(`#comment-${comment.id}`)).toContainText("游客评论，注册后保留");
+  const imageComposer = page.locator("form").filter({ has: page.getByRole("button", { name: "发布回复", exact: true }) });
+  await imageComposer.locator("textarea").fill("正式账号自己发图并查看");
+  await imageComposer.locator('input[type="file"]').setInputFiles(photoPath);
+  const imageResponse = page.waitForResponse((response) => response.url().endsWith(`/posts/${postId}/comments`) && response.request().method() === "POST");
+  await imageComposer.getByRole("button", { name: "发布回复", exact: true }).click();
+  const imageComment = await (await imageResponse).json();
+  const imageNode = page.locator(`#comment-${imageComment.id} .comment-media-grid img`);
+  await expect.poll(() => imageNode.evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0)), { timeout: 20000 }).toBe(true);
+  await imageNode.click();
+  await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0)), { timeout: 20000 }).toBe(true);
+  if (process.env.LUNTAN_QA_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.LUNTAN_QA_SCREENSHOT_DIR, "own-comment-gallery.png"), fullPage: false });
+  await page.getByRole("button", { name: "关闭查看器" }).click();
+  // 同一个正式账号继续走真实兑换、订单页和积分返还，不使用生产积分。
+  const productId = `journey-product-${suffix}`;
+  const productName = `旅程测试徽章 ${suffix.slice(0, 8)}`;
+  sql(`UPDATE users SET points_balance=100 WHERE id=${quote(guestId)};
+    INSERT INTO store_products (id,name,points,stock_total) VALUES (${quote(productId)},${quote(productName)},60,5);
+    INSERT INTO user_roles (id,user_id,role_id) VALUES (${quote(`journey-role-${suffix}`)},${quote(author.user.id)},'role-super-admin');`);
+  await navigate("/points");
+  await expect(page.locator(".points-hero-number")).toHaveText("100");
+  await page.locator(".store-product-card").filter({ hasText: productName }).getByRole("button", { name: "申请兑换" }).click();
+  const orderResponse = page.waitForResponse((response) => response.url().endsWith("/store/orders") && response.request().method() === "POST");
+  await page.getByRole("button", { name: "提交申请" }).click();
+  const order = await (await orderResponse).json();
+  expect(order.id).toBeTruthy();
+  await expect(page.locator(`#order-${order.id}`)).toContainText("审核中");
+  expect(sql(`SELECT points_balance FROM users WHERE id=${quote(guestId)}`)).toBe("100");
+  const approval = await request.post(`/api/v1/admin/store/orders/${order.id}/review`, { headers: auth, data: { decision: "approve" } });
+  expect(approval.status()).toBe(200);
+  expect(sql(`SELECT points_balance FROM users WHERE id=${quote(guestId)}`)).toBe("40");
+  await navigate(`/points?tab=orders&order=${order.id}`);
+  const shippingDialog = page.getByRole("dialog", { name: "填写收货地址" });
+  await expect(shippingDialog).toBeVisible();
+  await shippingDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(shippingDialog).toBeHidden();
+  await page.locator(`#order-${order.id}`).getByRole("button", { name: "取消与售后" }).click();
+  const aftercare = page.getByRole("dialog", { name: "取消与售后" });
+  await aftercare.locator("textarea").fill("本地测试取消兑换");
+  await aftercare.getByRole("button", { name: "取消订单并返还已扣积分" }).click();
+  await expect(page.locator(`#order-${order.id}`)).toContainText("已取消");
+  await expect(page.locator(".points-hero-number")).toHaveText("100");
+  expect(sql(`SELECT stock_reserved FROM store_products WHERE id=${quote(productId)}`)).toBe("0");
+  if (process.env.LUNTAN_QA_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.LUNTAN_QA_SCREENSHOT_DIR, "store-cancelled-desktop.png"), fullPage: false });
   expect(errors).toEqual([]);
 });

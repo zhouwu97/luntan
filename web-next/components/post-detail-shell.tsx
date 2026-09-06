@@ -1409,7 +1409,6 @@ function CommentMediaThumbnail({
   const candidates = [...new Set([
     ...mediaCandidates(asset, "thumb"),
     ...mediaCandidates(asset, "detail"),
-    ...mediaCandidates(asset, "original"),
   ])];
   const [candidateIdx, setCandidateIdx] = useState(0);
   const [mediaRetry, setMediaRetry] = useState(0);

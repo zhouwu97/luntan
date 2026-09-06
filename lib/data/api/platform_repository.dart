@@ -64,10 +64,12 @@ class ForumNotification {
 
   NotificationCategory get category {
     if (isModeration) return NotificationCategory.moderation;
-    if (isSystem) return NotificationCategory.system;
+    if (isSystem) return NotificationCategory.moderation;
     if (type.startsWith('community.') ||
         type == 'announcement' ||
-        type == 'event') {
+        type == 'event' ||
+        type == 'maintenance' ||
+        type == 'rules.updated') {
       return NotificationCategory.community;
     }
     return NotificationCategory.interaction;
@@ -985,6 +987,17 @@ class PlatformRepository {
       items: items,
       nextCursor: payload['next_cursor'] as String?,
       hasMore: payload['has_more'] == true,
+    );
+  }
+
+  Future<void> publishCommunityAnnouncement({
+    required String id,
+    required String title,
+    required String content,
+  }) async {
+    await _client.postJson(
+      '/api/v1/admin/announcements',
+      body: {'id': id, 'title': title, 'content': content},
     );
   }
 

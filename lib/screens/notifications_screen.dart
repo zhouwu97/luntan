@@ -88,6 +88,9 @@ class _TabState {
   bool hasMore = true;
   bool loaded = false;
   bool loading = false;
+  bool loadingMore = false;
+  String? loadMoreError;
+  int generation = 0;
   String? errorMessage;
 }
 
@@ -124,9 +127,9 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen> {
   final ScrollController scrollController = ScrollController();
   NotificationCategory filter = NotificationCategory.all;
-  bool loadingMore = false;
-  String? loadMoreError;
-  int _generation = 0;
+  bool get loadingMore => _currentState.loadingMore;
+  String? get loadMoreError => _currentState.loadMoreError;
+  final Set<String> _readIds = {};
 
   final Map<NotificationCategory, _TabState> _tabStates = {
     NotificationCategory.all: _TabState(),
@@ -170,11 +173,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       return;
     }
 
-    final generation = ++_generation;
+    final generation = ++tabState.generation;
     setState(() {
       tabState.loading = true;
       tabState.errorMessage = null;
-      loadMoreError = null;
+      tabState.loadMoreError = null;
+      tabState.loadingMore = false;
       if (forceRefresh) {
         tabState.items.clear();
         tabState.nextCursor = null;
@@ -186,22 +190,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final page = await widget.repository.listNotifications(
         category: category,
       );
-      if (!mounted || generation != _generation) return;
+      if (!mounted || generation != tabState.generation) return;
       setState(() {
         tabState.items
           ..clear()
-          ..addAll(page.items);
+          ..addAll(_mergeRead(page.items));
         tabState.nextCursor = page.nextCursor;
         tabState.hasMore = page.hasMore;
         tabState.loaded = true;
         tabState.loading = false;
       });
     } catch (_) {
-      if (mounted && generation == _generation) {
+      if (mounted && generation == tabState.generation) {
         setState(() {
           tabState.errorMessage = '通知加载失败，请重试';
           tabState.loading = false;
         });
+      }
+    } finally {
+      if (mounted && generation == tabState.generation) {
+        setState(() => tabState.loading = false);
       }
     }
   }
@@ -216,34 +224,39 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         tabState.nextCursor == null) {
       return;
     }
-    final generation = _generation;
+    final generation = tabState.generation;
     final requestedCategory = filter;
     final requestedCursor = tabState.nextCursor;
 
-    setState(() => loadingMore = true);
+    setState(() => tabState.loadingMore = true);
     try {
       final page = await widget.repository.listNotifications(
         cursor: requestedCursor,
         category: requestedCategory,
       );
-      if (!mounted ||
-          generation != _generation ||
-          filter != requestedCategory) {
+      if (!mounted || generation != tabState.generation) {
         return;
       }
       setState(() {
-        tabState.items.addAll(page.items);
+        final known = tabState.items.map((item) => item.id).toSet();
+        tabState.items.addAll(
+          _mergeRead(page.items).where((item) => !known.contains(item.id)),
+        );
         tabState.nextCursor = page.nextCursor;
         tabState.hasMore = page.hasMore;
-        loadMoreError = null;
-        loadingMore = false;
+        tabState.loadMoreError = null;
+        tabState.loadingMore = false;
       });
     } catch (_) {
-      if (mounted && generation == _generation) {
+      if (mounted && generation == tabState.generation) {
         setState(() {
-          loadMoreError = '加载更多失败，点击重试';
-          loadingMore = false;
+          tabState.loadMoreError = '加载更多失败，点击重试';
+          tabState.loadingMore = false;
         });
+      }
+    } finally {
+      if (mounted && generation == tabState.generation) {
+        setState(() => tabState.loadingMore = false);
       }
     }
   }
@@ -268,6 +281,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       setState(() {
         for (final state in _tabStates.values) {
           for (final item in state.items) {
+            _readIds.add(item.id);
             item.isRead = true;
           }
         }
@@ -285,7 +299,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _handleNotificationTap(ForumNotification item) {
     if (!item.isRead) {
-      setState(() => item.isRead = true);
       unawaited(_markNotificationRead(item));
     }
     if (item.targetType != 'store_order' &&
@@ -337,12 +350,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  Iterable<ForumNotification> _mergeRead(List<ForumNotification> incoming) {
+    for (final item in incoming) {
+      if (_readIds.contains(item.id)) item.isRead = true;
+    }
+    return incoming;
+  }
+
+  void _setRead(String id, bool read) {
+    if (read) {
+      _readIds.add(id);
+    } else {
+      _readIds.remove(id);
+    }
+    for (final state in _tabStates.values) {
+      for (final item in state.items) {
+        if (item.id == id) item.isRead = read;
+      }
+    }
+  }
+
   Future<void> _markNotificationRead(ForumNotification item) async {
     try {
       await widget.repository.markNotificationRead(item.id);
+      if (!mounted) return;
+      setState(() => _setRead(item.id, true));
     } catch (_) {
-      if (!mounted || !items.contains(item)) return;
-      setState(() => item.isRead = false);
+      // 已读失败保持原状态，不能覆盖同时完成的全部已读。
     }
   }
 

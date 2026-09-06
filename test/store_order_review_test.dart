@@ -113,9 +113,18 @@ void main() {
 
     expect(find.text('兑换订单'), findsOneWidget);
     expect(find.text('测试用户'), findsOneWidget);
-    expect(requestedStatus, 'pending_review');
-    await tester.ensureVisible(find.text('已拒绝'));
-    await tester.tap(find.text('已拒绝'));
+    expect(
+      requestedStatus,
+      'pending_review,ready_to_ship,return_requested,refund_pending',
+    );
+    expect(find.text('全部'), findsOneWidget);
+    expect(find.text('待我操作'), findsOneWidget);
+    expect(find.text('处理中'), findsOneWidget);
+    expect(find.text('已结束'), findsOneWidget);
+    await tester.tap(find.byTooltip('筛选订单状态'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('已拒绝 ·'));
+    await tester.tap(find.widgetWithText(FilledButton, '应用筛选'));
     await tester.pumpAndSettle();
     expect(requestedStatus, 'rejected');
     await tester.tap(find.text('测试用户'));
@@ -312,7 +321,10 @@ void main() {
       MaterialApp(home: StoreOrderReviewScreen(repository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('待发货'));
+    await tester.tap(find.byTooltip('筛选订单状态'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('待发货 ·'));
+    await tester.tap(find.widgetWithText(FilledButton, '应用筛选'));
     await tester.pumpAndSettle();
     expect(requestedStatus, 'ready_to_ship');
     await tester.tap(find.text('测试用户'));

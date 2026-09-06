@@ -1,3 +1,4 @@
+import '../widgets/report_reason_sheet.dart';
 // ignore_for_file: unused_element
 
 import 'package:flutter/foundation.dart';
@@ -807,10 +808,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () async {
                   Navigator.pop(sheetContext);
                   try {
+                    final reason = await showReportReasonSheet(context);
+                    if (reason == null) return;
                     await widget.platform!.report(
                       targetType: 'post',
                       targetId: post.id,
-                      reasonCode: 'other',
+                      reasonCode: reason,
                     );
                     widget.onFeedback('举报已提交，我们会尽快处理');
                   } catch (error) {

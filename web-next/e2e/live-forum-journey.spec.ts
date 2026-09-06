@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-// 该用例连接真实 API、媒体存储和数据库；常规模拟测试不启用它。
+// 该用例连接隔离 API、worker、媒体存储和测试数据库，CI 作为独立步骤执行。
 test("真实论坛旅程：游客、浏览、图片评论、回复定位和原身份注册", async ({ page, request }) => {
   test.skip(process.env.LUNTAN_LIVE_JOURNEY !== "1", "需要独立的本地 API 与 PostgreSQL");
   test.setTimeout(150000);
@@ -48,6 +48,8 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   const upload = await uploadToken.json();
   expect((await request.put(upload.upload_url, { data: photo, headers: { "Content-Type": "image/jpeg" } })).ok()).toBeTruthy();
   expect((await request.post(`/api/v1/media/${upload.media_id}/complete`, { headers: auth, data: { size: photo.length, sha256: checksum } })).ok()).toBeTruthy();
+  // complete 只确认上传，等待 worker 生成变体后再打开页面。
+  await expect.poll(() => sql(`SELECT count(*) FROM media_variants WHERE media_id=${quote(upload.media_id)} AND variant='detail' AND status='ready'`), { timeout: 30000 }).toBe("1");
   const postId = `journey-post-${suffix}`;
   const title = `真实论坛旅程 ${suffix}`;
   sql(`INSERT INTO communities (id,category_id,slug,name,status) VALUES ('community-campus',${quote(categoryId)},'journey-campus','校园','active') ON CONFLICT (id) DO NOTHING;

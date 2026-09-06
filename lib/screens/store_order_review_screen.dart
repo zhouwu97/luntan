@@ -32,23 +32,54 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = false;
-  String _selectedStatus = 'pending_review';
+  String _selectedGroup = 'todo';
+  Set<String> _selectedStatuses = const <String>{};
   int _requestGeneration = 0;
   Map<String, int> _counts = const <String, int>{};
+  bool _combinedStatusSupported = true;
 
-  static const _statusFilters = <({String value, String label})>[
-    (value: 'pending_review', label: '待审核'),
-    (value: 'awaiting_address', label: '待填地址'),
-    (value: 'ready_to_ship', label: '待发货'),
-    (value: 'return_requested', label: '退货待审核'),
-    (value: 'refund_pending', label: '待退款'),
-    (value: 'refunded', label: '已退款'),
-    (value: 'cancelled', label: '已取消'),
-    (value: 'shipped', label: '已发货'),
-    (value: 'completed', label: '已完成'),
-    (value: 'rejected', label: '已拒绝'),
-    (value: 'all', label: '全部'),
+  static const _statusFilters = <({String value, String label, String group})>[
+    (value: 'pending_review', label: '待审核', group: 'todo'),
+    (value: 'ready_to_ship', label: '待发货', group: 'todo'),
+    (value: 'return_requested', label: '退货待审核', group: 'todo'),
+    (value: 'refund_pending', label: '待退款', group: 'todo'),
+    (value: 'awaiting_address', label: '待填地址', group: 'processing'),
+    (value: 'shipped', label: '已发货', group: 'processing'),
+    (value: 'refunded', label: '已退款', group: 'done'),
+    (value: 'cancelled', label: '已取消', group: 'done'),
+    (value: 'completed', label: '已完成', group: 'done'),
+    (value: 'rejected', label: '已拒绝', group: 'done'),
   ];
+
+  static const _groups = <({String value, String label})>[
+    (value: 'all', label: '全部'),
+    (value: 'todo', label: '待我操作'),
+    (value: 'processing', label: '处理中'),
+    (value: 'done', label: '已结束'),
+  ];
+
+  List<String> get _effectiveStatuses {
+    if (_selectedStatuses.isNotEmpty) return _selectedStatuses.toList()..sort();
+    if (_selectedGroup == 'all') return const <String>[];
+    return _statusFilters
+        .where((filter) => filter.group == _selectedGroup)
+        .map((filter) => filter.value)
+        .toList();
+  }
+
+  String get _requestStatus {
+    final statuses = _effectiveStatuses;
+    if (statuses.isEmpty ||
+        (!_combinedStatusSupported && statuses.length > 1)) {
+      return 'all';
+    }
+    return statuses.join(',');
+  }
+
+  String get _selectionKey {
+    final selected = _selectedStatuses.toList()..sort();
+    return '$_selectedGroup:${selected.join(',')}';
+  }
 
   @override
   void initState() {
@@ -58,7 +89,8 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
 
   Future<void> _loadFirstPage() async {
     final generation = ++_requestGeneration;
-    final requestStatus = _selectedStatus;
+    final selectionKey = _selectionKey;
+    var requestStatus = _requestStatus;
 
     setState(() {
       _loading = true;
@@ -73,17 +105,28 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       final countsFuture = widget.repository.getStoreOrderCounts().catchError(
         (_) => const <String, int>{},
       );
-      final page = await widget.repository.listStoreOrderPage(
-        status: requestStatus,
-      );
+      AdminStoreOrderPage page;
+      try {
+        page = await widget.repository.listStoreOrderPage(
+          status: requestStatus,
+        );
+      } catch (_) {
+        if (!requestStatus.contains(',')) rethrow;
+        // 兼容尚未支持联合状态查询的旧服务端，升级期间页面仍可正常使用。
+        _combinedStatusSupported = false;
+        requestStatus = 'all';
+        page = await widget.repository.listStoreOrderPage(
+          status: requestStatus,
+        );
+      }
       final counts = await countsFuture;
       if (!mounted ||
           generation != _requestGeneration ||
-          requestStatus != _selectedStatus) {
+          selectionKey != _selectionKey) {
         return;
       }
       setState(() {
-        _items.addAll(page.items);
+        _items.addAll(_filterItemsIfNeeded(page.items, requestStatus));
         _nextCursor = page.nextCursor;
         _hasMore = page.hasMore;
         _counts = counts;
@@ -92,7 +135,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     } catch (error) {
       if (!mounted ||
           generation != _requestGeneration ||
-          requestStatus != _selectedStatus) {
+          selectionKey != _selectionKey) {
         return;
       }
       setState(() {
@@ -105,7 +148,8 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
   Future<void> _loadMore() async {
     final cursor = _nextCursor;
     final generation = _requestGeneration;
-    final requestStatus = _selectedStatus;
+    final requestStatus = _requestStatus;
+    final selectionKey = _selectionKey;
 
     if (_loadingMore || !_hasMore || cursor == null || cursor.isEmpty) return;
     setState(() {
@@ -119,12 +163,12 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       );
       if (!mounted ||
           generation != _requestGeneration ||
-          requestStatus != _selectedStatus ||
+          selectionKey != _selectionKey ||
           cursor != _nextCursor) {
         return;
       }
       setState(() {
-        _items.addAll(page.items);
+        _items.addAll(_filterItemsIfNeeded(page.items, requestStatus));
         _nextCursor = page.nextCursor;
         _hasMore = page.hasMore;
         _loadingMore = false;
@@ -132,7 +176,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     } catch (error) {
       if (!mounted ||
           generation != _requestGeneration ||
-          requestStatus != _selectedStatus) {
+          selectionKey != _selectionKey) {
         return;
       }
       setState(() {
@@ -142,11 +186,32 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     }
   }
 
+  Iterable<AdminStoreOrder> _filterItemsIfNeeded(
+    List<AdminStoreOrder> items,
+    String requestStatus,
+  ) {
+    final statuses = _effectiveStatuses.toSet();
+    if (requestStatus != 'all' || statuses.isEmpty) return items;
+    return items.where((item) => statuses.contains(_statusValue(item)));
+  }
+
+  String _statusValue(AdminStoreOrder item) {
+    if (item.status == 'pending_review' ||
+        item.status == 'rejected' ||
+        item.status == 'cancelled') {
+      return item.status;
+    }
+    return item.fulfillmentStatus;
+  }
+
   Future<void> _refresh() => _loadFirstPage();
 
-  Future<void> _selectStatus(String status) async {
-    if (status == _selectedStatus) return;
-    setState(() => _selectedStatus = status);
+  Future<void> _selectGroup(String group) async {
+    if (group == _selectedGroup && _selectedStatuses.isEmpty) return;
+    setState(() {
+      _selectedGroup = group;
+      _selectedStatuses = const <String>{};
+    });
     await _loadFirstPage();
   }
 
@@ -180,6 +245,7 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
       ),
       body: Column(
         children: [
+          if (_todoCount > 0) _buildActionNotice(),
           _buildStatusFilters(),
           Expanded(
             child: RefreshIndicator(onRefresh: _refresh, child: _buildBody()),
@@ -189,30 +255,283 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     );
   }
 
-  Widget _buildStatusFilters() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
+  int get _todoCount => _statusFilters
+      .where((filter) => filter.group == 'todo')
+      .fold(0, (total, filter) => total + (_counts[filter.value] ?? 0));
+
+  int _groupCount(String group) {
+    if (group == 'all') return _counts['all'] ?? 0;
+    return _statusFilters
+        .where((filter) => filter.group == group)
+        .fold(0, (total, filter) => total + (_counts[filter.value] ?? 0));
+  }
+
+  Widget _buildActionNotice() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppTheme.border),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [AppTheme.cardShadow],
+      ),
       child: Row(
         children: [
-          for (final filter in _statusFilters) ...[
-            Builder(
-              builder: (context) {
-                final count = _counts[filter.value];
-                final hasCount = count != null && count > 0;
-                final labelText = hasCount ? '${filter.label} $count' : filter.label;
-                return ChoiceChip(
-                  label: Text(labelText),
-                  selected: filter.value == _selectedStatus,
-                  onSelected: (_) => _selectStatus(filter.value),
-                );
-              },
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '有 $_todoCount 笔订单需要你处理',
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '及时完成审核、发货或售后处理',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-          ],
+          ),
+          TextButton(
+            onPressed: () => _selectGroup('todo'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.orange,
+              backgroundColor: AppTheme.softAmber,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(11),
+              ),
+            ),
+            child: const Text(
+              '去处理',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildStatusFilters() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppTheme.background,
+        border: Border(bottom: BorderSide(color: AppTheme.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                height: 46,
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE9F0F7),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Row(
+                  children: [
+                    for (final group in _groups)
+                      Expanded(
+                        child: _buildGroupButton(group.value, group.label),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Badge(
+              isLabelVisible: _selectedStatuses.isNotEmpty,
+              label: Text('${_selectedStatuses.length}'),
+              child: IconButton(
+                tooltip: '筛选订单状态',
+                onPressed: _showFilterSheet,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppTheme.textSecondary,
+                  side: const BorderSide(color: AppTheme.border),
+                  minimumSize: const Size(44, 44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: const Icon(Icons.filter_list_rounded, size: 20),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupButton(String value, String label) {
+    final selected = value == _selectedGroup;
+    final count = _groupCount(value);
+    return InkWell(
+      key: ValueKey('order-group-$value'),
+      onTap: () => _selectGroup(value),
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: selected ? const [AppTheme.cardShadow] : null,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: selected ? AppTheme.primary : AppTheme.textSecondary,
+                  fontSize: 11.5,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                ),
+              ),
+            ),
+            if (count > 0 && value != 'all') ...[
+              const SizedBox(width: 3),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: value == 'todo' ? AppTheme.orange : AppTheme.primary,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFilterSheet() async {
+    var draft = Set<String>.of(_selectedStatuses);
+    final selected = await showModalBottomSheet<Set<String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              10,
+              16,
+              18 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppTheme.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '筛选订单状态',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => setSheetState(() => draft.clear()),
+                      child: const Text('清除筛选'),
+                    ),
+                  ],
+                ),
+                for (final group in _groups.where(
+                  (group) => group.value != 'all',
+                )) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    group.label,
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final filter in _statusFilters.where(
+                        (filter) => filter.group == group.value,
+                      ))
+                        FilterChip(
+                          label: Text(
+                            '${filter.label} · ${_counts[filter.value] ?? 0}',
+                          ),
+                          selected: draft.contains(filter.value),
+                          showCheckmark: false,
+                          onSelected: (value) => setSheetState(() {
+                            value
+                                ? draft.add(filter.value)
+                                : draft.remove(filter.value);
+                          }),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 22),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(sheetContext, draft),
+                        child: const Text('应用筛选'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _selectedStatuses = selected);
+    await _loadFirstPage();
   }
 
   Widget _buildBody() {
@@ -242,9 +561,39 @@ class _StoreOrderReviewScreenState extends State<StoreOrderReviewScreen> {
     }
     if (_items.isEmpty) {
       return ListView(
-        children: const [
-          SizedBox(height: 180),
-          Center(child: Text('当前没有符合条件的兑换申请')),
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        children: [
+          const SizedBox(height: 150),
+          Center(
+            child: Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: AppTheme.softBlue,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: const Icon(
+                Icons.inventory_2_outlined,
+                color: AppTheme.primary,
+                size: 27,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Center(
+            child: Text(
+              '当前没有相关订单',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Center(
+            child: Text(
+              '新的兑换申请或履约状态会显示在这里',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+          ),
         ],
       );
     }
@@ -286,119 +635,355 @@ class _StoreOrderListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = item.nickname.trim().isEmpty ? item.username : item.nickname;
+    final status = _statusAppearance(item);
+    final shipping = item.shipping;
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: AppTheme.border),
+      ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-          child: Row(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppTheme.softRose,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                alignment: Alignment.center,
-                child: const Icon(
-                  Icons.card_giftcard_outlined,
-                  color: AppTheme.pink,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: status.background,
+                      borderRadius: BorderRadius.circular(15),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${item.productName} · ${item.points} 积分',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      status.icon,
+                      color: status.foreground,
+                      size: 23,
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '订单状态：${_statusLabel(item)}',
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.productName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.account_circle_outlined,
+                              size: 14,
+                              color: AppTheme.textSecondary,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              relativeTimeLabel(item.createdAt),
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: status.background,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      status.label,
                       style: TextStyle(
-                        color: item.status == 'rejected'
-                            ? AppTheme.orange
-                            : AppTheme.textSecondary,
+                        color: status.foreground,
                         fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (item.shipping != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        _shippingSummary(
-                          item.shipping!,
-                          item.fulfillmentStatus,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 2),
-                    Text(
-                      '申请时间 ${relativeTimeLabel(item.createdAt)} · 当前积分 ${item.userPoints}',
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                    if (item.status != 'pending_review' &&
-                        item.reviewedAt != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        '审核于 ${relativeTimeLabel(item.reviewedAt!)} · ${item.reviewedBy.isEmpty ? '管理员' : item.reviewedBy}',
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                    if (item.invalidatedPoints > 0)
-                      Text(
-                        '已剔除 ${item.invalidatedCount} 笔奖励 · ${item.invalidatedPoints} 积分',
-                        style: const TextStyle(
-                          color: AppTheme.orange,
-                          fontSize: 11,
-                        ),
-                      ),
-                    if (item.reviewReason.trim().isNotEmpty)
-                      Text(
-                        '审核理由：${item.reviewReason}',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  _metric(
+                    Icons.workspace_premium_outlined,
+                    '${item.points} 积分',
+                  ),
+                  const SizedBox(width: 16),
+                  _metric(
+                    Icons.account_balance_wallet_outlined,
+                    '当前 ${item.userPoints}',
+                  ),
+                ],
+              ),
+              if (shipping != null) ...[
+                const SizedBox(height: 13),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7F9FC),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        item.fulfillmentStatus == 'shipped'
+                            ? Icons.local_shipping_outlined
+                            : Icons.location_on_outlined,
+                        color: AppTheme.primary,
+                        size: 17,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          _shippingSummary(shipping, item.fulfillmentStatus),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 11.5,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (item.invalidatedPoints > 0 ||
+                  item.reviewReason.trim().isNotEmpty ||
+                  (item.status != 'pending_review' &&
+                      item.reviewedAt != null)) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+                if (item.invalidatedPoints > 0)
+                  _note(
+                    Icons.remove_circle_outline,
+                    '已剔除 ${item.invalidatedCount} 笔奖励，共 ${item.invalidatedPoints} 积分',
+                    AppTheme.orange,
+                  ),
+                if (item.reviewReason.trim().isNotEmpty)
+                  _note(
+                    Icons.notes_rounded,
+                    item.reviewReason,
+                    AppTheme.textSecondary,
+                  ),
+                if (item.status != 'pending_review' && item.reviewedAt != null)
+                  _note(
+                    Icons.verified_user_outlined,
+                    '审核于 ${relativeTimeLabel(item.reviewedAt!)}',
+                    AppTheme.textSecondary,
+                  ),
+              ],
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 11),
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.verified_user_outlined,
+                          size: 14,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _timelineLabel(item),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: onTap,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    child: Text(_actionLabel(item)),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _metric(IconData icon, String label) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 15, color: AppTheme.textSecondary),
+      const SizedBox(width: 5),
+      Text(
+        label,
+        style: const TextStyle(
+          color: AppTheme.textSecondary,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
+
+  Widget _note(IconData icon, String text, Color color) => Padding(
+    padding: const EdgeInsets.only(bottom: 5),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 14, color: color),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: color, fontSize: 11.5, height: 1.35),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  String _actionLabel(AdminStoreOrder order) {
+    if (order.status == 'pending_review') return '审核订单';
+    return switch (order.fulfillmentStatus) {
+      'ready_to_ship' => '填写物流',
+      'return_requested' => '审核退货',
+      'refund_pending' => '处理退款',
+      'awaiting_address' => '查看进度',
+      _ => '查看详情',
+    };
+  }
+
+  String _timelineLabel(AdminStoreOrder order) {
+    if (order.status == 'pending_review') {
+      return '提交申请 · ${relativeTimeLabel(order.createdAt)}';
+    }
+    if (order.reviewedAt != null) {
+      return '审核完成 · ${relativeTimeLabel(order.reviewedAt!)}';
+    }
+    return '状态更新 · ${relativeTimeLabel(order.createdAt)}';
+  }
+
+  ({String label, IconData icon, Color foreground, Color background})
+  _statusAppearance(AdminStoreOrder item) {
+    final label = _statusLabel(item);
+    if (item.status == 'rejected' || item.fulfillmentStatus == 'cancelled') {
+      return (
+        label: label,
+        icon: Icons.close_rounded,
+        foreground: AppTheme.orange,
+        background: const Color(0xFFFFF3EA),
+      );
+    }
+    switch (item.fulfillmentStatus) {
+      case 'awaiting_address':
+        return (
+          label: '待填地址',
+          icon: Icons.edit_location_alt_outlined,
+          foreground: AppTheme.orange,
+          background: const Color(0xFFFFF3EA),
+        );
+      case 'ready_to_ship':
+        return (
+          label: '待发货',
+          icon: Icons.inventory_2_outlined,
+          foreground: AppTheme.primary,
+          background: AppTheme.softBlue,
+        );
+      case 'shipped':
+        return (
+          label: '已发货',
+          icon: Icons.local_shipping_outlined,
+          foreground: AppTheme.primary,
+          background: AppTheme.softBlue,
+        );
+      case 'completed':
+        return (
+          label: '已完成',
+          icon: Icons.check_circle_outline_rounded,
+          foreground: AppTheme.mint,
+          background: AppTheme.softMint,
+        );
+      case 'return_requested':
+      case 'refund_pending':
+      case 'refunded':
+        return (
+          label: label,
+          icon: Icons.assignment_return_outlined,
+          foreground: AppTheme.orange,
+          background: const Color(0xFFFFF3EA),
+        );
+      default:
+        return (
+          label: label,
+          icon: Icons.card_giftcard_outlined,
+          foreground: AppTheme.pink,
+          background: AppTheme.softRose,
+        );
+    }
   }
 
   String _statusLabel(AdminStoreOrder item) {

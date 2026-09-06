@@ -125,6 +125,17 @@ func (s *Server) toggleBookmark(w http.ResponseWriter, r *http.Request, postID s
 			return
 		}
 	}
+	if changed && active {
+		var authorID string
+		if err := tx.QueryRowContext(r.Context(), `SELECT author_id FROM posts WHERE id = $1`, postID).Scan(&authorID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if err := enqueueNotificationTx(tx, authorID, user.ID, "bookmark", "post", postID, time.Now().UTC()); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -188,6 +199,17 @@ func (s *Server) toggleCommentLike(w http.ResponseWriter, r *http.Request, comme
 				writeInternalError(w, r, err)
 				return
 			}
+		}
+	}
+	if likeChanged && active {
+		var authorID, postID string
+		if err := tx.QueryRowContext(r.Context(), `SELECT author_id, post_id FROM comments WHERE id = $1`, commentID).Scan(&authorID, &postID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if err := enqueueNotificationWithDataTx(tx, authorID, user.ID, "like", "comment", commentID, map[string]any{"post_id": postID}, time.Now().UTC()); err != nil {
+			writeInternalError(w, r, err)
+			return
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -299,7 +321,7 @@ func (s *Server) toggleUserFollow(w http.ResponseWriter, r *http.Request, target
 		return
 	}
 	if changed && active {
-		if err := enqueueNotificationTx(tx, targetUserID, user.ID, "follow", "user", targetUserID, time.Now().UTC()); err != nil {
+		if err := enqueueNotificationTx(tx, targetUserID, user.ID, "follow", "user", user.ID, time.Now().UTC()); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}

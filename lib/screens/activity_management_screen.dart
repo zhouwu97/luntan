@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../data/api/api_client.dart';
@@ -45,6 +48,97 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         status: _selectedStatus == 'all' ? null : _selectedStatus,
       );
     });
+  }
+
+  Future<void> _openAnnouncement() async {
+    final title = TextEditingController();
+    final content = TextEditingController();
+    final random = Random.secure();
+    final id = base64UrlEncode(
+      List<int>.generate(24, (_) => random.nextInt(256)),
+    );
+    var sending = false;
+    String? error;
+    final route = DialogRoute<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => PopScope(
+          canPop: !sending,
+          child: AlertDialog(
+            title: const Text('发布社区公告'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('发布后将通知所有当前活跃用户。'),
+                  TextField(
+                    controller: title,
+                    enabled: !sending,
+                    maxLength: 100,
+                    decoration: const InputDecoration(labelText: '公告标题'),
+                  ),
+                  TextField(
+                    controller: content,
+                    enabled: !sending,
+                    maxLength: 10000,
+                    minLines: 3,
+                    maxLines: 8,
+                    decoration: const InputDecoration(labelText: '公告正文'),
+                  ),
+                  if (error != null)
+                    Text(error!, style: const TextStyle(color: Colors.red)),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: sending ? null : () => Navigator.pop(dialogContext),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: sending
+                    ? null
+                    : () async {
+                        if (title.text.trim().isEmpty ||
+                            content.text.trim().isEmpty) {
+                          update(() => error = '请填写标题和正文');
+                          return;
+                        }
+                        update(() {
+                          sending = true;
+                          error = null;
+                        });
+                        try {
+                          await widget.repository.publishCommunityAnnouncement(
+                            id: id,
+                            title: title.text.trim(),
+                            content: content.text.trim(),
+                          );
+                          if (!dialogContext.mounted) return;
+                          Navigator.pop(dialogContext);
+                          widget.onFeedback('社区公告已发布');
+                        } catch (e) {
+                          if (dialogContext.mounted) {
+                            update(() {
+                              sending = false;
+                              error = userFacingApiMessage(e);
+                            });
+                          }
+                        }
+                      },
+                child: Text(sending ? '发布中…' : '发布公告'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await Navigator.of(context).push(route);
+    // 等待路由退出动画释放输入框后再销毁控制器。
+    await route.completed;
+    title.dispose();
+    content.dispose();
   }
 
   Future<void> _openEditor([ActivityItem? item]) async {
@@ -148,6 +242,11 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         backgroundColor: AppTheme.background,
         elevation: 0,
         actions: [
+          IconButton(
+            onPressed: _openAnnouncement,
+            icon: const Icon(Icons.campaign_outlined),
+            tooltip: '发布社区公告',
+          ),
           IconButton(
             onPressed: _openEditor,
             icon: const Icon(Icons.add_rounded),

@@ -136,6 +136,17 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: luntan
+          POSTGRES_PASSWORD: luntan
+          POSTGRES_DB: luntan_journey_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U luntan -d luntan_journey_test"
+          --health-interval 5s --health-timeout 5s --health-retries 5
     defaults:
       run:
         working-directory: web-next
@@ -155,4 +166,42 @@ jobs:
         run: npx playwright test
         env:
           CI: true
-
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Run real notification journey with API and worker
+        env:
+          APP_ENV: test
+          HTTP_PORT: '8080'
+          DATABASE_URL: postgres://luntan:luntan@127.0.0.1:5432/luntan_journey_test?sslmode=disable
+          ALLOW_LEGACY_USERNAME_REGISTRATION: 'true'
+          ALLOW_DEV_AUTH_CODE: 'true'
+          AUTH_REGISTER_REQUIRE_EMAIL_CODE: 'false'
+          OBJECT_STORAGE_SIGNING_SECRET: ci-only-notification-media-secret
+          MEDIA_STORAGE_DIR: /tmp/luntan-journey-media
+          WEB_ORIGIN: http://127.0.0.1:3000
+          LUNTAN_LIVE_JOURNEY: '1'
+          PLAYWRIGHT_TEST_BASE_URL: http://127.0.0.1:8080
+          LUNTAN_JOURNEY_WEB_ORIGIN: http://127.0.0.1:3000
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+          (cd ../server && go build -o /tmp/luntan-journey-api ./cmd/api && go build -o /tmp/luntan-journey-worker ./cmd/worker)
+          (cd .. && /tmp/luntan-journey-api) > /tmp/luntan-journey-api.log 2>&1 &
+          api_pid=$!
+          node node_modules/next/dist/bin/next start --hostname 127.0.0.1 > /tmp/luntan-journey-web.log 2>&1 &
+          web_pid=$!
+          trap 'kill "$api_pid" "$web_pid" ${worker_pid:-} 2>/dev/null || true' EXIT
+          curl --retry 30 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:8080/health
+          /tmp/luntan-journey-worker > /tmp/luntan-journey-worker.log 2>&1 &
+          worker_pid=$!
+          curl --retry 30 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:3000 > /dev/null
+          npx playwright test e2e/live-forum-journey.spec.ts
+      - name: Upload journey failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notification-journey-logs
+          path: /tmp/luntan-journey-*.log

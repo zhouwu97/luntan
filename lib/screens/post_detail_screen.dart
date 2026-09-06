@@ -83,7 +83,7 @@ class PostDetailScreen extends StatefulWidget {
   final ValueChanged<String> onFeedback;
   final Future<void> Function(Post)? onDeletePost;
   final Future<void> Function(Post, String title, String content)? onEditPost;
-  final Future<void> Function(String targetType, String targetId)? onReport;
+  final Future<bool> Function(String targetType, String targetId)? onReport;
   final PollRepository? pollRepository;
   final PublishRepository? publishRepository;
   final PlatformRepository? platformRepository;
@@ -1280,8 +1280,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
     try {
       if (widget.onReport != null) {
-        await widget.onReport!(targetType, targetId);
-        if (mounted) widget.onFeedback('举报已提交，我们会尽快处理');
+        final submitted = await widget.onReport!(targetType, targetId);
+        if (mounted && submitted) widget.onFeedback('举报已提交，我们会尽快处理');
       }
     } catch (error) {
       if (mounted) {

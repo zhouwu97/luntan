@@ -1,5 +1,5 @@
 # 服务器部署脚本 + APK 上传
-# 用法: 在 Claude Code 提示符输入 ! .\scripts\deploy-server.ps1
+# 用法: .\scripts\deploy-server.ps1
 
 $server = "root@43.161.249.91"
 $repoPath = "/root/bb"
@@ -29,9 +29,13 @@ $commands = @(
     "git pull origin main",
     "cd server",
     "go build -o /root/luntan-api ./cmd/api",
-    "systemctl restart luntan-api || (pkill luntan-api; nohup /root/luntan-api > /root/api.log 2>&1 &)",
+    "go build -o /root/luntan-worker ./cmd/worker",
+    "systemctl restart luntan-api",
+    "curl --retry 10 --retry-delay 1 --retry-connrefused -f http://localhost:8080/health",
+    "systemctl restart luntan-worker",
+    "systemctl is-active --quiet luntan-api luntan-worker",
     "sleep 2",
-    "curl -f http://localhost:8080/health || echo 'Health check failed'"
+    "curl -f http://localhost:8080/health"
 )
 
 $remoteCmd = $commands -join ' && '
@@ -40,6 +44,7 @@ Write-Host "执行命令: $remoteCmd" -ForegroundColor Yellow
 Write-Host ""
 
 ssh $server $remoteCmd
+if ($LASTEXITCODE -ne 0) { throw "服务器部署或健康检查失败" }
 
 Write-Host "`n=== 部署完成 ===" -ForegroundColor Green
 Write-Host "APK 下载地址: $downloadUrl" -ForegroundColor Cyan

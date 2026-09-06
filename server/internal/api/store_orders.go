@@ -67,6 +67,24 @@ func validStoreOrderStatus(status string) bool {
 	}
 }
 
+func parseStoreOrderStatuses(raw string) ([]string, bool) {
+	parts := strings.Split(raw, ",")
+	statuses := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		status := strings.TrimSpace(part)
+		if status == "" || status == "all" || !validStoreOrderStatus(status) {
+			return nil, false
+		}
+		if _, exists := seen[status]; exists {
+			continue
+		}
+		seen[status] = struct{}{}
+		statuses = append(statuses, status)
+	}
+	return statuses, len(statuses) > 0
+}
+
 func storeOrderStatusFilterColumn(status string) string {
 	switch status {
 	case "none", "awaiting_address", "ready_to_ship", "shipped", "completed", "cancelled", "return_requested", "refund_pending", "refunded":
@@ -159,7 +177,15 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "pending_review"
 	}
-	if !validStoreOrderStatus(status) {
+	statuses := []string{status}
+	if strings.Contains(status, ",") {
+		var valid bool
+		statuses, valid = parseStoreOrderStatuses(status)
+		if !valid {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STATUS", Message: "兑换订单状态无效"})
+			return
+		}
+	} else if !validStoreOrderStatus(status) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_STATUS", Message: "兑换订单状态无效"})
 		return
 	}
@@ -171,8 +197,13 @@ func (s *Server) listAdminStoreOrders(w http.ResponseWriter, r *http.Request) {
 	args := make([]any, 0, 3)
 	where := "TRUE"
 	if status != "all" {
-		args = append(args, status)
-		where = storeOrderStatusFilterColumn(status) + " = $1"
+		clauses := make([]string, 0, len(statuses))
+		for _, filterStatus := range statuses {
+			args = append(args, filterStatus)
+			clauses = append(clauses, storeOrderStatusFilterColumn(filterStatus)+" = $"+strconv.Itoa(len(args)))
+		}
+		// 聚合分类仍由数据库筛选，避免只在当前分页内过滤而漏掉订单。
+		where = "(" + strings.Join(clauses, " OR ") + ")"
 	}
 	if rawCursor := strings.TrimSpace(r.URL.Query().Get("cursor")); rawCursor != "" {
 		cursor, decodeErr := decodeStoreOrderCursor(rawCursor)

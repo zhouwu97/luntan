@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthSession, SessionUser } from "../types/forum";
 import {
   getMe,
@@ -38,6 +38,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [ready, setReady] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const unreadAccount = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -55,11 +56,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const currentUser = await getMe();
         if (!active) return;
         setUser(currentUser);
-        void getUnreadNotificationCount()
-          .then((count) => {
-            if (active) setUnreadCount(count);
-          })
-          .catch(() => undefined);
+
       })
       .catch(() => undefined)
       .finally(() => {
@@ -69,6 +66,33 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let pending = false;
+    unreadAccount.current = user?.id;
+    setUnreadCount(0);
+    const refresh = async () => {
+      if (!user || document.visibilityState !== "visible" || pending) return;
+      pending = true;
+      try {
+        const count = await getUnreadNotificationCount();
+        if (active) setUnreadCount(count);
+      } catch {
+        // 轮询失败保留当前角标，下一次前台刷新重试。
+      } finally {
+        pending = false;
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 30000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [user?.id]);
 
   const isGuest = Boolean(user && user.accountType === "guest");
   const isRegistered = Boolean(user && user.accountType !== "guest");
@@ -84,7 +108,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       unreadCount,
       refreshUnreadCount: async () => {
         try {
-          setUnreadCount(await getUnreadNotificationCount());
+          const count = await getUnreadNotificationCount();
+          if (user?.id === unreadAccount.current) setUnreadCount(count);
         } catch {
           // 网络不可用时保留当前角标，避免误报为已读。
         }
@@ -92,17 +117,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       signInWithCode: async (email, code) => {
         const session: AuthSession = await loginWithEmailCode(email, code);
         setUser(session.user);
-        void getUnreadNotificationCount().then(setUnreadCount).catch(() => setUnreadCount(0));
       },
       signInWithPassword: async (email, password) => {
         const session: AuthSession = await loginWithPassword(email, password);
         setUser(session.user);
-        void getUnreadNotificationCount().then(setUnreadCount).catch(() => setUnreadCount(0));
       },
       registerWithEmail: async (email, password, code, nickname) => {
         const session: AuthSession = await registerWithEmail(email, password, code, nickname);
         setUser(session.user);
-        void getUnreadNotificationCount().then(setUnreadCount).catch(() => setUnreadCount(0));
       },
       signInAsGuest: async () => {
         const session: AuthSession = await loginAsGuest();

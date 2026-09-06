@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -22,6 +23,7 @@ import 'data/mock_forum_data.dart';
 import 'data/repository_provider.dart';
 import 'domain/models.dart';
 import 'domain/repositories.dart';
+import 'widgets/report_reason_sheet.dart';
 import 'screens/app_update_sheet.dart';
 import 'screens/auth_screen.dart';
 import 'screens/appeal_detail_screen.dart';
@@ -81,6 +83,9 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   late final PublishController publishController;
   AuthController? authController;
   Future<void>? authInitialization;
+  Timer? _notificationTimer;
+  String? _notificationAccount;
+  bool _unreadRequestActive = false;
   int currentTab = 0;
   // 公开帖子是首页主内容，未登录时直接进入浏览态；所有互动入口都通过
   // _requireCapability 读取同一份 /me 能力集合。
@@ -249,6 +254,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _notificationTimer?.cancel();
     unreadCount.dispose();
     authController?.removeListener(_syncFeedAccountScope);
     authController?.dispose();
@@ -264,6 +270,18 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
 
   void _syncFeedAccountScope() {
     final auth = authController;
+    final account = auth?.status == AuthStatus.authenticated
+        ? auth?.user?.id
+        : null;
+    if (account != _notificationAccount) {
+      _notificationAccount = account;
+      unreadCount.value = 0;
+      _notificationTimer?.cancel();
+      if (account != null) {
+        unawaited(_refreshUnreadCount());
+        _startNotificationPolling();
+      }
+    }
     unawaited(
       feedController.setAccountScope(
         auth?.status == AuthStatus.authenticated ? auth?.user?.id : null,
@@ -271,10 +289,19 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     );
   }
 
+  void _startNotificationPolling() {
+    _notificationTimer?.cancel();
+    _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_refreshUnreadCount());
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _notificationTimer?.cancel();
     if (state == AppLifecycleState.resumed) {
       if (authController?.status == AuthStatus.authenticated) {
+        _startNotificationPolling();
         unawaited(_refreshUnreadCount());
       }
       unawaited(_checkForegroundUpdate());
@@ -617,7 +644,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     await feedController.refresh();
   }
 
-  Future<void> report(String targetType, String targetId) async {
+  Future<bool> report(String targetType, String targetId) async {
     final platform = repositories.platform;
     if (platform == null) {
       throw const ApiException(
@@ -625,14 +652,22 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
         message: '当前模式暂不支持举报',
       );
     }
+    final reason = await showReportReasonSheet(appContext);
+    if (reason == null) return false;
     await platform.report(
       targetType: targetType,
       targetId: targetId,
-      reasonCode: 'other',
+      reasonCode: reason,
     );
+    return true;
   }
 
   void openUserProfile(String userId, {int initialTab = 0}) {
+    if (userId == currentUser?.id) {
+      navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      openMyProfile();
+      return;
+    }
     final users = repositories.users;
     if (users == null) {
       _showQuickFeedback('当前模式暂不支持用户主页');
@@ -1100,12 +1135,24 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
     }
     final platform = repositories.platform;
     if (platform == null) return;
+    if (_unreadRequestActive) return;
+    final account = currentUser?.id;
+    _unreadRequestActive = true;
     try {
       final value = await platform.unreadNotificationCount();
-      if (!mounted) return;
+      if (!mounted ||
+          account != currentUser?.id ||
+          (apiMode && !isAuthenticated)) {
+        return;
+      }
       unreadCount.value = value;
     } catch (_) {
       // 未读数只是辅助信息，接口暂时不可用时不阻塞首页。
+    } finally {
+      _unreadRequestActive = false;
+      if (mounted && account != currentUser?.id && isAuthenticated) {
+        unawaited(_refreshUnreadCount());
+      }
     }
   }
 

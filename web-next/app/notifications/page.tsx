@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "../../components/site-header";
 import { Icon, type IconName } from "../../components/icons";
@@ -20,6 +20,8 @@ const tabs = [
 export default function NotificationsPage() {
   const router = useRouter();
   const { user, ready, refreshUnreadCount } = useSession();
+  const requestScope = useRef(0);
+  const paging = useRef(false);
   const [category, setCategory] = useState("all");
   const [items, setItems] = useState<ForumNotification[]>([]);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
@@ -28,10 +30,14 @@ export default function NotificationsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const emptyDescription = category === "interaction" ? "回复、点赞、收藏和关注会出现在这里。" : category === "community" ? "社区公告和活动消息会出现在这里。" : category === "moderation" ? "举报处理、申诉和兑换进度会出现在这里。" : "新消息会出现在这里。";
 
   useEffect(() => {
     if (!ready || !user) return;
     let active = true;
+    requestScope.current += 1;
+    paging.current = false;
+    setLoadingMore(false);
     setLoading(true);
     setError("");
     setNextCursor(undefined);
@@ -50,6 +56,7 @@ export default function NotificationsPage() {
       });
     return () => {
       active = false;
+      requestScope.current += 1;
     };
   }, [category, ready, user]);
 
@@ -58,7 +65,9 @@ export default function NotificationsPage() {
   }, [ready, router, user]);
 
   async function loadMore() {
-    if (!hasMore || !nextCursor || loadingMore) return;
+    if (loading || !hasMore || !nextCursor || paging.current) return;
+    const scope = requestScope.current;
+    paging.current = true;
     setLoadingMore(true);
     setError("");
     try {
@@ -66,6 +75,7 @@ export default function NotificationsPage() {
         category: category === "all" ? undefined : category,
         cursor: nextCursor,
       });
+      if (scope !== requestScope.current) return;
       setItems((current) => {
         const known = new Set(current.map((item) => item.id));
         return [...current, ...page.items.filter((item) => !known.has(item.id))];
@@ -73,9 +83,12 @@ export default function NotificationsPage() {
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch (requestError) {
-      setError(formatError(requestError, "加载更多通知失败"));
+      if (scope === requestScope.current) setError(formatError(requestError, "加载更多通知失败"));
     } finally {
-      setLoadingMore(false);
+      if (scope === requestScope.current) {
+        paging.current = false;
+        setLoadingMore(false);
+      }
     }
   }
 
@@ -120,7 +133,7 @@ export default function NotificationsPage() {
             {tabs.map((tab) => <button key={tab.value} type="button" role="tab" aria-selected={category === tab.value} className={category === tab.value ? "active" : ""} onClick={() => setCategory(tab.value)}>{tab.label}</button>)}
           </div>
           {error && <div className="data-note" role="status">{error}</div>}
-          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{groupNotifications(items).map((group) => <section className="notification-group" key={group.label}><h2>{group.label}</h2>{group.items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</section>)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>有新的互动时，会在这里告诉你。</p></div>}
+          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{groupNotifications(items).map((group) => <section className="notification-group" key={group.label}><h2>{group.label}</h2>{group.items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</section>)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>{emptyDescription}</p></div>}
         </section>
       </main>
     </>

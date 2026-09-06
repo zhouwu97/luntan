@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -256,7 +257,14 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 	coverMediaID := strings.TrimSpace(input.CoverMediaID)
 	coverURL := strings.TrimSpace(input.CoverURL)
 
-	_, err := s.db.ExecContext(r.Context(), `
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO activities (
 			id, title, description, cover_media_id, cover_url,
 			start_at, end_at, location, status, publication_status, created_by, published_at, created_at, updated_at
@@ -268,6 +276,15 @@ func (s *Server) createAdminActivity(w http.ResponseWriter, r *http.Request) {
 		input.StartAt, input.EndAt, strings.TrimSpace(input.Location), responseStatus, publicationStatus, user.ID, publishedAt, now,
 	)
 	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	if err := enqueueActivityNotificationTx(r.Context(), tx, activityID, user.ID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -332,7 +349,14 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 	coverMediaID := strings.TrimSpace(input.CoverMediaID)
 	coverURL := strings.TrimSpace(input.CoverURL)
 
-	res, err := s.db.ExecContext(r.Context(), `
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE activities
 		SET title = $1, description = $2, cover_media_id = NULLIF($3, ''), cover_url = $4,
 		    start_at = $5, end_at = $6, location = $7, status = $8,
@@ -357,6 +381,15 @@ func (s *Server) updateAdminActivity(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 
+	if err := enqueueActivityNotificationTx(r.Context(), tx, activityID, user.ID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"id": activityID, "status": responseStatus, "publication_status": publicationStatus, "phase": phase, "message": "活动已更新"})
 }
 
@@ -373,8 +406,15 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
 	var startAt, endAt sql.NullTime
-	err := s.db.QueryRowContext(r.Context(), `SELECT start_at, end_at FROM activities WHERE id = $1 AND deleted_at IS NULL`, activityID).Scan(&startAt, &endAt)
+	err = tx.QueryRowContext(r.Context(), `SELECT start_at, end_at FROM activities WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, activityID).Scan(&startAt, &endAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{
 			Status:  http.StatusNotFound,
@@ -399,11 +439,20 @@ func (s *Server) publishAdminActivity(w http.ResponseWriter, r *http.Request, ac
 
 	newStatus := deriveActivityPhase(activityNullableTime(startAt), activityNullableTime(endAt), now)
 
-	_, err = s.db.ExecContext(r.Context(), `
+	_, err = tx.ExecContext(r.Context(), `
 		UPDATE activities
 		SET status = $1, publication_status = 'published', published_at = COALESCE(published_at, now()), updated_at = now()
 		WHERE id = $2 AND deleted_at IS NULL`, newStatus, activityID)
 	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	if err := enqueueActivityNotificationTx(r.Context(), tx, activityID, user.ID, now); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -537,4 +586,20 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// 首次发布在活动行上领取广播资格，避免重复点击、编辑和重新上架反复打扰用户。
+func enqueueActivityNotificationTx(ctx context.Context, tx *sql.Tx, activityID, actorID string, now time.Time) error {
+	var title, description string
+	err := tx.QueryRowContext(ctx, `UPDATE activities SET notification_sent_at = $2
+        WHERE id = $1 AND publication_status = 'published' AND deleted_at IS NULL
+          AND notification_sent_at IS NULL AND (end_at IS NULL OR end_at > $2)
+        RETURNING title, description`, activityID, now).Scan(&title, &description)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return enqueueCommunityBroadcastTx(ctx, tx, actorID, "community.event", "activity", activityID, title, description, now)
 }

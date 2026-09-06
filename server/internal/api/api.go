@@ -216,6 +216,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch {
+	case r.Method == http.MethodPost && path == "/api/v1/admin/announcements":
+		s.createCommunityAnnouncement(w, r)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/auth/register":
 		s.register(w, r)
 		return

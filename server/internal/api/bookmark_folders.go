@@ -601,6 +601,17 @@ func (s *Server) setPostBookmarkFolders(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	}
+	if changed && len(folderIDs) > 0 {
+		var authorID string
+		if err := tx.QueryRowContext(r.Context(), `SELECT author_id FROM posts WHERE id = $1`, postID).Scan(&authorID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if err := enqueueNotificationTx(tx, authorID, user.ID, "bookmark", "post", postID, time.Now().UTC()); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		writeInternalError(w, r, err)
 		return

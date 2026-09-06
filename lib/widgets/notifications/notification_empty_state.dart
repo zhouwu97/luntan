@@ -15,6 +15,12 @@ class NotificationEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = categoryName == '全部' ? '暂时没有新通知' : '该分类暂无通知';
+    final description = switch (categoryName) {
+      '互动' => '回复、点赞、收藏和关注会出现在这里',
+      '社区' => '社区公告和活动消息会出现在这里',
+      '处理' => '举报处理、申诉和兑换进度会出现在这里',
+      _ => '新消息会出现在这里',
+    };
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
@@ -44,10 +50,10 @@ class NotificationEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 7),
-            const Text(
-              '回复、点赞和社区通知\n都会出现在这里',
+            Text(
+              description,
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 12.5,
                 color: AppTheme.textSecondary,
                 height: 1.5,

@@ -384,7 +384,7 @@ func validateMediaInput(input mediaUploadInput) error {
 		return ErrInvalidMedia
 	}
 	switch input.MimeType {
-	case "image/jpeg", "image/png", "image/webp":
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
 		if input.Size > 15*1024*1024 {
 			return ErrMediaTooLarge
 		}
@@ -539,7 +539,7 @@ func publicVariantAllowed(mimeType, moderationStatus, variant string) bool {
 		return false
 	}
 	if variant == "source" {
-		return strings.HasPrefix(mimeType, "video/")
+		return strings.HasPrefix(mimeType, "video/") || strings.EqualFold(mimeType, "image/gif")
 	}
 	return publicImageVariants[variant]
 }

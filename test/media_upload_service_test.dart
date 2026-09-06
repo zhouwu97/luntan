@@ -8,6 +8,22 @@ import 'package:luntan/data/api/publish_repository.dart';
 import 'package:luntan/services/media_upload_service.dart';
 
 void main() {
+  test('GIF 上传预处理保留动画帧与原始编码', () async {
+    final animation = img.Image(width: 2, height: 2)..frameDuration = 80;
+    animation.addFrame(img.Image(width: 2, height: 2)..frameDuration = 120);
+    final bytes = img.encodeGif(animation);
+    expect(img.decodeGif(bytes)?.numFrames, 2);
+
+    final prepared = await MediaUploadService.prepareImage(
+      XFile.fromData(bytes, name: 'meme.gif'),
+    );
+
+    expect(prepared.mimeType, 'image/gif');
+    expect(prepared.fileName, 'image.gif');
+    expect(prepared.bytes, bytes);
+    expect(img.decodeGif(prepared.bytes)?.numFrames, 2);
+  });
+
   test('按文件内容识别 PNG，携带尺寸和 SHA-256', () async {
     final source = img.Image(width: 2, height: 3);
     final bytes = img.encodePng(source);
@@ -85,5 +101,6 @@ class _FakePublishRepository implements PublishRepository {
   }) => throw UnimplementedError();
 
   @override
-  Future<void> deleteMedia(String mediaId) async => deletedMediaIds.add(mediaId);
+  Future<void> deleteMedia(String mediaId) async =>
+      deletedMediaIds.add(mediaId);
 }

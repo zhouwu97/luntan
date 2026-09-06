@@ -62,10 +62,12 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 	}
 
 	isVideo := strings.EqualFold(strings.TrimSpace(payload.MimeType), "video/mp4")
+	isGIF := strings.EqualFold(strings.TrimSpace(payload.MimeType), "image/gif")
+	isSourceOnly := isVideo || isGIF
 	readyVariants := "'source', 'original', 'detail', 'feed', 'thumb'"
 	readyTarget := 5
-	if isVideo {
-		// 视频当前只登记源对象，图片衍生图不能由视频处理链路伪造。
+	if isSourceOnly {
+		// 视频和 GIF 直接登记源对象；GIF 若走静态图处理会丢失动画帧。
 		readyVariants = "'source'"
 		readyTarget = 1
 	}
@@ -96,8 +98,8 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 	}
 
 	var procRes *media.ProcessResult
-	if isVideo {
-		// 完整读取视频流，确保网络存储在标记 ready 前已经返回成功。
+	if isSourceOnly {
+		// 完整读取源文件，确保网络存储在标记 ready 前已经返回成功。
 		if _, err := io.Copy(io.Discard, rc); err != nil {
 			_ = rc.Close()
 			return fmt.Errorf("read source video: %w", err)
@@ -165,7 +167,7 @@ func (h MediaHandler) handleProcess(ctx context.Context, event Event) error {
 		return fmt.Errorf("save source variant: %w", err)
 	}
 
-	if isVideo {
+	if isSourceOnly {
 		return tx.Commit()
 	}
 

@@ -802,8 +802,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               comment: comment,
                               floor: index + 2,
                               replies: comment.replyPreview,
-                              // 帖子楼层保持紧凑，二级回复统一从“回复”入口进入。
-                              showReplyPreview: false,
+                              // 首屏直接展示回复预览，完整楼中楼仍通过“查看全部”进入。
+                              showReplyPreview: true,
                               isHighlighted: isHighlighted,
                               isPostAuthor: post.authorId == comment.authorId,
                               onAuthorTap: widget.onOpenUserId,

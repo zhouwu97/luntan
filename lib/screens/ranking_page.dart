@@ -2597,7 +2597,7 @@ class _DetailCouponAdminCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasCoupon = couponUrl != null && couponUrl!.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 2, 24, 14),
+      padding: const EdgeInsets.fromLTRB(24, 2, 24, 6),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
         decoration: BoxDecoration(
@@ -2663,9 +2663,9 @@ class _DetailProductIntro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 9, 24, 14),
+    padding: const EdgeInsets.fromLTRB(24, 9, 24, 8),
     child: SizedBox(
-      height: 142,
+      height: 96,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2674,7 +2674,7 @@ class _DetailProductIntro extends StatelessWidget {
             child: _rankingImage(
               item,
               width: 112,
-              height: 142,
+              height: 96,
               fit: BoxFit.contain,
             ),
           ),
@@ -3039,7 +3039,7 @@ class _ReviewSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 37, 24, 12),
+    padding: const EdgeInsets.fromLTRB(24, 18, 24, 12),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

@@ -161,6 +161,22 @@ func TestMediaUploadRequiresSHA256(t *testing.T) {
 	}
 }
 
+func TestMediaUploadAcceptsGIF(t *testing.T) {
+	if !validMediaInput(mediaUploadInput{
+		FileName: "meme.gif",
+		MimeType: "image/gif",
+		Size:     1024,
+		Width:    120,
+		Height:   120,
+		SHA256:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}) {
+		t.Fatal("animated GIF should be accepted as an image upload")
+	}
+	if !publicVariantAllowed("image/gif", "normal", "source") {
+		t.Fatal("normal GIF source variant should be publicly readable")
+	}
+}
+
 func TestNewMediaID(t *testing.T) {
 	id, err := newMediaID()
 	if err != nil {

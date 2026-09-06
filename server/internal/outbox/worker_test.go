@@ -344,6 +344,50 @@ func TestMediaHandlerVideoPersistsOnlyVerifiedSourceVariant(t *testing.T) {
 	}
 }
 
+func TestMediaHandlerGIFPreservesSourceVariant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	store := storage.NewMemoryStorage()
+	const sourceKey = "media/u1/animated-gif"
+	gifBytes := []byte("GIF89a animated payload")
+	if err := store.Put(ctx, sourceKey, "image/gif", bytes.NewReader(gifBytes), int64(len(gifBytes))); err != nil {
+		t.Fatal(err)
+	}
+	handler := MediaHandler{DB: db, Storage: store}
+	payload, _ := json.Marshal(MediaProcessPayload{
+		MediaID:   "m_gif",
+		ObjectKey: sourceKey,
+		MimeType:  "image/gif",
+		Width:     120,
+		Height:    120,
+		SizeBytes: int64(len(gifBytes)),
+	})
+
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM media_variants WHERE media_id = \$1 AND status = 'ready' AND variant IN \('source'\)`).
+		WithArgs("m_gif").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectBegin()
+	mock.ExpectExec(`INSERT INTO media_variants .* VALUES \(\$1, 'source'`).
+		WithArgs("m_gif", sourceKey, "image/gif", 120, 120, int64(len(gifBytes)), "", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := handler.Handle(ctx, Event{EventType: "media.process", Payload: payload}); err != nil {
+		t.Fatalf("Handle GIF media.process failed: %v", err)
+	}
+	if store.HasObject(sourceKey + "_original.jpg") {
+		t.Fatal("GIF must not be flattened into a static JPEG variant")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
 func TestMediaHandlerDeletePhysicallyDeletesAllVariants(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

@@ -8,7 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../data/api/publish_repository.dart';
 
 /// 原生端所有业务图片上传共用的预处理与上传入口。
-/// 服务端只接受 jpeg/png/webp，因此 HEIC 会优先借助平台解码器转成 PNG。
+/// 普通图片必要时压缩，GIF 保留原始编码与全部动画帧，HEIC 借助平台解码器转成 PNG。
 class MediaUploadService {
   const MediaUploadService(this._repository);
 
@@ -39,9 +39,25 @@ class MediaUploadService {
 
     var decoded = img.decodeImage(bytes);
     if (decoded == null) {
-      throw const PublishException('无法读取图片，请选择 JPG、PNG 或 WebP 图片');
+      throw const PublishException('无法读取图片，请选择 JPG、PNG、GIF 或 WebP 图片');
     }
-    final hadOrientation = decoded.exif.imageIfd.orientation != null &&
+    if (mimeType == 'image/gif') {
+      final width = decoded.width;
+      final height = decoded.height;
+      if (width <= 0 || height <= 0 || width * height > maxPixels) {
+        throw const PublishException('GIF 图片尺寸无效或像素过大');
+      }
+      // GIF 不能走静态图的方向修正和 JPEG 压缩，否则只会剩下第一帧。
+      return _prepared(
+        file: file,
+        bytes: bytes,
+        mimeType: mimeType,
+        width: width,
+        height: height,
+      );
+    }
+    final hadOrientation =
+        decoded.exif.imageIfd.orientation != null &&
         decoded.exif.imageIfd.orientation != 1;
     decoded = img.bakeOrientation(decoded);
     final width = decoded.width;
@@ -74,7 +90,8 @@ class MediaUploadService {
       );
     }
 
-    final keepPng = mimeType == 'image/png' &&
+    final keepPng =
+        mimeType == 'image/png' &&
         !needsResize &&
         !hadOrientation &&
         bytes.length <= maxBytes;
@@ -145,6 +162,8 @@ class MediaUploadService {
   }) {
     final extension = mimeType == 'image/png'
         ? '.png'
+        : mimeType == 'image/gif'
+        ? '.gif'
         : mimeType == 'image/webp'
         ? '.webp'
         : '.jpg';
@@ -171,7 +190,20 @@ class MediaUploadService {
 
   static String _detectMime(Uint8List bytes, String fileName) {
     if (_startsWith(bytes, const [0xff, 0xd8, 0xff])) return 'image/jpeg';
-    if (_startsWith(bytes, const [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+    if (_startsWith(bytes, const [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+        _startsWith(bytes, const [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])) {
+      return 'image/gif';
+    }
+    if (_startsWith(bytes, const [
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    ])) {
       return 'image/png';
     }
     if (bytes.length >= 12 &&
@@ -180,7 +212,7 @@ class MediaUploadService {
       return 'image/webp';
     }
     if (_isHeic(bytes, fileName)) return 'image/heic';
-    throw const PublishException('仅支持 JPG、PNG、WEBP 图片');
+    throw const PublishException('仅支持 JPG、PNG、GIF、WEBP 图片');
   }
 
   static bool _isHeic(Uint8List bytes, String fileName) {

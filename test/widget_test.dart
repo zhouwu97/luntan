@@ -104,7 +104,7 @@ void main() {
     expect(find.byType(PostDetailScreen), findsOneWidget);
   });
 
-  testWidgets('开箱帖子详情显示评论并保留楼中楼入口且不展示回复预览', (tester) async {
+  testWidgets('开箱帖子详情直接展示二级回复预览并保留楼中楼入口', (tester) async {
     await tester.pumpWidget(const LuntanApp(showBrandSplash: false));
     await tester.pumpAndSettle();
 
@@ -115,7 +115,12 @@ void main() {
 
     expect(find.text('评论 24'), findsOneWidget);
     expect(find.byType(CommentItem), findsWidgets);
-    expect(find.byType(CommentReplyPreview), findsNothing);
+    await tester.scrollUntilVisible(
+      find.byType(CommentReplyPreview),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.byType(CommentReplyPreview), findsWidgets);
   });
 
   testWidgets('首页最新排序下显示按回复与按发帖胶囊并支持切换', (tester) async {

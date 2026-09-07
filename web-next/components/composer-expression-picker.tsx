@@ -26,9 +26,16 @@ export function ComposerExpressionPicker({
       </button>
       {open && (
         <section className="expression-panel" aria-label="表情选择">
-          <div className="expression-tabs">
-            <button type="button" className={tab === "emoji" ? "active" : ""} onClick={() => setTab("emoji")}>Emoji</button>
-            <button type="button" className={tab === "sticker" ? "active" : ""} onClick={() => setTab("sticker")}>表情包</button>
+          <div className="expression-header">
+            <div className="expression-tabs">
+              <button type="button" className={tab === "emoji" ? "active" : ""} onClick={() => setTab("emoji")}>Emoji</button>
+              <button type="button" className={tab === "sticker" ? "active" : ""} onClick={() => setTab("sticker")}>表情包</button>
+            </div>
+            {tab === "sticker" && (
+              <div className="sticker-groups">
+                {stickerGroups.map((item, index) => <button type="button" key={item.id} className={index === groupIndex ? "active" : ""} onClick={() => setGroupIndex(index)}>{item.name}</button>)}
+              </div>
+            )}
           </div>
           {tab === "emoji" ? (
             <div className="emoji-grid">
@@ -36,9 +43,6 @@ export function ComposerExpressionPicker({
             </div>
           ) : (
             <>
-              <div className="sticker-groups">
-                {stickerGroups.map((item, index) => <button type="button" key={item.id} className={index === groupIndex ? "active" : ""} onClick={() => setGroupIndex(index)}>{item.name}</button>)}
-              </div>
               {stickerDisabled && <div className="expression-note">图片与表情包不能同时发送</div>}
               <div className="sticker-grid">
                 {group.items.map((sticker) => (

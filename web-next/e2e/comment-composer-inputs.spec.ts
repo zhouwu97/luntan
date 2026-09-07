@@ -117,6 +117,16 @@ test("楼中楼 Emoji 网格不会被发送按钮样式撑出面板", async ({ p
   const lastEmojiBounds = await modal.getByRole("button", { name: "插入 💯" }).boundingBox();
   expect(panelBounds && lastEmojiBounds).toBeTruthy();
   expect(lastEmojiBounds!.x + lastEmojiBounds!.width).toBeLessThanOrEqual(panelBounds!.x + panelBounds!.width);
+
+  await panel.getByRole("button", { name: "表情包", exact: true }).click();
+  const modalBounds = await modal.boundingBox();
+  const stickerPanelBounds = await panel.boundingBox();
+  const stickerTabBounds = await panel.getByRole("button", { name: "表情包", exact: true }).boundingBox();
+  const groupBounds = await panel.getByRole("button", { name: "明风·日常", exact: true }).boundingBox();
+  expect(modalBounds && stickerPanelBounds && stickerTabBounds && groupBounds).toBeTruthy();
+  expect(stickerPanelBounds!.y).toBeGreaterThanOrEqual(modalBounds!.y);
+  expect(stickerPanelBounds!.height).toBeLessThanOrEqual(210);
+  expect(Math.abs((stickerTabBounds!.y + stickerTabBounds!.height / 2) - (groupBounds!.y + groupBounds!.height / 2))).toBeLessThan(3);
 });
 
 test("Emoji 插入当前光标而不是固定追加到末尾", async ({ page }) => {

@@ -4426,6 +4426,9 @@ img { display: block; max-width: 100%; }
   width: min(330px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: min(300px, calc(100dvh - 96px));
   overflow: hidden;
   padding: 10px;
   border: 1px solid var(--line);
@@ -4434,11 +4437,34 @@ img { display: block; max-width: 100%; }
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
 }
 
+.expression-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
 .expression-tabs,
 .sticker-groups {
   display: flex;
   gap: 6px;
-  margin-bottom: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.expression-tabs {
+  flex: 0 0 auto;
+}
+
+.sticker-groups {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sticker-groups::-webkit-scrollbar {
+  display: none;
 }
 
 .expression-tabs button,
@@ -4449,6 +4475,7 @@ img { display: block; max-width: 100%; }
   background: #f1f5f9;
   color: #64748b;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -4491,7 +4518,9 @@ img { display: block; max-width: 100%; }
 
 .sticker-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   max-height: 230px;
   overflow-y: auto;
@@ -4514,9 +4543,14 @@ img { display: block; max-width: 100%; }
 }
 
 .expression-note {
+  flex: 0 0 auto;
   margin-bottom: 7px;
   color: #b45309;
   font-size: 12px;
+}
+
+.comment-reply-modal .expression-panel {
+  max-height: min(210px, calc(100dvh - 180px));
 }
 
 .selected-sticker {

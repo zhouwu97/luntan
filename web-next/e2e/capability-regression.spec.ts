@@ -87,7 +87,7 @@ test("社区首页明确进入全站，PC 游客不伪装成正式用户", async
   await expect(page).toHaveURL(/community=all/);
 });
 
-test("游客收藏在请求前引导注册，评论只保留文字入口", async ({ page }) => {
+test("桌面游客能看见发图入口，但上传与收藏都先引导注册", async ({ page }) => {
   await restoreAs(page, guest);
   await mockPost(page);
   let bookmarkRequests = 0;
@@ -98,6 +98,7 @@ test("游客收藏在请求前引导注册，评论只保留文字入口", async
 
   await page.goto("/post/post-capability");
   await expect(page.getByPlaceholder("写下你的评价、拆箱感受或回复…")).toBeVisible();
+  await expect(page.getByRole("button", { name: "上传图片（注册后可用）" })).toBeVisible();
   await expect(page.locator('input[type="file"]')).toHaveCount(0);
   await page.getByRole("button", { name: "收藏" }).first().click();
   await expect(page).toHaveURL(/\/login\?mode=register/);
@@ -145,7 +146,7 @@ test("手机正式用户可以上传图片并随评论发送", async ({ page }) 
 
   await page.goto("/post/post-capability");
   await page.getByPlaceholder("说点什么，参与热烈讨论...").click();
-  await page.getByPlaceholder("友善地写下你的评价或想法…").fill("手机图片评论");
+  await page.getByPlaceholder("友善地回复一句…").fill("手机图片评论");
   await page.locator('.composer-sheet input[type="file"]').setInputFiles({ name: "mobile.png", mimeType: "image/png", buffer: pngBytes });
   await expect(page.locator(".composer-sheet img")).toBeVisible();
   await page.getByRole("button", { name: "发送", exact: true }).click();

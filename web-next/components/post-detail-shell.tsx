@@ -631,34 +631,16 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       {/* 移动端弹出发评抽屉 */}
       {mobileComposerOpen && (
         <div
-          className="composer-sheet-overlay"
+          className="composer-sheet-overlay mobile-reply-overlay"
           onClick={(e) => {
             if (e.target === e.currentTarget) setMobileComposerOpen(false);
           }}
         >
-          <div className="composer-sheet">
-            <div className="composer-sheet-handle" />
-            <form onSubmit={handleMobileSubmitComment}>
-              <textarea
-                ref={mobileComposerRef}
-                autoFocus
-                rows={3}
-                onPaste={mobileImageInput.onPaste}
-                style={{
-                  width: "100%",
-                  borderRadius: 12,
-                  border: "1px solid #dce8f3",
-                  padding: 10,
-                  fontSize: 14,
-                  resize: "none",
-                }}
-                placeholder="友善地写下你的评价或想法…"
-                value={mobileComposerText}
-                onChange={(e) => setMobileComposerText(e.target.value)}
-              />
-
+          <div className="composer-sheet mobile-reply-sheet">
+            <form className="mobile-reply-form" onSubmit={handleMobileSubmitComment}>
+              <div className="mobile-reply-extras">
               {mobilePreviews.items.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <div className="mobile-reply-previews">
                   {mobilePreviews.items.map((preview, idx) => (
                     <div
                       key={preview.id}
@@ -708,33 +690,20 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                 </div>
               )}
               {mobileUploadMessage && (
-                <div className="form-error" style={{ marginTop: 8, color: "#64748b" }}>
+                <div className="form-error mobile-reply-message">
                   {mobileUploadMessage}
                 </div>
               )}
+              </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginTop: 10,
-                }}
-              >
+              <div className="mobile-reply-toolbar">
                 {canUploadMedia ? (
                   <label
                     aria-label="添加图片"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      color: "#3b82f6",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
+                    className="mobile-reply-tool"
                   >
-                    <Icon name="image" size={18} />
-                    <span>图片 ({mobilePreviews.items.length}/9)</span>
+                    <Icon name="image" size={22} />
+                    {mobilePreviews.items.length > 0 && <span>{mobilePreviews.items.length}</span>}
                     <input
                       type="file"
                       accept={webImageAccept}
@@ -749,20 +718,9 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                     type="button"
                     aria-label="添加图片（注册后可用）"
                     onClick={() => router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${id}`)}`)}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: 0,
-                      border: 0,
-                      background: "transparent",
-                      color: "#3b82f6",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
+                    className="mobile-reply-tool"
                   >
-                    <Icon name="image" size={18} />
-                    <span>图片</span>
+                    <Icon name="image" size={22} />
                   </button>
                 )}
                 <ComposerExpressionPicker
@@ -770,23 +728,23 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                   onEmoji={(emoji) => insertAtSelection(mobileComposerRef.current, mobileComposerText, setMobileComposerText, emoji)}
                   onSticker={setMobileStickerId}
                 />
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button
-                    type="button"
-                    className="outline-button"
-                    onClick={() => setMobileComposerOpen(false)}
-                    disabled={sendingComment}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="submit"
-                    className="primary-button"
-                    disabled={(!mobileComposerText.trim() && mobilePreviews.items.length === 0 && !mobileStickerId) || sendingComment}
-                  >
-                    {sendingComment ? "发送中…" : "发送"}
-                  </button>
-                </div>
+                <textarea
+                  ref={mobileComposerRef}
+                  autoFocus
+                  rows={1}
+                  onPaste={mobileImageInput.onPaste}
+                  className="mobile-reply-input"
+                  placeholder="友善地回复一句…"
+                  value={mobileComposerText}
+                  onChange={(e) => setMobileComposerText(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="mobile-reply-submit"
+                  disabled={(!mobileComposerText.trim() && mobilePreviews.items.length === 0 && !mobileStickerId) || sendingComment}
+                >
+                  {sendingComment ? "发送中…" : "发送"}
+                </button>
               </div>
             </form>
           </div>
@@ -1266,6 +1224,14 @@ function CommentsSection({
   const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
   const imageInput = useComposerImageInput({ previews, onMessage: setMessage, enabled: canUploadMedia && !stickerId });
 
+  function handleUnavailableImageUpload() {
+    if (!user || user.accountType === "guest") {
+      onRequireAuth();
+      return;
+    }
+    setMessage("当前账号暂不可上传图片");
+  }
+
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
     imageInput.appendFiles(Array.from(e.target.files || []));
     e.target.value = "";
@@ -1434,28 +1400,51 @@ function CommentsSection({
 
           <div className="composer-footer">
             <div className="composer-tools-left">
-              {canUploadMedia && <label
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  color: stickerId ? "#94a3b8" : "#64748b",
-                  fontSize: 13,
-                  cursor: stickerId ? "not-allowed" : "pointer",
-                  padding: "4px 8px",
-                }}
-              >
-                <Icon name="image" size={17} />
-                <span>上传图片 ({previews.items.length}/9)</span>
-                <input
-                  type="file"
-                  accept={webImageAccept}
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={handleChooseFiles}
-                  disabled={previews.items.length >= 9 || busy || Boolean(stickerId)}
-                />
-              </label>}
+              {canUploadMedia ? (
+                <label
+                  aria-label="上传图片"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    color: stickerId ? "#94a3b8" : "#64748b",
+                    fontSize: 13,
+                    cursor: stickerId ? "not-allowed" : "pointer",
+                    padding: "4px 8px",
+                  }}
+                >
+                  <Icon name="image" size={17} />
+                  <span>上传图片 ({previews.items.length}/9)</span>
+                  <input
+                    type="file"
+                    accept={webImageAccept}
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={handleChooseFiles}
+                    disabled={previews.items.length >= 9 || busy || Boolean(stickerId)}
+                  />
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  aria-label="上传图片（注册后可用）"
+                  onClick={handleUnavailableImageUpload}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "4px 8px",
+                    border: 0,
+                    background: "transparent",
+                    color: "#64748b",
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Icon name="image" size={17} />
+                  <span>上传图片</span>
+                </button>
+              )}
               <ComposerExpressionPicker
                 stickerDisabled={previews.items.length > 0}
                 onEmoji={(emoji) => insertAtSelection(contentRef.current, content, setContent, emoji)}
@@ -1903,6 +1892,14 @@ function CommentReplyModal({
   const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
   const imageInput = useComposerImageInput({ previews, onMessage: setMessage, enabled: canUploadMedia && !stickerId });
 
+  function handleUnavailableImageUpload() {
+    if (!user || user.accountType === "guest") {
+      onRequireAuth();
+      return;
+    }
+    setMessage("当前账号暂不可上传图片");
+  }
+
   useEffect(() => {
     let active = true;
     void getCommentReplies(root.id)
@@ -2199,10 +2196,21 @@ function CommentReplyModal({
           onDrop={imageInput.onDrop}
         >
           {imageInput.dragActive && <div className="composer-drop-hint">松开即可添加图片</div>}
-          {canUploadMedia && <label style={{ cursor: stickerId ? "not-allowed" : "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: stickerId ? "#94a3b8" : "#64748b" }}>
-            <Icon name="image" size={19} />
-            <input type="file" accept={webImageAccept} multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy || Boolean(stickerId)} />
-          </label>}
+          {canUploadMedia ? (
+            <label aria-label="添加回复图片" style={{ cursor: stickerId ? "not-allowed" : "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: stickerId ? "#94a3b8" : "#64748b" }}>
+              <Icon name="image" size={19} />
+              <input type="file" accept={webImageAccept} multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy || Boolean(stickerId)} />
+            </label>
+          ) : (
+            <button
+              type="button"
+              aria-label="添加回复图片（注册后可用）"
+              onClick={handleUnavailableImageUpload}
+              style={{ display: "grid", placeItems: "center", padding: "0 6px", border: 0, background: "transparent", color: "#64748b", cursor: "pointer" }}
+            >
+              <Icon name="image" size={19} />
+            </button>
+          )}
           <ComposerExpressionPicker
             stickerDisabled={previews.items.length > 0}
             onEmoji={(emoji) => insertAtSelection(contentRef.current, content, setContent, emoji)}

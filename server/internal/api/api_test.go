@@ -831,7 +831,18 @@ func TestCreateCommentEnforcesAttachmentConstraints(t *testing.T) {
 		t.Fatalf("expected 400 when both media and sticker are present, got %d", res.Code)
 	}
 
-	// 3. 非图片 MIME 类型被拒绝
+	// 3. 不在内置目录中的贴纸 ID 被拒绝
+	expectAuth()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/posts/p1/comments", strings.NewReader(`{"sticker_id":"not-a-real-sticker"}`))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Idempotency-Key", "k-invalid-sticker")
+	res = httptest.NewRecorder()
+	NewHandler(db).ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown sticker_id, got %d", res.Code)
+	}
+
+	// 4. 非图片 MIME 类型被拒绝
 	expectAuth()
 	mock.ExpectQuery(`(?s)SELECT owner_id, status, mime_type FROM media_assets WHERE id = \$1 AND deleted_at IS NULL`).
 		WithArgs("m_video").

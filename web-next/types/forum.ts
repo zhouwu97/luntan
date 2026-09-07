@@ -117,6 +117,7 @@ export interface Comment {
   author: UserSummary;
   content: string;
   media?: MediaAsset[];
+  stickerId?: string;
   publicationStatus?: string;
   moderationStatus?: string;
   rootId?: string;

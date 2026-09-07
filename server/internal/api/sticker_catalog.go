@@ -1,0 +1,43 @@
+package api
+
+// allowedStickerIDs 与客户端内置表情包资源对应。服务端只接受目录内启用的 ID，
+// 避免任意字符串进入评论数据；历史数据读取不受此校验影响。
+var allowedStickerIDs = map[string]struct{}{
+	"0cc4a3688e7b222b977fef3a078619b6": {}, "0ccd6d087a05757fb478bf0601e8c786": {},
+	"0eeed98ece4e89243db9dea7ccd796fd": {}, "10529d03ba8b034d0e69680e34d45af5": {},
+	"12fdec70b5d7d5dc0497b175594bab65": {}, "134dfdfb5fd355fbb504b62f0391174b": {},
+	"1568a70091296e5199816f67fe457acc": {}, "1c5d27144aae834d352e4f6704750458": {},
+	"1c704494bbb89fce27681425cffbe6fa": {}, "2d094a6c0e1ac32d31a65286eb141a57": {},
+	"2f875950c473b51c6a7015ee22181f11": {}, "303e1f59ad80c492d2e7c15658b00870": {},
+	"36286e5249dbbd659981ca530e21c047": {}, "3a23a1641d24e756461e575efc34efe9": {},
+	"404375fdaab3eb43488841beb985c395": {}, "4093d7cdb944076e0a8e4e06be2e2776": {},
+	"40cd7c2491a76b3c998730df4c4d2d1c": {}, "4295842cc56caa7d48e4a12d81ea02e0": {},
+	"4535efdfbdc938e7c225528e8915285b": {}, "4ea7d374be1cede6e7b9990dbf1f0c59": {},
+	"5726c9c935a255106d90e46857441a0c": {}, "57a6e6ddf0ed6ae409103a1c79796cda": {},
+	"5ad44d700fcd9a0c81cf6834ce4e3575": {}, "5cd76a09685d78d5e803384dc5436fe8": {},
+	"5d9aa5f7f3b304bf7cffa81cdde8901c": {}, "5db6cd535eda31edc0d1983e785bb8cd": {},
+	"6159bd58fba8eb5c5254f501c958b658": {}, "6370dbf8a240aa98d5b71582dc70a211": {},
+	"63cfb0a51097da75df49cb719922b8e7": {}, "63f9cb8a346d8cc21cb006b48b93e07e": {},
+	"6608d1dacfcde27f87f7d3852330d0fb": {}, "66c40b9e958abe8adcc2943b191e832f": {},
+	"693d57aca10e49cb5baf53b8dbb96c36": {}, "69ba783fe381142e90124ee1e0fcdec5": {},
+	"6d65948c4146fc8a669b9bb10f3832e6": {}, "701d6d42f9bdb8df4ab565956e0390f0": {},
+	"7d9614c4d56db06a13cc85420e03ffba": {}, "82481e8836d11b0eac41ea5addb0da0c": {},
+	"8985274fa30525fddf1221fd4d3aef90": {}, "986e5bd2a4b13d23b32416c046ecb068": {},
+	"9f3cfb00a3e638491e5435e5550d5c83": {}, "a651cf5813ba41587b22d273682e01ae": {},
+	"aad70d8d064f9eb79286c1393490716c": {}, "b0d61e4aa42714bc2c5e5f7cf9480d98": {},
+	"b0f41bb02a1554d51ea4382e69725041": {}, "b2df28aa490c058b9fdfba6f96ae28f5": {},
+	"b62b2648f0d40805331d4c45968e4737": {}, "bf4fdc61f3162854bd1e8f80114f0624": {},
+	"c1b8473a302b379591b8bef7c0c2f9cd": {}, "c9ad6e9fa2baf83ce2073249c77d85c0": {},
+	"ca153e00bcbf3a5a04e2a1cedf4fc735": {}, "cab495ebb00f701357a34c730c667960": {},
+	"cee44a40131c4f95098b36430449c912": {}, "d0ccdc6d8c3e941529e797b4d8d5ef85": {},
+	"d0deb840abc781f414c7ad6824407964": {}, "d38554d91745da379f208122f2a153c1": {},
+	"d931ab4696e4003b744092c1acd3b6c8": {}, "dd3904929e09c479945e9b00d7090fdd": {},
+	"df6dac55ccfc89a4dfc188f320112318": {}, "e417bb87afe85caded296e8c475be864": {},
+	"ea32e204f9e4997bfcefaff6847debcb": {}, "f05144bf668463d3f2742765d6f8da14": {},
+	"f180ae4e76d1896a615f1095044f5ee8": {}, "f824b5b93951ea809e59bab466114f71": {},
+}
+
+func isAllowedStickerID(id string) bool {
+	_, ok := allowedStickerIDs[id]
+	return ok
+}

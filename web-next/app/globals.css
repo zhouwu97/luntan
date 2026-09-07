@@ -4253,3 +4253,200 @@ img { display: block; max-width: 100%; }
 @media (min-width: 761px) and (max-width: 1400px) {
   .brand-wrap .tagline { display: none; }
 }
+
+.composer-dropzone {
+  position: relative;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.composer-dropzone.drag-active {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+  background: #f8fbff;
+}
+
+.composer-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--primary);
+  border-radius: inherit;
+  background: rgba(239, 246, 255, 0.94);
+  color: #2563eb;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.composer-tools-left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.expression-picker-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.expression-trigger {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.expression-trigger:hover,
+.expression-trigger[aria-expanded="true"] {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.expression-panel {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(330px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+}
+
+.expression-tabs,
+.sticker-groups {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.expression-tabs button,
+.sticker-groups button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.expression-tabs button.active,
+.sticker-groups button.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.emoji-grid button,
+.sticker-grid button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.emoji-grid button {
+  min-width: 32px;
+  height: 34px;
+  font-size: 21px;
+}
+
+.emoji-grid button:hover,
+.sticker-grid button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.sticker-grid button {
+  aspect-ratio: 1;
+  padding: 4px;
+}
+
+.sticker-grid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.sticker-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.expression-note {
+  margin-bottom: 7px;
+  color: #b45309;
+  font-size: 12px;
+}
+
+.selected-sticker {
+  position: relative;
+  width: fit-content;
+  margin: 8px 12px;
+}
+
+.selected-sticker > button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.72);
+  color: white;
+  cursor: pointer;
+}
+
+.reply-selected-sticker {
+  margin-left: 16px;
+}
+
+.comment-sticker {
+  display: block;
+  width: auto;
+  max-width: min(160px, 100%);
+  max-height: 160px;
+  margin-top: 7px;
+  object-fit: contain;
+}
+
+@media (max-width: 480px) {
+  .expression-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: max(84px, env(safe-area-inset-bottom));
+    width: auto;
+  }
+
+  .emoji-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}

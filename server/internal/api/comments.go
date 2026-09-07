@@ -565,6 +565,10 @@ func (s *Server) createCommentForUser(w http.ResponseWriter, r *http.Request, us
 		writeAuthError(w, r, ErrInvalidComment)
 		return
 	}
+	if stickerID != "" && !isAllowedStickerID(stickerID) {
+		writeAuthError(w, r, ErrInvalidComment)
+		return
+	}
 
 	for _, mid := range mediaIDs {
 		var ownerID, status, mimeType string

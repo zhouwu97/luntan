@@ -177,6 +177,7 @@ jobs:
         env:
           APP_ENV: test
           HTTP_PORT: '8080'
+          PORT: '3001'
           API_PROXY_TARGET: http://127.0.0.1:8080
           DATABASE_URL: postgres://luntan:luntan@127.0.0.1:5432/luntan_journey_test?sslmode=disable
           ALLOW_LEGACY_USERNAME_REGISTRATION: 'true'
@@ -184,10 +185,10 @@ jobs:
           AUTH_REGISTER_REQUIRE_EMAIL_CODE: 'false'
           OBJECT_STORAGE_SIGNING_SECRET: ci-only-notification-media-secret
           MEDIA_STORAGE_DIR: /tmp/luntan-journey-media
-          WEB_ORIGIN: http://127.0.0.1:3000
+          WEB_ORIGIN: http://127.0.0.1:3001
           LUNTAN_LIVE_JOURNEY: '1'
           PLAYWRIGHT_TEST_BASE_URL: http://127.0.0.1:8080
-          LUNTAN_JOURNEY_WEB_ORIGIN: http://127.0.0.1:3000
+          LUNTAN_JOURNEY_WEB_ORIGIN: http://127.0.0.1:3001
         run: |
           set -eu
           sudo apt-get update -qq
@@ -201,7 +202,7 @@ jobs:
           curl --retry 30 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:8080/health
           /tmp/luntan-journey-worker > /tmp/luntan-journey-worker.log 2>&1 &
           worker_pid=$!
-          curl --retry 30 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:3000 > /dev/null
+          curl --retry 30 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:3001 > /dev/null
           npx playwright test e2e/live-forum-journey.spec.ts
       - name: Upload journey failure logs
         if: failure()

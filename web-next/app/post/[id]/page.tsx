@@ -23,12 +23,8 @@ export async function generateMetadata({ params }: PostPageProps): Promise<Metad
   const { id } = await params;
   const postId = decodePostId(id);
   const result = await getPublicPost(postId);
-  if (result.status === "not_found") {
-    return {
-      title: "帖子不存在 - 圣杯酱",
-      robots: { index: false, follow: false },
-    };
-  }
+  // 在元数据阶段立即终止响应，避免流式渲染先写出 200 后才进入 not-found 边界。
+  if (result.status === "not_found") notFound();
   if (result.status === "unavailable") {
     return {
       title: "帖子暂时无法加载 - 圣杯酱",

@@ -201,12 +201,20 @@ export function parsePost(raw: unknown): Post {
 export function parseComment(raw: unknown): Comment {
   const item = asRecord(raw);
   const viewer = asRecord(item.viewer_state);
+  const stickerAttachment = Array.isArray(item.attachments)
+    ? item.attachments.map(asRecord).find((attachment) => asString(attachment.type) === "sticker")
+    : undefined;
+  const stickerId = asString(item.sticker_id)
+    || asString(stickerAttachment?.sticker_id)
+    || asString(stickerAttachment?.media_id)
+    || asString(stickerAttachment?.id);
   return {
     id: asString(item.id),
     postId: asString(item.post_id),
     author: parseUser(item.author),
     content: asString(item.content),
     media: parseMediaList(item),
+    stickerId: stickerId || undefined,
     publicationStatus: asString(item.publication_status) || undefined,
     moderationStatus: asString(item.moderation_status) || undefined,
     rootId: asString(item.root_id) || undefined,
@@ -609,13 +617,14 @@ function newIdempotencyKey(prefix: string): string {
     : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export async function createComment(postId: string, content: string, mediaIds?: string[]): Promise<Comment> {
+export async function createComment(postId: string, content: string, mediaIds?: string[], stickerId?: string): Promise<Comment> {
   return parseComment(
     await apiPost(
       `/posts/${encodeURIComponent(postId)}/comments`,
       {
         content,
         ...(mediaIds && mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
+        ...(stickerId ? { sticker_id: stickerId } : {}),
       },
       {
         "Idempotency-Key": newIdempotencyKey("web-comment"),
@@ -629,6 +638,7 @@ export async function createReply(
   content: string,
   replyToUserId?: string,
   mediaIds?: string[],
+  stickerId?: string,
 ): Promise<Comment> {
   return parseComment(
     await apiPost(
@@ -637,6 +647,7 @@ export async function createReply(
         content,
         reply_to_user_id: replyToUserId || undefined,
         ...(mediaIds && mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
+        ...(stickerId ? { sticker_id: stickerId } : {}),
       },
       {
         "Idempotency-Key": newIdempotencyKey("web-reply"),

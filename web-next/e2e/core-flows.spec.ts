@@ -909,7 +909,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     expect(commentsRequestCount).toBe(2);
   });
 
-  test("13. 点赞与收藏状态单一源：移动端正文与底部浮动栏状态双向 100% 同步", async ({ page }) => {
+  test("13. 移动端正文互动与常驻评论栏同时可用", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
 
     const mockPost = {
@@ -966,39 +966,29 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await page.goto("/post/post-sync-state-1");
     await expect(page.getByRole("heading", { name: "双向状态同步测试贴" })).toBeVisible();
 
-    // 1. 在正文区域点击点赞
+    // 评论栏改为与 App 一致的输入工具栏，正文互动仍保持独立可用。
     const articleLikeBtn = page.locator(".detail-stats button").filter({ hasText: "点赞" });
-    const bottomLikeBtn = page.locator(".composer.mobile-only .composer-side button").nth(0);
+    const articleBookmarkBtn = page.locator(".detail-stats button").filter({ hasText: "收藏" });
+    const mobileComposer = page.locator(".mobile-comment-composer");
 
     await expect(articleLikeBtn).not.toHaveClass(/selected/);
-    await expect(bottomLikeBtn).not.toHaveClass(/selected/);
-    await expect(bottomLikeBtn).toHaveAttribute("aria-label", "点赞");
+    await expect(articleBookmarkBtn).not.toHaveClass(/selected/);
+    await expect(mobileComposer).toBeVisible();
+    await expect(mobileComposer.getByPlaceholder("友善地回复一句…")).toBeVisible();
+    await expect(mobileComposer.getByRole("button", { name: "发送" })).toBeDisabled();
 
     await articleLikeBtn.click();
 
-    // 验证正文与移动端底部栏【同时】变亮，计数同步增加
     await expect(articleLikeBtn).toHaveClass(/selected/);
-    await expect(bottomLikeBtn).toHaveClass(/selected/);
-    await expect(bottomLikeBtn).toHaveAttribute("aria-label", "已点赞");
     await expect(articleLikeBtn).toContainText("11 点赞");
-    await expect(bottomLikeBtn).toContainText("11");
 
-    // 2. 在移动端底部栏点击收藏
-    const bottomBookmarkBtn = page.locator(".composer.mobile-only .composer-side button").nth(1);
-    const articleBookmarkBtn = page.locator(".detail-stats button").filter({ hasText: "收藏" });
+    await articleBookmarkBtn.click();
 
-    await expect(bottomBookmarkBtn).not.toHaveClass(/selected/);
-    await expect(articleBookmarkBtn).not.toHaveClass(/selected/);
-    await expect(bottomBookmarkBtn).toHaveAttribute("aria-label", "收藏");
-
-    await bottomBookmarkBtn.click();
-
-    // 验证底部与正文收藏【同时】变亮，计数同步增加
-    await expect(bottomBookmarkBtn).toHaveClass(/selected/);
     await expect(articleBookmarkBtn).toHaveClass(/selected/);
-    await expect(bottomBookmarkBtn).toHaveAttribute("aria-label", "已收藏");
     await expect(articleBookmarkBtn).toContainText("6 收藏");
-    await expect(bottomBookmarkBtn).toContainText("6");
+
+    await mobileComposer.getByPlaceholder("友善地回复一句…").fill("移动端评论栏测试");
+    await expect(mobileComposer.getByRole("button", { name: "发送" })).toBeEnabled();
   });
 
   test("14. 首页默认入口与排序语义：/ 默认进入最新且 URL 保持干净，推荐严格按管理员精选无自动回退", async ({ page }) => {

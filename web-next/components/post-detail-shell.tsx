@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { ChangeEvent, FormEvent, MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SiteHeader } from "./site-header";
+import { CommentSticker, ComposerExpressionPicker } from "./composer-expression-picker";
 import { AppDownloadBanner } from "./app-download-banner";
 import { Icon } from "./icons";
 import { MediaImage } from "./media-image";
@@ -37,75 +38,31 @@ import {
   setPostLike,
   setUserFollow,
   isDeterministicClientError,
-  isPossiblySupportedImageFile,
   uploadImages,
   webImageAccept,
   votePostPoll,
 } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
+import { useComposerImageInput, useLocalImagePreviews } from "../lib/use-composer-images";
 import type { Comment, MediaAsset, Poll, Post, SessionUser } from "../types/forum";
 
 const ImageGalleryModal = dynamic(() => import("./image-gallery-modal").then((module) => module.ImageGalleryModal), { ssr: false });
 const ReportModal = dynamic(() => import("./report-modal").then((module) => module.ReportModal), { ssr: false });
 
-type LocalImagePreview = {
-  id: string;
-  file: File;
-  url: string;
-};
-
-function newLocalPreview(file: File): LocalImagePreview {
-  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return { id: suffix, file, url: URL.createObjectURL(file) };
-}
-
-function revokeLocalPreviews(items: LocalImagePreview[]) {
-  for (const item of items) URL.revokeObjectURL(item.url);
-}
-
-function useLocalImagePreviews(maxCount = 9) {
-  const [items, setItems] = useState<LocalImagePreview[]>([]);
-  const itemsRef = useRef(items);
-
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  useEffect(() => () => revokeLocalPreviews(itemsRef.current), []);
-
-  const append = useCallback((files: File[]) => {
-    const supported = files.filter(isPossiblySupportedImageFile);
-    const skippedUnsupported = files.length - supported.length;
-    const slots = Math.max(0, maxCount - itemsRef.current.length);
-    const additions = supported.slice(0, slots).map(newLocalPreview);
-    const next = [...itemsRef.current, ...additions];
-    itemsRef.current = next;
-    setItems(next);
-    return {
-      added: additions.length,
-      skippedUnsupported,
-      skippedLimit: Math.max(0, supported.length - slots),
-    };
-  }, [maxCount]);
-
-  const removeAt = useCallback((index: number) => {
-    const current = itemsRef.current;
-    const removed = current[index];
-    if (removed) URL.revokeObjectURL(removed.url);
-    const next = current.filter((_, idx) => idx !== index);
-    itemsRef.current = next;
-    setItems(next);
-  }, []);
-
-  const clear = useCallback(() => {
-    revokeLocalPreviews(itemsRef.current);
-    itemsRef.current = [];
-    setItems([]);
-  }, []);
-
-  return { items, append, removeAt, clear };
+function insertAtSelection(
+  element: HTMLInputElement | HTMLTextAreaElement | null,
+  value: string,
+  setValue: (value: string) => void,
+  insertion: string,
+) {
+  const start = element?.selectionStart ?? value.length;
+  const end = element?.selectionEnd ?? start;
+  const next = `${value.slice(0, start)}${insertion}${value.slice(end)}`;
+  setValue(next);
+  requestAnimationFrame(() => {
+    element?.focus();
+    element?.setSelectionRange(start + insertion.length, start + insertion.length);
+  });
 }
 
 function uploadProgressText(current: number, total: number, stage: "preparing" | "uploading" | "complete") {
@@ -146,11 +103,17 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
 
   const [related, setRelated] = useState<Post[]>([]);
 
-  const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
   const [mobileComposerText, setMobileComposerText] = useState("");
+  const mobileComposerRef = useRef<HTMLTextAreaElement>(null);
+  const [mobileStickerId, setMobileStickerId] = useState("");
   const mobilePreviews = useLocalImagePreviews(9);
   const [sendingComment, setSendingComment] = useState(false);
   const [mobileUploadMessage, setMobileUploadMessage] = useState("");
+  const mobileImageInput = useComposerImageInput({
+    previews: mobilePreviews,
+    onMessage: setMobileUploadMessage,
+    enabled: canUploadMedia && !mobileStickerId,
+  });
   const [galleryImages, setGalleryImages] = useState<GalleryImage[] | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [reportTarget, setReportTarget] = useState<{ type: "post" | "comment"; id: string; title?: string } | null>(null);
@@ -450,10 +413,8 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
   }
 
   function handleChooseMobileFiles(event: ChangeEvent<HTMLInputElement>) {
-    const result = mobilePreviews.append(Array.from(event.target.files || []));
+    mobileImageInput.appendFiles(Array.from(event.target.files || []));
     event.target.value = "";
-    if (result.skippedUnsupported > 0) showToast("已跳过不支持的文件");
-    if (result.skippedLimit > 0) showToast("最多上传 9 张图片");
   }
 
   async function handleMobileSubmitComment(event: FormEvent<HTMLFormElement>) {
@@ -462,7 +423,7 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       router.push(`/login?next=${encodeURIComponent(`/post/${id}`)}`);
       return;
     }
-    if ((!mobileComposerText.trim() && mobilePreviews.items.length === 0) || sendingComment) return;
+    if ((!mobileComposerText.trim() && mobilePreviews.items.length === 0 && !mobileStickerId) || sendingComment) return;
     setSendingComment(true);
     setMobileUploadMessage("");
     try {
@@ -471,14 +432,14 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       });
       const newComment = await createWithUploadedMediaRollback(
         mediaIds,
-        () => createComment(id, mobileComposerText.trim(), mediaIds),
+        () => createComment(id, mobileComposerText.trim(), mediaIds, mobileStickerId || undefined),
       );
       setComments((curr) => [newComment, ...curr]);
       setTotalComments((t) => t + 1);
       setPost((current) => current ? { ...current, commentCount: current.commentCount + 1 } : current);
       setMobileComposerText("");
+      setMobileStickerId("");
       mobilePreviews.clear();
-      setMobileComposerOpen(false);
       showToast("回复发布成功！");
     } catch (reqErr) {
       showToast(formatError(reqErr, "回复失败，请重试"));
@@ -627,73 +588,12 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
         </div>
       </main>
 
-      {/* 移动端底部固定快速回复输入条 */}
-      <div className="composer mobile-only">
-        <div className="composer-trigger" onClick={() => setMobileComposerOpen(true)}>
-          <input
-            type="text"
-            readOnly
-            placeholder="说点什么，参与热烈讨论..."
-            value={mobileComposerText}
-          />
-        </div>
-        <div className="composer-side">
-          <a href="#comments" className="comp-stat" aria-label="查看评论">
-            <Icon name="message" size={18} />
-            {compactCount(post.commentCount)}
-          </a>
-          <button
-            type="button"
-            className={`comp-stat stat${post.viewerState.hasLiked ? " selected" : ""}`}
-            onClick={handleToggleLike}
-            disabled={likePending}
-            aria-label={post.viewerState.hasLiked ? "已点赞" : "点赞"}
-          >
-            <Icon name="heart" size={18} />
-            {compactCount(post.likeCount)}
-          </button>
-          <button
-            type="button"
-            className={`comp-stat stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
-            onClick={handleToggleBookmark}
-            disabled={bookmarkPending}
-            aria-label={post.viewerState.hasBookmarked ? "已收藏" : "收藏"}
-          >
-            <Icon name="bookmark" size={18} />
-            {compactCount(post.bookmarkCount)}
-          </button>
-        </div>
-      </div>
-
-      {/* 移动端弹出发评抽屉 */}
-      {mobileComposerOpen && (
-        <div
-          className="composer-sheet-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMobileComposerOpen(false);
-          }}
-        >
-          <div className="composer-sheet">
-            <div className="composer-sheet-handle" />
-            <form onSubmit={handleMobileSubmitComment}>
-              <textarea
-                autoFocus
-                rows={3}
-                style={{
-                  width: "100%",
-                  borderRadius: 12,
-                  border: "1px solid #dce8f3",
-                  padding: 10,
-                  fontSize: 14,
-                  resize: "none",
-                }}
-                placeholder="友善地写下你的评价或想法…"
-                value={mobileComposerText}
-                onChange={(e) => setMobileComposerText(e.target.value)}
-              />
-
+      {/* 移动端与 App 保持一致：评论栏始终固定在页面底部。 */}
+      <div className="composer mobile-only mobile-comment-composer">
+        <form className="mobile-reply-form" onSubmit={handleMobileSubmitComment}>
+          <div className="mobile-reply-extras">
               {mobilePreviews.items.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                <div className="mobile-reply-previews">
                   {mobilePreviews.items.map((preview, idx) => (
                     <div
                       key={preview.id}
@@ -736,41 +636,34 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                   ))}
                 </div>
               )}
+              {mobileStickerId && (
+                <div className="selected-sticker">
+                  <CommentSticker stickerId={mobileStickerId} />
+                  <button type="button" aria-label="移除表情包" onClick={() => setMobileStickerId("")}>×</button>
+                </div>
+              )}
               {mobileUploadMessage && (
-                <div className="form-error" style={{ marginTop: 8, color: "#64748b" }}>
+                <div className="form-error mobile-reply-message">
                   {mobileUploadMessage}
                 </div>
               )}
+          </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginTop: 10,
-                }}
-              >
+          <div className="mobile-reply-toolbar">
                 {canUploadMedia ? (
                   <label
                     aria-label="添加图片"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      color: "#3b82f6",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
+                    className="mobile-reply-tool"
                   >
-                    <Icon name="image" size={18} />
-                    <span>图片 ({mobilePreviews.items.length}/9)</span>
+                    <Icon name="image" size={22} />
+                    {mobilePreviews.items.length > 0 && <span>{mobilePreviews.items.length}</span>}
                     <input
                       type="file"
                       accept={webImageAccept}
                       multiple
                       style={{ display: "none" }}
                       onChange={handleChooseMobileFiles}
-                      disabled={mobilePreviews.items.length >= 9 || sendingComment}
+                      disabled={mobilePreviews.items.length >= 9 || sendingComment || Boolean(mobileStickerId)}
                     />
                   </label>
                 ) : (
@@ -778,44 +671,35 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                     type="button"
                     aria-label="添加图片（注册后可用）"
                     onClick={() => router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${id}`)}`)}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: 0,
-                      border: 0,
-                      background: "transparent",
-                      color: "#3b82f6",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
+                    className="mobile-reply-tool"
                   >
-                    <Icon name="image" size={18} />
-                    <span>图片</span>
+                    <Icon name="image" size={22} />
                   </button>
                 )}
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button
-                    type="button"
-                    className="outline-button"
-                    onClick={() => setMobileComposerOpen(false)}
-                    disabled={sendingComment}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="submit"
-                    className="primary-button"
-                    disabled={(!mobileComposerText.trim() && mobilePreviews.items.length === 0) || sendingComment}
-                  >
-                    {sendingComment ? "发送中…" : "发送"}
-                  </button>
-                </div>
-              </div>
-            </form>
+                <ComposerExpressionPicker
+                  stickerDisabled={mobilePreviews.items.length > 0}
+                  onEmoji={(emoji) => insertAtSelection(mobileComposerRef.current, mobileComposerText, setMobileComposerText, emoji)}
+                  onSticker={setMobileStickerId}
+                />
+            <textarea
+                  ref={mobileComposerRef}
+                  rows={1}
+                  onPaste={mobileImageInput.onPaste}
+                  className="mobile-reply-input"
+                  placeholder="友善地回复一句…"
+                  value={mobileComposerText}
+                  onChange={(e) => setMobileComposerText(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="mobile-reply-submit"
+                  disabled={(!mobileComposerText.trim() && mobilePreviews.items.length === 0 && !mobileStickerId) || sendingComment}
+                >
+                  {sendingComment ? "发送中…" : "发送"}
+                </button>
           </div>
-        </div>
-      )}
+        </form>
+      </div>
 
       {/* 图片全屏画廊查看器 */}
       {galleryImages && (
@@ -1282,22 +1166,31 @@ function CommentsSection({
   onRefreshPost?: () => void;
 }) {
   const [content, setContent] = useState("");
+  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const [stickerId, setStickerId] = useState("");
   const previews = useLocalImagePreviews(9);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
+  const imageInput = useComposerImageInput({ previews, onMessage: setMessage, enabled: canUploadMedia && !stickerId });
+
+  function handleUnavailableImageUpload() {
+    if (!user || user.accountType === "guest") {
+      onRequireAuth();
+      return;
+    }
+    setMessage("当前账号暂不可上传图片");
+  }
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
-    const result = previews.append(Array.from(e.target.files || []));
+    imageInput.appendFiles(Array.from(e.target.files || []));
     e.target.value = "";
-    if (result.skippedUnsupported > 0) setMessage("已跳过不支持的文件");
-    if (result.skippedLimit > 0) setMessage("最多上传 9 张图片");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return onRequireAuth();
-    if ((!content.trim() && previews.items.length === 0) || busy) return;
+    if ((!content.trim() && previews.items.length === 0 && !stickerId) || busy) return;
     setBusy(true);
     setMessage("");
     try {
@@ -1306,12 +1199,13 @@ function CommentsSection({
       });
       const next = await createWithUploadedMediaRollback(
         mediaIds,
-        () => createComment(post.id, content.trim(), mediaIds),
+        () => createComment(post.id, content.trim(), mediaIds, stickerId || undefined),
       );
       setComments((current) => [next, ...current]);
       setTotalComments((t) => t + 1);
       onRefreshPost?.();
       setContent("");
+      setStickerId("");
       previews.clear();
       setMessage("");
     } catch (requestError) {
@@ -1374,7 +1268,15 @@ function CommentsSection({
       </div>
 
       {/* 桌面端内嵌输入框 */}
-      <form className="comment-composer desktop-only" onSubmit={submit}>
+      <form
+        className={`comment-composer composer-dropzone desktop-only${imageInput.dragActive ? " drag-active" : ""}`}
+        onSubmit={submit}
+        onDragEnter={imageInput.onDragEnter}
+        onDragOver={imageInput.onDragOver}
+        onDragLeave={imageInput.onDragLeave}
+        onDrop={imageInput.onDrop}
+      >
+        {imageInput.dragActive && <div className="composer-drop-hint">松开即可添加图片</div>}
         <UserAvatar
           userId={user?.id}
           name={user?.nickname || "客"}
@@ -1383,8 +1285,10 @@ function CommentsSection({
         />
         <div className="composer-box">
           <textarea
+            ref={contentRef}
             value={content}
             onChange={(event) => setContent(event.target.value)}
+            onPaste={imageInput.onPaste}
             placeholder={user ? "写下你的评价、拆箱感受或回复…" : "登录后参与回复"}
             rows={2}
             onFocus={() => {
@@ -1437,34 +1341,70 @@ function CommentsSection({
               ))}
             </div>
           )}
+          {stickerId && (
+            <div className="selected-sticker">
+              <CommentSticker stickerId={stickerId} />
+              <button type="button" aria-label="移除表情包" onClick={() => setStickerId("")}>×</button>
+            </div>
+          )}
 
           <div className="composer-footer">
-            {canUploadMedia && <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                color: "#64748b",
-                fontSize: 13,
-                cursor: "pointer",
-                padding: "4px 8px",
-              }}
-            >
-              <Icon name="image" size={17} />
-              <span>上传图片 ({previews.items.length}/9)</span>
-              <input
-                type="file"
-                accept={webImageAccept}
-                multiple
-                style={{ display: "none" }}
-                onChange={handleChooseFiles}
-                disabled={previews.items.length >= 9 || busy}
+            <div className="composer-tools-left">
+              {canUploadMedia ? (
+                <label
+                  aria-label="上传图片"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    color: stickerId ? "#94a3b8" : "#64748b",
+                    fontSize: 13,
+                    cursor: stickerId ? "not-allowed" : "pointer",
+                    padding: "4px 8px",
+                  }}
+                >
+                  <Icon name="image" size={17} />
+                  <span>上传图片 ({previews.items.length}/9)</span>
+                  <input
+                    type="file"
+                    accept={webImageAccept}
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={handleChooseFiles}
+                    disabled={previews.items.length >= 9 || busy || Boolean(stickerId)}
+                  />
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  aria-label="上传图片（注册后可用）"
+                  onClick={handleUnavailableImageUpload}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "4px 8px",
+                    border: 0,
+                    background: "transparent",
+                    color: "#64748b",
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Icon name="image" size={17} />
+                  <span>上传图片</span>
+                </button>
+              )}
+              <ComposerExpressionPicker
+                stickerDisabled={previews.items.length > 0}
+                onEmoji={(emoji) => insertAtSelection(contentRef.current, content, setContent, emoji)}
+                onSticker={setStickerId}
               />
-            </label>}
+            </div>
             <button
               type="submit"
               className="reply-submit"
-              disabled={(!content.trim() && previews.items.length === 0) || busy}
+              disabled={(!content.trim() && previews.items.length === 0 && !stickerId) || busy}
             >
               {busy ? "发送中…" : "发布回复"}
             </button>
@@ -1758,6 +1698,7 @@ function CommentRow({
             ))}
           </div>
         )}
+        {!isDeleted && comment.stickerId && <CommentSticker stickerId={comment.stickerId} />}
 
         {!isDeleted && previewReplies.length > 0 && (
           <div
@@ -1809,6 +1750,7 @@ function CommentRow({
                         ))}
                       </div>
                     )}
+                    {!isReplyDeleted && reply.stickerId && <CommentSticker stickerId={reply.stickerId} />}
                   </div>
                 </div>
               );
@@ -1892,10 +1834,21 @@ function CommentReplyModal({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [content, setContent] = useState("");
+  const contentRef = useRef<HTMLInputElement>(null);
+  const [stickerId, setStickerId] = useState("");
   const previews = useLocalImagePreviews(9);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
+  const imageInput = useComposerImageInput({ previews, onMessage: setMessage, enabled: canUploadMedia && !stickerId });
+
+  function handleUnavailableImageUpload() {
+    if (!user || user.accountType === "guest") {
+      onRequireAuth();
+      return;
+    }
+    setMessage("当前账号暂不可上传图片");
+  }
 
   useEffect(() => {
     let active = true;
@@ -1959,16 +1912,14 @@ function CommentReplyModal({
   }
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
-    const result = previews.append(Array.from(e.target.files || []));
+    imageInput.appendFiles(Array.from(e.target.files || []));
     e.target.value = "";
-    if (result.skippedUnsupported > 0) setMessage("已跳过不支持的文件");
-    if (result.skippedLimit > 0) setMessage("最多上传 9 张图片");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return onRequireAuth();
-    if ((!content.trim() && previews.items.length === 0) || busy) return;
+    if ((!content.trim() && previews.items.length === 0 && !stickerId) || busy) return;
     setBusy(true);
     setMessage("");
     try {
@@ -1977,11 +1928,12 @@ function CommentReplyModal({
       });
       const next = await createWithUploadedMediaRollback(
         mediaIds,
-        () => createReply(root.id, content.trim(), undefined, mediaIds),
+        () => createReply(root.id, content.trim(), undefined, mediaIds, stickerId || undefined),
       );
       setReplies((current) => [...current, next]);
       onReplyCreated?.(next);
       setContent("");
+      setStickerId("");
       previews.clear();
       setMessage("");
     } catch (requestError) {
@@ -2062,6 +2014,7 @@ function CommentReplyModal({
                   ))}
                 </div>
               )}
+              {!isRootDeleted && root.stickerId && <CommentSticker stickerId={root.stickerId} />}
             </div>
           </div>
 
@@ -2126,6 +2079,7 @@ function CommentReplyModal({
                         ))}
                       </div>
                     )}
+                    {!isReplyDeleted && reply.stickerId && <CommentSticker stickerId={reply.stickerId} />}
                   </div>
                 </div>
               );
@@ -2176,18 +2130,50 @@ function CommentReplyModal({
             ))}
           </div>
         )}
+        {stickerId && (
+          <div className="selected-sticker reply-selected-sticker">
+            <CommentSticker stickerId={stickerId} />
+            <button type="button" aria-label="移除表情包" onClick={() => setStickerId("")}>×</button>
+          </div>
+        )}
 
-        <form className="comment-reply-composer" onSubmit={submit}>
-          {canUploadMedia && <label style={{ cursor: "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: "#64748b" }}>
-            <Icon name="image" size={19} />
-            <input type="file" accept={webImageAccept} multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy} />
-          </label>}
+        <form
+          className={`comment-reply-composer composer-dropzone${imageInput.dragActive ? " drag-active" : ""}`}
+          onSubmit={submit}
+          onDragEnter={imageInput.onDragEnter}
+          onDragOver={imageInput.onDragOver}
+          onDragLeave={imageInput.onDragLeave}
+          onDrop={imageInput.onDrop}
+        >
+          {imageInput.dragActive && <div className="composer-drop-hint">松开即可添加图片</div>}
+          {canUploadMedia ? (
+            <label aria-label="添加回复图片" style={{ cursor: stickerId ? "not-allowed" : "pointer", display: "grid", placeItems: "center", padding: "0 6px", color: stickerId ? "#94a3b8" : "#64748b" }}>
+              <Icon name="image" size={19} />
+              <input type="file" accept={webImageAccept} multiple style={{ display: "none" }} onChange={handleChooseFiles} disabled={previews.items.length >= 9 || busy || Boolean(stickerId)} />
+            </label>
+          ) : (
+            <button
+              type="button"
+              aria-label="添加回复图片（注册后可用）"
+              onClick={handleUnavailableImageUpload}
+              style={{ display: "grid", placeItems: "center", padding: "0 6px", border: 0, background: "transparent", color: "#64748b", cursor: "pointer" }}
+            >
+              <Icon name="image" size={19} />
+            </button>
+          )}
+          <ComposerExpressionPicker
+            stickerDisabled={previews.items.length > 0}
+            onEmoji={(emoji) => insertAtSelection(contentRef.current, content, setContent, emoji)}
+            onSticker={setStickerId}
+          />
           <input
+            ref={contentRef}
             value={content}
             onChange={(event) => setContent(event.target.value)}
+            onPaste={imageInput.onPaste}
             placeholder="友善地回复一句…"
           />
-          <button type="submit" disabled={(!content.trim() && previews.items.length === 0) || busy}>
+          <button type="submit" disabled={(!content.trim() && previews.items.length === 0 && !stickerId) || busy}>
             {busy ? "发送中" : "发送"}
           </button>
         </form>

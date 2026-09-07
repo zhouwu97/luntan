@@ -16,7 +16,7 @@ class AppLinks {
   }
 
   static String post(String postId) =>
-      _resolve('posts/${Uri.encodeComponent(postId)}');
+      _resolve('post/${Uri.encodeComponent(postId)}');
 
   static String ranking(String toyId) =>
       _resolve('ranking/${Uri.encodeComponent(toyId)}');

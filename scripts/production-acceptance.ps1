@@ -113,6 +113,7 @@ function Test-HttpEndpoint {
             StatusCode = $response.StatusCode
             Content = [string]$response.Content
             Location = $response.Headers['Location']
+            Headers = $response.Headers
         }
     } catch {
         return @{
@@ -191,16 +192,7 @@ if (-not $SkipMediaValidation) {
     # 2.1 数据库：pending_backfill 检查
     Write-Host "检查待回填媒体数量..." -ForegroundColor Gray
 
-    $backfillQuery = @"
-SELECT count(*) AS pending_backfill
-FROM media_assets ma
-WHERE ma.status = 'ready' AND ma.deleted_at IS NULL AND ma.mime_type LIKE 'image/%'
-  AND NOT (
-    EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'original' AND mv.status = 'ready')
-    AND EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'detail' AND mv.status = 'ready')
-    AND EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'thumb' AND mv.status = 'ready')
-  );
-"@
+    $backfillQuery = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'media-variants-health.sql')
 
     try {
         $pendingBackfill = Test-DatabaseQuery -Query $backfillQuery -ConnectionString $DatabaseUrl
@@ -333,6 +325,46 @@ if ($adminCheck.StatusCode -eq 401) {
     Write-CheckResult "管理员端点认证" "Pass" "未认证请求返回 401"
 } else {
     Write-CheckResult "管理员端点认证" "Fail" "管理员端点可能未正确保护（状态: $($adminCheck.StatusCode)）"
+}
+
+# 3.4 浏览器安全响应头必须由生产入口统一提供。
+$homeCheck = Test-HttpEndpoint -Url "$apiBaseUrl/"
+$requiredSecurityHeaders = @{
+    'Strict-Transport-Security' = '^max-age='
+    'X-Content-Type-Options' = '^nosniff$'
+    'Referrer-Policy' = '.+'
+    'X-Frame-Options' = '^DENY$'
+    'Permissions-Policy' = '.+'
+    'Content-Security-Policy-Report-Only' = '.+'
+}
+foreach ($headerName in $requiredSecurityHeaders.Keys) {
+    $value = if ($homeCheck.Headers) { [string]$homeCheck.Headers[$headerName] } else { '' }
+    if ($homeCheck.Success -and $value -match $requiredSecurityHeaders[$headerName]) {
+        Write-CheckResult "安全响应头 $headerName" "Pass" $value
+    } else {
+        Write-CheckResult "安全响应头 $headerName" "Fail" "缺失或值无效"
+    }
+}
+
+# 3.5 公开配置与生产注册策略必须一致。
+$bootstrapCheck = Test-HttpEndpoint -Url "$apiBaseUrl/api/v1/bootstrap"
+try {
+    $bootstrap = $bootstrapCheck.Content | ConvertFrom-Json
+    if ($bootstrapCheck.Success -and $bootstrap.auth.email_code_required -eq $true) {
+        Write-CheckResult "注册验证码策略" "Pass" "生产环境要求邮箱验证码"
+    } else {
+        Write-CheckResult "注册验证码策略" "Fail" "bootstrap 未声明 email_code_required=true"
+    }
+} catch {
+    Write-CheckResult "注册验证码策略" "Fail" "bootstrap 响应无法解析"
+}
+
+# 3.6 历史帖子 URL 必须返回永久重定向，避免旧分享链接继续 404。
+$legacyPostCheck = Test-HttpEndpoint -Url "$apiBaseUrl/posts/production-acceptance-invalid" -ExpectedStatus 308
+if ($legacyPostCheck.Success -and $legacyPostCheck.Location -match '/post/production-acceptance-invalid$') {
+    Write-CheckResult "历史帖子链接" "Pass" "旧路由返回 308"
+} else {
+    Write-CheckResult "历史帖子链接" "Fail" "未永久跳转到 /post/[id]"
 }
 
 # ============================================

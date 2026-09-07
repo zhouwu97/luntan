@@ -160,10 +160,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web-next/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
       - name: Run Playwright E2E tests
         run: npx playwright test
         env:
@@ -176,6 +177,7 @@ jobs:
         env:
           APP_ENV: test
           HTTP_PORT: '8080'
+          API_PROXY_TARGET: http://127.0.0.1:8080
           DATABASE_URL: postgres://luntan:luntan@127.0.0.1:5432/luntan_journey_test?sslmode=disable
           ALLOW_LEGACY_USERNAME_REGISTRATION: 'true'
           ALLOW_DEV_AUTH_CODE: 'true'

@@ -1,4 +1,8 @@
-# 部署检查清单
+# 部署检查清单（旧免验证码流程，已废弃）
+
+> 不得执行本文中的免验证码命令。当前生产发布只允许使用
+> `.github/workflows/deploy-production.yml`，且部署脚本会强制
+> `AUTH_REGISTER_REQUIRE_EMAIL_CODE=true`。
 
 ## 关键风险点
 

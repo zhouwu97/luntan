@@ -28,6 +28,9 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
   });
 
   test("2. 免验证码注册：支持免验证码直接注册表单契约", async ({ page }) => {
+    await page.route("**/api/v1/bootstrap", (route) => route.fulfill({
+      json: { auth: { guest_enabled: true, registration_enabled: true, email_code_required: false } },
+    }));
     await page.goto("/login");
 
     // 切换至“注册”
@@ -1154,7 +1157,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       });
     });
 
-    let mockRecommendations = [
+    const mockRecommendations = [
       {
         post_id: "p-rec-1",
         position: 1,

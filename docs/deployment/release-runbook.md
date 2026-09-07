@@ -35,19 +35,24 @@ bash scripts/rollback-staging.sh /opt/luntan-qa/releases/<sha>-<timestamp>
 `release_sha` 并确认 `confirm_production=true`。工作流会校验 checkout 后的 commit
 与输入 SHA 完全一致，并要求 GHCR 中存在同一 SHA 的不可变镜像标签；不存在时不会
 进入部署阶段。
+此外，同一 SHA 必须先由 `deploy-staging.yml` 产出未过期的
+`staging-acceptance-<sha>` 验收凭证；没有该凭证时生产工作流会阻断。
 
 GitHub `production` environment 必须配置 required reviewers，并保存
-`PRODUCTION_DEPLOY_COMMAND` secret。该命令可使用工作流注入的 `IMAGE_TAG` 与
-`RELEASE_SHA`，且必须按以下顺序执行：
+`PRODUCTION_SSH_HOST`、`PRODUCTION_SSH_USER`、`PRODUCTION_SSH_PRIVATE_KEY`；可选
+`PRODUCTION_SSH_PORT`，默认 22。生产 SSH 用户必须是受控的 root 发布账号。
+部署逻辑由仓库内 `scripts/deploy-production.sh` 和
+`scripts/rollback-production.sh` 提供，不得藏在命令类 secret 中。
 
-1. 生产数据库备份、备份文件校验，必要时完成 restore drill。
-2. 拉取精确的 `IMAGE_TAG`，禁止 `latest` 或重新构建未审计代码。
+1. 生产数据库备份并生成 SHA-256 校验文件，定期单独完成 restore drill。
+2. 拉取精确的 API/Web SHA 镜像，禁止 `latest` 或重新构建未审计代码。
 3. 运行 `/app/luntan-migrate`；迁移失败立即退出并停止 rollout。
 4. 启动新 API/worker，检查 `/health`、`/ready`、smoke 和关键指标。
 5. 完成切流量与短时观察后再结束命令；任何失败必须返回非零退出码。
 
-生产迁移前先执行 `scripts/backup.ps1`，工作流本身不会替代数据库备份或生产环境
-required reviewer 配置。
+生产脚本会在迁移前自动执行 `pg_dump` 并校验，同时强制
+`AUTH_REGISTER_REQUIRE_EMAIL_CODE=true`。工作流不会替代定期恢复演练或 production
+environment 的 required reviewer 配置。
 
 ## Restore Drill
 

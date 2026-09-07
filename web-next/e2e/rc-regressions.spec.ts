@@ -152,7 +152,7 @@ test.describe("网页版 RC 回归链路", () => {
     await pointsCard.locator(".workbench-points-link").click();
     await expect(page).toHaveURL(/\/points/);
     // 积分中心会独立读取积分，不应影响工作台的失败恢复逻辑。
-    expect(pointsRequests).toBe(3);
+    await expect.poll(() => pointsRequests).toBe(3);
   });
 
   test("发帖创建失败时回收本次已上传媒体", async ({ page }) => {

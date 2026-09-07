@@ -26,9 +26,27 @@ async function fetchPublicJson(path: string): Promise<unknown | null> {
   }
 }
 
-export const getPublicPost = cache(async (postId: string): Promise<Post | null> => {
-  const payload = await fetchPublicJson(`/posts/${encodeURIComponent(postId)}?include_details=1`);
-  return payload ? parsePost(payload) : null;
+export type PublicPostResult =
+  | { status: "ok"; post: Post }
+  | { status: "not_found" }
+  | { status: "unavailable" };
+
+export const getPublicPost = cache(async (postId: string): Promise<PublicPostResult> => {
+  try {
+    const response = await fetch(
+      `${apiOrigin()}/api/v1/posts/${encodeURIComponent(postId)}?include_details=1`,
+      {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 60 },
+      },
+    );
+    if (response.status === 404 || response.status === 410) return { status: "not_found" };
+    if (!response.ok) return { status: "unavailable" };
+    return { status: "ok", post: parsePost(await response.json()) };
+  } catch {
+    // 上游故障不能伪装成内容不存在；客户端壳仍可重试恢复。
+    return { status: "unavailable" };
+  }
 });
 
 export const getPublicRecentPosts = cache(async (): Promise<Post[]> => {

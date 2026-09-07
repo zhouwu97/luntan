@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 // 该用例连接隔离 API、worker、媒体存储和测试数据库，CI 作为独立步骤执行。
-test("真实论坛旅程：游客、浏览、图片评论、回复定位和原身份注册", async ({ page, request }) => {
+test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原身份注册", async ({ page, request }) => {
   test.skip(process.env.LUNTAN_LIVE_JOURNEY !== "1", "需要独立的本地 API 与 PostgreSQL");
   test.setTimeout(150000);
   page.setDefaultTimeout(15000);
@@ -40,6 +40,52 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   expect(authorResponse.status()).toBe(201);
   const author = await authorResponse.json();
   const auth = { Authorization: `Bearer ${author.access_token}` };
+
+  // GIF 必须通过真实上传、worker 处理和帖子读取链路，不能只验证前端 fixture。
+  const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64");
+  const gifChecksum = createHash("sha256").update(gif).digest("hex");
+  const gifTokenResponse = await request.post("/api/v1/media/upload-token", {
+    headers: auth,
+    data: { file_name: "journey.gif", mime_type: "image/gif", width: 1, height: 1, size: gif.length, sha256: gifChecksum },
+  });
+  expect(gifTokenResponse.status()).toBe(201);
+  const gifUpload = await gifTokenResponse.json();
+  expect((await request.put(gifUpload.upload_url, { data: gif, headers: { "Content-Type": "image/gif" } })).ok()).toBeTruthy();
+  expect((await request.post(`/api/v1/media/${gifUpload.media_id}/complete`, { headers: auth, data: { size: gif.length, sha256: gifChecksum } })).ok()).toBeTruthy();
+  await expect.poll(() => sql(`SELECT count(*) FROM media_variants WHERE media_id=${quote(gifUpload.media_id)} AND variant='source' AND status='ready'`), { timeout: 30000 }).toBe("1");
+  const gifPostResponse = await request.post("/api/v1/posts", {
+    headers: { ...auth, "Idempotency-Key": randomUUID() },
+    data: { community_id: markerId, type: "normal", title: `真实 GIF ${suffix}`, content: "GIF 上传与重载", media_ids: [gifUpload.media_id] },
+  });
+  expect(gifPostResponse.status()).toBe(201);
+  const gifPost = await gifPostResponse.json();
+  expect(sql(`SELECT count(*) FROM media_variants WHERE media_id=${quote(gifUpload.media_id)} AND variant IN ('original','detail','thumb')`)).toBe("0");
+
+  // 投票走真实建帖、投票、重复提交和冲突分支，确认票数持久化。
+  const pollPostResponse = await request.post("/api/v1/posts", {
+    headers: { ...auth, "Idempotency-Key": randomUUID() },
+    data: {
+      community_id: markerId,
+      type: "poll",
+      title: `真实投票 ${suffix}`,
+      content: "投票持久化",
+      poll: { question: "优先验证哪条链路？", options: ["GIF", "投票"], allow_multiple: false },
+    },
+  });
+  expect(pollPostResponse.status()).toBe(201);
+  const pollPost = await pollPostResponse.json();
+  const pollBeforeResponse = await request.get(`/api/v1/posts/${pollPost.id}/poll`, { headers: auth });
+  expect(pollBeforeResponse.ok()).toBeTruthy();
+  const pollBefore = await pollBeforeResponse.json();
+  const selectedOption = pollBefore.options[0].id;
+  expect((await request.put(`/api/v1/polls/${pollBefore.id}/vote`, { headers: auth, data: { option_ids: [selectedOption] } })).ok()).toBeTruthy();
+  const repeatedVote = await request.put(`/api/v1/polls/${pollBefore.id}/vote`, { headers: auth, data: { option_ids: [selectedOption] } });
+  expect(repeatedVote.status()).toBe(200);
+  expect((await repeatedVote.json()).already_voted).toBe(true);
+  const changedVote = await request.put(`/api/v1/polls/${pollBefore.id}/vote`, { headers: auth, data: { option_ids: [pollBefore.options[1].id] } });
+  expect(changedVote.status()).toBe(409);
+  expect(sql(`SELECT vote_count FROM poll_options WHERE id=${quote(selectedOption)}`)).toBe("1");
+
   const photoPath = path.resolve("../assets/images/store/badge.jpg");
   const photo = readFileSync(photoPath);
   const checksum = createHash("sha256").update(photo).digest("hex");
@@ -60,10 +106,21 @@ test("真实论坛旅程：游客、浏览、图片评论、回复定位和原�
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const guestResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/auth/guest") && response.request().method() === "POST");
-  await navigate("/");
+  const missingResponse = await navigate(`/post/journey-missing-${suffix}`);
+  expect(missingResponse?.status()).toBe(404);
+  if (webOrigin) {
+    const legacyResponse = await request.get(new URL(`/posts/${gifPost.id}`, webOrigin).toString(), { maxRedirects: 0 });
+    expect(legacyResponse.status()).toBe(308);
+    expect(legacyResponse.headers().location).toBe(`/post/${gifPost.id}`);
+  }
+  await navigate(`/post/${gifPost.id}`);
+  await expect.poll(() => page.locator(".detail-gallery img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 20000 }).toBeGreaterThan(0);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.locator(".detail-gallery img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 20000 }).toBeGreaterThan(0);
   const guest = await (await guestResponse).json();
   expect(guest.user.account_type).toBe("guest");
   const guestId = guest.user.id;
+  await navigate("/");
   const viewResponse = page.waitForResponse((response) => response.url().endsWith(`/posts/${postId}/view`));
   await page.getByRole("heading", { name: title, exact: true }).first().click();
   expect((await (await viewResponse).json()).recorded).toBe(true);

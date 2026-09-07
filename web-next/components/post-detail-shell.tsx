@@ -137,14 +137,13 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [commentsError, setCommentsError] = useState("");
-  const [totalComments, setTotalComments] = useState(0);
+  const [, setTotalComments] = useState(0);
   const [hasMoreComments, setHasMoreComments] = useState(false);
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [sortOrder, setSortOrder] = useState<"hot" | "asc" | "desc">("asc");
   const [landlordOnly, setLandlordOnly] = useState(false);
 
   const [related, setRelated] = useState<Post[]>([]);
-  const [relatedLoading, setRelatedLoading] = useState(false);
 
   const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
   const [mobileComposerText, setMobileComposerText] = useState("");
@@ -261,7 +260,6 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
   // 3. 异步加载相关推荐（最低优先级，静默容错）
   useEffect(() => {
     let mounted = true;
-    setRelatedLoading(true);
     getFeed({ sort: "hot", limit: 5, accountScope: user?.id })
       .then((feedPage) => {
         if (!mounted) return;
@@ -270,9 +268,6 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       .catch(() => {
         if (!mounted) return;
         setRelated([]);
-      })
-      .finally(() => {
-        if (mounted) setRelatedLoading(false);
       });
 
     return () => {
@@ -605,7 +600,6 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
               post={post}
               comments={comments}
               setComments={setComments}
-              totalComments={totalComments}
               setTotalComments={setTotalComments}
               hasMoreComments={hasMoreComments}
               loadingMoreComments={loadingMoreComments}
@@ -1034,7 +1028,7 @@ function PostArticle({
       )}
 
       {post.type === "poll" && (
-        <PostPoll postId={post.id} user={user} onRequireAuth={onRequireAuth} />
+        <PostPoll postId={post.id} user={user} />
       )}
 
       <div className="detail-stats">
@@ -1086,11 +1080,9 @@ function PostArticle({
 function PostPoll({
   postId,
   user,
-  onRequireAuth,
 }: {
   postId: string;
   user: SessionUser | null;
-  onRequireAuth: () => void;
 }) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -1228,7 +1220,6 @@ function CommentsSection({
   post,
   comments,
   setComments,
-  totalComments,
   setTotalComments,
   hasMoreComments,
   loadingMoreComments,
@@ -1252,7 +1243,6 @@ function CommentsSection({
   post: Post;
   comments: Comment[];
   setComments: React.Dispatch<React.SetStateAction<Comment[]>>;
-  totalComments: number;
   setTotalComments: React.Dispatch<React.SetStateAction<number>>;
   hasMoreComments: boolean;
   loadingMoreComments: boolean;
@@ -1534,11 +1524,11 @@ function CommentsSection({
           onRequireAuth={onRequireAuth}
           onClose={() => setReplyTarget(null)}
           onOpenGallery={onOpenGallery}
-          onReplyCreated={(reply) => {
+          onReplyCreated={() => {
             onRetryComments?.();
             onRefreshPost?.();
           }}
-          onReplyDeleted={(replyId) => {
+          onReplyDeleted={() => {
             onRetryComments?.();
             onRefreshPost?.();
           }}

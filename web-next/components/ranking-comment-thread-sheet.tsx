@@ -47,8 +47,6 @@ export function RankingCommentThreadSheet({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-    // 弹层每次只对应一条根评价，打开时加载一次。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadFirstPage() {

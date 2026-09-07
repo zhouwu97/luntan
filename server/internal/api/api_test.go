@@ -29,6 +29,27 @@ func TestAPIWithoutDatabaseReturns503(t *testing.T) {
 	}
 }
 
+func TestPublicBootstrapReflectsRegistrationPolicyWithoutDatabase(t *testing.T) {
+	t.Setenv("AUTH_REGISTER_REQUIRE_EMAIL_CODE", "false")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/bootstrap", nil)
+	res := httptest.NewRecorder()
+
+	NewHandler(nil).ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("bootstrap status = %d, want 200", res.Code)
+	}
+	for _, expected := range []string{
+		`"guest_enabled":true`,
+		`"registration_enabled":true`,
+		`"email_code_required":false`,
+	} {
+		if !strings.Contains(res.Body.String(), expected) {
+			t.Fatalf("bootstrap body missing %s: %s", expected, res.Body.String())
+		}
+	}
+}
+
 func TestAuthMethodAndBearerValidation(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -43,6 +44,26 @@ func TestMigrationFilesAreOrderedAndPaired(t *testing.T) {
 		}
 		if !foundDown {
 			t.Fatalf("down migration missing for %s", file.Path)
+		}
+	}
+}
+
+func TestUpMigrationsRemainApplicationRollbackCompatible(t *testing.T) {
+	directory := filepath.Join("..", "..", "..", "migrations")
+	files, err := ListUpMigrations(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 全量发布失败时只回滚应用，不自动逆向数据库。禁止在 up migration
+	// 删除或重命名表/列；收缩操作必须放到确认不再回滚旧应用的后续版本。
+	destructive := regexp.MustCompile(`(?im)^\s*(?:DROP\s+TABLE|TRUNCATE\b|ALTER\s+TABLE\b[^;]*(?:DROP\s+COLUMN|RENAME\s+(?:COLUMN|TO)\b))`)
+	for _, file := range files {
+		contents, readErr := os.ReadFile(file.Path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if match := destructive.Find(contents); match != nil {
+			t.Fatalf("up migration %s 包含不兼容应用回滚的收缩操作: %s", filepath.Base(file.Path), strings.TrimSpace(string(match)))
 		}
 	}
 }

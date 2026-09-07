@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { PostDetailShell } from "../../../components/post-detail-shell";
 import { getPublicPost } from "../../../lib/server-post";
 import { publicSiteUrl } from "../../../lib/public-site";
@@ -21,13 +22,20 @@ function excerpt(value: string): string {
 export async function generateMetadata({ params }: PostPageProps): Promise<Metadata> {
   const { id } = await params;
   const postId = decodePostId(id);
-  const post = await getPublicPost(postId);
-  if (!post) {
+  const result = await getPublicPost(postId);
+  if (result.status === "not_found") {
     return {
       title: "帖子不存在 - 圣杯酱",
       robots: { index: false, follow: false },
     };
   }
+  if (result.status === "unavailable") {
+    return {
+      title: "帖子暂时无法加载 - 圣杯酱",
+      robots: { index: false, follow: false },
+    };
+  }
+  const post = result.post;
 
   const canonical = publicSiteUrl(`/post/${encodeURIComponent(post.id)}`);
   const description = excerpt(post.content) || `${post.author.nickname} 发布于 ${post.community.name} 的分享`;
@@ -60,6 +68,8 @@ export async function generateMetadata({ params }: PostPageProps): Promise<Metad
 export default async function PostPage({ params }: PostPageProps) {
   const { id } = await params;
   const postId = decodePostId(id);
-  const initialPost = await getPublicPost(postId);
+  const result = await getPublicPost(postId);
+  if (result.status === "not_found") notFound();
+  const initialPost = result.status === "ok" ? result.post : null;
   return <PostDetailShell id={postId} initialPost={initialPost} />;
 }

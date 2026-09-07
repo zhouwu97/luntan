@@ -1,0 +1,35 @@
+services:
+  migrate:
+    image: ${API_IMAGE_TAG:?API_IMAGE_TAG is required}
+    network_mode: host
+    env_file: .env
+    entrypoint: ["/app/luntan-migrate"]
+    restart: "no"
+
+  api:
+    image: ${API_IMAGE_TAG:?API_IMAGE_TAG is required}
+    container_name: luntan-api
+    network_mode: host
+    env_file: .env
+    environment:
+      HTTP_PORT: "18080"
+    restart: unless-stopped
+
+  worker:
+    image: ${API_IMAGE_TAG:?API_IMAGE_TAG is required}
+    container_name: luntan-worker
+    network_mode: host
+    env_file: .env
+    entrypoint: ["/app/luntan-worker"]
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE_TAG:?WEB_IMAGE_TAG is required}
+    container_name: luntan-web
+    network_mode: host
+    environment:
+      PORT: "3000"
+      HOSTNAME: "127.0.0.1"
+      API_PROXY_TARGET: "http://127.0.0.1:18080"
+      NEXT_TELEMETRY_DISABLED: "1"
+    restart: unless-stopped

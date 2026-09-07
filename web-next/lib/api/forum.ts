@@ -33,6 +33,7 @@ import type {
   PointTransaction,
   MyPointsDetail,
   Poll,
+  PublicBootstrap,
   UserSummary,
 } from "../../types/forum";
 import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
@@ -961,6 +962,19 @@ export async function requestEmailCode(email: string, scene: "login" | "register
     retryAfter: asNumber(payload.retry_after, 60),
     delivery: asString(payload.delivery, "email"),
     devCode: asString(payload.dev_code) || undefined,
+  };
+}
+
+export async function getPublicBootstrap(): Promise<PublicBootstrap> {
+  const payload = asRecord(await apiJson<JsonRecord>("/bootstrap"));
+  const auth = asRecord(payload.auth);
+  return {
+    auth: {
+      guestEnabled: asBoolean(auth.guest_enabled, true),
+      registrationEnabled: asBoolean(auth.registration_enabled, true),
+      // 配置接口不可用或字段缺失时采用更安全的必填策略，避免误导用户。
+      emailCodeRequired: asBoolean(auth.email_code_required, true),
+    },
   };
 }
 

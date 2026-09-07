@@ -182,6 +182,14 @@ export interface EmailCodeChallenge {
   devCode?: string;
 }
 
+export interface PublicBootstrap {
+  auth: {
+    guestEnabled: boolean;
+    registrationEnabled: boolean;
+    emailCodeRequired: boolean;
+  };
+}
+
 export interface AuthSession {
   user: SessionUser;
   accessToken: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { initials } from "../lib/format";
 
 const avatarCache = new Map<string, string>();
@@ -17,10 +17,6 @@ function normalizeAvatarUrl(value?: string): string | undefined {
     return DEFAULT_AVATAR_URL;
   }
   return clean;
-}
-
-function getDeterministicAvatar(key: string): string {
-  return DEFAULT_AVATAR_URL;
 }
 
 export function UserAvatar({
@@ -48,7 +44,7 @@ export function UserAvatar({
     setImgFailed(false);
   }, [cacheKey, normalizedUrl]);
 
-  const fallbackAvatar = useMemo(() => getDeterministicAvatar(cacheKey || "user"), [cacheKey]);
+  const fallbackAvatar = DEFAULT_AVATAR_URL;
   const activeUrl = normalizedUrl || cachedUrl || fallbackAvatar;
   const tone = avatarTones[(Array.from(cacheKey).reduce((sum, char) => sum + char.charCodeAt(0), 0) || 0) % avatarTones.length];
 

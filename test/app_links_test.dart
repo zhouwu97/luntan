@@ -8,7 +8,7 @@ void main() {
     final ranking = Uri.parse(AppLinks.ranking('toy-1'));
 
     expect(post.origin, ranking.origin);
-    expect(post.path, '/posts/post-1');
+    expect(post.path, '/post/post-1');
     expect(ranking.path, '/ranking/toy-1');
   });
 }

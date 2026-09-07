@@ -216,6 +216,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch {
+	case r.Method == http.MethodGet && path == "/api/v1/bootstrap":
+		s.publicBootstrap(w)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/admin/announcements":
 		s.createCommunityAnnouncement(w, r)
 		return
@@ -734,6 +737,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "请求资源不存在"})
 	}
+}
+
+// publicBootstrap 只暴露客户端渲染所需的公开能力开关，禁止把服务端
+// 凭据或原始环境变量透传给浏览器。
+func (s *Server) publicBootstrap(w http.ResponseWriter) {
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"auth": map[string]bool{
+			"guest_enabled":        true,
+			"registration_enabled": true,
+			"email_code_required":  emailCodeRequiredForRegistration(),
+		},
+	})
 }
 
 func isProfileListPath(path string) bool {

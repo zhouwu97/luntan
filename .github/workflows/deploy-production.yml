@@ -50,6 +50,29 @@ jobs:
               core.setFailed('发布提交必须通过 main 分支完整 CI（包含真实通知旅程）。');
             }
 
+      - name: Require staging acceptance for this release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        with:
+          script: |
+            const expected = `staging-acceptance-${process.env.RELEASE_SHA}`;
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner, repo: context.repo.repo,
+              workflow_id: 'deploy-staging.yml', status: 'success', per_page: 100,
+            });
+            let accepted = false;
+            for (const run of data.workflow_runs) {
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner, repo: context.repo.repo, run_id: run.id, per_page: 100,
+              });
+              if (artifacts.data.artifacts.some(artifact => !artifact.expired && artifact.name === expected)) {
+                accepted = true;
+                break;
+              }
+            }
+            if (!accepted) core.setFailed('该 release SHA 尚未通过内部 staging acceptance。');
+
       - name: Validate release SHA and confirmation
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
@@ -92,16 +115,36 @@ jobs:
           ref: ${{ inputs.release_sha }}
           fetch-depth: 1
 
-      - name: Run approved production rollout
+      - name: Configure SSH deployment identity
+        id: ssh
         env:
-          PRODUCTION_DEPLOY_COMMAND: ${{ secrets.PRODUCTION_DEPLOY_COMMAND }}
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+        run: |
+          set -eu
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          install -m 0700 -d "$HOME/.ssh"
+          key_file="$RUNNER_TEMP/production-deploy-key"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$key_file"
+          chmod 0600 "$key_file"
+          echo "key_file=$key_file" >> "$GITHUB_OUTPUT"
+
+      - name: Run versioned production rollout
+        env:
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
           IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
           API_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
           WEB_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-web:${{ inputs.release_sha }}
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -eu
-          test -n "$PRODUCTION_DEPLOY_COMMAND"
+          test -n "$PRODUCTION_SSH_HOST"
+          test -n "$PRODUCTION_SSH_USER"
+          test -f "$SSH_KEY_FILE"
           test -n "$API_IMAGE_TAG"
           test -n "$WEB_IMAGE_TAG"
           test -n "$RELEASE_SHA"
@@ -110,8 +153,21 @@ jobs:
               *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
             esac
           done
-          export IMAGE_TAG API_IMAGE_TAG WEB_IMAGE_TAG RELEASE_SHA
-          sh -c "$PRODUCTION_DEPLOY_COMMAND"
+          ssh_port="${PRODUCTION_SSH_PORT:-22}"
+          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
+          remote_dir=/opt/luntan-production/incoming
+          ssh-keyscan -p "$ssh_port" -H "$PRODUCTION_SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          ssh_opts=(-i "$SSH_KEY_FILE" -p "$ssh_port" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          scp_opts=(-i "$SSH_KEY_FILE" -P "$ssh_port" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          ssh "${ssh_opts[@]}" "$remote" "install -d -m 0700 '$remote_dir' /opt/luntan-production"
+          ssh "${ssh_opts[@]}" "$remote" "test \"\$(id -u)\" = 0"
+          scp "${scp_opts[@]}" deploy/production.compose.yml scripts/deploy-production.sh scripts/rollback-production.sh web-next/deploy/shengbeijiang.com.conf "$remote:$remote_dir/"
+          ssh "${ssh_opts[@]}" "$remote" "install -m 0644 '$remote_dir/production.compose.yml' /opt/luntan-production/production.compose.yml && install -m 0755 '$remote_dir/deploy-production.sh' /opt/luntan-production/deploy-production.sh && install -m 0755 '$remote_dir/rollback-production.sh' /opt/luntan-production/rollback-production.sh && install -m 0644 '$remote_dir/shengbeijiang.com.conf' /etc/nginx/conf.d/shengbeijiang.com.conf && nginx -t && systemctl reload nginx"
+          printf '%s' "$GHCR_TOKEN" | ssh "${ssh_opts[@]}" "$remote" "docker login ghcr.io --username '$GHCR_USER' --password-stdin"
+          printf -v api_image_q '%q' "$API_IMAGE_TAG"
+          printf -v web_image_q '%q' "$WEB_IMAGE_TAG"
+          printf -v release_q '%q' "$RELEASE_SHA"
+          ssh "${ssh_opts[@]}" "$remote" "API_IMAGE_TAG=$api_image_q WEB_IMAGE_TAG=$web_image_q RELEASE_SHA=$release_q /opt/luntan-production/deploy-production.sh"
 
       - name: Verify production rollout versions
         env:
@@ -126,8 +182,11 @@ jobs:
           node <<'NODE'
           const base = process.env.PRODUCTION_BASE_URL.replace(/\/+$/, "");
           const release = process.env.RELEASE_SHA;
+          async function request(path, init = {}) {
+            return fetch(`${base}${path}`, { cache: "no-store", ...init });
+          }
           async function json(path) {
-            const response = await fetch(`${base}${path}`, { cache: "no-store" });
+            const response = await request(path);
             if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
             return response.json();
           }
@@ -139,5 +198,58 @@ jobs:
           if (apiCommit !== release) throw new Error(`API SHA mismatch: ${apiCommit} !== ${release}`);
           if (webCommit !== release) throw new Error(`Web SHA mismatch: ${webCommit} !== ${release}`);
           if (buildCommit !== release) throw new Error(`/__build SHA mismatch: ${buildCommit} !== ${release}`);
-          console.log(`Verified production API/Web rollout at ${release}`);
+
+          for (const path of ["/health", "/ready", "/api/v1/feed/latest?limit=1", "/api/v1/store/products", "/robots.txt", "/sitemap.xml"]) {
+            const response = await request(path);
+            if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
+          }
+
+          const bootstrap = await json("/api/v1/bootstrap");
+          if (bootstrap.auth?.email_code_required !== true) {
+            throw new Error("Production bootstrap must require an email verification code");
+          }
+
+          const home = await request("/");
+          if (!home.ok) throw new Error(`/ returned HTTP ${home.status}`);
+          for (const name of [
+            "strict-transport-security",
+            "x-content-type-options",
+            "referrer-policy",
+            "x-frame-options",
+            "permissions-policy",
+            "content-security-policy-report-only",
+          ]) {
+            if (!home.headers.get(name)) throw new Error(`Missing production security header: ${name}`);
+          }
+
+          const legacy = await request("/posts/production-acceptance-invalid", { redirect: "manual" });
+          if (legacy.status !== 308 || !legacy.headers.get("location")?.endsWith("/post/production-acceptance-invalid")) {
+            throw new Error(`Legacy post route did not return the expected 308 redirect`);
+          }
+          const missingPost = await request(`/post/production-acceptance-${release}`);
+          if (missingPost.status !== 404) {
+            throw new Error(`Missing post returned HTTP ${missingPost.status}, expected 404`);
+          }
+
+          const feed = await json("/api/v1/feed/latest?limit=1");
+          const publicPostId = feed.items?.[0]?.id;
+          if (!publicPostId) throw new Error("Production feed has no public post fixture");
+          const postPage = await request(`/post/${encodeURIComponent(publicPostId)}`);
+          if (!postPage.ok) throw new Error(`Public post page returned HTTP ${postPage.status}`);
+
+          console.log(`Verified production release and core business routes at ${release}`);
           NODE
+
+      - name: Roll back the full production release after a failed gate
+        if: failure()
+        env:
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_KEY_FILE: ${{ steps.ssh.outputs.key_file }}
+        run: |
+          set -eu
+          ssh_port="${PRODUCTION_SSH_PORT:-22}"
+          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
+          ssh -i "$SSH_KEY_FILE" -p "$ssh_port" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$remote" /opt/luntan-production/rollback-production.sh

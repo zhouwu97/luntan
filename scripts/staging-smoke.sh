@@ -10,6 +10,7 @@ DB_OS_USER="${LUNTAN_DB_OS_USER:-postgres}"
 EXPECTED_RELEASE_SHA="${EXPECTED_RELEASE_SHA:-}"
 EXPECTED_MIGRATION_VERSION="${EXPECTED_MIGRATION_VERSION:-}"
 CURL_TIMEOUT_SECONDS="${STAGING_SMOKE_CURL_TIMEOUT_SECONDS:-10}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 fail() {
     printf 'staging smoke failed: %s\n' "$1" >&2
@@ -113,6 +114,7 @@ expect_body_contains "public readiness" "$BASE_URL/ready" '"status":"ready"'
 expect_status "public feed" "$BASE_URL/api/v1/feed/latest?limit=1" 200
 expect_status "store products" "$BASE_URL/api/v1/store/products" 200
 expect_status "release manifest" "$BASE_URL/api/v1/app/releases/latest" 200
+expect_status "public bootstrap" "$BASE_URL/api/v1/bootstrap" 200
 expect_status "admin authentication" "$BASE_URL/api/v1/admin/users" 401
 expect_status_in "metrics protection" "$BASE_URL/metrics" 403 404
 expect_status "legacy media path" "$BASE_URL/media/staging-smoke.invalid" 404
@@ -122,22 +124,8 @@ expect_status "public imported user media" "$BASE_URL/imported-media/user-media/
 [[ -n "$DATABASE_URL" ]] || fail "DATABASE_URL is required for staging smoke"
 command -v psql >/dev/null 2>&1 || fail "psql is required for staging smoke"
 
-pending_backfill="$(query "
-    SELECT count(*)
-    FROM media_assets ma
-    WHERE ma.status = 'ready' AND ma.deleted_at IS NULL AND ma.mime_type LIKE 'image/%'
-      AND (
-        (ma.mime_type = 'image/gif' AND NOT EXISTS (
-          SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'source' AND mv.status = 'ready'
-        ))
-        OR
-        (ma.mime_type <> 'image/gif' AND NOT (
-          EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'original' AND mv.status = 'ready')
-          AND EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'detail' AND mv.status = 'ready')
-          AND EXISTS (SELECT 1 FROM media_variants mv WHERE mv.media_id = ma.id AND mv.variant = 'thumb' AND mv.status = 'ready')
-        ))
-      );
-" )"
+[[ -f "$SCRIPT_DIR/media-variants-health.sql" ]] || fail "media variant health SQL is missing"
+pending_backfill="$(query "$(cat "$SCRIPT_DIR/media-variants-health.sql")")"
 [[ "$pending_backfill" == "0" ]] || fail "pending media variants: $pending_backfill"
 printf 'PASS %-28s pending_backfill=0\n' "media backfill"
 

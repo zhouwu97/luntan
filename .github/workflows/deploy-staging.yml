@@ -101,6 +101,7 @@ jobs:
           cp -R migrations/. ../release/migrations/
           cp -R ../build/web/. ../release/web/
           install -m 0755 ../scripts/staging-smoke.sh ../release/staging-smoke.sh
+          install -m 0644 ../scripts/media-variants-health.sql ../release/media-variants-health.sql
           printf 'commit=%s\nbuild_time=%s\n' "$RELEASE_SHA" "$BUILD_TIME" > ../release/release-metadata.txt
           test -x ../release/luntan-api
           test -x ../release/luntan-worker
@@ -183,3 +184,16 @@ jobs:
           printf -v quoted_base '%q' "$STAGING_BASE_URL"
           ssh "${ssh_opts[@]}" "$remote" \
             "chmod 0755 '$remote_deploy' '$remote_rollback' && install -m 0755 '$remote_rollback' /opt/luntan-qa/staging/rollback-staging.sh && STAGING_BASE_URL=$quoted_base LUNTAN_STAGING_DIR=/opt/luntan-qa bash '$remote_deploy' '$remote_archive' '$RELEASE_SHA' && rm -f '$remote_deploy' '$remote_rollback'"
+
+      - name: Record successful staging acceptance
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: printf 'release_sha=%s\n' "$RELEASE_SHA" > "staging-acceptance-${RELEASE_SHA}.txt"
+
+      - name: Upload staging acceptance attestation
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-acceptance-${{ inputs.release_sha }}
+          path: staging-acceptance-${{ inputs.release_sha }}.txt
+          if-no-files-found: error
+          retention-days: 30

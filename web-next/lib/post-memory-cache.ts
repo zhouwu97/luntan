@@ -73,8 +73,7 @@ export function fetchPost(postId: string, accountScope?: string): Promise<Post> 
   if (existing) return existing;
 
   const requestGeneration = scopeGeneration(accountScope);
-  let request: Promise<Post>;
-  request = getPost(postId)
+  const request = getPost(postId)
     .then((post) => {
       if (scopeGeneration(accountScope) === requestGeneration) {
         setPostSnapshot(post, accountScope);

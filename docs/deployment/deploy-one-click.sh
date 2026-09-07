@@ -1,4 +1,6 @@
 #!/bin/bash
+echo "该脚本已废弃：生产发布只能使用 deploy-production workflow 与仓库内版本化脚本。" >&2
+exit 1
 # 一键部署脚本 - 在服务器上执行
 # 使用方法: bash deploy.sh
 

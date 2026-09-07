@@ -121,9 +121,19 @@ test.describe("GIF 媒体 Web 回归", () => {
     await page.route("**/api/v1/media-file/media-gif-comment/source", (route) => route.fulfill({ contentType: "image/gif", body: gifBytes }));
 
     await page.goto("/post/post-gif-comment");
-    await page.getByPlaceholder("写下你的评价、拆箱感受或回复…").fill("评论 GIF");
-    await page.locator(".comment-composer input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });
-    await page.getByRole("button", { name: "发布回复" }).click();
+    const desktopComposer = page.getByPlaceholder("写下你的评价、拆箱感受或回复…");
+    const mobileComposer = page.getByPlaceholder("说点什么，参与热烈讨论...");
+    await expect.poll(async () => (await desktopComposer.isVisible()) || (await mobileComposer.isVisible())).toBe(true);
+    if (await desktopComposer.isVisible()) {
+      await desktopComposer.fill("评论 GIF");
+      await page.locator(".comment-composer input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });
+      await page.getByRole("button", { name: "发布回复" }).click();
+    } else {
+      await mobileComposer.click();
+      await page.getByPlaceholder("友善地写下你的评价或想法…").fill("评论 GIF");
+      await page.locator(".composer-sheet input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });
+      await page.getByRole("button", { name: "发送", exact: true }).click();
+    }
 
     await expect.poll(() => commentPayload?.media_ids).toEqual(["media-gif-comment"]);
     await expect.poll(() => uploadPayload?.mime_type).toBe("image/gif");

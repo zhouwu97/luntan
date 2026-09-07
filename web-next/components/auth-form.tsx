@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
 import { useSession } from "./session-provider";
 import { formatError } from "../lib/format";
-import { requestEmailCode } from "../lib/api/forum";
+import { getPublicBootstrap, requestEmailCode } from "../lib/api/forum";
 
 type AuthMode = "login" | "register";
 type LoginMethod = "password" | "code";
@@ -45,6 +45,7 @@ export function AuthForm() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [permissionOpen, setPermissionOpen] = useState(false);
+  const [emailCodeRequired, setEmailCodeRequired] = useState(true);
   const destination = safeNext(searchParams.get("next"));
 
   useEffect(() => {
@@ -58,6 +59,20 @@ export function AuthForm() {
       router.replace(destination);
     }
   }, [destination, router, user]);
+
+  useEffect(() => {
+    let active = true;
+    void getPublicBootstrap()
+      .then((bootstrap) => {
+        if (active) setEmailCodeRequired(bootstrap.auth.emailCodeRequired);
+      })
+      .catch(() => {
+        // 网络异常时保持验证码必填，不能把未知策略误展示为免验证注册。
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function clearFeedback() {
     setError("");
@@ -120,6 +135,10 @@ export function AuthForm() {
       }
       if (password !== confirmPassword) {
         setError("两次输入的密码不一致");
+        return;
+      }
+      if (emailCodeRequired && !code.trim()) {
+        setError("请填写邮箱验证码");
         return;
       }
     } else if (loginMethod === "code") {
@@ -245,7 +264,7 @@ export function AuthForm() {
         )}
 
         {/* 模式切换 Tabs（登录 / 注册） */}
-        <div className="auth-mode-tabs" role="tablist" aria-label="登录或注册">
+        <div className="auth-mode-tabs" role="group" aria-label="登录或注册">
           <button
             type="button"
             className={mode === "login" ? "active" : ""}
@@ -264,7 +283,7 @@ export function AuthForm() {
 
         {/* 登录方式切换 Tabs（密码登录 / 验证码登录） */}
         {mode === "login" && (
-          <div className="auth-method-tabs" role="tablist" aria-label="登录方式">
+          <div className="auth-method-tabs" role="group" aria-label="登录方式">
             <button
               type="button"
               className={loginMethod === "password" ? "active" : ""}
@@ -468,9 +487,11 @@ export function AuthForm() {
               <div className="auth-field-group">
                 <div className="field-label-row">
                   <label className="field-label" htmlFor="auth-reg-code">
-                    邮箱验证码（选填）
+                    {emailCodeRequired ? "邮箱验证码" : "邮箱验证码（选填）"}
                   </label>
-                  <span className="field-hint">当前支持免验证码直接注册</span>
+                  <span className="field-hint">
+                    {emailCodeRequired ? "请先获取验证码" : "当前支持免验证码直接注册"}
+                  </span>
                 </div>
                 <div className="code-field">
                   <Icon name="mail" size={18} />
@@ -479,10 +500,11 @@ export function AuthForm() {
                     className="text-input"
                     value={code}
                     onChange={(event) => setCode(event.target.value)}
-                    placeholder="若收到验证码可填，无则留空"
+                    placeholder={emailCodeRequired ? "输入 6 位验证码" : "若收到验证码可填，无则留空"}
                     inputMode="numeric"
                     maxLength={6}
                     autoComplete="one-time-code"
+                    required={emailCodeRequired}
                   />
                   <button
                     type="button"

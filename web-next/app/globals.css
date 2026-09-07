@@ -482,10 +482,10 @@ img { display: block; max-width: 100%; }
 .dev-code-hint strong { letter-spacing: .08em; }
 .primary-submit { width: 100%; height: 46px; margin-top: 10px; border-radius: 12px; font-size: 14px; font-weight: 750; }
 .auth-divider { position: relative; margin: 23px 0 16px; border-top: 1px solid var(--line); text-align: center; }
-.auth-divider span { position: relative; top: -9px; padding: 0 10px; color: var(--text-faint); background: #fff; font-size: 11px; }
+.auth-divider span { position: relative; top: -9px; padding: 0 10px; color: #64748b; background: #fff; font-size: 11px; }
 .guest-button { width: 100%; height: 42px; color: #52718d; background: #f4f8fc; border: 1px solid #e1ebf4; border-radius: 11px; font-size: 13px; font-weight: 700; }
 .guest-button:hover:not(:disabled) { color: var(--primary-deep); background: #edf6ff; }
-.auth-footnote { margin: 19px 0 0; color: var(--text-faint); text-align: center; font-size: 11px; line-height: 1.6; }
+.auth-footnote { margin: 19px 0 0; color: #64748b; text-align: center; font-size: 11px; line-height: 1.6; }
 .coming-page { min-height: 420px; padding: 72px 20px; display: grid; justify-items: center; align-content: center; text-align: center; background: #fff; border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); }
 .coming-page h1 { margin: 20px 0 8px; font-size: 26px; letter-spacing: -.04em; }
 .coming-page p { margin: 0; color: var(--text-soft); font-size: 14px; }
@@ -904,7 +904,7 @@ img { display: block; max-width: 100%; }
   border-radius: 12px;
 }
 .auth-mode-tabs button {
-  color: #64748b;
+  color: #475569;
   background: transparent;
   border: 0;
   border-radius: 9px;
@@ -927,7 +927,7 @@ img { display: block; max-width: 100%; }
 }
 .auth-method-tabs button {
   padding: 6px 14px;
-  color: #64748b;
+  color: #475569;
   background: transparent;
   border: 1px solid #e2e8f0;
   border-radius: 20px;
@@ -966,7 +966,7 @@ img { display: block; max-width: 100%; }
 .auth-forgot {
   align-self: flex-end;
   margin-top: 5px;
-  color: #3b82f6;
+  color: #1d4ed8;
   background: transparent;
   border: 0;
   font-size: 11px;
@@ -1072,7 +1072,7 @@ img { display: block; max-width: 100%; }
     align-items: center;
     justify-content: space-between;
     margin-bottom: 12px;
-    color: #64748b;
+    color: #475569;
   }
   .auth-mobile-top button {
     background: transparent;

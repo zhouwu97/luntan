@@ -37,7 +37,7 @@ async function mockPost(page: Page) {
 }
 
 async function dispatchImage(page: Page, selector: string, eventName: "drop" | "paste", fileName: string) {
-  await page.locator(selector).evaluate((element, input) => {
+  return page.locator(selector).evaluate((element, input) => {
     const bytes = Uint8Array.from(atob(input.base64), (char) => char.charCodeAt(0));
     const transfer = new DataTransfer();
     transfer.items.add(new File([bytes], input.fileName, { type: "image/png" }));
@@ -45,6 +45,7 @@ async function dispatchImage(page: Page, selector: string, eventName: "drop" | "
       ? new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer })
       : new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer });
     element.dispatchEvent(event);
+    return event.defaultPrevented;
   }, { base64: pngBase64, fileName, eventName });
 }
 
@@ -127,6 +128,13 @@ test("楼中楼 Emoji 网格不会被发送按钮样式撑出面板", async ({ p
   expect(stickerPanelBounds!.y).toBeGreaterThanOrEqual(modalBounds!.y);
   expect(stickerPanelBounds!.height).toBeLessThanOrEqual(210);
   expect(Math.abs((stickerTabBounds!.y + stickerTabBounds!.height / 2) - (groupBounds!.y + groupBounds!.height / 2))).toBeLessThan(3);
+
+  await modal.locator("header h2").click();
+  await expect(panel).toBeHidden();
+  await modal.getByRole("button", { name: "添加表情" }).click();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(modal.getByRole("button", { name: "添加表情" })).toBeFocused();
 });
 
 test("Emoji 插入当前光标而不是固定追加到末尾", async ({ page }) => {
@@ -166,6 +174,92 @@ test("表情包发送 sticker_id 并在新评论中正确渲染", async ({ page 
   await expect(page.locator("#comment-sticker-comment .comment-sticker")).toHaveAttribute("src", "/stickers/aad70d8d064f9eb79286c1393490716c.png");
 });
 
+test("楼中楼表情包发送 sticker_id 并在回复列表中渲染", async ({ page }) => {
+  let payload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/comments/root-comment/replies*", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    payload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 201, json: {
+      id: "reply-sticker",
+      post_id: "post-composer",
+      root_id: "root-comment",
+      parent_id: "root-comment",
+      content: "",
+      attachments: [{ id: "aad70d8d064f9eb79286c1393490716c", type: "sticker", sticker_id: "aad70d8d064f9eb79286c1393490716c" }],
+      author: { id: "composer-user", nickname: "输入测试用户" },
+      created_at: new Date().toISOString(),
+      viewer_state: {},
+    } });
+  });
+
+  await page.goto("/post/post-composer");
+  await page.locator("#comment-root-comment .nested").click();
+  const modal = page.locator(".comment-reply-modal");
+  await modal.getByRole("button", { name: "添加表情" }).click();
+  await modal.getByRole("button", { name: "表情包", exact: true }).click();
+  await modal.getByRole("button", { name: "选择表情包：亲亲" }).click();
+  await modal.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => payload).toMatchObject({ content: "", sticker_id: "aad70d8d064f9eb79286c1393490716c" });
+  await expect(page.locator("#comment-reply-sticker .comment-sticker")).toHaveAttribute("src", "/stickers/aad70d8d064f9eb79286c1393490716c.png");
+});
+
+test("移动端常驻 Composer 支持表情包发送", async ({ page }) => {
+  let payload: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/posts/post-composer/comments", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    payload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 201, json: {
+      id: "mobile-sticker-comment",
+      post_id: "post-composer",
+      content: "",
+      attachments: [{ id: "aad70d8d064f9eb79286c1393490716c", type: "sticker", sticker_id: "aad70d8d064f9eb79286c1393490716c" }],
+      author: { id: "composer-user", nickname: "输入测试用户" },
+      created_at: new Date().toISOString(),
+      viewer_state: {},
+    } });
+  });
+
+  await page.setViewportSize({ width: 435, height: 850 });
+  await page.goto("/post/post-composer");
+  const composer = page.locator(".mobile-comment-composer");
+  await composer.getByRole("button", { name: "添加表情" }).click();
+  await composer.getByRole("button", { name: "表情包", exact: true }).click();
+  await composer.getByRole("button", { name: "选择表情包：亲亲" }).click();
+  await composer.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => payload).toMatchObject({ content: "", sticker_id: "aad70d8d064f9eb79286c1393490716c" });
+  await expect(page.locator("#comment-mobile-sticker-comment .comment-sticker")).toHaveAttribute("src", "/stickers/aad70d8d064f9eb79286c1393490716c.png");
+});
+
+test("已选表情包时拖图会阻止导航并提示互斥", async ({ page }) => {
+  await page.goto("/post/post-composer");
+  const composer = page.locator(".comment-composer");
+  await composer.getByRole("button", { name: "添加表情" }).click();
+  await composer.getByRole("button", { name: "表情包", exact: true }).click();
+  await composer.getByRole("button", { name: "选择表情包：亲亲" }).click();
+
+  await dispatchImage(page, ".comment-composer", "drop", "disabled-drop.png");
+  await expect(page).toHaveURL(/\/post\/post-composer$/);
+  await expect(page.getByText("图片与表情包不能同时发送")).toBeVisible();
+  await expect(composer.locator("img[src^='blob:']")).toHaveCount(0);
+});
+
+test("已选表情包时粘贴图片不吞掉现有文字", async ({ page }) => {
+  await page.goto("/post/post-composer");
+  const composer = page.locator(".comment-composer");
+  const textarea = composer.locator("textarea");
+  await textarea.fill("保留这段文字");
+  await composer.getByRole("button", { name: "添加表情" }).click();
+  await composer.getByRole("button", { name: "表情包", exact: true }).click();
+  await composer.getByRole("button", { name: "选择表情包：亲亲" }).click();
+
+  const prevented = await dispatchImage(page, ".comment-composer textarea", "paste", "disabled-paste.png");
+  await expect(textarea).toHaveValue("保留这段文字");
+  await expect(composer.locator("img[src^='blob:']")).toHaveCount(0);
+  expect(prevented).toBe(false);
+});
+
 test("435px 手机表情面板不发生横向溢出", async ({ page }) => {
   await page.setViewportSize({ width: 435, height: 850 });
   await page.goto("/post/post-composer");
@@ -183,4 +277,48 @@ test("435px 手机表情面板不发生横向溢出", async ({ page }) => {
   expect(bounds).toBeTruthy();
   expect(bounds!.x).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(435);
+});
+
+test("移动端动态 Composer 高度为图片预览留出底部空间", async ({ page }) => {
+  await page.setViewportSize({ width: 435, height: 850 });
+  await page.goto("/post/post-composer");
+  const composer = page.locator(".mobile-comment-composer");
+  const before = await composer.boundingBox();
+  await composer.locator("input[type=file]").setInputFiles(
+    Array.from({ length: 9 }, (_, index) => ({
+      name: `mobile-${index}.png`,
+      mimeType: "image/png",
+      buffer: Buffer.from(pngBase64, "base64"),
+    })),
+  );
+  await expect(composer.locator("img[src^='blob:']")).toHaveCount(9);
+  const after = await composer.boundingBox();
+  const content = await page.locator(".post-detail-mobile-content").evaluate((element) => ({
+    paddingBottom: getComputedStyle(element).paddingBottom,
+    composerHeight: getComputedStyle(element).getPropertyValue("--mobile-comment-composer-height"),
+  }));
+
+  expect(before && after).toBeTruthy();
+  expect(after!.height).toBeGreaterThan(before!.height);
+  expect(parseFloat(content.composerHeight)).toBeGreaterThan(before!.height);
+  expect(parseFloat(content.paddingBottom)).toBeGreaterThan(after!.height - 1);
+});
+
+test("低高度移动端表情面板保持在视口内且表情包可滚动", async ({ page }) => {
+  for (const viewport of [{ width: 390, height: 400 }, { width: 435, height: 420 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/post/post-composer");
+    const composer = page.locator(".mobile-comment-composer");
+    await composer.getByRole("button", { name: "添加表情" }).click();
+    const panel = composer.locator(".expression-panel");
+    await expect(panel).toBeVisible();
+    const bounds = await panel.boundingBox();
+    expect(bounds).toBeTruthy();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+
+    await panel.getByRole("button", { name: "表情包", exact: true }).click();
+    await expect.poll(() => panel.locator(".sticker-grid").evaluate((element) => element.scrollHeight >= element.clientHeight)).toBe(true);
+  }
 });

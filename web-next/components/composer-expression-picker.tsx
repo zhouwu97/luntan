@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { stickerGroups, stickerUrl } from "../lib/sticker-catalog";
 
 const emojis = ["😀", "😂", "😭", "🥹", "😊", "😍", "🥳", "🤔", "😮", "😡", "👍", "👎", "👏", "🙏", "💪", "❤️", "🔥", "🎉", "✨", "👀", "🤝", "✅", "❌", "💯"];
@@ -17,11 +17,34 @@ export function ComposerExpressionPicker({
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"emoji" | "sticker">("emoji");
   const [groupIndex, setGroupIndex] = useState(0);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const group = stickerGroups[groupIndex] || stickerGroups[0];
 
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!pickerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
   return (
-    <div className="expression-picker-wrap">
-      <button type="button" className="expression-trigger" aria-label="添加表情" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+    <div ref={pickerRef} className="expression-picker-wrap">
+      <button ref={triggerRef} type="button" className="expression-trigger" aria-label="添加表情" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         ☺
       </button>
       {open && (

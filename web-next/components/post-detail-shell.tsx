@@ -105,15 +105,40 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
 
   const [mobileComposerText, setMobileComposerText] = useState("");
   const mobileComposerRef = useRef<HTMLTextAreaElement>(null);
+  const mobileComposerContainerRef = useRef<HTMLDivElement>(null);
+  const mobileContentRef = useRef<HTMLElement>(null);
   const [mobileStickerId, setMobileStickerId] = useState("");
   const mobilePreviews = useLocalImagePreviews(9);
   const [sendingComment, setSendingComment] = useState(false);
   const [mobileUploadMessage, setMobileUploadMessage] = useState("");
+  const handleMobileUnavailableImageUpload = useCallback(() => {
+    setMobileUploadMessage(mobileStickerId ? "图片与表情包不能同时发送" : "当前账号暂不可上传图片");
+  }, [mobileStickerId]);
   const mobileImageInput = useComposerImageInput({
     previews: mobilePreviews,
     onMessage: setMobileUploadMessage,
     enabled: canUploadMedia && !mobileStickerId,
+    onDisabled: handleMobileUnavailableImageUpload,
   });
+
+  useEffect(() => {
+    const composer = mobileComposerContainerRef.current;
+    const content = mobileContentRef.current;
+    if (!composer || !content || typeof ResizeObserver === "undefined") return;
+
+    const updateComposerHeight = () => {
+      const height = composer.getBoundingClientRect().height;
+      if (height > 0) content.style.setProperty("--mobile-comment-composer-height", `${height}px`);
+    };
+
+    updateComposerHeight();
+    const observer = new ResizeObserver(updateComposerHeight);
+    observer.observe(composer);
+    return () => {
+      observer.disconnect();
+      content.style.removeProperty("--mobile-comment-composer-height");
+    };
+  }, [post?.id, postLoading]);
   const [galleryImages, setGalleryImages] = useState<GalleryImage[] | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [reportTarget, setReportTarget] = useState<{ type: "post" | "comment"; id: string; title?: string } | null>(null);
@@ -533,7 +558,7 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
         </button>
       </header>
 
-      <main className="page-frame post-detail-page-frame">
+      <main ref={mobileContentRef} className="page-frame post-detail-page-frame post-detail-mobile-content">
         <div className="detail-grid">
           <section className="detail-main">
             <Link href="/" className="back-link detail-back desktop-only">
@@ -589,7 +614,7 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       </main>
 
       {/* 移动端与 App 保持一致：评论栏始终固定在页面底部。 */}
-      <div className="composer mobile-only mobile-comment-composer">
+      <div ref={mobileComposerContainerRef} className="composer mobile-only mobile-comment-composer">
         <form className="mobile-reply-form" onSubmit={handleMobileSubmitComment}>
           <div className="mobile-reply-extras">
               {mobilePreviews.items.length > 0 && (
@@ -1172,15 +1197,23 @@ function CommentsSection({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
-  const imageInput = useComposerImageInput({ previews, onMessage: setMessage, enabled: canUploadMedia && !stickerId });
-
-  function handleUnavailableImageUpload() {
+  const handleUnavailableImageUpload = useCallback(() => {
+    if (stickerId) {
+      setMessage("图片与表情包不能同时发送");
+      return;
+    }
     if (!user || user.accountType === "guest") {
       onRequireAuth();
       return;
     }
     setMessage("当前账号暂不可上传图片");
-  }
+  }, [onRequireAuth, stickerId, user]);
+  const imageInput = useComposerImageInput({
+    previews,
+    onMessage: setMessage,
+    enabled: canUploadMedia && !stickerId,
+    onDisabled: handleUnavailableImageUpload,
+  });
 
   function handleChooseFiles(e: ChangeEvent<HTMLInputElement>) {
     imageInput.appendFiles(Array.from(e.target.files || []));
@@ -1840,15 +1873,23 @@ function CommentReplyModal({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const canUploadMedia = Boolean(user && user.accountType !== "guest" && user.capabilities?.can_upload_media !== false);
-  const imageInput = useComposerImageInput({ previews, onMessage: setMessage, enabled: canUploadMedia && !stickerId });
-
-  function handleUnavailableImageUpload() {
+  const handleUnavailableImageUpload = useCallback(() => {
+    if (stickerId) {
+      setMessage("图片与表情包不能同时发送");
+      return;
+    }
     if (!user || user.accountType === "guest") {
       onRequireAuth();
       return;
     }
     setMessage("当前账号暂不可上传图片");
-  }
+  }, [onRequireAuth, stickerId, user]);
+  const imageInput = useComposerImageInput({
+    previews,
+    onMessage: setMessage,
+    enabled: canUploadMedia && !stickerId,
+    onDisabled: handleUnavailableImageUpload,
+  });
 
   useEffect(() => {
     let active = true;

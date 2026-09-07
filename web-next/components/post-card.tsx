@@ -20,6 +20,7 @@ import {
 } from "../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../lib/format";
 import { mediaCandidates } from "../lib/media-url";
+import { copyText } from "../lib/clipboard";
 import { prefetchPost, setPostSnapshot } from "../lib/post-memory-cache";
 
 const ImageGalleryModal = dynamic(() => import("./image-gallery-modal").then((module) => module.ImageGalleryModal), { ssr: false });
@@ -115,14 +116,11 @@ export function PostCard({
     }
   }
 
-  function handleCopyLink(event: MouseEvent) {
+  async function handleCopyLink(event: MouseEvent) {
     stop(event);
     setMenuOpen(false);
-    if (typeof window !== "undefined" && navigator.clipboard) {
-      const url = `${window.location.origin}/post/${encodeURIComponent(post.id)}`;
-      void navigator.clipboard.writeText(url);
-      showToast("已复制帖子链接");
-    }
+    const url = `${window.location.origin}/post/${encodeURIComponent(post.id)}`;
+    showToast(await copyText(url) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
   }
 
   function handleReport(event: MouseEvent) {

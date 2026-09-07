@@ -19,6 +19,7 @@ import {
   setRankingToyWant,
 } from "../lib/api/forum";
 import { writeRankingToyCache } from "../lib/ranking-client-cache";
+import { copyText } from "../lib/clipboard";
 import type { RankingToyComment, RankingToyDetail } from "../types/forum";
 
 function scoreText(score: number) {
@@ -275,7 +276,7 @@ export function RankingDetailShell({ id }: { id: string }) {
     if (navigator.share) {
       await navigator.share({ title: detail?.name || "榜单商品", url }).catch(() => undefined);
     } else {
-      await navigator.clipboard?.writeText(url);
+      await copyText(url);
     }
   }
 

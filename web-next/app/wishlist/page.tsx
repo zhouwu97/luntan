@@ -8,6 +8,7 @@ import { MediaImage } from "../../components/media-image";
 import { getRankingToy } from "../../lib/api/forum";
 import { formatError } from "../../lib/format";
 import { readRankingToyCache, writeRankingToyCache } from "../../lib/ranking-client-cache";
+import { copyText } from "../../lib/clipboard";
 import type { RankingToy } from "../../types/forum";
 
 export default function WishlistPage() {
@@ -43,8 +44,7 @@ export default function WishlistPage() {
 
   async function copyCoupon() {
     if (!item?.couponUrl) return;
-    await navigator.clipboard?.writeText(item.couponUrl);
-    setNotice("优惠券链接已复制");
+    setNotice(await copyText(item.couponUrl) ? "优惠券链接已复制" : "复制失败，请手动复制上方链接");
   }
 
   return (

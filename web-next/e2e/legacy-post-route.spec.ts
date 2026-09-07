@@ -8,3 +8,10 @@ test("旧帖子链接永久跳转到当前详情路由", async ({ request }) => 
   expect(response.status()).toBe(308);
   expect(response.headers().location).toBe("/post/post-legacy-1");
 });
+
+test("旧下载页地址永久跳转到当前下载路由", async ({ request }) => {
+  const response = await request.get("/download.html", { maxRedirects: 0 });
+
+  expect(response.status()).toBe(308);
+  expect(response.headers().location).toBe("/download");
+});

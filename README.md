@@ -105,7 +105,7 @@ flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
 
 分享链接使用 `WEB_BASE_URL` 生成真实 Web/Universal Link；未配置时默认使用
-`https://luntan.app`。发布环境请替换为已配置域名：
+`https://shengbeijiang.com`。发布环境仍建议显式注入已配置域名：
 
 ```bash
 flutter build apk --release --dart-define=WEB_BASE_URL=https://forum.example.com
@@ -227,7 +227,7 @@ OUTPUT_STANDALONE=true npm run build
 | `AUTH_CODE_HASH_SECRET` | 验证码 HMAC-SHA256 密钥；生产环境至少 32 字节 | 服务端 |
 | `ALLOW_DEV_AUTH_CODE` | 仅 development/test 的本地联调开关，默认关闭；生产/QA/staging 禁止开启 | 服务端 |
 | `API_BASE_URL` | 客户端 API 地址（编译期 dart-define），默认 `https://shengbeijiang.com` | 客户端 |
-| `WEB_BASE_URL` | 分享链接域名，默认 `https://luntan.app` | 客户端 |
+| `WEB_BASE_URL` | 分享链接域名，默认 `https://shengbeijiang.com` | 客户端 |
 | `MEDIA_STORAGE_DIR` | 本地媒体目录兜底（dev/QA），生产使用外部对象存储 | 服务端 |
 | `OBJECT_STORAGE_PUBLIC_BASE_URL` | ranking/imported 等明确公开资源的访问前缀；不得公开 `media/` 源图 | 服务端 |
 | `MEDIA_DELIVERY_MODE` | 媒体分发模式：`direct`（对象存储公开直链，要求 `OBJECT_STORAGE_PUBLIC_BASE_URL`）或 `gateway`（受控媒体网关，要求 `STORAGE_INTERNAL_BASE_URL` 且禁止 `OBJECT_STORAGE_PUBLIC_BASE_URL`）；production 必须显式指定，未知值拒绝启动 | 服务端 |

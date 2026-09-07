@@ -5,11 +5,11 @@ class AppLinks {
   static Uri get webBase {
     const configured = String.fromEnvironment(
       'WEB_BASE_URL',
-      defaultValue: 'https://luntan.app',
+      defaultValue: 'https://shengbeijiang.com',
     );
     final parsed = Uri.tryParse(configured.trim());
     if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) {
-      return Uri.parse('https://luntan.app/');
+      return Uri.parse('https://shengbeijiang.com/');
     }
     final path = parsed.path.endsWith('/') ? parsed.path : '${parsed.path}/';
     return parsed.replace(path: path, query: '', fragment: '');
@@ -22,7 +22,7 @@ class AppLinks {
       _resolve('ranking/${Uri.encodeComponent(toyId)}');
 
   /// 官网下载页。Web 与原生端都通过这个入口获取同一份稳定版信息。
-  static String get downloadPage => _resolve('download.html');
+  static String get downloadPage => _resolve('download');
 
   static String _resolve(String path) =>
       webBase.resolve(Uri(path: path).toString()).toString();

@@ -12,6 +12,7 @@ import { useToast } from "./toast-context";
 import { getCommunity, getFeed } from "../lib/api/forum";
 import { readFeedCacheSnapshot, writeFeedCache } from "../lib/feed-cache";
 import { relativeTime } from "../lib/format";
+import { copyText } from "../lib/clipboard";
 import type { Community, Post } from "../types/forum";
 
 function normalizeSort(value: string | null): FeedSort {
@@ -139,10 +140,9 @@ export function CommunityShell({ communityId }: { communityId: string }) {
           type="button"
           aria-label="更多操作"
           onClick={() => {
-            if (typeof navigator !== "undefined" && navigator.clipboard) {
-              void navigator.clipboard.writeText(window.location.href);
-              showToast("已复制板块链接");
-            }
+            void copyText(window.location.href).then((copied) => {
+              showToast(copied ? "已复制板块链接" : "复制失败，请手动复制浏览器地址");
+            });
           }}
         >
           <Icon name="more" size={19} />

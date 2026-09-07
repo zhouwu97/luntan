@@ -40,6 +40,11 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: "/download.html",
+        destination: "/download",
+        permanent: true,
+      },
+      {
         source: "/auth",
         destination: "/login",
         permanent: false,

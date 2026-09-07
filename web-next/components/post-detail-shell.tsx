@@ -13,6 +13,7 @@ import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import type { GalleryImage } from "./image-gallery-modal";
 import { mediaCandidates } from "../lib/media-url";
+import { copyText } from "../lib/clipboard";
 import { fetchPost, getPostSnapshot, setPostSnapshot } from "../lib/post-memory-cache";
 import {
   createComment,
@@ -487,11 +488,8 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
     }
   }
 
-  function handleShareLink() {
-    if (typeof window !== "undefined" && navigator.clipboard) {
-      void navigator.clipboard.writeText(window.location.href);
-      showToast("已复制帖子链接");
-    }
+  async function handleShareLink() {
+    showToast(await copyText(window.location.href) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
   }
 
   if (postLoading && !post) {
@@ -849,12 +847,9 @@ function PostArticle({
   const [isRecommended, setIsRecommended] = useState(post.isRecommended === true);
   const [isHotSuppressed, setIsHotSuppressed] = useState(false);
 
-  function handleCopyLink() {
+  async function handleCopyLink() {
     setMenuOpen(false);
-    if (typeof window !== "undefined" && navigator.clipboard) {
-      void navigator.clipboard.writeText(window.location.href);
-      showToast("已复制帖子链接");
-    }
+    showToast(await copyText(window.location.href) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
   }
 
   async function handleToggleRecommendation() {

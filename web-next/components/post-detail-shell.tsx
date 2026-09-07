@@ -1767,25 +1767,52 @@ function CommentRow({
               onReply();
             }}
           >
-            {previewReplies.map((reply) => (
-              <div className="nested-reply-line" key={reply.id}>
-                <UserAvatar
-                  userId={reply.author.id}
-                  name={reply.author.nickname}
-                  url={reply.author.avatarUrl}
-                  size="small"
-                />
-                <div className="nested-reply-content">
-                  <div className="nested-reply-author">
-                    <span className="nested-name">{reply.author.nickname}</span>
-                    <span className="nested-reply-level">Lv.{reply.author.level || 1}</span>
-                  </div>
-                  <div className={reply.publicationStatus === "deleted" ? "deleted" : undefined}>
-                    {reply.publicationStatus === "deleted" ? "该回复已删除" : reply.content}
+            {previewReplies.map((reply) => {
+              const isReplyDeleted = reply.publicationStatus === "deleted";
+              const replyImages: GalleryImage[] = (isReplyDeleted ? [] : reply.media || []).map((item) => ({
+                url: item.detailUrl || item.url || item.originalUrl || "",
+                alt: item.altText || "回复配图",
+                detailUrl: item.detailUrl,
+                originalUrl: item.originalUrl || item.url,
+                thumbUrl: item.thumbUrl,
+                sources: mediaCandidates(item, "detail"),
+              }));
+
+              return (
+                <div className="nested-reply-line" key={reply.id}>
+                  <UserAvatar
+                    userId={reply.author.id}
+                    name={reply.author.nickname}
+                    url={reply.author.avatarUrl}
+                    size="small"
+                  />
+                  <div className="nested-reply-content">
+                    <div className="nested-reply-author">
+                      <span className="nested-name">{reply.author.nickname}</span>
+                      <span className="nested-reply-level">Lv.{reply.author.level || 1}</span>
+                    </div>
+                    <div className={isReplyDeleted ? "deleted" : undefined}>
+                      {isReplyDeleted ? "该回复已删除" : reply.content}
+                    </div>
+                    {!isReplyDeleted && reply.media && reply.media.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                        {reply.media.map((asset, idx) => (
+                          <CommentMediaThumbnail
+                            key={asset.id || idx}
+                            asset={asset}
+                            alt={asset.altText || `回复图片 ${idx + 1}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenGallery(replyImages, idx);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {hiddenReplyCount > 0 && (
               <div className="more-nested">展开其余 {hiddenReplyCount} 条回复 ›</div>
             )}

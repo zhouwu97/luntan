@@ -34,7 +34,16 @@ test("楼中楼竖图使用可辨识的完整预览而不是裁切小方块", as
     author,
     content: "带竖图的回复线程",
     reply_count: 3,
-    reply_preview: [{ id: "reply-preview", post_id: "post-reply-media", root_id: "reply-root", parent_id: "reply-root", author, content: "预览回复", created_at: createdAt }],
+    reply_preview: [{
+      id: "reply-preview",
+      post_id: "post-reply-media",
+      root_id: "reply-root",
+      parent_id: "reply-root",
+      author,
+      content: "",
+      created_at: createdAt,
+      media: [{ id: "reply-preview-image", url: tallImage, thumb_url: tallImage, detail_url: tallImage, original_url: tallImage, alt_text: "折叠回复竖图" }],
+    }],
     created_at: createdAt,
   };
   const imageReply = {
@@ -59,6 +68,9 @@ test("楼中楼竖图使用可辨识的完整预览而不是裁切小方块", as
   } }));
 
   await page.goto("/post/post-reply-media");
+  const collapsedPreview = page.locator("#comment-reply-root .nested .comment-media-thumb");
+  await expect(collapsedPreview).toBeVisible();
+  await expect.poll(() => collapsedPreview.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await page.locator("#comment-reply-root .more-nested").click();
   const preview = page.locator("#comment-reply-with-image .comment-media-preview");
   await expect(preview).toBeVisible();

@@ -23,6 +23,51 @@ test("新评论的旧源地址转换为网关，异步生成后自动显示并�
   await expect.poll(() => page.locator(".gallery-main-image").evaluateAll((images) => images.some((image) => (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
 });
 
+test("楼中楼竖图使用可辨识的完整预览而不是裁切小方块", async ({ page }) => {
+  const tallImage = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='216' height='480'%3E%3Crect fill='white' width='100%25' height='100%25'/%3E%3Crect fill='%23ef4444' x='18' y='30' width='180' height='80'/%3E%3Ctext x='108' y='210' text-anchor='middle' font-size='24'%3EORDER%3C/text%3E%3C/svg%3E";
+  const createdAt = new Date().toISOString();
+  const author = { id: "reply-author", nickname: "回复作者", level: 3 };
+  const root = {
+    id: "reply-root",
+    post_id: "post-reply-media",
+    root_id: "reply-root",
+    author,
+    content: "带竖图的回复线程",
+    reply_count: 3,
+    reply_preview: [{ id: "reply-preview", post_id: "post-reply-media", root_id: "reply-root", parent_id: "reply-root", author, content: "预览回复", created_at: createdAt }],
+    created_at: createdAt,
+  };
+  const imageReply = {
+    id: "reply-with-image",
+    post_id: "post-reply-media",
+    root_id: "reply-root",
+    parent_id: "reply-root",
+    author,
+    content: "",
+    created_at: createdAt,
+    media: [{ id: "reply-image", url: tallImage, thumb_url: tallImage, detail_url: tallImage, original_url: tallImage, alt_text: "竖图预览" }],
+  };
+
+  await page.route("**/api/v1/posts/post-reply-media?*", (route) => route.fulfill({ json: {
+    id: "post-reply-media", title: "回复图片预览测试", content: "正文", author, community: { id: "campus", name: "校园" }, comment_count: 1, created_at: createdAt,
+  } }));
+  await page.route("**/api/v1/posts/post-reply-media/comments*", (route) => route.fulfill({ json: { items: [root], total: 1, has_more: false } }));
+  await page.route("**/api/v1/comments/reply-root/replies*", (route) => route.fulfill({ json: {
+    items: [imageReply, { ...imageReply, id: "reply-text-2", content: "第二条", media: [] }, { ...imageReply, id: "reply-text-3", content: "第三条", media: [] }],
+    total: 3,
+    has_more: false,
+  } }));
+
+  await page.goto("/post/post-reply-media");
+  await page.locator("#comment-reply-root .more-nested").click();
+  const preview = page.locator("#comment-reply-with-image .comment-media-preview");
+  await expect(preview).toBeVisible();
+  const size = await preview.boundingBox();
+  expect(size?.width).toBeGreaterThanOrEqual(120);
+  expect(size?.height).toBeGreaterThanOrEqual(160);
+  await expect(preview).toHaveCSS("object-fit", "contain");
+});
+
 test("游客不显示榜单管理入口，直达投稿页时引导注册", async ({ page }) => {
   await page.goto("/ranking");
   await expect(page.getByRole("heading", { name: "本周好物榜" })).toBeVisible();

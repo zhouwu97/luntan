@@ -750,27 +750,50 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                   marginTop: 10,
                 }}
               >
-                {canUploadMedia && <label
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    color: "#3b82f6",
-                    fontSize: 13,
-                    cursor: "pointer",
-                  }}
-                >
-                  <Icon name="image" size={18} />
-                  <span>图片 ({mobilePreviews.items.length}/9)</span>
-                  <input
-                    type="file"
-                    accept={webImageAccept}
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={handleChooseMobileFiles}
-                    disabled={mobilePreviews.items.length >= 9 || sendingComment}
-                  />
-                </label>}
+                {canUploadMedia ? (
+                  <label
+                    aria-label="添加图片"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      color: "#3b82f6",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Icon name="image" size={18} />
+                    <span>图片 ({mobilePreviews.items.length}/9)</span>
+                    <input
+                      type="file"
+                      accept={webImageAccept}
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={handleChooseMobileFiles}
+                      disabled={mobilePreviews.items.length >= 9 || sendingComment}
+                    />
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="添加图片（注册后可用）"
+                    onClick={() => router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${id}`)}`)}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: 0,
+                      border: 0,
+                      background: "transparent",
+                      color: "#3b82f6",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Icon name="image" size={18} />
+                    <span>图片</span>
+                  </button>
+                )}
                 <div style={{ display: "flex", gap: 10 }}>
                   <button
                     type="button"
@@ -1537,10 +1560,12 @@ function CommentMediaThumbnail({
   asset,
   alt,
   onClick,
+  variant = "thumbnail",
 }: {
   asset: MediaAsset;
   alt: string;
   onClick: (e: MouseEvent) => void;
+  variant?: "thumbnail" | "preview";
 }) {
   // 评论详情允许用原图做最终容灾；首页 Feed 使用的 MediaImage 不走这条链。
   const candidates = [...new Set([
@@ -1552,6 +1577,10 @@ function CommentMediaThumbnail({
   const mediaKey = candidates.join("|");
   const src = candidates[candidateIdx] || asset.thumbUrl || asset.url;
   const isFailed = candidateIdx >= candidates.length && candidates.length > 0;
+  const isPreview = variant === "preview";
+  const mediaSize = isPreview
+    ? { width: "min(240px, 100%)", height: 240, objectFit: "contain" as const }
+    : { width: 80, height: 80, objectFit: "cover" as const };
 
   useEffect(() => { setCandidateIdx(0); setMediaRetry(0); }, [mediaKey]);
   useEffect(() => {
@@ -1564,10 +1593,9 @@ function CommentMediaThumbnail({
   if (isFailed) {
     return (
       <div
-        className="comment-media-thumb comment-media-failed"
+        className={`comment-media-thumb comment-media-failed${isPreview ? " comment-media-preview" : ""}`}
         style={{
-          width: 80,
-          height: 80,
+          ...mediaSize,
           borderRadius: 8,
           background: "var(--color-bg-secondary, #f1f5f9)",
           display: "flex",
@@ -1588,11 +1616,11 @@ function CommentMediaThumbnail({
     <img
       src={src}
       alt={alt}
+      className={`comment-media-thumb${isPreview ? " comment-media-preview" : ""}`}
       style={{
-        width: 80,
-        height: 80,
+        ...mediaSize,
         borderRadius: 8,
-        objectFit: "cover",
+        background: isPreview ? "var(--color-bg-secondary, #f8fafc)" : undefined,
         cursor: "pointer",
       }}
       onError={() => {
@@ -2001,6 +2029,7 @@ function CommentReplyModal({
                       key={asset.id || idx}
                       asset={asset}
                       alt={asset.altText || `楼层配图 ${idx + 1}`}
+                      variant="preview"
                       onClick={() => onOpenGallery(rootImages, idx)}
                     />
                   ))}
@@ -2064,6 +2093,7 @@ function CommentReplyModal({
                             key={asset.id || idx}
                             asset={asset}
                             alt={asset.altText || `回复配图 ${idx + 1}`}
+                            variant="preview"
                             onClick={() => onOpenGallery(replyImages, idx)}
                           />
                         ))}

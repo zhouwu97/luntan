@@ -145,7 +145,6 @@ test("表情包发送 sticker_id 并在新评论中正确渲染", async ({ page 
 test("435px 手机表情面板不发生横向溢出", async ({ page }) => {
   await page.setViewportSize({ width: 435, height: 850 });
   await page.goto("/post/post-composer");
-  await page.getByPlaceholder("说点什么，参与热烈讨论...").click();
   const toolbar = page.locator(".mobile-reply-toolbar");
   const imageBounds = await toolbar.getByLabel("添加图片").boundingBox();
   const inputBounds = await toolbar.getByPlaceholder("友善地回复一句…").boundingBox();
@@ -153,7 +152,7 @@ test("435px 手机表情面板不发生横向溢出", async ({ page }) => {
   expect(imageBounds && inputBounds && sendBounds).toBeTruthy();
   expect(Math.abs((imageBounds!.y + imageBounds!.height / 2) - (inputBounds!.y + inputBounds!.height / 2))).toBeLessThan(3);
   expect(Math.abs((sendBounds!.y + sendBounds!.height / 2) - (inputBounds!.y + inputBounds!.height / 2))).toBeLessThan(3);
-  await page.locator(".composer-sheet").getByRole("button", { name: "添加表情" }).click();
+  await page.locator(".mobile-comment-composer").getByRole("button", { name: "添加表情" }).click();
   const panel = page.locator(".expression-panel");
   await expect(panel).toBeVisible();
   const bounds = await panel.boundingBox();

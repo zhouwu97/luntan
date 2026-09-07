@@ -2605,6 +2605,14 @@ img { display: block; max-width: 100%; }
 .mobile-reply-overlay {
   background: transparent;
 }
+.mobile-comment-composer {
+  height: auto;
+  min-height: 62px;
+  display: block;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  overflow: visible;
+  box-shadow: 0 -6px 20px rgba(15, 23, 42, .08);
+}
 .mobile-reply-sheet {
   width: min(100%, 430px);
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
@@ -2677,6 +2685,7 @@ img { display: block; max-width: 100%; }
   font-size: 14px;
   line-height: 20px;
   resize: none;
+  overflow-y: auto;
   outline: none;
 }
 .mobile-reply-input:focus {
@@ -2694,6 +2703,7 @@ img { display: block; max-width: 100%; }
   color: #fff;
   font-size: 14px;
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
 }
 .mobile-reply-submit:disabled {

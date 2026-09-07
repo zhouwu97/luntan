@@ -103,7 +103,6 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
 
   const [related, setRelated] = useState<Post[]>([]);
 
-  const [mobileComposerOpen, setMobileComposerOpen] = useState(false);
   const [mobileComposerText, setMobileComposerText] = useState("");
   const mobileComposerRef = useRef<HTMLTextAreaElement>(null);
   const [mobileStickerId, setMobileStickerId] = useState("");
@@ -441,7 +440,6 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       setMobileComposerText("");
       setMobileStickerId("");
       mobilePreviews.clear();
-      setMobileComposerOpen(false);
       showToast("回复发布成功！");
     } catch (reqErr) {
       showToast(formatError(reqErr, "回复失败，请重试"));
@@ -590,55 +588,10 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
         </div>
       </main>
 
-      {/* 移动端底部固定快速回复输入条 */}
-      <div className="composer mobile-only">
-        <div className="composer-trigger" onClick={() => setMobileComposerOpen(true)}>
-          <input
-            type="text"
-            readOnly
-            placeholder="说点什么，参与热烈讨论..."
-            value={mobileComposerText}
-          />
-        </div>
-        <div className="composer-side">
-          <a href="#comments" className="comp-stat" aria-label="查看评论">
-            <Icon name="message" size={18} />
-            {compactCount(post.commentCount)}
-          </a>
-          <button
-            type="button"
-            className={`comp-stat stat${post.viewerState.hasLiked ? " selected" : ""}`}
-            onClick={handleToggleLike}
-            disabled={likePending}
-            aria-label={post.viewerState.hasLiked ? "已点赞" : "点赞"}
-          >
-            <Icon name="heart" size={18} />
-            {compactCount(post.likeCount)}
-          </button>
-          <button
-            type="button"
-            className={`comp-stat stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
-            onClick={handleToggleBookmark}
-            disabled={bookmarkPending}
-            aria-label={post.viewerState.hasBookmarked ? "已收藏" : "收藏"}
-          >
-            <Icon name="bookmark" size={18} />
-            {compactCount(post.bookmarkCount)}
-          </button>
-        </div>
-      </div>
-
-      {/* 移动端弹出发评抽屉 */}
-      {mobileComposerOpen && (
-        <div
-          className="composer-sheet-overlay mobile-reply-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMobileComposerOpen(false);
-          }}
-        >
-          <div className="composer-sheet mobile-reply-sheet">
-            <form className="mobile-reply-form" onSubmit={handleMobileSubmitComment}>
-              <div className="mobile-reply-extras">
+      {/* 移动端与 App 保持一致：评论栏始终固定在页面底部。 */}
+      <div className="composer mobile-only mobile-comment-composer">
+        <form className="mobile-reply-form" onSubmit={handleMobileSubmitComment}>
+          <div className="mobile-reply-extras">
               {mobilePreviews.items.length > 0 && (
                 <div className="mobile-reply-previews">
                   {mobilePreviews.items.map((preview, idx) => (
@@ -694,9 +647,9 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                   {mobileUploadMessage}
                 </div>
               )}
-              </div>
+          </div>
 
-              <div className="mobile-reply-toolbar">
+          <div className="mobile-reply-toolbar">
                 {canUploadMedia ? (
                   <label
                     aria-label="添加图片"
@@ -728,9 +681,8 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                   onEmoji={(emoji) => insertAtSelection(mobileComposerRef.current, mobileComposerText, setMobileComposerText, emoji)}
                   onSticker={setMobileStickerId}
                 />
-                <textarea
+            <textarea
                   ref={mobileComposerRef}
-                  autoFocus
                   rows={1}
                   onPaste={mobileImageInput.onPaste}
                   className="mobile-reply-input"
@@ -745,11 +697,9 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                 >
                   {sendingComment ? "发送中…" : "发送"}
                 </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+        </form>
+      </div>
 
       {/* 图片全屏画廊查看器 */}
       {galleryImages && (

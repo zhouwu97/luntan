@@ -111,7 +111,6 @@ test("手机游客点击图片入口时明确引导注册", async ({ page }) => 
   await mockPost(page);
 
   await page.goto("/post/post-capability");
-  await page.getByPlaceholder("说点什么，参与热烈讨论...").click();
   await page.getByRole("button", { name: "添加图片（注册后可用）" }).click();
 
   await expect(page).toHaveURL(/\/login\?mode=register/);
@@ -145,10 +144,9 @@ test("手机正式用户可以上传图片并随评论发送", async ({ page }) 
   });
 
   await page.goto("/post/post-capability");
-  await page.getByPlaceholder("说点什么，参与热烈讨论...").click();
   await page.getByPlaceholder("友善地回复一句…").fill("手机图片评论");
-  await page.locator('.composer-sheet input[type="file"]').setInputFiles({ name: "mobile.png", mimeType: "image/png", buffer: pngBytes });
-  await expect(page.locator(".composer-sheet img")).toBeVisible();
+  await page.locator('.mobile-comment-composer input[type="file"]').setInputFiles({ name: "mobile.png", mimeType: "image/png", buffer: pngBytes });
+  await expect(page.locator(".mobile-comment-composer img")).toBeVisible();
   await page.getByRole("button", { name: "发送", exact: true }).click();
 
   await expect.poll(() => commentPayload).toMatchObject({ content: "手机图片评论", media_ids: ["mobile-comment-image"] });

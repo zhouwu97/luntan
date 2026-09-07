@@ -122,16 +122,15 @@ test.describe("GIF 媒体 Web 回归", () => {
 
     await page.goto("/post/post-gif-comment");
     const desktopComposer = page.getByPlaceholder("写下你的评价、拆箱感受或回复…");
-    const mobileComposer = page.getByPlaceholder("说点什么，参与热烈讨论...");
+    const mobileComposer = page.getByPlaceholder("友善地回复一句…");
     await expect.poll(async () => (await desktopComposer.isVisible()) || (await mobileComposer.isVisible())).toBe(true);
     if (await desktopComposer.isVisible()) {
       await desktopComposer.fill("评论 GIF");
       await page.locator(".comment-composer input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });
       await page.getByRole("button", { name: "发布回复" }).click();
     } else {
-      await mobileComposer.click();
-      await page.getByPlaceholder("友善地写下你的评价或想法…").fill("评论 GIF");
-      await page.locator(".composer-sheet input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });
+      await mobileComposer.fill("评论 GIF");
+      await page.locator(".mobile-comment-composer input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });
       await page.getByRole("button", { name: "发送", exact: true }).click();
     }
 

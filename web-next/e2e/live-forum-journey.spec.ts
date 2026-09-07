@@ -115,6 +115,11 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
   const missingResponse = await navigate(`/post/journey-missing-${suffix}`);
   expect(missingResponse?.status()).toBe(404);
   if (webOrigin) {
+    // 生产 Host 不能让内部预检沿公网域名回环，否则 CDN/旧实例会掩盖真实 404。
+    const hostedMissingResponse = await request.get(new URL(`/post/journey-host-missing-${suffix}`, webOrigin).toString(), {
+      headers: { Host: "shengbeijiang.com" },
+    });
+    expect(hostedMissingResponse.status()).toBe(404);
     const legacyResponse = await request.get(new URL(`/posts/${gifPost.id}`, webOrigin).toString(), { maxRedirects: 0 });
     expect(legacyResponse.status()).toBe(308);
     expect(legacyResponse.headers().location).toBe(`/post/${gifPost.id}`);

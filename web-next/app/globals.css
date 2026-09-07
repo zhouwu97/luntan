@@ -1261,7 +1261,7 @@ img { display: block; max-width: 100%; }
 .comment-reply-item .comment-time { margin-left: 8px; }
 .comment-reply-composer { min-height: 62px; padding: 10px 16px; display: flex; gap: 9px; border-top: 1px solid var(--line); }
 .comment-reply-composer input { min-width: 0; flex: 1; padding: 0 13px; color: var(--text); background: #f3f6f9; border: 0; border-radius: 22px; outline: 0; font-size: 13px; }
-.comment-reply-composer button { width: 66px; color: #fff; background: var(--primary); border-radius: 21px; font-size: 12px; font-weight: 700; }
+.comment-reply-composer > button { width: 66px; color: #fff; background: var(--primary); border-radius: 21px; font-size: 12px; font-weight: 700; }
 .comment-reply-modal > .form-error { margin: 0 16px 12px; }
 
 @media (max-width: 760px) {
@@ -4424,6 +4424,9 @@ img { display: block; max-width: 100%; }
   left: 0;
   bottom: calc(100% + 8px);
   width: min(330px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  overflow: hidden;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -4458,7 +4461,9 @@ img { display: block; max-width: 100%; }
 
 .emoji-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -4473,7 +4478,8 @@ img { display: block; max-width: 100%; }
 }
 
 .emoji-grid button {
-  min-width: 32px;
+  width: 100%;
+  min-width: 0;
   height: 34px;
   font-size: 21px;
 }

@@ -105,6 +105,20 @@ test("楼中楼回复支持拖入图片且草稿与一级评论隔离", async ({
   await expect(page.locator(".comment-reply-modal img[src^='blob:']")).toHaveCount(1);
 });
 
+test("楼中楼 Emoji 网格不会被发送按钮样式撑出面板", async ({ page }) => {
+  await page.goto("/post/post-composer");
+  await page.locator("#comment-root-comment .nested").click();
+  const modal = page.locator(".comment-reply-modal");
+  await modal.getByRole("button", { name: "添加表情" }).click();
+  const panel = modal.locator(".expression-panel");
+  await expect(panel).toBeVisible();
+  await expect.poll(() => panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const panelBounds = await panel.boundingBox();
+  const lastEmojiBounds = await modal.getByRole("button", { name: "插入 💯" }).boundingBox();
+  expect(panelBounds && lastEmojiBounds).toBeTruthy();
+  expect(lastEmojiBounds!.x + lastEmojiBounds!.width).toBeLessThanOrEqual(panelBounds!.x + panelBounds!.width);
+});
+
 test("Emoji 插入当前光标而不是固定追加到末尾", async ({ page }) => {
   await page.goto("/post/post-composer");
   const textarea = page.getByPlaceholder("写下你的评价、拆箱感受或回复…");

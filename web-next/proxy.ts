@@ -14,7 +14,12 @@ export async function proxy(request: NextRequest) {
     if (response.status === 404 || response.status === 410) {
       const notFoundUrl = request.nextUrl.clone();
       notFoundUrl.pathname = "/post-not-found";
-      return NextResponse.rewrite(notFoundUrl, { status: 404 });
+      // Next 的 rewrite 会把目标页面重新标记为 200；透传页面内容并显式保留 404，
+      // 让浏览器、搜索引擎和外部链接检查都得到一致的真实状态码。
+      const notFoundPage = await fetch(notFoundUrl, { headers: request.headers, cache: "no-store" });
+      const headers = new Headers(notFoundPage.headers);
+      headers.delete("content-length");
+      return new NextResponse(notFoundPage.body, { status: 404, headers });
     }
   } catch {
     // 上游暂时不可用时继续进入页面壳，由客户端重试，不能误判内容已删除。

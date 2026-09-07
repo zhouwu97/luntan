@@ -57,6 +57,40 @@ RankingToyComment _createComment({
 }
 
 void main() {
+  testWidgets('键盘弹出时楼中楼回复栏紧贴键盘上沿且不额外增高', (tester) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+
+    final root = _createComment(id: 'root-1', authorId: 'u1');
+    final repo = _MockRankingRepository(replies: const []);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RankingCommentThreadSheet(
+          rootComment: root,
+          repository: repo,
+          onReply: (target, content) async => root,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final replyField = find.byType(TextField);
+    final replyBar = find
+        .ancestor(of: replyField, matching: find.byType(Container))
+        .first;
+    final replyBarWidget = tester.widget<Container>(replyBar);
+    final replyBarRect = tester.getRect(replyBar);
+
+    expect(replyBarWidget.padding, const EdgeInsets.fromLTRB(14, 8, 14, 8));
+    expect(replyBarRect.height, lessThan(100));
+    expect(replyBarRect.bottom, 500);
+  });
+
   testWidgets('普通用户在 RankingCommentThreadSheet 仅可复制，无删除选项', (tester) async {
     final root = _createComment(id: 'root-1', authorId: 'u1', replyCount: 1);
     final reply = _createComment(id: 'r-1', authorId: 'u2', parentId: 'root-1');

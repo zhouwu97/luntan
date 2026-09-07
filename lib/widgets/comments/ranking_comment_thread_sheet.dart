@@ -898,14 +898,8 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
         color: Colors.white,
         border: Border(top: BorderSide(color: AppTheme.border)),
       ),
-      padding: EdgeInsets.fromLTRB(
-        14,
-        8,
-        14,
-        8 + (MediaQuery.of(context).viewInsets.bottom > 0
-            ? MediaQuery.of(context).viewInsets.bottom
-            : MediaQuery.viewPaddingOf(context).bottom),
-      ),
+      // Scaffold 已根据键盘和底部安全区调整内容区域，避免在回复栏重复补偿。
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
       child: Row(
         children: [
           Expanded(
@@ -919,12 +913,12 @@ class _RankingCommentThreadSheetState extends State<RankingCommentThreadSheet> {
                 filled: true,
                 fillColor: const Color(0xFFF5F8FB),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(20),
                   borderSide: BorderSide.none,
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+                  horizontal: 16,
+                  vertical: 9,
                 ),
               ),
             ),

@@ -2577,6 +2577,31 @@ img { display: block; max-width: 100%; }
   align-items: center;
   gap: 12px;
 }
+.composer-sheet-overlay {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(15, 23, 42, .36);
+}
+.composer-sheet {
+  width: min(100%, 430px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  border-radius: 18px 18px 0 0;
+  background: #fff;
+  padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -12px 32px rgba(15, 23, 42, .16);
+}
+.composer-sheet-handle {
+  width: 36px;
+  height: 4px;
+  margin: 0 auto 12px;
+  border-radius: 999px;
+  background: #d5e0eb;
+}
 .comp-stat {
   display: flex;
   align-items: center;

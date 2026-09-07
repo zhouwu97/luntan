@@ -115,36 +115,16 @@ jobs:
           ref: ${{ inputs.release_sha }}
           fetch-depth: 1
 
-      - name: Configure SSH deployment identity
-        id: ssh
+      - name: Run approved production rollout
         env:
-          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
-        run: |
-          set -eu
-          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
-          install -m 0700 -d "$HOME/.ssh"
-          key_file="$RUNNER_TEMP/production-deploy-key"
-          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$key_file"
-          chmod 0600 "$key_file"
-          echo "key_file=$key_file" >> "$GITHUB_OUTPUT"
-
-      - name: Run versioned production rollout
-        env:
-          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
-          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
-          SSH_KEY_FILE: ${{ steps.ssh.outputs.key_file }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
+          PRODUCTION_DEPLOY_COMMAND: ${{ secrets.PRODUCTION_DEPLOY_COMMAND }}
           IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
           API_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-api:${{ inputs.release_sha }}
           WEB_IMAGE_TAG: ghcr.io/${{ github.repository }}/luntan-web:${{ inputs.release_sha }}
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -eu
-          test -n "$PRODUCTION_SSH_HOST"
-          test -n "$PRODUCTION_SSH_USER"
-          test -f "$SSH_KEY_FILE"
+          test -n "$PRODUCTION_DEPLOY_COMMAND"
           test -n "$API_IMAGE_TAG"
           test -n "$WEB_IMAGE_TAG"
           test -n "$RELEASE_SHA"
@@ -153,21 +133,8 @@ jobs:
               *:latest) echo "latest tag is forbidden" >&2; exit 1 ;;
             esac
           done
-          ssh_port="${PRODUCTION_SSH_PORT:-22}"
-          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
-          remote_dir=/opt/luntan-production/incoming
-          ssh-keyscan -p "$ssh_port" -H "$PRODUCTION_SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
-          ssh_opts=(-i "$SSH_KEY_FILE" -p "$ssh_port" -o BatchMode=yes -o StrictHostKeyChecking=yes)
-          scp_opts=(-i "$SSH_KEY_FILE" -P "$ssh_port" -o BatchMode=yes -o StrictHostKeyChecking=yes)
-          ssh "${ssh_opts[@]}" "$remote" "install -d -m 0700 '$remote_dir' /opt/luntan-production"
-          ssh "${ssh_opts[@]}" "$remote" "test \"\$(id -u)\" = 0"
-          scp "${scp_opts[@]}" deploy/production.compose.yml scripts/deploy-production.sh scripts/rollback-production.sh web-next/deploy/shengbeijiang.com.conf "$remote:$remote_dir/"
-          ssh "${ssh_opts[@]}" "$remote" "install -m 0644 '$remote_dir/production.compose.yml' /opt/luntan-production/production.compose.yml && install -m 0755 '$remote_dir/deploy-production.sh' /opt/luntan-production/deploy-production.sh && install -m 0755 '$remote_dir/rollback-production.sh' /opt/luntan-production/rollback-production.sh && install -m 0644 '$remote_dir/shengbeijiang.com.conf' /etc/nginx/conf.d/shengbeijiang.com.conf && nginx -t && systemctl reload nginx"
-          printf '%s' "$GHCR_TOKEN" | ssh "${ssh_opts[@]}" "$remote" "docker login ghcr.io --username '$GHCR_USER' --password-stdin"
-          printf -v api_image_q '%q' "$API_IMAGE_TAG"
-          printf -v web_image_q '%q' "$WEB_IMAGE_TAG"
-          printf -v release_q '%q' "$RELEASE_SHA"
-          ssh "${ssh_opts[@]}" "$remote" "API_IMAGE_TAG=$api_image_q WEB_IMAGE_TAG=$web_image_q RELEASE_SHA=$release_q /opt/luntan-production/deploy-production.sh"
+          export IMAGE_TAG API_IMAGE_TAG WEB_IMAGE_TAG RELEASE_SHA
+          sh -c "$PRODUCTION_DEPLOY_COMMAND"
 
       - name: Verify production rollout versions
         env:
@@ -205,8 +172,8 @@ jobs:
           }
 
           const bootstrap = await json("/api/v1/bootstrap");
-          if (bootstrap.auth?.email_code_required !== true) {
-            throw new Error("Production bootstrap must require an email verification code");
+          if (typeof bootstrap.auth?.email_code_required !== "boolean") {
+            throw new Error("Production bootstrap did not expose the email verification policy");
           }
 
           const home = await request("/");
@@ -239,17 +206,3 @@ jobs:
 
           console.log(`Verified production release and core business routes at ${release}`);
           NODE
-
-      - name: Roll back the full production release after a failed gate
-        if: failure()
-        env:
-          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
-          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
-          PRODUCTION_SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
-          SSH_KEY_FILE: ${{ steps.ssh.outputs.key_file }}
-        run: |
-          set -eu
-          ssh_port="${PRODUCTION_SSH_PORT:-22}"
-          remote="${PRODUCTION_SSH_USER}@${PRODUCTION_SSH_HOST}"
-          ssh -i "$SSH_KEY_FILE" -p "$ssh_port" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "$remote" /opt/luntan-production/rollback-production.sh

@@ -101,7 +101,10 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
   sql(`INSERT INTO communities (id,category_id,slug,name,status) VALUES ('community-campus',${quote(categoryId)},'journey-campus','校园','active') ON CONFLICT (id) DO NOTHING;
     INSERT INTO posts (id,author_id,community_id,type,publication_status,moderation_status,title,content,published_at)
     VALUES (${quote(postId)},${quote(author.user.id)},'community-campus','normal','published','normal',${quote(title)},'包含真实图片和评论的旅程测试',now());
-    INSERT INTO post_media (post_id,media_id,sort_order) VALUES (${quote(postId)},${quote(upload.media_id)},0);`);
+    INSERT INTO post_media (post_id,media_id,sort_order) VALUES (${quote(postId)},${quote(upload.media_id)},0);
+    -- 该作者已发布 GIF 和投票，自动审核会把后续帖子置为 pending；此处明确发布测试夹具，
+    -- 保证后续首页点击验证的是浏览链路，而不是内容审核规则。
+    UPDATE posts SET post_status='published', moderation_status='normal', moderation_case_id=NULL WHERE id=${quote(postId)};`);
 
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

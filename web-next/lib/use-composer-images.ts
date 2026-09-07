@@ -69,59 +69,72 @@ export function useComposerImageInput({
   previews,
   onMessage,
   enabled = true,
+  onDisabled,
 }: {
   previews: LocalImagePreviews;
   onMessage: (message: string) => void;
   enabled?: boolean;
+  onDisabled?: () => void;
 }) {
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
 
   const appendFiles = useCallback((files: File[]) => {
-    if (!enabled || files.length === 0) return;
+    if (files.length === 0) return;
+    if (!enabled) {
+      onDisabled?.();
+      return;
+    }
     const result = previews.append(files);
     if (result.skippedLimit > 0) onMessage("最多上传 9 张图片");
     else if (result.skippedUnsupported > 0) onMessage("已跳过不支持的文件");
     else onMessage("");
-  }, [enabled, onMessage, previews]);
+  }, [enabled, onDisabled, onMessage, previews]);
 
   const onPaste = useCallback((event: ClipboardEvent<HTMLElement>) => {
     const files = Array.from(event.clipboardData.items)
       .filter((item) => item.kind === "file")
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file));
-    if (files.length === 0) return;
+    // disabled 时不接管剪贴板，避免把用户原本要粘贴的文本一起吞掉。
+    if (files.length === 0 || !enabled) return;
     event.preventDefault();
     appendFiles(files);
-  }, [appendFiles]);
+  }, [appendFiles, enabled]);
+
+  const hasFiles = useCallback((event: DragEvent<HTMLElement>) => (
+    Array.from(event.dataTransfer.types).includes("Files") || event.dataTransfer.files.length > 0
+  ), []);
 
   const onDragEnter = useCallback((event: DragEvent<HTMLElement>) => {
-    if (!enabled || !Array.from(event.dataTransfer.types).includes("Files")) return;
+    if (!hasFiles(event)) return;
     event.preventDefault();
+    if (!enabled) return;
     dragDepth.current += 1;
     setDragActive(true);
-  }, [enabled]);
+  }, [enabled, hasFiles]);
 
   const onDragOver = useCallback((event: DragEvent<HTMLElement>) => {
-    if (!enabled || !Array.from(event.dataTransfer.types).includes("Files")) return;
+    if (!hasFiles(event)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  }, [enabled]);
+    event.dataTransfer.dropEffect = enabled ? "copy" : "none";
+  }, [enabled, hasFiles]);
 
   const onDragLeave = useCallback((event: DragEvent<HTMLElement>) => {
-    if (!enabled) return;
+    if (!hasFiles(event)) return;
     event.preventDefault();
+    if (!enabled) return;
     dragDepth.current = Math.max(0, dragDepth.current - 1);
     if (dragDepth.current === 0) setDragActive(false);
-  }, [enabled]);
+  }, [enabled, hasFiles]);
 
   const onDrop = useCallback((event: DragEvent<HTMLElement>) => {
-    if (!enabled) return;
+    if (!hasFiles(event)) return;
     event.preventDefault();
     dragDepth.current = 0;
     setDragActive(false);
     appendFiles(Array.from(event.dataTransfer.files));
-  }, [appendFiles, enabled]);
+  }, [appendFiles, hasFiles]);
 
   return { appendFiles, dragActive, onPaste, onDragEnter, onDragOver, onDragLeave, onDrop };
 }

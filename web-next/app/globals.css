@@ -1505,6 +1505,10 @@ img { display: block; max-width: 100%; }
   .site-header { display: none !important; }
   .home-left-col, .home-right-col { display: none !important; }
   .home-grid, .detail-grid { display: block !important; }
+  .post-detail-mobile-content {
+    --mobile-comment-composer-height: 62px;
+    padding-bottom: calc(var(--mobile-comment-composer-height, 62px) + env(safe-area-inset-bottom, 0px) + 12px);
+  }
 }
 
 /* ===== 原型全局组件样式 ===== */

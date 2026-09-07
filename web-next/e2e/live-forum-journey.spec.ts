@@ -105,7 +105,10 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
 
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const guestResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/auth/guest") && response.request().method() === "POST");
+  // 导航会释放旧页面的响应体；在响应到达时立即读取，避免后续重载丢失 CDP 资源。
+  const guestResponse = page
+    .waitForResponse((response) => response.url().endsWith("/api/v1/auth/guest") && response.request().method() === "POST")
+    .then((response) => response.json());
   const missingResponse = await navigate(`/post/journey-missing-${suffix}`);
   expect(missingResponse?.status()).toBe(404);
   if (webOrigin) {
@@ -117,7 +120,7 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
   await expect.poll(() => page.locator(".detail-gallery img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 20000 }).toBeGreaterThan(0);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(() => page.locator(".detail-gallery img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 20000 }).toBeGreaterThan(0);
-  const guest = await (await guestResponse).json();
+  const guest = await guestResponse;
   expect(guest.user.account_type).toBe("guest");
   const guestId = guest.user.id;
   await navigate("/");

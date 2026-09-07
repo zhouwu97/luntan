@@ -1,0 +1,155 @@
+name: build-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact 40-character main commit SHA to build
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build immutable release images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact release SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Validate release SHA belongs to main
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -eu
+          printf '%s\n' "$RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$'
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          test -z "$(git status --porcelain)"
+
+      - name: Require successful main CI for this release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              head_sha: process.env.RELEASE_SHA,
+              per_page: 100,
+            });
+            const runs = data.workflow_runs.filter(
+              run => run.event === 'push' && run.head_branch === 'main',
+            );
+            const latest = runs.sort(
+              (a, b) => new Date(b.created_at) - new Date(a.created_at),
+            )[0];
+            if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') {
+              core.setFailed('Release 提交必须通过 main 分支的完整 ci.yml。');
+            }
+
+      - name: Define immutable image references
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -eu
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          api_image="ghcr.io/${GITHUB_REPOSITORY}/luntan-api:${RELEASE_SHA}"
+          web_image="ghcr.io/${GITHUB_REPOSITORY}/luntan-web:${RELEASE_SHA}"
+          for image in "$api_image" "$web_image"; do
+            case "$image" in
+              *:latest) echo 'latest tag is forbidden' >&2; exit 1 ;;
+            esac
+          done
+          {
+            echo "RELEASE_SHA=$RELEASE_SHA"
+            echo "BUILD_TIME=$build_time"
+            echo "API_IMAGE=$api_image"
+            echo "WEB_IMAGE=$web_image"
+          } >> "$GITHUB_ENV"
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Refuse to overwrite an existing release image
+        run: |
+          set -eu
+          for image in "$API_IMAGE" "$WEB_IMAGE"; do
+            error_file="$RUNNER_TEMP/manifest-inspect-error"
+            if docker manifest inspect "$image" > /dev/null 2>"$error_file"; then
+              echo "Release image already exists and cannot be overwritten: $image" >&2
+              exit 1
+            fi
+            if ! grep -Eqi 'manifest unknown|no such manifest|not found' "$error_file"; then
+              cat "$error_file" >&2
+              echo "Unable to verify whether release image already exists: $image" >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push immutable API image
+        run: |
+          set -eu
+          docker build \
+            --build-arg BUILD_VERSION="$RELEASE_SHA" \
+            --build-arg BUILD_COMMIT="$RELEASE_SHA" \
+            --build-arg BUILD_TIME="$BUILD_TIME" \
+            --tag "$API_IMAGE" \
+            server
+          docker push "$API_IMAGE"
+
+      - name: Build and push immutable Web image
+        run: |
+          set -eu
+          docker build \
+            --build-arg NEXT_PUBLIC_RELEASE_SHA="$RELEASE_SHA" \
+            --build-arg NEXT_PUBLIC_GIT_SHA="$RELEASE_SHA" \
+            --build-arg NEXT_PUBLIC_BUILD_TIME="$BUILD_TIME" \
+            --tag "$WEB_IMAGE" \
+            web-next
+          docker push "$WEB_IMAGE"
+
+      - name: Record image digests and release metadata
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -eu
+          api_digest="$(docker buildx imagetools inspect "$API_IMAGE" --format '{{.Digest}}')"
+          web_digest="$(docker buildx imagetools inspect "$WEB_IMAGE" --format '{{.Digest}}')"
+          printf '%s\n' "$api_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$web_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          metadata_dir="release-metadata-${RELEASE_SHA}"
+          mkdir -p "$metadata_dir"
+          cat > "$metadata_dir/release-metadata.txt" <<EOF
+          release_sha=${RELEASE_SHA}
+          build_time=${BUILD_TIME}
+          api_image=${API_IMAGE}
+          api_digest=${api_digest}
+          api_image_ref=${API_IMAGE}@${api_digest}
+          web_image=${WEB_IMAGE}
+          web_digest=${web_digest}
+          web_image_ref=${WEB_IMAGE}@${web_digest}
+          EOF
+          cat "$metadata_dir/release-metadata.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata-${{ inputs.release_sha }}
+          path: release-metadata-${{ inputs.release_sha }}/release-metadata.txt
+          if-no-files-found: error
+          retention-days: 90

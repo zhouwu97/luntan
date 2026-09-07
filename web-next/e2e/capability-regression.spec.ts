@@ -104,6 +104,55 @@ test("游客收藏在请求前引导注册，评论只保留文字入口", async
   expect(bookmarkRequests).toBe(0);
 });
 
+test("手机游客点击图片入口时明确引导注册", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await restoreAs(page, guest);
+  await mockPost(page);
+
+  await page.goto("/post/post-capability");
+  await page.getByPlaceholder("说点什么，参与热烈讨论...").click();
+  await page.getByRole("button", { name: "添加图片（注册后可用）" }).click();
+
+  await expect(page).toHaveURL(/\/login\?mode=register/);
+});
+
+test("手机正式用户可以上传图片并随评论发送", async ({ page }) => {
+  const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await restoreAs(page, registered);
+  await mockPost(page);
+  let commentPayload: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/media/upload-token", (route) => route.fulfill({
+    status: 201,
+    json: { media_id: "mobile-comment-image", upload_url: "/upload/mobile-comment-image", upload_method: "PUT" },
+  }));
+  await page.route("**/upload/mobile-comment-image", (route) => route.fulfill({ status: 200 }));
+  await page.route("**/api/v1/media/mobile-comment-image/complete", (route) => route.fulfill({ json: { status: "ready" } }));
+  await page.route("**/api/v1/posts/post-capability/comments", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    commentPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 201, json: {
+      id: "mobile-image-comment",
+      post_id: "post-capability",
+      content: "手机图片评论",
+      author: registered,
+      created_at: new Date().toISOString(),
+      viewer_state: {},
+      media: [],
+    } });
+  });
+
+  await page.goto("/post/post-capability");
+  await page.getByPlaceholder("说点什么，参与热烈讨论...").click();
+  await page.getByPlaceholder("友善地写下你的评价或想法…").fill("手机图片评论");
+  await page.locator('.composer-sheet input[type="file"]').setInputFiles({ name: "mobile.png", mimeType: "image/png", buffer: pngBytes });
+  await expect(page.locator(".composer-sheet img")).toBeVisible();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+
+  await expect.poll(() => commentPayload).toMatchObject({ content: "手机图片评论", media_ids: ["mobile-comment-image"] });
+});
+
 test("普通正式用户可进入榜单投稿，管理员入口仍保持独立", async ({ page }) => {
   await restoreAs(page, registered);
   await mockRanking(page);

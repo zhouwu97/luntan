@@ -48,6 +48,7 @@ void main() {
     ]);
     final openedPostIds = <String>[];
     final feedback = <String>[];
+    var changedCount = 0;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -56,6 +57,7 @@ void main() {
           repository: repository,
           onFeedback: feedback.add,
           onOpenPostId: openedPostIds.add,
+          onRecommendationChanged: () async => changedCount += 1,
         ),
       ),
     );
@@ -73,6 +75,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.removedId, 'p1');
     expect(find.text('1. 推荐帖子 p1'), findsNothing);
+    expect(changedCount, 1);
 
     // 重新挂载两项，验证拖拽回调会提交新的顺序。
     repository.items
@@ -84,6 +87,7 @@ void main() {
           key: UniqueKey(),
           repository: repository,
           onFeedback: feedback.add,
+          onRecommendationChanged: () async => changedCount += 1,
         ),
       ),
     );
@@ -96,5 +100,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.reorderedIds, ['p2', 'p1']);
+    expect(changedCount, 2);
   });
 }

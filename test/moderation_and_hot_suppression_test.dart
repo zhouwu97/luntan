@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luntan/controllers/comments_controller.dart';
 import 'package:luntan/controllers/interaction_controller.dart';
 import 'package:luntan/controllers/post_detail_controller.dart';
+import 'package:luntan/data/api/api_client.dart';
+import 'package:luntan/data/api/platform_repository.dart';
 import 'package:luntan/data/repositories/mock_repositories.dart';
 import 'package:luntan/domain/models.dart';
 import 'package:luntan/domain/repositories.dart';
@@ -242,6 +244,66 @@ void main() {
 
     expect(find.text('图片打码'), findsNothing);
   });
+
+  testWidgets('PostDetailScreen 推荐成功后通知首页刷新推荐流', (tester) async {
+    final platformRepo = _RecordingRecommendationRepository();
+    final postDetailController = PostDetailController(
+      repository: _FakePostWithImageRepository(),
+      postId: 'p-with-img',
+    );
+    final commentsController = CommentsController(
+      repository: MockCommentRepository(),
+      postId: 'p-with-img',
+    );
+    var changedCount = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostDetailScreen(
+          controller: postDetailController,
+          commentsController: commentsController,
+          interactionController: InteractionController(
+            repository: MockInteractionRepository(),
+          ),
+          platformRepository: platformRepo,
+          canModerate: true,
+          onToggleLike: (_) async {},
+          onToggleBookmark: (_) async {},
+          onFeedback: (_) {},
+          onRecommendationChanged: () async => changedCount += 1,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final appBarMoreButton = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.byIcon(Icons.more_horiz_rounded),
+    );
+    await tester.tap(appBarMoreButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('加入首页推荐'));
+    await tester.pumpAndSettle();
+
+    expect(platformRepo.setPostId, 'p-with-img');
+    expect(changedCount, 1);
+  });
+}
+
+class _RecordingRecommendationRepository extends PlatformRepository {
+  _RecordingRecommendationRepository()
+    : super(ApiClient(baseUri: Uri.parse('https://example.com')));
+
+  String? setPostId;
+
+  @override
+  Future<void> setHomeRecommendation({
+    required String postId,
+    int? position,
+    DateTime? expiresAt,
+  }) async {
+    setPostId = postId;
+  }
 }
 
 class _FakePostWithImageRepository implements PostRepository {

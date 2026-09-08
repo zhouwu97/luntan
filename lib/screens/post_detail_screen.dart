@@ -59,6 +59,7 @@ class PostDetailScreen extends StatefulWidget {
     this.platformRepository,
     this.canModerate = false,
     this.canRestoreCensored = false,
+    this.onRecommendationChanged,
     this.onOpenUserId,
   });
 
@@ -91,6 +92,7 @@ class PostDetailScreen extends StatefulWidget {
   final PlatformRepository? platformRepository;
   final bool canModerate;
   final bool canRestoreCensored;
+  final Future<void> Function()? onRecommendationChanged;
   final ValueChanged<String>? onOpenUserId;
 
   @override
@@ -1089,6 +1091,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             await widget.platformRepository!
                                 .setHomeRecommendation(postId: post.id);
                           }
+                          await widget.onRecommendationChanged?.call();
                           if (!mounted) return;
                           widget.onFeedback(
                             post.isRecommended ? '已移出首页推荐' : '已加入首页推荐',

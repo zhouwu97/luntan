@@ -10,11 +10,13 @@ class HomeRecommendationsScreen extends StatefulWidget {
     required this.repository,
     required this.onFeedback,
     this.onOpenPostId,
+    this.onRecommendationChanged,
   });
 
   final PlatformRepository repository;
   final ValueChanged<String> onFeedback;
   final ValueChanged<String>? onOpenPostId;
+  final Future<void> Function()? onRecommendationChanged;
 
   @override
   State<HomeRecommendationsScreen> createState() =>
@@ -74,6 +76,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       await widget.repository.reorderHomeRecommendations(
         items.map((item) => item.postId).toList(),
       );
+      await widget.onRecommendationChanged?.call();
       if (mounted) widget.onFeedback('首页推荐顺序已保存');
     } catch (cause) {
       if (mounted) {
@@ -117,6 +120,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     setState(() => saving = true);
     try {
       await widget.repository.removeHomeRecommendation(item.postId);
+      await widget.onRecommendationChanged?.call();
       if (!mounted) return;
       setState(() => items.removeWhere((value) => value.postId == item.postId));
       widget.onFeedback('已移出首页推荐');

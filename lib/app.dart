@@ -545,6 +545,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               platformRepository: repositories.platform,
               canModerate: canModerate,
               canRestoreCensored: apiMode && canManageAdmins,
+              onRecommendationChanged:
+                  feedController.refreshRecommendationFeedIfNeeded,
               onOpenUserId: openUserProfile,
             ),
           ),
@@ -848,6 +850,8 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
           repository: platform,
           onFeedback: _showQuickFeedback,
           onOpenPostId: openPostById,
+          onRecommendationChanged:
+              feedController.refreshRecommendationFeedIfNeeded,
         ),
       ),
     );

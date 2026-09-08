@@ -182,6 +182,56 @@ void main() {
     expect(feed.calls, hasLength(1));
   });
 
+  test('推荐内容变化时只刷新当前推荐流', () async {
+    final recommendedFeed = _RecordingFeed([
+      FeedPage(items: [_post('old', 'campus')]),
+      FeedPage(items: [_post('new', 'campus')]),
+    ]);
+    final recommendedController = FeedController(repository: recommendedFeed);
+    await recommendedController.setQuery(
+      communityId: 'campus',
+      sort: 'recommended',
+    );
+
+    await recommendedController.refreshRecommendationFeedIfNeeded();
+
+    expect(recommendedFeed.calls, hasLength(2));
+    expect(recommendedController.state.items.single.id, 'new');
+
+    final latestFeed = _RecordingFeed([
+      FeedPage(items: [_post('latest', 'campus')]),
+    ]);
+    final latestController = FeedController(repository: latestFeed);
+    await latestController.setQuery(communityId: 'campus', sort: 'latest');
+
+    await latestController.refreshRecommendationFeedIfNeeded();
+
+    expect(latestFeed.calls, hasLength(1));
+  });
+
+  test('推荐流加载期间发生内容变化会废弃旧请求并重新加载', () async {
+    final feed = _PendingFeed();
+    final controller = FeedController(repository: feed);
+
+    final initial = controller.setQuery(
+      communityId: 'campus',
+      sort: 'recommended',
+    );
+    final refresh = controller.refreshRecommendationFeedIfNeeded();
+    expect(feed.requests, hasLength(2));
+
+    feed.requests[1].completer.complete(
+      FeedPage(items: [_post('new', 'campus')]),
+    );
+    await refresh;
+    feed.requests[0].completer.complete(
+      FeedPage(items: [_post('old', 'campus')]),
+    );
+    await initial;
+
+    expect(controller.state.items.single.id, 'new');
+  });
+
   test('乱序完成的旧板块请求不能覆盖最后一次选择', () async {
     final feed = _PendingFeed();
     final controller = FeedController(repository: feed);

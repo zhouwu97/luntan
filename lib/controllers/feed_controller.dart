@@ -101,6 +101,13 @@ class FeedController extends ChangeNotifier {
     await _startFirstPage();
   }
 
+  /// 推荐增删或排序会改变列表成员关系，当前正在展示推荐流时必须重新取首屏。
+  /// 即使旧首屏仍在加载，也要用新 generation 废弃它，避免旧快照回写。
+  Future<void> refreshRecommendationFeedIfNeeded() async {
+    if (_sort != 'recommended' || _state.status == FeedStatus.initial) return;
+    await _startFirstPage();
+  }
+
   Future<void> setQuery({
     String? communityId,
     String sort = 'recommended',

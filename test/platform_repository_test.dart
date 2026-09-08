@@ -155,7 +155,7 @@ void main() {
           if (request.method == 'GET' &&
               request.url.path == '/api/v1/admin/recommendations') {
             return http.Response(
-              '{"items":[{"post_id":"p1","position":1,"recommended_by":"admin-1","recommended_at":"2026-08-26T01:00:00Z","expires_at":null,"post":{"id":"p1","title":"开箱记录","content":"正文","author":{"nickname":"管理员"},"community":{"name":"大型拆箱"}}}]}',
+              '{"items":[{"post_id":"p1","position":1,"is_pinned":true,"recommended_by":"admin-1","recommended_at":"2026-08-26T01:00:00Z","expires_at":null,"post":{"id":"p1","title":"开箱记录","content":"正文","author":{"nickname":"管理员"},"community":{"name":"大型拆箱"}}}]}',
               200,
               headers: const {
                 'content-type': 'application/json; charset=utf-8',
@@ -173,12 +173,14 @@ void main() {
         position: 2,
         expiresAt: DateTime.utc(2026, 9, 1),
       );
+      await repository.setHomeRecommendationPinned(postId: 'p1', pinned: false);
       await repository.removeHomeRecommendation('p1');
       await repository.reorderHomeRecommendations(['p2', 'p1']);
 
       expect(recommendations.single.postId, 'p1');
       expect(recommendations.single.title, '开箱记录');
       expect(recommendations.single.communityName, '大型拆箱');
+      expect(recommendations.single.isPinned, isTrue);
       expect(calls.first, 'GET /api/v1/admin/recommendations ');
       expect(
         calls[1].startsWith('PUT /api/v1/admin/recommendations/p1 '),
@@ -188,12 +190,16 @@ void main() {
         'position': 2,
         'expires_at': '2026-09-01T00:00:00.000Z',
       });
-      expect(calls[2], 'DELETE /api/v1/admin/recommendations/p1 ');
       expect(
-        calls[3].startsWith('PUT /api/v1/admin/recommendations/reorder '),
+        calls[2],
+        'PUT /api/v1/admin/recommendations/p1/pin {"pinned":false}',
+      );
+      expect(calls[3], 'DELETE /api/v1/admin/recommendations/p1 ');
+      expect(
+        calls[4].startsWith('PUT /api/v1/admin/recommendations/reorder '),
         isTrue,
       );
-      expect(jsonDecode(calls[3].substring(calls[3].indexOf('{'))) as Map, {
+      expect(jsonDecode(calls[4].substring(calls[4].indexOf('{'))) as Map, {
         'items': [
           {'post_id': 'p2', 'position': 0},
           {'post_id': 'p1', 'position': 1},

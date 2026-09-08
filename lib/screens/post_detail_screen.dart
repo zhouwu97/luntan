@@ -901,8 +901,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 sending: isSending,
                 isAuthenticated: widget.isAuthenticated,
                 canComment: widget.canComment ?? widget.isAuthenticated,
-                canUploadMedia:
-                    widget.canUploadMedia ?? widget.isAuthenticated,
+                canUploadMedia: widget.canUploadMedia ?? widget.isAuthenticated,
                 onRequireAuth: widget.onRequireAuth,
                 blockedMessage: _commentBlockedMessage,
                 onFeedback: widget.onFeedback,
@@ -1072,43 +1071,101 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       }
                     },
                   ),
-                  if (widget.platformRepository != null && widget.canModerate)
-                    ListTile(
-                      leading: Icon(
-                        post.isRecommended
-                            ? Icons.remove_circle_outline
-                            : Icons.push_pin_outlined,
-                        color: AppTheme.primary,
-                      ),
-                      title: Text(post.isRecommended ? '移出首页推荐' : '加入首页推荐'),
-                      onTap: () async {
-                        Navigator.pop(sheetContext);
-                        try {
-                          if (post.isRecommended) {
-                            await widget.platformRepository!
-                                .removeHomeRecommendation(post.id);
-                          } else {
+                  if (widget.platformRepository != null &&
+                      widget.canModerate) ...[
+                    if (!post.isRecommended)
+                      ListTile(
+                        leading: const Icon(
+                          Icons.add_circle_outline,
+                          color: AppTheme.primary,
+                        ),
+                        title: const Text('加入推荐'),
+                        onTap: () async {
+                          Navigator.pop(sheetContext);
+                          try {
                             await widget.platformRepository!
                                 .setHomeRecommendation(postId: post.id);
+                            await widget.onRecommendationChanged?.call();
+                            if (!mounted) return;
+                            widget.onFeedback('已加入推荐');
+                            await widget.controller.load();
+                          } catch (error) {
+                            if (mounted) {
+                              widget.onFeedback(
+                                userFacingApiMessage(
+                                  error,
+                                  fallback: '推荐操作失败，请稍后重试',
+                                ),
+                              );
+                            }
                           }
-                          await widget.onRecommendationChanged?.call();
-                          if (!mounted) return;
-                          widget.onFeedback(
-                            post.isRecommended ? '已移出首页推荐' : '已加入首页推荐',
-                          );
-                          await widget.controller.load();
-                        } catch (error) {
-                          if (mounted) {
-                            widget.onFeedback(
-                              userFacingApiMessage(
-                                error,
-                                fallback: '推荐操作失败，请稍后重试',
-                              ),
-                            );
+                        },
+                      )
+                    else ...[
+                      ListTile(
+                        leading: Icon(
+                          post.isRecommendationPinned
+                              ? Icons.push_pin
+                              : Icons.push_pin_outlined,
+                          color: AppTheme.primary,
+                        ),
+                        title: Text(
+                          post.isRecommendationPinned ? '取消推荐置顶' : '在推荐中置顶',
+                        ),
+                        onTap: () async {
+                          Navigator.pop(sheetContext);
+                          try {
+                            final pinned = !post.isRecommendationPinned;
+                            await widget.platformRepository!
+                                .setHomeRecommendationPinned(
+                                  postId: post.id,
+                                  pinned: pinned,
+                                );
+                            await widget.onRecommendationChanged?.call();
+                            if (!mounted) return;
+                            widget.onFeedback(pinned ? '已在推荐中置顶' : '已取消推荐置顶');
+                            await widget.controller.load();
+                          } catch (error) {
+                            if (mounted) {
+                              widget.onFeedback(
+                                userFacingApiMessage(
+                                  error,
+                                  fallback: '推荐置顶操作失败，请稍后重试',
+                                ),
+                              );
+                            }
                           }
-                        }
-                      },
-                    ),
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(
+                          Icons.remove_circle_outline,
+                          color: AppTheme.primary,
+                        ),
+                        title: const Text('移出推荐'),
+                        onTap: () async {
+                          Navigator.pop(sheetContext);
+                          try {
+                            await widget.platformRepository!
+                                .removeHomeRecommendation(post.id);
+                            await widget.onRecommendationChanged?.call();
+                            if (!mounted) return;
+                            widget.onFeedback('已移出推荐');
+                            await widget.controller.load();
+                          } catch (error) {
+                            if (mounted) {
+                              widget.onFeedback(
+                                userFacingApiMessage(
+                                  error,
+                                  fallback: '推荐操作失败，请稍后重试',
+                                ),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                    ],
+                  ],
                   if (widget.canModerate &&
                       widget.platformRepository != null &&
                       post.images.isNotEmpty)

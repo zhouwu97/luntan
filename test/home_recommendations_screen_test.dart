@@ -12,6 +12,7 @@ class _FakeRecommendationRepository extends PlatformRepository {
   final List<HomeRecommendation> items;
   List<String>? reorderedIds;
   String? removedId;
+  bool? pinned;
 
   @override
   Future<List<HomeRecommendation>> listHomeRecommendations() async =>
@@ -25,6 +26,14 @@ class _FakeRecommendationRepository extends PlatformRepository {
   @override
   Future<void> removeHomeRecommendation(String postId) async {
     removedId = postId;
+  }
+
+  @override
+  Future<void> setHomeRecommendationPinned({
+    required String postId,
+    required bool pinned,
+  }) async {
+    this.pinned = pinned;
   }
 }
 
@@ -41,6 +50,30 @@ HomeRecommendation _recommendation(String id, int position) =>
     );
 
 void main() {
+  testWidgets('首页推荐管理页支持置顶和取消置顶', (tester) async {
+    final repository = _FakeRecommendationRepository([
+      _recommendation('p1', 0),
+    ]);
+    var changedCount = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeRecommendationsScreen(
+          repository: repository,
+          onFeedback: (_) {},
+          onRecommendationChanged: () async => changedCount += 1,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('在推荐中置顶'));
+    await tester.pumpAndSettle();
+
+    expect(repository.pinned, isTrue);
+    expect(find.byTooltip('取消推荐置顶'), findsOneWidget);
+    expect(changedCount, 1);
+  });
+
   testWidgets('首页推荐页支持查看、移除和拖拽排序', (tester) async {
     final repository = _FakeRecommendationRepository([
       _recommendation('p1', 0),

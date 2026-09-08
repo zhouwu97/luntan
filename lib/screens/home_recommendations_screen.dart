@@ -98,8 +98,13 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('移出首页推荐？', style: TextStyle(fontWeight: FontWeight.w800)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              '移出首页推荐？',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
             content: Text('“${item.title}”将不再出现在人工推荐流中。'),
             actions: [
               TextButton(
@@ -109,7 +114,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
               FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: AppTheme.pink),
                 onPressed: () => Navigator.pop(dialogContext, true),
-                 child: const Text('移出推荐'),
+                child: const Text('移出推荐'),
               ),
             ],
           ),
@@ -127,6 +132,38 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     } catch (cause) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(cause, fallback: '移出推荐失败'));
+      }
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  Future<void> _setPinned(HomeRecommendation item) async {
+    if (saving) return;
+    final pinned = !item.isPinned;
+    setState(() => saving = true);
+    try {
+      await widget.repository.setHomeRecommendationPinned(
+        postId: item.postId,
+        pinned: pinned,
+      );
+      await widget.onRecommendationChanged?.call();
+      if (!mounted) return;
+      setState(() {
+        final index = items.indexWhere((value) => value.postId == item.postId);
+        if (index >= 0) {
+          items[index] = _copyRecommendation(item, isPinned: pinned);
+          // 管理列表与首页使用同一分区顺序，操作后立即反映真实位置。
+          items.sort((a, b) {
+            if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
+            return a.position.compareTo(b.position);
+          });
+        }
+      });
+      widget.onFeedback(pinned ? '已在推荐中置顶' : '已取消推荐置顶');
+    } catch (cause) {
+      if (mounted) {
+        widget.onFeedback(userFacingApiMessage(cause, fallback: '推荐置顶操作失败'));
       }
     } finally {
       if (mounted) setState(() => saving = false);
@@ -181,9 +218,16 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 36, color: AppTheme.textSecondary),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 36,
+              color: AppTheme.textSecondary,
+            ),
             const SizedBox(height: 10),
-            const Text('加载推荐列表失败', style: TextStyle(color: AppTheme.pink, fontSize: 13)),
+            const Text(
+              '加载推荐列表失败',
+              style: TextStyle(color: AppTheme.pink, fontSize: 13),
+            ),
             const SizedBox(height: 12),
             FilledButton.tonal(onPressed: _load, child: const Text('重新加载')),
           ],
@@ -208,7 +252,11 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(Icons.push_pin_outlined, size: 28, color: Color(0xFF6B8299)),
+                    child: const Icon(
+                      Icons.push_pin_outlined,
+                      size: 28,
+                      color: Color(0xFF6B8299),
+                    ),
                   ),
                   const SizedBox(height: 14),
                   const Text(
@@ -222,7 +270,10 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                   const SizedBox(height: 4),
                   const Text(
                     '管理员可在帖子详情菜单中将优质内容加入精选',
-                    style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -272,7 +323,11 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                           alignment: Alignment.center,
-                          child: const Icon(Icons.drag_indicator_rounded, color: AppTheme.purple, size: 18),
+                          child: const Icon(
+                            Icons.drag_indicator_rounded,
+                            color: AppTheme.purple,
+                            size: 18,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -284,12 +339,28 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                               '${index + 1}. ${item.title}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: AppTheme.textPrimary),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
+                                color: AppTheme.textPrimary,
+                              ),
                             ),
+                            if (item.isPinned) ...[
+                              const SizedBox(height: 4),
+                              const Text(
+                                '置顶推荐',
+                                style: TextStyle(
+                                  color: AppTheme.pink,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 3),
                             Text(
                               [
-                                if (item.communityName.isNotEmpty) item.communityName,
+                                if (item.communityName.isNotEmpty)
+                                  item.communityName,
                                 if (item.authorName.isNotEmpty) item.authorName,
                                 _dateLabel(item.recommendedAt),
                                 if (item.expiresAt != null)
@@ -297,15 +368,35 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                               ].join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 11,
+                              ),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
+                        tooltip: item.isPinned ? '取消推荐置顶' : '在推荐中置顶',
+                        onPressed: saving ? null : () => _setPinned(item),
+                        icon: Icon(
+                          item.isPinned
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined,
+                          color: item.isPinned
+                              ? AppTheme.pink
+                              : const Color(0xFF8FA3B8),
+                          size: 20,
+                        ),
+                      ),
+                      IconButton(
                         tooltip: '移出推荐',
                         onPressed: saving ? null : () => _remove(item),
-                        icon: const Icon(Icons.remove_circle_outline_rounded, color: Color(0xFF8FA3B8), size: 20),
+                        icon: const Icon(
+                          Icons.remove_circle_outline_rounded,
+                          color: Color(0xFF8FA3B8),
+                          size: 20,
+                        ),
                       ),
                     ],
                   ),
@@ -321,3 +412,19 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   String _dateLabel(DateTime value) =>
       '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 }
+
+HomeRecommendation _copyRecommendation(
+  HomeRecommendation item, {
+  required bool isPinned,
+}) => HomeRecommendation(
+  postId: item.postId,
+  position: item.position,
+  recommendedBy: item.recommendedBy,
+  recommendedAt: item.recommendedAt,
+  title: item.title,
+  contentPreview: item.contentPreview,
+  authorName: item.authorName,
+  communityName: item.communityName,
+  isPinned: isPinned,
+  expiresAt: item.expiresAt,
+);

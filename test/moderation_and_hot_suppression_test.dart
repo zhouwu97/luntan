@@ -13,74 +13,78 @@ import 'package:luntan/screens/post_detail_screen.dart';
 import 'package:luntan/widgets/forum_post_card.dart';
 
 void main() {
-  testWidgets('ForumPostCard renders [已人工移出热门] badge when hotSuppressed is true', (tester) async {
-    final post = Post(
-      id: 'p101',
-      authorId: 'u1',
-      communityId: 'c1',
-      title: '热门测试帖子',
-      content: '测试内容',
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-      hotSuppressed: true,
-      hotSuppressedReason: '人工移出热门',
-    );
+  testWidgets(
+    'ForumPostCard renders [已人工移出热门] badge when hotSuppressed is true',
+    (tester) async {
+      final post = Post(
+        id: 'p101',
+        authorId: 'u1',
+        communityId: 'c1',
+        title: '热门测试帖子',
+        content: '测试内容',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        hotSuppressed: true,
+        hotSuppressedReason: '人工移出热门',
+      );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ForumPostCard(
-            post: post,
-            onOpen: () {},
-            onLike: () {},
-            onBookmark: () {},
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ForumPostCard(
+              post: post,
+              onOpen: () {},
+              onLike: () {},
+              onBookmark: () {},
+            ),
           ),
         ),
-      ),
-    );
+      );
 
-    expect(find.text('已人工移出热门'), findsOneWidget);
-  });
+      expect(find.text('已人工移出热门'), findsOneWidget);
+    },
+  );
 
-  testWidgets('ImageModerationScreen displays image and allows switching masking mode', (tester) async {
-    final media = MediaAsset(
-      id: 'm101',
-      type: MediaType.image,
-      url: 'https://example.com/photo.jpg',
-      width: 800,
-      height: 600,
-      moderationStatus: 'normal',
-      maskRegions: const [
-        MaskRegion(x: 0.1, y: 0.1, width: 0.3, height: 0.3, type: 'mosaic'),
-      ],
-    );
+  testWidgets(
+    'ImageModerationScreen displays image and allows switching masking mode',
+    (tester) async {
+      final media = MediaAsset(
+        id: 'm101',
+        type: MediaType.image,
+        url: 'https://example.com/photo.jpg',
+        width: 800,
+        height: 600,
+        moderationStatus: 'normal',
+        maskRegions: const [
+          MaskRegion(x: 0.1, y: 0.1, width: 0.3, height: 0.3, type: 'mosaic'),
+        ],
+      );
 
-    final post = Post(
-      id: 'p101',
-      authorId: 'u1',
-      communityId: 'c1',
-      title: '打码测试帖子',
-      content: '测试内容',
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-      media: [media],
-    );
+      final post = Post(
+        id: 'p101',
+        authorId: 'u1',
+        communityId: 'c1',
+        title: '打码测试帖子',
+        content: '测试内容',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        media: [media],
+      );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ImageModerationScreen(post: post),
-      ),
-    );
+      await tester.pumpWidget(
+        MaterialApp(home: ImageModerationScreen(post: post)),
+      );
 
-    expect(find.text('图片打码 1/1'), findsOneWidget);
-    expect(find.text('马赛克'), findsOneWidget);
-    expect(find.text('模糊'), findsOneWidget);
-    expect(find.text('保存并应用'), findsOneWidget);
+      expect(find.text('图片打码 1/1'), findsOneWidget);
+      expect(find.text('马赛克'), findsOneWidget);
+      expect(find.text('模糊'), findsOneWidget);
+      expect(find.text('保存并应用'), findsOneWidget);
 
-    // Switch to blur
-    await tester.tap(find.text('模糊'));
-    await tester.pump();
-  });
+      // Switch to blur
+      await tester.tap(find.text('模糊'));
+      await tester.pump();
+    },
+  );
 
   testWidgets('PostDetailScreen 显示图片打码入口并支持跳转（管理员且有图）', (tester) async {
     final postRepo = _FakePostWithImageRepository();
@@ -134,7 +138,9 @@ void main() {
     expect(find.byType(ImageModerationScreen), findsOneWidget);
   });
 
-  testWidgets('PostDetailScreen 管理员且帖子有图时，底部菜单可滚动展示删除帖子并支持点击删除', (tester) async {
+  testWidgets('PostDetailScreen 管理员且帖子有图时，底部菜单可滚动展示删除帖子并支持点击删除', (
+    tester,
+  ) async {
     final postRepo = _FakePostWithImageRepository();
     final commentRepo = MockCommentRepository();
     final interactionRepo = MockInteractionRepository();
@@ -282,10 +288,55 @@ void main() {
     );
     await tester.tap(appBarMoreButton);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('加入首页推荐'));
+    await tester.tap(find.text('加入推荐'));
     await tester.pumpAndSettle();
 
     expect(platformRepo.setPostId, 'p-with-img');
+    expect(changedCount, 1);
+  });
+
+  testWidgets('PostDetailScreen 已置顶推荐可取消推荐置顶并通知刷新', (tester) async {
+    final platformRepo = _RecordingRecommendationRepository();
+    final postDetailController = PostDetailController(
+      repository: _FakeRecommendedPostRepository(),
+      postId: 'p-recommended',
+    );
+    var changedCount = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PostDetailScreen(
+          controller: postDetailController,
+          commentsController: CommentsController(
+            repository: MockCommentRepository(),
+            postId: 'p-recommended',
+          ),
+          interactionController: InteractionController(
+            repository: MockInteractionRepository(),
+          ),
+          platformRepository: platformRepo,
+          canModerate: true,
+          onToggleLike: (_) async {},
+          onToggleBookmark: (_) async {},
+          onFeedback: (_) {},
+          onRecommendationChanged: () async => changedCount += 1,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final appBarMoreButton = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.byIcon(Icons.more_horiz_rounded),
+    );
+    await tester.tap(appBarMoreButton);
+    await tester.pumpAndSettle();
+    expect(find.text('取消推荐置顶'), findsOneWidget);
+    expect(find.text('移出推荐'), findsOneWidget);
+    await tester.tap(find.text('取消推荐置顶'));
+    await tester.pumpAndSettle();
+
+    expect(platformRepo.pinned, isFalse);
     expect(changedCount, 1);
   });
 }
@@ -295,6 +346,7 @@ class _RecordingRecommendationRepository extends PlatformRepository {
     : super(ApiClient(baseUri: Uri.parse('https://example.com')));
 
   String? setPostId;
+  bool? pinned;
 
   @override
   Future<void> setHomeRecommendation({
@@ -304,6 +356,31 @@ class _RecordingRecommendationRepository extends PlatformRepository {
   }) async {
     setPostId = postId;
   }
+
+  @override
+  Future<void> setHomeRecommendationPinned({
+    required String postId,
+    required bool pinned,
+  }) async {
+    this.pinned = pinned;
+  }
+}
+
+class _FakeRecommendedPostRepository implements PostRepository {
+  @override
+  Future<PostDetail?> getPost(String id) async => PostDetail(
+    post: Post(
+      id: id,
+      authorId: 'u1',
+      communityId: 'c1',
+      title: '已置顶推荐帖子',
+      content: '测试内容',
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      isRecommended: true,
+      isRecommendationPinned: true,
+    ),
+  );
 }
 
 class _FakePostWithImageRepository implements PostRepository {

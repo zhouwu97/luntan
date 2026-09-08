@@ -329,6 +329,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPut && path == "/api/v1/admin/recommendations/reorder":
 		s.reorderHomeRecommendations(w, r)
 		return
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admin/recommendations/") && strings.HasSuffix(path, "/pin"):
+		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/recommendations/"), "/pin")
+		s.setHomeRecommendationPin(w, r, postID)
+		return
 	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/v1/admin/posts/") && strings.HasSuffix(path, "/hot-suppression"):
 		postID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/admin/posts/"), "/hot-suppression")
 		s.setPostHotSuppression(w, r, postID)

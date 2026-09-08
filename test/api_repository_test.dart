@@ -19,7 +19,7 @@ void main() {
           requestedUri = request.url;
           return http.Response.bytes(
             utf8.encode(
-              '''{"items":[{"id":"p1","author":{"id":"u1","username":"user","nickname":"用户"},"community":{"id":"c1","slug":"campus","name":"校园"},"type":"normal","title":"标题","content_preview":"正文","comment_count":2,"like_count":3,"view_count":4,"created_at":"2026-08-22T12:00:00Z"}],"next_cursor":"cursor-1","has_more":true}''',
+              '''{"items":[{"id":"p1","author":{"id":"u1","username":"user","nickname":"用户"},"community":{"id":"c1","slug":"campus","name":"校园"},"type":"normal","title":"标题","content_preview":"正文","comment_count":2,"like_count":3,"view_count":4,"created_at":"2026-08-22T12:00:00Z","is_recommended":true,"recommendation_pinned":true}],"next_cursor":"cursor-1","has_more":true}''',
             ),
             200,
             headers: const {'content-type': 'application/json; charset=utf-8'},
@@ -35,6 +35,7 @@ void main() {
 
     expect(page.items.single.id, 'p1');
     expect(page.items.single.author?.nickname, '用户');
+    expect(page.items.single.isRecommendationPinned, isTrue);
     expect(page.nextCursor, 'cursor-1');
     expect(page.hasMore, isTrue);
     expect(requestedUri?.queryParameters['post_type'], 'game_share');
@@ -226,32 +227,35 @@ void main() {
     client.close();
   });
 
-  test('ApiUserRepository.listComments 请求 /users/{id}/comments 并复用轻量结构', () async {
-    Uri? requestedUri;
-    final client = ApiClient(
-      baseUri: Uri.parse('https://example.com'),
-      client: MockClient((request) async {
-        requestedUri = request.url;
-        return http.Response.bytes(
-          utf8.encode(
-            '{"items":[{"id":"post-1","comment_id":"c9","title":"帖子标题","content_preview":"他人评论","community_id":"c1","community_name":"评测区","comment_count":4,"like_count":2,"bookmark_count":0,"published_at":"2026-08-24T20:00:00Z","activity_at":"2026-08-24T21:00:00Z"}],"next_cursor":"cur-2","has_more":true}',
-          ),
-          200,
-          headers: const {'content-type': 'application/json; charset=utf-8'},
-        );
-      }),
-    );
+  test(
+    'ApiUserRepository.listComments 请求 /users/{id}/comments 并复用轻量结构',
+    () async {
+      Uri? requestedUri;
+      final client = ApiClient(
+        baseUri: Uri.parse('https://example.com'),
+        client: MockClient((request) async {
+          requestedUri = request.url;
+          return http.Response.bytes(
+            utf8.encode(
+              '{"items":[{"id":"post-1","comment_id":"c9","title":"帖子标题","content_preview":"他人评论","community_id":"c1","community_name":"评测区","comment_count":4,"like_count":2,"bookmark_count":0,"published_at":"2026-08-24T20:00:00Z","activity_at":"2026-08-24T21:00:00Z"}],"next_cursor":"cur-2","has_more":true}',
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
 
-    final page = await ApiUserRepository(client).listComments('u2');
+      final page = await ApiUserRepository(client).listComments('u2');
 
-    expect(requestedUri?.path, '/api/v1/users/u2/comments');
-    expect(page.items.single.commentId, 'c9');
-    expect(page.items.single.id, 'post-1');
-    expect(
-      page.items.single.activityAt,
-      DateTime.parse('2026-08-24T21:00:00Z'),
-    );
-    expect(page.nextCursor, 'cur-2');
-    client.close();
-  });
+      expect(requestedUri?.path, '/api/v1/users/u2/comments');
+      expect(page.items.single.commentId, 'c9');
+      expect(page.items.single.id, 'post-1');
+      expect(
+        page.items.single.activityAt,
+        DateTime.parse('2026-08-24T21:00:00Z'),
+      );
+      expect(page.nextCursor, 'cur-2');
+      client.close();
+    },
+  );
 }

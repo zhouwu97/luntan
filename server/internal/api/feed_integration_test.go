@@ -96,7 +96,7 @@ func fetchFeedIDs(t *testing.T, s *Server, sort, communityID string) []string {
 	t.Helper()
 	var all []string
 	cursor := ""
-	for page := 0; page < 10; page++ {
+	for page := 0; page < 100; page++ {
 		u := fmt.Sprintf("/api/v1/feed/latest?sort=%s&community_id=%s&limit=2", sort, communityID)
 		if cursor != "" {
 			u += "&cursor=" + url.QueryEscape(cursor)
@@ -830,9 +830,9 @@ func TestReplyToHiddenCommentRejected(t *testing.T) {
 }
 
 // 推荐严格限定管理员人工源：
-// 普通公开帖 A、管理员推荐 B (pos=2)、管理员推荐 C (pos=1)
-// 请求 sort=recommended：必须为 [C, B]，绝对不能出现 A；
-// 移除 C 后，再次请求只剩 [B]。
+// 普通公开帖 A、管理员置顶推荐 B (pos=2)、管理员普通推荐 C (pos=1)。
+// 推荐置顶优先于普通推荐内部 position，请求结果必须为 [B, C]；
+// 移除 C 后，再次请求只剩 [B]，未推荐的 A 始终不能出现。
 func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
 	s := feedIntegrationServer(t)
 	communityID, ids := insertFeedFixtures(t, s)
@@ -841,10 +841,10 @@ func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
 	postB := ids["p2"]
 	postC := ids["p3"]
 
-	// 将 postB 加入推荐，位次 2
+	// 将 postB 加入推荐并在推荐上下文中置顶，位次 2
 	if _, err := s.db.Exec(`
-		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at)
-		VALUES ($1, (SELECT author_id FROM posts WHERE id = $1), 2, now() - interval '1 hour')`, postB); err != nil {
+		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at, is_pinned)
+		VALUES ($1, (SELECT author_id FROM posts WHERE id = $1), 2, now() - interval '1 hour', true)`, postB); err != nil {
 		t.Fatal(err)
 	}
 
@@ -855,9 +855,9 @@ func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. 获取推荐 Feed，必须只有 C 和 B，且按 position 正序排，绝无未被推荐的 A
+	// 1. 获取推荐 Feed，必须只有 B 和 C，置顶分区优先，绝无未被推荐的 A
 	got := fetchFeedIDs(t, s, "recommended", communityID)
-	requireFeedOrder(t, got, []string{postC, postB}, "recommended: initial")
+	requireFeedOrder(t, got, []string{postB, postC}, "recommended: initial")
 	if slices.Contains(got, postA) {
 		t.Fatalf("未人工推荐的帖子 A (%s) 不应出现在推荐流中: %v", postA, got)
 	}
@@ -872,5 +872,100 @@ func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
 	requireFeedOrder(t, gotAfterDelete, []string{postB}, "recommended: after delete C")
 	if slices.Contains(gotAfterDelete, postC) {
 		t.Fatalf("已被移除推荐的帖子 C (%s) 仍出现在推荐流中: %v", postC, gotAfterDelete)
+	}
+}
+
+func TestRecommendedFeedPaginationCrossesPinBoundaryWithoutDuplicates(t *testing.T) {
+	s := feedIntegrationServer(t)
+	communityID, fixtureIDs := insertFeedFixtures(t, s)
+
+	postIDs := []string{fixtureIDs["p1"], fixtureIDs["p2"], fixtureIDs["p3"]}
+	var authorID string
+	if err := s.db.QueryRow(`SELECT author_id FROM posts WHERE id = $1`, fixtureIDs["p1"]).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for index := 3; index < 32; index++ {
+		postID := fmt.Sprintf("itest-rec-page-%d-%d", now.UnixNano(), index)
+		if _, err := s.db.Exec(`
+			INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+			VALUES ($1, $2, $3, 'normal', 'published', 'normal', $4, '正文', $5, $5, $5)`,
+			postID, authorID, communityID, fmt.Sprintf("分页推荐 %d", index), now.Add(-time.Duration(index)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		postIDs = append(postIDs, postID)
+	}
+	for index, postID := range postIDs {
+		position := index
+		if index < 2 {
+			// 两条置顶推荐共用 position，验证 recommended_at DESC 次级排序。
+			position = 0
+		}
+		if _, err := s.db.Exec(`
+			INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at, is_pinned)
+			VALUES ($1, $2, $3, $4, $5)`,
+			postID, authorID, position, now.Add(-time.Duration(index)*time.Second), index < 7); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type feedItem struct {
+		ID                   string `json:"id"`
+		RecommendationPinned bool   `json:"recommendation_pinned"`
+	}
+	type feedPayload struct {
+		Items []feedItem `json:"items"`
+		Next  *string    `json:"next_cursor"`
+		More  bool       `json:"has_more"`
+	}
+	fetchPage := func(cursor string) feedPayload {
+		t.Helper()
+		u := fmt.Sprintf("/api/v1/feed/latest?sort=recommended&community_id=%s&limit=20", communityID)
+		if cursor != "" {
+			u += "&cursor=" + url.QueryEscape(cursor)
+		}
+		req := httptest.NewRequest(http.MethodGet, u, nil)
+		res := httptest.NewRecorder()
+		s.latestFeed(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("推荐分页请求失败：status=%d body=%s", res.Code, res.Body.String())
+		}
+		var payload feedPayload
+		if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	firstPage := fetchPage("")
+	if len(firstPage.Items) != 20 || !firstPage.More || firstPage.Next == nil {
+		t.Fatalf("推荐第一页应为 20 条且存在下一页：%+v", firstPage)
+	}
+	for index, item := range firstPage.Items {
+		if item.RecommendationPinned != (index < 7) {
+			t.Fatalf("推荐第一页第 %d 条置顶状态错误：%+v", index, item)
+		}
+	}
+	secondPage := fetchPage(*firstPage.Next)
+	if len(secondPage.Items) != 12 || secondPage.More || secondPage.Next != nil {
+		t.Fatalf("推荐第二页应为剩余 12 条且无下一页：%+v", secondPage)
+	}
+	for index, item := range secondPage.Items {
+		if item.RecommendationPinned {
+			t.Fatalf("推荐第二页第 %d 条不应为置顶：%+v", index, item)
+		}
+	}
+
+	got := make([]string, 0, 32)
+	for _, item := range append(firstPage.Items, secondPage.Items...) {
+		got = append(got, item.ID)
+	}
+	requireFeedOrder(t, got, postIDs, "recommended: pin boundary pagination")
+	seen := make(map[string]struct{}, len(got))
+	for _, postID := range got {
+		if _, duplicated := seen[postID]; duplicated {
+			t.Fatalf("推荐分页出现重复帖子 %s：%v", postID, got)
+		}
+		seen[postID] = struct{}{}
 	}
 }

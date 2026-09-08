@@ -231,9 +231,11 @@ Post _postFromJson(Map<String, dynamic> json) {
           final rawMasks = value['mask_regions'];
           final masks = rawMasks is List
               ? rawMasks
-                  .whereType<Map>()
-                  .map((m) => MaskRegion.fromJson(Map<String, dynamic>.from(m)))
-                  .toList()
+                    .whereType<Map>()
+                    .map(
+                      (m) => MaskRegion.fromJson(Map<String, dynamic>.from(m)),
+                    )
+                    .toList()
               : const <MaskRegion>[];
           return MediaAsset(
             id: _string(value['id']),
@@ -242,7 +244,9 @@ Post _postFromJson(Map<String, dynamic> json) {
             width: _nullableInt(value['width']),
             height: _nullableInt(value['height']),
             altText: _nullableString(value['alt_text']),
-            moderationStatus: _string(value['moderation_status']) == 'censored' ? 'censored' : 'normal',
+            moderationStatus: _string(value['moderation_status']) == 'censored'
+                ? 'censored'
+                : 'normal',
             maskRegions: masks,
             thumb: _parseVariant(value['thumb']),
             feed: _parseVariant(value['feed']),
@@ -259,10 +263,9 @@ Post _postFromJson(Map<String, dynamic> json) {
       id: _string(authorJson['id']),
       username: _string(authorJson['username']),
       nickname: _string(authorJson['nickname']),
-      avatar: _nullableString(
-        authorJson['avatar'] ?? authorJson['avatar_url'],
-      ),
-      level: _nullableInt(authorJson['level']) ??
+      avatar: _nullableString(authorJson['avatar'] ?? authorJson['avatar_url']),
+      level:
+          _nullableInt(authorJson['level']) ??
           (_string(authorJson['id']).startsWith('guest') ? 0 : 1),
       createdAt: now,
       updatedAt: now,
@@ -299,6 +302,7 @@ Post _postFromJson(Map<String, dynamic> json) {
     lastCommentAt: lastCommentAt,
     isRecommended: json['is_recommended'] == true,
     recommendationPosition: _nullableInt(json['recommendation_position']),
+    isRecommendationPinned: json['recommendation_pinned'] == true,
     hotSuppressed: json['hot_suppressed'] == true,
     hotSuppressedReason: _nullableString(json['hot_suppressed_reason']),
     viewerState: ViewerPostState(

@@ -47,6 +47,7 @@ type postResponse struct {
 	LastCommentAt          *time.Time          `json:"last_comment_at,omitempty"`
 	IsRecommended          bool                `json:"is_recommended,omitempty"`
 	RecommendationPosition *int                `json:"recommendation_position,omitempty"`
+	RecommendationPinned   bool                `json:"recommendation_pinned,omitempty"`
 	HotSuppressed          bool                `json:"hot_suppressed,omitempty"`
 	HotSuppressedReason    string              `json:"hot_suppressed_reason,omitempty"`
 	HotSuppressedAt        *time.Time          `json:"hot_suppressed_at,omitempty"`
@@ -63,6 +64,7 @@ type feedPostRow struct {
 	score         *float64
 	recPosition   *int
 	recAt         *time.Time
+	recPinned     *bool
 	lastCommentAt *time.Time
 	activityAt    *time.Time
 }
@@ -91,7 +93,7 @@ func feedSortColumnsAt(sort, asOfPlaceholder string) (scoreExpr, orderBy string)
 		scoreExpr = "(p.bookmark_count * 5 + p.like_count * 3 + p.comment_count * 2 + p.share_count * 2)::double precision"
 		return scoreExpr, "ORDER BY (" + scoreExpr + ") DESC, p.published_at DESC, p.id DESC"
 	case "recommended":
-		return "", "ORDER BY hr.position ASC, hr.recommended_at DESC, p.id DESC"
+		return "", "ORDER BY hr.is_pinned DESC, hr.position ASC, hr.recommended_at DESC, p.id DESC"
 	default:
 		return "", "ORDER BY p.published_at DESC, p.id DESC"
 	}
@@ -143,7 +145,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
-		if isRecommended && (decoded.Position == nil || decoded.RecommendedAt == nil) {
+		if isRecommended && (decoded.RecommendationPinned == nil || decoded.Position == nil || decoded.RecommendedAt == nil) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
@@ -185,7 +187,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		       p.type, p.title, p.content, p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
 		       p.created_at, p.updated_at, p.published_at`
 
-	columns += `, hr.position AS rec_position, hr.recommended_at AS rec_at`
+	columns += `, hr.position AS rec_position, hr.recommended_at AS rec_at, hr.is_pinned AS rec_pinned`
 
 	columns += `, ` + lastCommentExpr + ` AS last_comment_at`
 	columns += `, ` + activityExpr + ` AS activity_at`
@@ -232,9 +234,10 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			p1 := len(args) + 1
 			p2 := len(args) + 2
 			p3 := len(args) + 3
-			query += fmt.Sprintf(" AND (hr.position > $%d OR (hr.position = $%d AND (hr.recommended_at < $%d OR (hr.recommended_at = $%d AND p.id < $%d))))",
-				p1, p1, p2, p2, p3)
-			args = append(args, *cursor.Position, *cursor.RecommendedAt, cursor.ID)
+			p4 := len(args) + 4
+			query += fmt.Sprintf(" AND (hr.is_pinned < $%d OR (hr.is_pinned = $%d AND (hr.position > $%d OR (hr.position = $%d AND (hr.recommended_at < $%d OR (hr.recommended_at = $%d AND p.id < $%d))))))",
+				p1, p1, p2, p2, p3, p3, p4)
+			args = append(args, *cursor.RecommendationPinned, *cursor.Position, *cursor.RecommendedAt, cursor.ID)
 		} else if scored {
 			score := 0.0
 			if cursor.Score != nil {
@@ -302,6 +305,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		var row feedPostRow
 		var recPos sql.NullInt64
 		var recAt sql.NullTime
+		var recPinned sql.NullBool
 		var lastCommentAt sql.NullTime
 		var activityAt sql.NullTime
 
@@ -311,7 +315,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			&row.post.Title, &row.post.ContentPreview, &row.post.CommentCount, &row.post.LikeCount,
 			&row.post.BookmarkCount, &row.post.ShareCount, &row.post.ViewCount, &row.post.CreatedAt,
 			&row.post.UpdatedAt, &row.publishedAt,
-			&recPos, &recAt,
+			&recPos, &recAt, &recPinned,
 			&lastCommentAt, &activityAt,
 		}
 		if scored {
@@ -333,6 +337,11 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		if recAt.Valid {
 			t := recAt.Time
 			row.recAt = &t
+		}
+		if recPinned.Valid {
+			pinned := recPinned.Bool
+			row.recPinned = &pinned
+			row.post.RecommendationPinned = pinned
 		}
 		if lastCommentAt.Valid {
 			t := lastCommentAt.Time
@@ -378,6 +387,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		if isRecommended {
 			next.Position = last.recPosition
 			next.RecommendedAt = last.recAt
+			next.RecommendationPinned = last.recPinned
 		} else if scored {
 			next.PublishedAt = last.publishedAt
 			next.Score = last.score

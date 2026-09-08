@@ -14,7 +14,7 @@ func TestFeedSortColumns(t *testing.T) {
 	}{
 		{"latest", false, "ORDER BY p.published_at DESC, p.id DESC", ""},
 		{"featured", true, "ORDER BY", "bookmark_count"},
-		{"recommended", false, "ORDER BY hr.position ASC, hr.recommended_at DESC, p.id DESC", ""},
+		{"recommended", false, "ORDER BY hr.is_pinned DESC, hr.position ASC, hr.recommended_at DESC, p.id DESC", ""},
 		{"hot", true, "ORDER BY", "POWER"},
 		{"unknown-sort", false, "ORDER BY p.published_at DESC, p.id DESC", ""},
 	}

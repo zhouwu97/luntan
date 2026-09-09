@@ -8,6 +8,8 @@ import (
 )
 
 type feedCursor struct {
+	// Sort 绑定生成游标时的排序模式，禁止把不同评分体系的游标交叉复用。
+	Sort                 string     `json:"sort"`
 	PublishedAt          time.Time  `json:"published_at,omitempty"`
 	ActivityAt           *time.Time `json:"activity_at,omitempty"`
 	Position             *int       `json:"position,omitempty"`
@@ -34,11 +36,18 @@ func decodeFeedCursor(value string) (feedCursor, error) {
 		return feedCursor{}, fmt.Errorf("decode cursor: %w", err)
 	}
 	var cursor feedCursor
-	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" {
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" || cursor.Sort == "" {
 		return feedCursor{}, fmt.Errorf("invalid cursor")
 	}
 	if cursor.PublishedAt.IsZero() && cursor.ActivityAt == nil && cursor.Position == nil {
 		return feedCursor{}, fmt.Errorf("invalid cursor")
 	}
 	return cursor, nil
+}
+
+func feedCursorSort(sortMode, latestBy string) string {
+	if sortMode == "" || sortMode == "latest" {
+		return "latest:" + latestBy
+	}
+	return sortMode
 }

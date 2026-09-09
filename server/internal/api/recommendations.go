@@ -22,6 +22,7 @@ type homeRecommendationItem struct {
 }
 
 type setRecommendationInput struct {
+	// Position 仅为兼容旧客户端保留；普通推荐由算法排序，置顶顺序只能通过 pin/reorder 修改。
 	Position  *int       `json:"position"`
 	ExpiresAt *time.Time `json:"expires_at"`
 }
@@ -253,26 +254,16 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
-	position := 0
-	if input.Position != nil {
-		position = *input.Position
-	} else {
-		var maxPos sql.NullInt64
-		_ = tx.QueryRowContext(r.Context(), `SELECT MAX(position) FROM home_recommendations`).Scan(&maxPos)
-		if maxPos.Valid {
-			position = int(maxPos.Int64) + 1
-		}
-	}
-
-	_, err = tx.ExecContext(r.Context(), `
+	var position int
+	err = tx.QueryRowContext(r.Context(), `
 		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at, expires_at)
-		VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)
+		VALUES ($1, $2, 0, CURRENT_TIMESTAMP, $3)
 		ON CONFLICT (post_id) DO UPDATE SET
-			position = EXCLUDED.position,
 			recommended_by = EXCLUDED.recommended_by,
 			recommended_at = CURRENT_TIMESTAMP,
-			expires_at = EXCLUDED.expires_at`,
-		postID, user.ID, position, input.ExpiresAt)
+			expires_at = EXCLUDED.expires_at
+		RETURNING position`,
+		postID, user.ID, input.ExpiresAt).Scan(&position)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

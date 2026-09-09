@@ -91,4 +91,17 @@ func TestRecordPostShareKeepsBaselineAndDeduplicates(t *testing.T) {
 	if shareCount != 9 || eventCount != 2 {
 		t.Fatalf("最终分享聚合错误 share_count=%d events=%d", shareCount, eventCount)
 	}
+
+	if _, err := s.db.Exec(`UPDATE communities SET status = 'inactive' WHERE id = $1`, communityID); err != nil {
+		t.Fatal(err)
+	}
+	if code, payload := record(sharerToken); code != http.StatusNotFound {
+		t.Fatalf("停用社区中的帖子不可分享计数 status=%d payload=%v", code, payload)
+	}
+	if _, err := s.db.Exec(`UPDATE communities SET status = 'active', deleted_at = now() WHERE id = $1`, communityID); err != nil {
+		t.Fatal(err)
+	}
+	if code, payload := record(sharerToken); code != http.StatusNotFound {
+		t.Fatalf("已删除社区中的帖子不可分享计数 status=%d payload=%v", code, payload)
+	}
 }

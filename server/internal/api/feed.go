@@ -181,12 +181,17 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	isLatestComment := (sortMode == "latest" || sortMode == "") && latestBy == "comment"
 	isLatestPost := (sortMode == "latest" || sortMode == "") && latestBy == "post"
 	usesAsOf := sortMode == "hot" || isRecommended || isLatestComment
+	cursorSort := feedCursorSort(sortMode, latestBy)
 
 	var cursor *feedCursor
 	if value := r.URL.Query().Get("cursor"); value != "" {
 		decoded, err := decodeFeedCursor(value)
 		if err != nil {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
+			return
+		}
+		if decoded.Sort != cursorSort {
+			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
 		if isRecommended {
@@ -446,6 +451,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if hasMore && len(rowsData) > 0 {
 		last := rowsData[len(rowsData)-1]
 		var next feedCursor
+		next.Sort = cursorSort
 		next.ID = last.post.ID
 		if isRecommended {
 			next.RecommendationPinned = last.recPinned

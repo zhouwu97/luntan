@@ -29,15 +29,18 @@ func (s *Server) recordPostShare(w http.ResponseWriter, r *http.Request, postID 
 	var authorID string
 	var shareCount int64
 	err = tx.QueryRowContext(r.Context(), `
-		SELECT author_id, share_count
-		FROM posts
-		WHERE id = $1
-		  AND publication_status = 'published'
-		  AND moderation_status = 'normal'
-		  AND type <> 'market'
-		  AND deleted_at IS NULL
-		  AND published_at IS NOT NULL
-		FOR UPDATE`, postID).Scan(&authorID, &shareCount)
+		SELECT p.author_id, p.share_count
+		FROM posts p
+		JOIN communities c ON c.id = p.community_id
+		WHERE p.id = $1
+		  AND p.publication_status = 'published'
+		  AND p.moderation_status = 'normal'
+		  AND p.type <> 'market'
+		  AND p.deleted_at IS NULL
+		  AND p.published_at IS NOT NULL
+		  AND c.status = 'active'
+		  AND c.deleted_at IS NULL
+		FOR UPDATE OF p`, postID).Scan(&authorID, &shareCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeAuthError(w, r, ErrPostNotFound)
 		return

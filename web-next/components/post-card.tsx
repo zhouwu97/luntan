@@ -124,9 +124,7 @@ export function PostCard({
     const copied = await copyText(url);
     showToast(copied ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
     if (copied && user && user.accountType !== "guest") {
-      void recordPostShare(post.id)
-        .then(({ shareCount }) => setPostSnapshot({ ...post, shareCount }, user.id))
-        .catch(() => undefined);
+      void recordPostShare(post.id).catch(() => undefined);
     }
   }
 

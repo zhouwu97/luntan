@@ -228,6 +228,25 @@ func TestRecommendationPinRequiresActiveRecommendationAndAppearsInPostDetail(t *
 	if !recommendedAtAfter.Equal(recommendedAtBefore) {
 		t.Fatalf("pin → unpin → pin 不应改变 recommended_at：before=%s after=%s", recommendedAtBefore, recommendedAtAfter)
 	}
+	var pinnedPositionBefore int
+	if err := s.db.QueryRow(`SELECT position FROM home_recommendations WHERE post_id = $1`, postID).Scan(&pinnedPositionBefore); err != nil {
+		t.Fatal(err)
+	}
+	legacyPayload, _ := json.Marshal(map[string]any{
+		"position":   pinnedPositionBefore + 100,
+		"expires_at": now.Add(24 * time.Hour),
+	})
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, legacyPayload, nil)
+	if code != http.StatusOK {
+		t.Fatalf("旧 set-recommendation 请求应保持兼容，实际 %d：%s", code, body)
+	}
+	var pinnedPositionAfter int
+	if err := s.db.QueryRow(`SELECT position FROM home_recommendations WHERE post_id = $1`, postID).Scan(&pinnedPositionAfter); err != nil {
+		t.Fatal(err)
+	}
+	if pinnedPositionAfter != pinnedPositionBefore {
+		t.Fatalf("旧 set-recommendation 不得改写置顶位置：before=%d after=%d", pinnedPositionBefore, pinnedPositionAfter)
+	}
 
 	code, body = callBusinessAPI(handler, http.MethodGet, "/api/v1/posts/"+postID, token, nil, nil)
 	if code != http.StatusOK {

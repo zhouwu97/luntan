@@ -889,10 +889,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.pop(sheetContext);
                 final shareUrl = AppLinks.post(post.id);
                 try {
-                  await Share.share(shareUrl, subject: '分享帖子');
+                  final result = await Share.share(shareUrl, subject: '分享帖子');
+                  if (result.status != ShareResultStatus.dismissed &&
+                      widget.currentUser != null &&
+                      widget.currentUser?.accountType != 'guest') {
+                    try {
+                      await widget.interactionController.recordPostShare(post);
+                    } catch (_) {}
+                  }
                 } catch (_) {
                   await Clipboard.setData(ClipboardData(text: shareUrl));
                   widget.onFeedback('系统分享不可用，帖子链接已复制');
+                  if (widget.currentUser != null &&
+                      widget.currentUser?.accountType != 'guest') {
+                    try {
+                      await widget.interactionController.recordPostShare(post);
+                    } catch (_) {}
+                  }
                 }
               },
             ),

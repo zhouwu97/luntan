@@ -1,5 +1,12 @@
 import 'api_client.dart';
 
+class ShareRecordResult {
+  const ShareRecordResult({required this.recorded, required this.shareCount});
+
+  final bool recorded;
+  final int shareCount;
+}
+
 abstract interface class InteractionRepository {
   Future<void> setPostLike({required String postId, required bool active});
   Future<void> setCommentLike({
@@ -11,6 +18,7 @@ abstract interface class InteractionRepository {
     required bool active,
   });
   Future<void> setBookmark({required String postId, required bool active});
+  Future<ShareRecordResult> recordPostShare({required String postId});
   Future<void> setUserFollow({required String userId, required bool active});
   Future<void> setCommunityFollow({
     required String communityId,
@@ -46,6 +54,15 @@ class ApiInteractionRepository implements InteractionRepository {
   @override
   Future<void> setBookmark({required String postId, required bool active}) =>
       _toggle('/api/v1/posts/$postId/bookmark', active);
+
+  @override
+  Future<ShareRecordResult> recordPostShare({required String postId}) async {
+    final payload = await _client.postJson('/api/v1/posts/$postId/share');
+    return ShareRecordResult(
+      recorded: payload['recorded'] == true,
+      shareCount: (payload['share_count'] as num?)?.toInt() ?? 0,
+    );
+  }
 
   @override
   Future<void> setUserFollow({required String userId, required bool active}) =>

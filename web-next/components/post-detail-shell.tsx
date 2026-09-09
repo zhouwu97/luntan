@@ -28,6 +28,7 @@ import {
   getPostPoll,
   cleanupUploadedMedia,
   recordHistory,
+  recordPostShare,
   recordPostView,
   removeHomeRecommendation,
   setCommentDislike,
@@ -475,7 +476,20 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
   }
 
   async function handleShareLink() {
-    showToast(await copyText(window.location.href) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    const copied = await copyText(window.location.href);
+    showToast(copied ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    if (copied && post && user && user.accountType !== "guest") {
+      void recordPostShare(post.id)
+        .then(({ shareCount }) => {
+          setPost((current) => {
+            if (!current) return current;
+            const next = { ...current, shareCount };
+            setPostSnapshot(next, user.id);
+            return next;
+          });
+        })
+        .catch(() => undefined);
+    }
   }
 
   if (postLoading && !post) {

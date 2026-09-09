@@ -93,10 +93,58 @@ func feedSortColumnsAt(sort, asOfPlaceholder string) (scoreExpr, orderBy string)
 		scoreExpr = "(p.bookmark_count * 5 + p.like_count * 3 + p.comment_count * 2 + p.share_count * 2)::double precision"
 		return scoreExpr, "ORDER BY (" + scoreExpr + ") DESC, p.published_at DESC, p.id DESC"
 	case "recommended":
-		return "", "ORDER BY hr.is_pinned DESC, hr.position ASC, hr.recommended_at DESC, p.id DESC"
+		scoreExpr = recommendationScoreExpr(asOfPlaceholder)
+		return scoreExpr, recommendationOrderBy(scoreExpr)
 	default:
 		return "", "ORDER BY p.published_at DESC, p.id DESC"
 	}
+}
+
+// recommendationCommentStatsCTE 只聚合管理员推荐候选池中的评论，并在一次 GROUP BY
+// 中同时得到独立评论人数和有效评论总数，供 Feed 与管理列表复用。
+func recommendationCommentStatsCTE(candidatePredicate string) string {
+	return `recommendation_candidates AS (
+		SELECT hr.post_id, p.author_id
+		FROM home_recommendations hr
+		JOIN posts p ON p.id = hr.post_id
+		JOIN communities candidate_communities ON candidate_communities.id = p.community_id
+		WHERE ` + candidatePredicate + `
+	), recommendation_comment_stats AS (
+		SELECT cm.post_id,
+		       COUNT(DISTINCT cm.author_id)::double precision AS unique_commenters,
+		       COUNT(*)::double precision AS external_comments
+		FROM comments cm
+		JOIN recommendation_candidates rc ON rc.post_id = cm.post_id
+		JOIN users comment_users ON comment_users.id = cm.author_id
+		WHERE cm.publication_status = 'published'
+		  AND cm.moderation_status = 'normal'
+		  AND cm.deleted_at IS NULL
+		  AND cm.author_id <> rc.author_id
+		  AND comment_users.account_type <> 'guest'
+		  AND comment_users.deleted_at IS NULL
+		GROUP BY cm.post_id
+	)`
+}
+
+func recommendationScoreExpr(asOfPlaceholder string) string {
+	ageHours := "GREATEST(EXTRACT(EPOCH FROM (" + asOfPlaceholder + " - p.published_at)) / 3600.0, 0.0)"
+	uniqueCommenters := "COALESCE(rcs.unique_commenters, 0.0)"
+	externalComments := "COALESCE(rcs.external_comments, 0.0)"
+	effectiveComments := "LEAST(" + externalComments + ", " + uniqueCommenters + " * 3.0 + 5.0)"
+	quality := "(4.0 * LN(1.0 + p.like_count)" +
+		" + 6.0 * LN(1.0 + " + uniqueCommenters + ")" +
+		" + 2.0 * LN(1.0 + " + effectiveComments + ")" +
+		" + 2.0 * LN(1.0 + p.bookmark_count)" +
+		" + 2.0 * LN(1.0 + p.share_count))"
+	return "((6.0 + " + quality + ") / POWER(" + ageHours + " + 6.0, 0.9))::double precision"
+}
+
+func recommendationOrderBy(scoreExpr string) string {
+	return "ORDER BY hr.is_pinned DESC, " +
+		"CASE WHEN hr.is_pinned THEN hr.position END ASC NULLS LAST, " +
+		"CASE WHEN hr.is_pinned THEN hr.recommended_at END DESC NULLS LAST, " +
+		"CASE WHEN NOT hr.is_pinned THEN (" + scoreExpr + ") END DESC NULLS LAST, " +
+		"CASE WHEN NOT hr.is_pinned THEN p.published_at END DESC NULLS LAST, p.id DESC"
 }
 
 func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
@@ -129,10 +177,11 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isRecommended := sortMode == "recommended"
-	scored := sortMode == "hot" || sortMode == "featured"
+	scored := sortMode == "hot" || sortMode == "featured" || isRecommended
 	isLatestComment := (sortMode == "latest" || sortMode == "") && latestBy == "comment"
 	isLatestPost := (sortMode == "latest" || sortMode == "") && latestBy == "post"
-	usesAsOf := sortMode == "hot" || isLatestComment
+	usesAsOf := sortMode == "hot" || isRecommended || isLatestComment
+	cursorSort := feedCursorSort(sortMode, latestBy)
 
 	var cursor *feedCursor
 	if value := r.URL.Query().Get("cursor"); value != "" {
@@ -141,11 +190,18 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 无效"})
 			return
 		}
-		if scored && decoded.Score == nil {
+		if decoded.Sort != cursorSort {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
-		if isRecommended && (decoded.RecommendationPinned == nil || decoded.Position == nil || decoded.RecommendedAt == nil) {
+		if isRecommended {
+			if decoded.RecommendationPinned == nil || decoded.AsOf == nil ||
+				(*decoded.RecommendationPinned && (decoded.Position == nil || decoded.RecommendedAt == nil)) ||
+				(!*decoded.RecommendationPinned && (decoded.Score == nil || decoded.PublishedAt.IsZero())) {
+				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
+				return
+			}
+		} else if scored && decoded.Score == nil {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
@@ -198,12 +254,17 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 
 	var query string
 	if isRecommended {
-		query = columns + `
+		query = "WITH " + recommendationCommentStatsCTE(`
+			p.publication_status = 'published' AND p.moderation_status = 'normal'
+			AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
+			AND candidate_communities.status = 'active' AND candidate_communities.deleted_at IS NULL
+			AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)`) + " " + columns + `
 		FROM home_recommendations hr
 		JOIN posts p ON p.id = hr.post_id
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN communities c ON c.id = p.community_id
+		LEFT JOIN recommendation_comment_stats rcs ON rcs.post_id = p.id
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
 		  AND c.status = 'active' AND c.deleted_at IS NULL
@@ -231,13 +292,20 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 
 	if cursor != nil {
 		if isRecommended {
-			p1 := len(args) + 1
-			p2 := len(args) + 2
-			p3 := len(args) + 3
-			p4 := len(args) + 4
-			query += fmt.Sprintf(" AND (hr.is_pinned < $%d OR (hr.is_pinned = $%d AND (hr.position > $%d OR (hr.position = $%d AND (hr.recommended_at < $%d OR (hr.recommended_at = $%d AND p.id < $%d))))))",
-				p1, p1, p2, p2, p3, p3, p4)
-			args = append(args, *cursor.RecommendationPinned, *cursor.Position, *cursor.RecommendedAt, cursor.ID)
+			if *cursor.RecommendationPinned {
+				p1 := len(args) + 1
+				p2 := len(args) + 2
+				p3 := len(args) + 3
+				query += fmt.Sprintf(" AND (NOT hr.is_pinned OR (hr.is_pinned AND (hr.position > $%d OR (hr.position = $%d AND (hr.recommended_at < $%d OR (hr.recommended_at = $%d AND p.id < $%d))))))",
+					p1, p1, p2, p2, p3)
+				args = append(args, *cursor.Position, *cursor.RecommendedAt, cursor.ID)
+			} else {
+				p1 := len(args) + 1
+				p2 := len(args) + 2
+				p3 := len(args) + 3
+				query += fmt.Sprintf(" AND NOT hr.is_pinned AND ("+scoreExpr+", p.published_at, p.id) < ($%d, $%d, $%d)", p1, p2, p3)
+				args = append(args, *cursor.Score, cursor.PublishedAt, cursor.ID)
+			}
 		} else if scored {
 			score := 0.0
 			if cursor.Score != nil {
@@ -383,11 +451,19 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if hasMore && len(rowsData) > 0 {
 		last := rowsData[len(rowsData)-1]
 		var next feedCursor
+		next.Sort = cursorSort
 		next.ID = last.post.ID
 		if isRecommended {
-			next.Position = last.recPosition
-			next.RecommendedAt = last.recAt
 			next.RecommendationPinned = last.recPinned
+			asOf := feedAsOf
+			next.AsOf = &asOf
+			if last.recPinned != nil && *last.recPinned {
+				next.Position = last.recPosition
+				next.RecommendedAt = last.recAt
+			} else {
+				next.PublishedAt = last.publishedAt
+				next.Score = last.score
+			}
 		} else if scored {
 			next.PublishedAt = last.publishedAt
 			next.Score = last.score

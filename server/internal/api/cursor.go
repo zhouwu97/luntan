@@ -8,14 +8,15 @@ import (
 )
 
 type feedCursor struct {
+	// Sort 绑定生成游标时的排序模式，禁止把不同评分体系的游标交叉复用。
+	Sort                 string     `json:"sort"`
 	PublishedAt          time.Time  `json:"published_at,omitempty"`
 	ActivityAt           *time.Time `json:"activity_at,omitempty"`
 	Position             *int       `json:"position,omitempty"`
 	RecommendedAt        *time.Time `json:"recommended_at,omitempty"`
 	RecommendationPinned *bool      `json:"recommendation_pinned,omitempty"`
 	ID                   string     `json:"id"`
-	// Score 只在基于评分的排序（hot/featured）中出现，
-	// latest/recommended 排序的游标不含该字段。
+	// Score 用于 hot/featured 以及普通推荐；置顶推荐仍使用人工位次游标。
 	Score *float64 `json:"score,omitempty"`
 	// AsOf 固定评分所使用的时间，避免跨页请求之间 now() 漂移导致上一页最后一条再次出现。
 	AsOf *time.Time `json:"as_of,omitempty"`
@@ -35,11 +36,18 @@ func decodeFeedCursor(value string) (feedCursor, error) {
 		return feedCursor{}, fmt.Errorf("decode cursor: %w", err)
 	}
 	var cursor feedCursor
-	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" {
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ID == "" || cursor.Sort == "" {
 		return feedCursor{}, fmt.Errorf("invalid cursor")
 	}
 	if cursor.PublishedAt.IsZero() && cursor.ActivityAt == nil && cursor.Position == nil {
 		return feedCursor{}, fmt.Errorf("invalid cursor")
 	}
 	return cursor, nil
+}
+
+func feedCursorSort(sortMode, latestBy string) string {
+	if sortMode == "" || sortMode == "latest" {
+		return "latest:" + latestBy
+	}
+	return sortMode
 }

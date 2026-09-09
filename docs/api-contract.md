@@ -93,8 +93,8 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 排序语义：
 
 - `latest`：默认按最近回复时间倒序；指定 `latest_by=post` 时按 `published_at DESC`。
-- `recommended`：加权互动（like/comment/bookmark/share/view）+ 平缓时间衰减，
-  与 `latest` 不同源。
+- `recommended`：管理员候选池内先展示人工置顶，再按点赞、正式账号独立评论、
+  收藏、分享和发布时间衰减动态排序；浏览量不参与推荐分。
 - `hot`：更快衰减的热度排序，倾向近期热点。
 - `featured`：加权互动分，不叠加时间衰减，不再只按评论数；当前阶段由
   服务端公式排序（策展列随阶段6“加精”动作接入）。
@@ -124,6 +124,7 @@ Web Origin，继续从响应体读取 `refresh_token`，且服务端不设置 re
 | DELETE | `/posts/{id}` | 是 | 删除 |
 | PUT/DELETE | `/posts/{id}/like` | 是 | 点赞/取消 |
 | PUT/DELETE | `/posts/{id}/bookmark` | 是 | 收藏/取消 |
+| POST | `/posts/{id}/share` | 正式账号 | 记录终身首次有效分享；重复或作者自分享不增加计数 |
 | GET | `/posts/{id}/bookmark-folders` | 是 | 获取帖子所在收藏夹 |
 | PUT | `/posts/{id}/bookmark-folders` | 是 | 覆盖帖子收藏夹归属；空数组表示取消收藏 |
 | POST | `/posts/{id}/history` | 是 | 记录浏览历史 |

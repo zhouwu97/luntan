@@ -14,7 +14,7 @@ func TestFeedSortColumns(t *testing.T) {
 	}{
 		{"latest", false, "ORDER BY p.published_at DESC, p.id DESC", ""},
 		{"featured", true, "ORDER BY", "bookmark_count"},
-		{"recommended", false, "ORDER BY hr.is_pinned DESC, hr.position ASC, hr.recommended_at DESC, p.id DESC", ""},
+		{"recommended", true, "ORDER BY", "unique_commenters"},
 		{"hot", true, "ORDER BY", "POWER"},
 		{"unknown-sort", false, "ORDER BY p.published_at DESC, p.id DESC", ""},
 	}
@@ -33,6 +33,21 @@ func TestFeedSortColumns(t *testing.T) {
 		if tt.wantExpr != "" && !strings.Contains(scoreExpr, tt.wantExpr) {
 			t.Errorf("sort=%q: scoreExpr=%q missing %q", tt.sort, scoreExpr, tt.wantExpr)
 		}
+	}
+}
+
+func TestRecommendationScoreSignals(t *testing.T) {
+	score, order := feedSortColumns("recommended")
+	for _, signal := range []string{"like_count", "unique_commenters", "external_comments", "bookmark_count", "share_count"} {
+		if !strings.Contains(score, signal) {
+			t.Errorf("recommended score missing %s: %s", signal, score)
+		}
+	}
+	if strings.Contains(score, "view_count") || strings.Contains(score, "recommended_at") {
+		t.Fatalf("recommended score contains forbidden signal: %s", score)
+	}
+	if !strings.Contains(order, "CASE WHEN hr.is_pinned") || !strings.Contains(order, "CASE WHEN NOT hr.is_pinned") {
+		t.Fatalf("recommended order does not separate pinned and scored items: %s", order)
 	}
 }
 

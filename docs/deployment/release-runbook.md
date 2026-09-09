@@ -44,13 +44,19 @@ GitHub `production` environment 必须配置 required reviewers，并保存
 release/symlink 布局保持一致。
 
 1. 生产数据库备份并生成 SHA-256 校验文件，定期单独完成 restore drill。
-2. 拉取精确的 API/Web SHA 镜像，禁止 `latest` 或重新构建未审计代码。
-3. 运行 `/app/luntan-migrate`；迁移失败立即退出并停止 rollout。
-4. 启动新 API/worker，检查 `/health`、`/ready`、smoke 和关键指标。
-5. 完成切流量与短时观察后再结束命令；任何失败必须返回非零退出码。
+2. 发布包含 `post_share_events` 的版本前只读记录分享聚合基线：
+   `SELECT COUNT(*) FILTER (WHERE share_count <> 0), COALESCE(SUM(share_count), 0), COALESCE(MAX(share_count), 0) FROM posts;`。
+3. 拉取精确的 API/Web SHA 镜像，禁止 `latest` 或重新构建未审计代码。
+4. 运行 `/app/luntan-migrate`；迁移失败立即退出并停止 rollout。
+5. 启动新 API/worker，检查 `/health`、`/ready`、smoke 和关键指标。
+6. 完成切流量与短时观察后再结束命令；任何失败必须返回非零退出码。
 
 生产迁移前必须执行数据库备份和校验。工作流不会替代定期恢复演练或 production
 environment 的 required reviewer 配置；认证策略沿用目标环境配置，不得在发布时擅自切换。
+
+`post_share_events` 的 down migration 只回滚 DDL，不会逆向扣除已经写入
+`posts.share_count` 的增量。真实分享流量产生后不得把 down/up 当作无损回退；事件明细
+一旦删除，再次 up 时相同用户可能重新贡献计数，应优先采用前向修复。
 
 ## Restore Drill
 

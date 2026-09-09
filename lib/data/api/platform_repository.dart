@@ -1187,7 +1187,7 @@ class PlatformRepository {
       body: {
         'items': [
           for (var index = 0; index < postIds.length; index++)
-            {'post_id': postIds[index], 'position': index},
+            {'post_id': postIds[index], 'position': index + 1},
         ],
       },
     );

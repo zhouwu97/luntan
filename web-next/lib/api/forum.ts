@@ -579,6 +579,14 @@ export async function recordPostView(postId: string): Promise<{ recorded: boolea
   };
 }
 
+export async function recordPostShare(postId: string): Promise<{ recorded: boolean; shareCount: number }> {
+  const payload = await apiPost<JsonRecord>(`/posts/${encodeURIComponent(postId)}/share`);
+  return {
+    recorded: payload.recorded === true,
+    shareCount: asNumber(payload.share_count),
+  };
+}
+
 export async function setPostLike(postId: string, active: boolean): Promise<void> {
   await apiFetch(`/posts/${encodeURIComponent(postId)}/like`, { method: active ? "PUT" : "DELETE" });
 }
@@ -1420,6 +1428,7 @@ function parseHomeRecommendationItem(raw: unknown): HomeRecommendationItem {
   return {
     postId: asString(item.post_id),
     position: asNumber(item.position),
+    isPinned: item.is_pinned === true,
     recommendedBy: asString(item.recommended_by),
     recommendedAt: asString(item.recommended_at),
     expiresAt: asString(item.expires_at) || undefined,
@@ -1453,6 +1462,14 @@ export async function setHomeRecommendation(
 export async function removeHomeRecommendation(postId: string): Promise<void> {
   await apiFetch(`/admin/recommendations/${encodeURIComponent(postId)}`, {
     method: "DELETE",
+  });
+}
+
+export async function setHomeRecommendationPinned(postId: string, pinned: boolean): Promise<void> {
+  await apiJson(`/admin/recommendations/${encodeURIComponent(postId)}/pin`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
   });
 }
 

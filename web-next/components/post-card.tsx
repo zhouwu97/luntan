@@ -13,6 +13,7 @@ import type { Post, SessionUser } from "../types/forum";
 import {
   deletePost,
   removeHomeRecommendation,
+  recordPostShare,
   setHomeRecommendation,
   setPostBookmark,
   setPostHotSuppression,
@@ -120,7 +121,13 @@ export function PostCard({
     stop(event);
     setMenuOpen(false);
     const url = `${window.location.origin}/post/${encodeURIComponent(post.id)}`;
-    showToast(await copyText(url) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    const copied = await copyText(url);
+    showToast(copied ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    if (copied && user && user.accountType !== "guest") {
+      void recordPostShare(post.id)
+        .then(({ shareCount }) => setPostSnapshot({ ...post, shareCount }, user.id))
+        .catch(() => undefined);
+    }
   }
 
   function handleReport(event: MouseEvent) {

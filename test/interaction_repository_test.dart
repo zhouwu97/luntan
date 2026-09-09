@@ -22,12 +22,16 @@ void main() {
       await repository.setPostLike(postId: 'p1', active: true);
       await repository.setPostLike(postId: 'p1', active: false);
       await repository.setCommunityMembership(communityId: 'c1', active: true);
+      final share = await repository.recordPostShare(postId: 'p1');
 
       expect(methods, [
         'PUT /api/v1/posts/p1/like',
         'DELETE /api/v1/posts/p1/like',
         'PUT /api/v1/communities/c1/membership',
+        'POST /api/v1/posts/p1/share',
       ]);
+      expect(share.recorded, isFalse);
+      expect(share.shareCount, 0);
       client.close();
     },
   );

@@ -65,10 +65,12 @@ func TestRecommendedFeedCursorRoundTripWithPinState(t *testing.T) {
 	pinned := true
 	position := 3
 	recommendedAt := time.Date(2026, 9, 8, 8, 0, 0, 0, time.UTC)
+	asOf := time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC)
 	original := feedCursor{
 		RecommendationPinned: &pinned,
 		Position:             &position,
 		RecommendedAt:        &recommendedAt,
+		AsOf:                 &asOf,
 		ID:                   "post-pinned",
 	}
 

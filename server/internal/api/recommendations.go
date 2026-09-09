@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -34,6 +35,13 @@ type reorderRecommendationsInput struct {
 	Items []reorderRecommendationItem `json:"items"`
 }
 
+const homeRecommendationOrderLock = `SELECT pg_advisory_xact_lock(hashtext('luntan:home-recommendation-order'))`
+
+func lockHomeRecommendationOrder(ctx context.Context, tx *sql.Tx) error {
+	var lock any
+	return tx.QueryRowContext(ctx, homeRecommendationOrderLock).Scan(&lock)
+}
+
 func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -47,7 +55,8 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	rows, err := s.db.QueryContext(r.Context(), `
+	scoreExpr := recommendationScoreExpr("CURRENT_TIMESTAMP")
+	rows, err := s.db.QueryContext(r.Context(), "WITH "+recommendationCommentStatsCTE("p.deleted_at IS NULL")+`
 		SELECT hr.post_id, hr.position, hr.is_pinned, hr.recommended_by, hr.recommended_at, hr.expires_at,
 		       p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), p.community_id, c.slug, c.name,
 		       p.type, p.title, p.content, p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
@@ -57,8 +66,9 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN communities c ON c.id = p.community_id
+		LEFT JOIN recommendation_comment_stats rcs ON rcs.post_id = p.id
 		WHERE p.deleted_at IS NULL
-		ORDER BY hr.is_pinned DESC, hr.position ASC, hr.recommended_at DESC, p.id DESC`)
+		`+recommendationOrderBy(scoreExpr))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -125,27 +135,49 @@ func (s *Server) setHomeRecommendationPin(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer tx.Rollback()
+	if err := lockHomeRecommendationOrder(r.Context(), tx); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 
-	res, err := tx.ExecContext(r.Context(), `
-		UPDATE home_recommendations
-		SET is_pinned = $1
-		WHERE post_id = $2 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`, input.Pinned, postID)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if rowsAffected == 0 {
+	var currentlyPinned bool
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT is_pinned
+		FROM home_recommendations
+		WHERE post_id = $1 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+		FOR UPDATE`, postID).Scan(&currentlyPinned)
+	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{
 			Status:  http.StatusConflict,
 			Code:    "POST_NOT_RECOMMENDED",
 			Message: "帖子当前不在首页推荐中",
 		})
 		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	if input.Pinned != currentlyPinned {
+		if input.Pinned {
+			var nextPosition int
+			if err := tx.QueryRowContext(r.Context(), `
+				SELECT COALESCE(MAX(position), 0) + 1
+				FROM home_recommendations
+				WHERE is_pinned = true
+				  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`).Scan(&nextPosition); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if _, err := tx.ExecContext(r.Context(), `UPDATE home_recommendations SET is_pinned = true, position = $1 WHERE post_id = $2`, nextPosition, postID); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		} else if _, err := tx.ExecContext(r.Context(), `UPDATE home_recommendations SET is_pinned = false WHERE post_id = $1`, postID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 
 	_ = appendAdminLogTx(r.Context(), tx, user.ID, "home_recommendation.pin", "post", postID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
@@ -337,23 +369,35 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer tx.Rollback()
+	if err := lockHomeRecommendationOrder(r.Context(), tx); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 
-	stmt, err := tx.PrepareContext(r.Context(), `UPDATE home_recommendations SET position = $1 WHERE post_id = $2`)
+	stmt, err := tx.PrepareContext(r.Context(), `UPDATE home_recommendations SET position = $1 WHERE post_id = $2 AND is_pinned = true`)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
 	defer stmt.Close()
 
+	updated := int64(0)
 	for _, item := range input.Items {
-		if _, err := stmt.ExecContext(r.Context(), item.Position, item.PostID); err != nil {
+		result, err := stmt.ExecContext(r.Context(), item.Position, item.PostID)
+		if err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		updated += affected
 	}
 
 	_ = appendAdminLogTx(r.Context(), tx, user.ID, "home_recommendation.reorder", "system", "home_recommendations", "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
-		"count": len(input.Items),
+		"count": updated,
 	}, time.Now().UTC())
 
 	if err := tx.Commit(); err != nil {
@@ -363,7 +407,7 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"updated": len(input.Items),
+		"updated": updated,
 	})
 }
 

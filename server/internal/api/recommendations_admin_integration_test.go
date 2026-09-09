@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -238,6 +239,68 @@ func TestRecommendationPinRequiresActiveRecommendationAndAppearsInPostDetail(t *
 	}
 	if !post.IsRecommended || !post.RecommendationPinned {
 		t.Fatalf("帖子详情未返回真实推荐置顶状态：%s", body)
+	}
+}
+
+func TestConcurrentRecommendationPinsAppendDistinctPositions(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("itest-rec-pin-race-%d@example.com", suffix)
+	token := registerAndLogin(t, handler, email, fmt.Sprintf("rec_pin_race_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, email)
+	token = loginUser(t, handler, email, "password123")
+
+	var authorID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, email).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	postIDs := []string{fmt.Sprintf("post-rec-pin-race-a-%d", suffix), fmt.Sprintf("post-rec-pin-race-b-%d", suffix)}
+	for _, postID := range postIDs {
+		if _, err := s.db.Exec(`
+			INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+			VALUES ($1, $2, 'community-campus', 'normal', 'published', 'normal', '并发置顶', '正文', now(), now(), now())`, postID, authorID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO home_recommendations (post_id, recommended_by, position) VALUES ($1, $2, 0)`, postID, authorID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	payload, _ := json.Marshal(map[string]bool{"pinned": true})
+	codes := make(chan int, len(postIDs))
+	var wg sync.WaitGroup
+	for _, postID := range postIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			code, _ := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+id+"/pin", token, payload, nil)
+			codes <- code
+		}(postID)
+	}
+	wg.Wait()
+	close(codes)
+	for code := range codes {
+		if code != http.StatusOK {
+			t.Fatalf("并发置顶返回 %d", code)
+		}
+	}
+
+	positions := make([]int, 0, 2)
+	for _, postID := range postIDs {
+		var position int
+		var pinned bool
+		if err := s.db.QueryRow(`SELECT position, is_pinned FROM home_recommendations WHERE post_id = $1`, postID).Scan(&position, &pinned); err != nil {
+			t.Fatal(err)
+		}
+		if !pinned {
+			t.Fatalf("帖子 %s 未置顶", postID)
+		}
+		positions = append(positions, position)
+	}
+	difference := positions[0] - positions[1]
+	if difference != 1 && difference != -1 {
+		t.Fatalf("并发置顶位置应连续且不同：%v", positions)
 	}
 }
 

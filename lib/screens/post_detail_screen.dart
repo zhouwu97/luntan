@@ -36,6 +36,7 @@ class PostDetailScreen extends StatefulWidget {
     required this.commentsController,
     required this.interactionController,
     this.currentUserId,
+    this.canRecordShare = false,
     this.isAuthenticated = true,
     this.canLike,
     this.canComment,
@@ -67,6 +68,7 @@ class PostDetailScreen extends StatefulWidget {
   final CommentsController commentsController;
   final InteractionController interactionController;
   final String? currentUserId;
+  final bool canRecordShare;
   final bool isAuthenticated;
 
   /// 能力字段由 /me 下发；可空是为了兼容直接使用该页面的旧调用方。
@@ -1064,10 +1066,28 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       Navigator.pop(sheetContext);
                       final shareUrl = AppLinks.post(post.id);
                       try {
-                        await Share.share(shareUrl, subject: '分享帖子');
+                        final result = await Share.share(
+                          shareUrl,
+                          subject: '分享帖子',
+                        );
+                        if (result.status != ShareResultStatus.dismissed &&
+                            widget.canRecordShare) {
+                          try {
+                            await widget.interactionController.recordPostShare(
+                              post,
+                            );
+                          } catch (_) {}
+                        }
                       } catch (_) {
                         await Clipboard.setData(ClipboardData(text: shareUrl));
                         widget.onFeedback('系统分享不可用，帖子链接已复制');
+                        if (widget.canRecordShare) {
+                          try {
+                            await widget.interactionController.recordPostShare(
+                              post,
+                            );
+                          } catch (_) {}
+                        }
                       }
                     },
                   ),

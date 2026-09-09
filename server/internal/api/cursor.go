@@ -14,8 +14,7 @@ type feedCursor struct {
 	RecommendedAt        *time.Time `json:"recommended_at,omitempty"`
 	RecommendationPinned *bool      `json:"recommendation_pinned,omitempty"`
 	ID                   string     `json:"id"`
-	// Score 只在基于评分的排序（hot/featured）中出现，
-	// latest/recommended 排序的游标不含该字段。
+	// Score 用于 hot/featured 以及普通推荐；置顶推荐仍使用人工位次游标。
 	Score *float64 `json:"score,omitempty"`
 	// AsOf 固定评分所使用的时间，避免跨页请求之间 now() 漂移导致上一页最后一条再次出现。
 	AsOf *time.Time `json:"as_of,omitempty"`

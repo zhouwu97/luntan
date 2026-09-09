@@ -16,7 +16,8 @@ class InteractionController extends ChangeNotifier {
 
   final InteractionRepository _repository;
   final Set<String> _inFlight = <String>{};
-  final Map<String, _PostInteractions> _postTargets = <String, _PostInteractions>{};
+  final Map<String, _PostInteractions> _postTargets =
+      <String, _PostInteractions>{};
 
   bool isInFlight(String target) => _inFlight.contains(target);
 
@@ -85,6 +86,18 @@ class InteractionController extends ChangeNotifier {
       );
       _notifyPost(post.id);
       rethrow;
+    } finally {
+      _inFlight.remove(key);
+    }
+  }
+
+  Future<void> recordPostShare(Post post) async {
+    final key = 'post-share:${post.id}';
+    if (!_inFlight.add(key)) return;
+    try {
+      final result = await _repository.recordPostShare(postId: post.id);
+      post.shareCount = result.shareCount;
+      _notifyPost(post.id);
     } finally {
       _inFlight.remove(key);
     }

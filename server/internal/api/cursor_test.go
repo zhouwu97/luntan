@@ -112,12 +112,14 @@ func TestFeedCursorRejectsCrossSortReuse(t *testing.T) {
 	asOf := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
 	publishedAt := asOf.Add(-time.Hour)
 	tests := []struct {
-		cursorSort  string
-		requestSort string
+		cursorSort   string
+		requestQuery string
 	}{
-		{cursorSort: "recommended", requestSort: "hot"},
-		{cursorSort: "hot", requestSort: "featured"},
-		{cursorSort: "featured", requestSort: "recommended"},
+		{cursorSort: "recommended", requestQuery: "sort=hot"},
+		{cursorSort: "hot", requestQuery: "sort=featured"},
+		{cursorSort: "featured", requestQuery: "sort=recommended"},
+		{cursorSort: "latest:comment", requestQuery: "sort=latest&latest_by=post"},
+		{cursorSort: "latest:post", requestQuery: "sort=latest&latest_by=comment"},
 	}
 	for _, tt := range tests {
 		cursor, err := encodeFeedCursor(feedCursor{
@@ -130,11 +132,11 @@ func TestFeedCursorRejectsCrossSortReuse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?sort="+tt.requestSort+"&cursor="+url.QueryEscape(cursor), nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?"+tt.requestQuery+"&cursor="+url.QueryEscape(cursor), nil)
 		rec := httptest.NewRecorder()
 		(&Server{db: db}).latestFeed(rec, req)
 		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("%s cursor 用于 %s 应返回 400，实际 %d：%s", tt.cursorSort, tt.requestSort, rec.Code, rec.Body.String())
+			t.Fatalf("%s cursor 用于 %s 应返回 400，实际 %d：%s", tt.cursorSort, tt.requestQuery, rec.Code, rec.Body.String())
 		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -232,11 +232,21 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	defer tx.Rollback()
+	if err := lockHomeRecommendationOrder(r.Context(), tx); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 
-	// Verify post exists, is not deleted, and matches feed public visibility rules
-	var status, moderation, postType, authorID string
-	var publishedAt sql.NullTime
-	err = tx.QueryRowContext(r.Context(), `SELECT publication_status, moderation_status, type, published_at, author_id FROM posts WHERE id = $1 AND deleted_at IS NULL`, postID).Scan(&status, &moderation, &postType, &publishedAt, &authorID)
+	// 设置入口与推荐 Feed 使用相同的帖子、社区公开可见性条件。
+	var status, moderation, postType, authorID, communityStatus string
+	var publishedAt, communityDeletedAt sql.NullTime
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT p.publication_status, p.moderation_status, p.type, p.published_at, p.author_id,
+		       c.status, c.deleted_at
+		FROM posts p
+		JOIN communities c ON c.id = p.community_id
+		WHERE p.id = $1 AND p.deleted_at IS NULL`, postID).
+		Scan(&status, &moderation, &postType, &publishedAt, &authorID, &communityStatus, &communityDeletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "POST_NOT_FOUND", Message: "帖子不存在或已删除"})
 		return
@@ -245,7 +255,8 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		writeInternalError(w, r, err)
 		return
 	}
-	if status != "published" || moderation != "normal" || postType == "market" || !publishedAt.Valid {
+	if status != "published" || moderation != "normal" || postType == "market" || !publishedAt.Valid ||
+		communityStatus != "active" || communityDeletedAt.Valid {
 		httpserver.WriteAppError(w, r, httpserver.AppError{
 			Status:  http.StatusBadRequest,
 			Code:    "POST_NOT_RECOMMENDABLE",
@@ -261,7 +272,17 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 		ON CONFLICT (post_id) DO UPDATE SET
 			recommended_by = EXCLUDED.recommended_by,
 			recommended_at = CURRENT_TIMESTAMP,
-			expires_at = EXCLUDED.expires_at
+			expires_at = EXCLUDED.expires_at,
+			is_pinned = CASE
+				WHEN home_recommendations.expires_at IS NOT NULL
+				 AND home_recommendations.expires_at <= CURRENT_TIMESTAMP THEN false
+				ELSE home_recommendations.is_pinned
+			END,
+			position = CASE
+				WHEN home_recommendations.expires_at IS NOT NULL
+				 AND home_recommendations.expires_at <= CURRENT_TIMESTAMP THEN 0
+				ELSE home_recommendations.position
+			END
 		RETURNING position`,
 		postID, user.ID, input.ExpiresAt).Scan(&position)
 	if err != nil {

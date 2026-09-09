@@ -61,6 +61,30 @@ func TestFeedCursorRoundTripWithAsOf(t *testing.T) {
 	}
 }
 
+func TestRecommendedFeedCursorRoundTripWithPinState(t *testing.T) {
+	pinned := true
+	position := 3
+	recommendedAt := time.Date(2026, 9, 8, 8, 0, 0, 0, time.UTC)
+	original := feedCursor{
+		RecommendationPinned: &pinned,
+		Position:             &position,
+		RecommendedAt:        &recommendedAt,
+		ID:                   "post-pinned",
+	}
+
+	encoded, err := encodeFeedCursor(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeFeedCursor(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.RecommendationPinned == nil || !*decoded.RecommendationPinned {
+		t.Fatalf("recommendation pin state changed after round trip: %#v", decoded.RecommendationPinned)
+	}
+}
+
 func TestFeedCursorRejectsInvalidValue(t *testing.T) {
 	if _, err := decodeFeedCursor("not-a-cursor"); err == nil {
 		t.Fatal("invalid cursor was accepted")

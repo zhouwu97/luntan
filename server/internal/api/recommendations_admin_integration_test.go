@@ -170,6 +170,77 @@ func TestRecommendationExpiryAndVisibilityValidation(t *testing.T) {
 	}
 }
 
+func TestRecommendationPinRequiresActiveRecommendationAndAppearsInPostDetail(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("itest-rec-pin-%d@example.com", suffix)
+	token := registerAndLogin(t, handler, email, fmt.Sprintf("itest_rec_pin_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, email)
+	token = loginUser(t, handler, email, "password123")
+
+	var authorID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, email).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	postID := fmt.Sprintf("post-rec-pin-%d", suffix%100000)
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`
+		INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+		VALUES ($1, $2, 'community-campus', 'normal', 'published', 'normal', '推荐置顶测试', '测试正文', $3, $3, $3)`,
+		postID, authorID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	pinPayload, _ := json.Marshal(map[string]bool{"pinned": true})
+	code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", token, pinPayload, nil)
+	if code != http.StatusConflict || !bytes.Contains(body, []byte(`"code":"POST_NOT_RECOMMENDED"`)) {
+		t.Fatalf("未推荐帖子置顶应返回 POST_NOT_RECOMMENDED，实际 %d：%s", code, body)
+	}
+
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("加入推荐应返回 200，实际 %d：%s", code, body)
+	}
+	var recommendedAtBefore time.Time
+	if err := s.db.QueryRow(`SELECT recommended_at FROM home_recommendations WHERE post_id = $1`, postID).Scan(&recommendedAtBefore); err != nil {
+		t.Fatal(err)
+	}
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", token, pinPayload, nil)
+	if code != http.StatusOK {
+		t.Fatalf("推荐置顶应返回 200，实际 %d：%s", code, body)
+	}
+	unpinPayload, _ := json.Marshal(map[string]bool{"pinned": false})
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", token, unpinPayload, nil)
+	if code != http.StatusOK {
+		t.Fatalf("取消推荐置顶应返回 200，实际 %d：%s", code, body)
+	}
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", token, pinPayload, nil)
+	if code != http.StatusOK {
+		t.Fatalf("再次推荐置顶应返回 200，实际 %d：%s", code, body)
+	}
+	var recommendedAtAfter time.Time
+	if err := s.db.QueryRow(`SELECT recommended_at FROM home_recommendations WHERE post_id = $1`, postID).Scan(&recommendedAtAfter); err != nil {
+		t.Fatal(err)
+	}
+	if !recommendedAtAfter.Equal(recommendedAtBefore) {
+		t.Fatalf("pin → unpin → pin 不应改变 recommended_at：before=%s after=%s", recommendedAtBefore, recommendedAtAfter)
+	}
+
+	code, body = callBusinessAPI(handler, http.MethodGet, "/api/v1/posts/"+postID, token, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("读取帖子详情应返回 200，实际 %d：%s", code, body)
+	}
+	var post postResponse
+	if err := json.Unmarshal(body, &post); err != nil {
+		t.Fatal(err)
+	}
+	if !post.IsRecommended || !post.RecommendationPinned {
+		t.Fatalf("帖子详情未返回真实推荐置顶状态：%s", body)
+	}
+}
+
 func TestActivityAdminFiltersAndEndedPublishValidation(t *testing.T) {
 	s := feedIntegrationServer(t)
 	handler := NewHandler(s.db)

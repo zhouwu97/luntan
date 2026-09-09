@@ -157,6 +157,7 @@ Map<String, dynamic> _postToJson(Post post) => {
   'last_comment_at': post.lastCommentAt?.toIso8601String(),
   'is_recommended': post.isRecommended,
   'recommendation_position': post.recommendationPosition,
+  'recommendation_pinned': post.isRecommendationPinned,
   'hot_suppressed': post.hotSuppressed,
   'hot_suppressed_reason': post.hotSuppressedReason,
   'hot_suppressed_at': post.hotSuppressedAt?.toIso8601String(),
@@ -254,12 +255,11 @@ Post _postFromJson(Map<String, dynamic> value) {
   final community = value['community'] is Map
       ? _communityFromJson(_map(value['community']))
       : null;
-  final media = value['media'] is List
-      ? value['media']
-            .whereType<Map>()
-            .map((item) => _mediaFromJson(_map(item)))
-            .toList()
-      : <MediaAsset>[];
+  final media = <MediaAsset>[
+    if (value['media'] case final List<dynamic> rawMedia)
+      for (final item in rawMedia.whereType<Map>())
+        _mediaFromJson(_map(item)),
+  ];
   return Post(
     id: value['id'] as String? ?? '',
     authorId: value['author_id'] as String? ?? '',
@@ -291,6 +291,7 @@ Post _postFromJson(Map<String, dynamic> value) {
     lastCommentAt: _nullableDate(value['last_comment_at']),
     isRecommended: value['is_recommended'] == true,
     recommendationPosition: value['recommendation_position'] as int?,
+    isRecommendationPinned: value['recommendation_pinned'] == true,
     hotSuppressed: value['hot_suppressed'] == true,
     hotSuppressedReason: value['hot_suppressed_reason'] as String?,
     hotSuppressedAt: _nullableDate(value['hot_suppressed_at']),

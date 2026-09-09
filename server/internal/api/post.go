@@ -462,15 +462,20 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 	var row postResponse
 	var deletedAt sql.NullTime
 	var publishedAt sql.NullTime
+	var recommendationPosition sql.NullInt64
+	var recommendationPinned sql.NullBool
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), p.community_id, c.slug, c.name,
 		       p.type, p.title, p.content, p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
-		p.created_at, p.updated_at, p.published_at, p.publication_status, p.moderation_status, p.deleted_at
+		p.created_at, p.updated_at, p.published_at, p.publication_status, p.moderation_status, p.deleted_at,
+		hr.position, hr.is_pinned
 		FROM posts p
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN communities c ON c.id = p.community_id
-		WHERE p.id = $1 AND p.type <> 'market'`, id).Scan(&row.ID, &row.Author.ID, &row.Author.Username, &row.Author.Nickname, &row.Community.ID, &row.Community.Slug, &row.Community.Name, &row.Type, &row.Title, &row.Content, &row.CommentCount, &row.LikeCount, &row.BookmarkCount, &row.ShareCount, &row.ViewCount, &row.CreatedAt, &row.UpdatedAt, &publishedAt, &row.Publication, &row.Moderation, &deletedAt)
+		LEFT JOIN home_recommendations hr ON hr.post_id = p.id
+		  AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)
+		WHERE p.id = $1 AND p.type <> 'market'`, id).Scan(&row.ID, &row.Author.ID, &row.Author.Username, &row.Author.Nickname, &row.Community.ID, &row.Community.Slug, &row.Community.Name, &row.Type, &row.Title, &row.Content, &row.CommentCount, &row.LikeCount, &row.BookmarkCount, &row.ShareCount, &row.ViewCount, &row.CreatedAt, &row.UpdatedAt, &publishedAt, &row.Publication, &row.Moderation, &deletedAt, &recommendationPosition, &recommendationPinned)
 	if err == sql.ErrNoRows {
 		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "NOT_FOUND", Message: "帖子不存在"})
 		return
@@ -495,6 +500,12 @@ func (s *Server) getPost(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	if publishedAt.Valid {
 		row.PublishedAt = &publishedAt.Time
+	}
+	if recommendationPosition.Valid {
+		position := int(recommendationPosition.Int64)
+		row.IsRecommended = true
+		row.RecommendationPosition = &position
+		row.RecommendationPinned = recommendationPinned.Valid && recommendationPinned.Bool
 	}
 	if includePostDetails(r) {
 		if err := s.enrichPostResponse(r.Context(), r, &row, true); err != nil {

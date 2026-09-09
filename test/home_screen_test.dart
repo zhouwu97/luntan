@@ -78,6 +78,7 @@ class _RecordingRecommendationRepository extends PlatformRepository {
 
   bool setCalled = false;
   bool removeCalled = false;
+  bool? pinned;
 
   @override
   Future<void> setHomeRecommendation({
@@ -92,21 +93,34 @@ class _RecordingRecommendationRepository extends PlatformRepository {
   Future<void> removeHomeRecommendation(String postId) async {
     removeCalled = true;
   }
+
+  @override
+  Future<void> setHomeRecommendationPinned({
+    required String postId,
+    required bool pinned,
+  }) async {
+    this.pinned = pinned;
+  }
 }
 
-Post _post(String id, {DateTime? activityAt, bool isRecommended = false}) =>
-    Post(
-      id: id,
-      authorId: 'author-$id',
-      communityId: 'community-unboxing',
-      title: '自动分页帖子 $id',
-      content: '用于验证首页在首屏没有滚动空间时会继续补充下一页。',
-      createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-      updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
-      activityAt: activityAt,
-      lastCommentAt: activityAt,
-      isRecommended: isRecommended,
-    );
+Post _post(
+  String id, {
+  DateTime? activityAt,
+  bool isRecommended = false,
+  bool isRecommendationPinned = false,
+}) => Post(
+  id: id,
+  authorId: 'author-$id',
+  communityId: 'community-unboxing',
+  title: '自动分页帖子 $id',
+  content: '用于验证首页在首屏没有滚动空间时会继续补充下一页。',
+  createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+  updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
+  activityAt: activityAt,
+  lastCommentAt: activityAt,
+  isRecommended: isRecommended,
+  isRecommendationPinned: isRecommendationPinned,
+);
 
 Widget _homeFor(
   FeedController controller,
@@ -333,7 +347,7 @@ void main() {
     expect(repository.calls.last.latestOrder, LatestOrder.comment);
   });
 
-  testWidgets('管理员可以从帖子菜单加入或移出首页推荐', (tester) async {
+  testWidgets('已推荐帖子菜单同时提供推荐置顶和移出推荐', (tester) async {
     final repository = _PagedHomeFeed([
       FeedPage(items: [_post('p1', isRecommended: true)], hasMore: false),
       FeedPage(items: [_post('p1', isRecommended: true)], hasMore: false),
@@ -347,11 +361,64 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.more_horiz_rounded).first);
     await tester.pumpAndSettle();
-    expect(find.text('移出首页推荐'), findsOneWidget);
-    await tester.tap(find.text('移出首页推荐'));
+    expect(find.text('在推荐中置顶'), findsOneWidget);
+    expect(find.text('移出推荐'), findsOneWidget);
+    await tester.tap(find.text('在推荐中置顶'));
     await tester.pumpAndSettle();
 
-    expect(platform.removeCalled, isTrue);
+    expect(platform.pinned, isTrue);
+  });
+
+  testWidgets('推荐流按置顶和普通推荐分区，其他排序不展示推荐置顶标记', (tester) async {
+    final repository = _PagedHomeFeed([
+      FeedPage(
+        items: [
+          _post('latest', isRecommended: true, isRecommendationPinned: true),
+        ],
+        hasMore: false,
+      ),
+      FeedPage(
+        items: [
+          _post('pinned', isRecommended: true, isRecommendationPinned: true),
+          _post('normal', isRecommended: true),
+        ],
+        hasMore: false,
+      ),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(_homeFor(controller, repository));
+    await tester.pumpAndSettle();
+    expect(find.text('置顶推荐'), findsNothing);
+    expect(find.text('置顶'), findsNothing);
+
+    await tester.tap(find.text('推荐'));
+    await tester.pumpAndSettle();
+    expect(find.text('置顶推荐'), findsOneWidget);
+    expect(find.text('更多推荐'), findsOneWidget);
+    expect(find.text('置顶'), findsOneWidget);
+  });
+
+  testWidgets('推荐流只有普通推荐时不显示分区标题', (tester) async {
+    final repository = _PagedHomeFeed([
+      FeedPage(items: [_post('latest')], hasMore: false),
+      FeedPage(
+        items: [
+          _post('normal-1', isRecommended: true),
+          _post('normal-2', isRecommended: true),
+        ],
+        hasMore: false,
+      ),
+    ]);
+    final controller = FeedController(repository: repository);
+
+    await tester.pumpWidget(_homeFor(controller, repository));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('推荐'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('置顶推荐'), findsNothing);
+    expect(find.text('更多推荐'), findsNothing);
   });
 
   testWidgets('窄屏下顶栏搜索框提示文字截断而不溢出', (tester) async {

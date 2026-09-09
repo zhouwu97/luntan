@@ -425,7 +425,8 @@ class MediaAsset {
   String? get feedGridUrl => thumb?.url ?? detailUrl;
 
   /// Feed 单图使用 960px feed 变体，旧媒体退回详情图。
-  String? get feedSingleUrl => feed?.url ?? detail?.url ?? thumb?.url ?? originalUrl;
+  String? get feedSingleUrl =>
+      feed?.url ?? detail?.url ?? thumb?.url ?? originalUrl;
 
   /// 保留旧调用方，但默认采用小图规格，Feed 不再隐式请求 detail。
   String? get previewUrl => feedGridUrl;
@@ -469,6 +470,7 @@ class Post {
     this.lastCommentAt,
     this.isRecommended = false,
     this.recommendationPosition,
+    this.isRecommendationPinned = false,
     this.hotSuppressed = false,
     this.hotSuppressedReason,
     this.hotSuppressedAt,
@@ -504,6 +506,7 @@ class Post {
   final DateTime? lastCommentAt;
   final bool isRecommended;
   final int? recommendationPosition;
+  final bool isRecommendationPinned;
   final bool hotSuppressed;
   final String? hotSuppressedReason;
   final DateTime? hotSuppressedAt;
@@ -645,9 +648,9 @@ class PostViewResult {
 String relativeTimeLabel(DateTime value, {DateTime? now}) {
   // 服务端时间统一表示同一个时间点；显示口径固定为北京时间，
   // 避免设备时区设置影响“昨天/几天前”等帖子时间文案。
-  final delta = _beijingTime(now ?? DateTime.now()).difference(
-    _beijingTime(value),
-  );
+  final delta = _beijingTime(
+    now ?? DateTime.now(),
+  ).difference(_beijingTime(value));
   if (delta.inMinutes < 1) return '刚刚';
   if (delta.inHours < 1) return '${delta.inMinutes}分钟前';
   if (delta.inHours < 24) return '${delta.inHours}小时前';

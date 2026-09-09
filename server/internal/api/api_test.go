@@ -677,9 +677,9 @@ func TestLatestFeedUsesStableCursorAndReturnsNextCursor(t *testing.T) {
 	}
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
-	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at", "rec_position", "rec_at", "last_comment_at", "activity_at"}).
-		AddRow("p2", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第二条", "正文", 2, 3, 0, 0, 5, created, created, created, nil, nil, nil, created).
-		AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第一条", "正文", 1, 2, 0, 0, 4, created.Add(-time.Minute), created.Add(-time.Minute), created.Add(-time.Minute), nil, nil, nil, created.Add(-time.Minute))
+	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at", "rec_position", "rec_at", "rec_pinned", "last_comment_at", "activity_at"}).
+		AddRow("p2", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第二条", "正文", 2, 3, 0, 0, 5, created, created, created, nil, nil, nil, nil, created).
+		AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "第一条", "正文", 1, 2, 0, 0, 4, created.Add(-time.Minute), created.Add(-time.Minute), created.Add(-time.Minute), nil, nil, nil, nil, created.Add(-time.Minute))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT CURRENT_TIMESTAMP`)).
 		WillReturnRows(sqlmock.NewRows([]string{"current_timestamp"}).AddRow(created))
 	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*ORDER BY.*LIMIT \$2`).WithArgs(created, 2).WillReturnRows(rows)
@@ -721,7 +721,7 @@ func TestGetPostHidesModeratedRows(t *testing.T) {
 	}
 	defer db.Close()
 	created := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
-	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at", "publication_status", "moderation_status", "deleted_at"}).AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "标题", "正文", 0, 0, 0, 0, 1, created, created, created, "published", "hidden", nil)
+	rows := sqlmock.NewRows([]string{"id", "author_id", "username", "nickname", "community_id", "slug", "community_name", "type", "title", "content", "comment_count", "like_count", "bookmark_count", "share_count", "view_count", "created_at", "updated_at", "published_at", "publication_status", "moderation_status", "deleted_at", "recommendation_position", "recommendation_pinned"}).AddRow("p1", "u1", "user", "用户", "c1", "campus", "校园", "normal", "标题", "正文", 0, 0, 0, 0, 1, created, created, created, "published", "hidden", nil, nil, nil)
 	mock.ExpectQuery(`(?s)SELECT p.id, p.author_id.*WHERE p.id = \$1`).WithArgs("p1").WillReturnRows(rows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/posts/p1", nil)

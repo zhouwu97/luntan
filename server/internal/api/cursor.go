@@ -8,11 +8,12 @@ import (
 )
 
 type feedCursor struct {
-	PublishedAt   time.Time  `json:"published_at,omitempty"`
-	ActivityAt    *time.Time `json:"activity_at,omitempty"`
-	Position      *int       `json:"position,omitempty"`
-	RecommendedAt *time.Time `json:"recommended_at,omitempty"`
-	ID            string     `json:"id"`
+	PublishedAt          time.Time  `json:"published_at,omitempty"`
+	ActivityAt           *time.Time `json:"activity_at,omitempty"`
+	Position             *int       `json:"position,omitempty"`
+	RecommendedAt        *time.Time `json:"recommended_at,omitempty"`
+	RecommendationPinned *bool      `json:"recommendation_pinned,omitempty"`
+	ID                   string     `json:"id"`
 	// Score 只在基于评分的排序（hot/featured）中出现，
 	// latest/recommended 排序的游标不含该字段。
 	Score *float64 `json:"score,omitempty"`

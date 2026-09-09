@@ -656,6 +656,7 @@ class HomeRecommendation {
     required this.contentPreview,
     required this.authorName,
     required this.communityName,
+    this.isPinned = false,
     this.expiresAt,
   });
 
@@ -668,6 +669,7 @@ class HomeRecommendation {
   final String contentPreview;
   final String authorName;
   final String communityName;
+  final bool isPinned;
 }
 
 class RankingToySubmission {
@@ -1146,6 +1148,7 @@ class PlatformRepository {
             ? nickname
             : _string(author['username']),
         communityName: _string(community['name']),
+        isPinned: value['is_pinned'] == true,
       );
     }).toList();
   }
@@ -1166,6 +1169,16 @@ class PlatformRepository {
 
   Future<void> removeHomeRecommendation(String postId) async {
     await _client.deleteJson('/api/v1/admin/recommendations/$postId');
+  }
+
+  Future<void> setHomeRecommendationPinned({
+    required String postId,
+    required bool pinned,
+  }) async {
+    await _client.putJson(
+      '/api/v1/admin/recommendations/$postId/pin',
+      body: {'pinned': pinned},
+    );
   }
 
   Future<void> reorderHomeRecommendations(List<String> postIds) async {

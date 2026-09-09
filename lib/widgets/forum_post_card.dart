@@ -19,6 +19,7 @@ class ForumPostCard extends StatelessWidget {
     this.onAuthorTap,
     this.contextMeta,
     this.interactionListenable,
+    this.showRecommendationPin = false,
   });
 
   final Post post;
@@ -30,6 +31,7 @@ class ForumPostCard extends StatelessWidget {
   final void Function(String userId)? onAuthorTap;
   final String? contextMeta;
   final Listenable? interactionListenable;
+  final bool showRecommendationPin;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +47,8 @@ class ForumPostCard extends StatelessWidget {
   Widget _buildContent(BuildContext context) {
     // 0 评论依然允许点击进入详情并开始第一条评论
     final openComments = onOpenComments ?? onOpen;
+    final showsRecommendationPin =
+        showRecommendationPin && post.isRecommendationPinned;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 5),
@@ -70,165 +74,170 @@ class ForumPostCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 13, 14, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ForumAuthorRow(
-                  post: post,
-                  onMenu: onMenu,
-                  onAuthorTap: onAuthorTap,
-                ),
-                const SizedBox(height: 9),
-                if (post.moderationStatus == ModerationStatus.pending) ...[
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF7ED),
-                      borderRadius: BorderRadius.circular(7),
-                      border: Border.all(
-                        color: const Color(0xFFFFEDD5),
-                        width: 0.8,
+                children: [
+                  ForumAuthorRow(
+                    post: post,
+                    onMenu: onMenu,
+                    onAuthorTap: onAuthorTap,
+                  ),
+                  const SizedBox(height: 9),
+                  if (post.moderationStatus == ModerationStatus.pending) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(
-                          Icons.hourglass_top_rounded,
-                          size: 13,
-                          color: Color(0xFFC2410C),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7ED),
+                        borderRadius: BorderRadius.circular(7),
+                        border: Border.all(
+                          color: const Color(0xFFFFEDD5),
+                          width: 0.8,
                         ),
-                        SizedBox(width: 4),
-                        Text(
-                          '审核中 · 仅自己可见',
-                          style: TextStyle(
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(
+                            Icons.hourglass_top_rounded,
+                            size: 13,
                             color: Color(0xFFC2410C),
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                if (post.isPinned ||
-                    post.isFeatured ||
-                    post.hotSuppressed ||
-                    post.extraTag == '精华') ...[
-                  Row(
-                    children: [
-                      if (post.isPinned || post.isFeatured || post.extraTag == '精华') ...[
-                        _Tag(
-                          text: post.isPinned ? '置顶' : '精华',
-                          color: post.isPinned ? AppTheme.pink : AppTheme.orange,
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-                      if (post.hotSuppressed)
-                        const _Tag(
-                          text: '已人工移出热门',
-                          color: Colors.blueGrey,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                ],
-                if (contextMeta != null) ...[
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.background,
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                    child: Text(
-                      contextMeta!,
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                        height: 1.35,
+                          SizedBox(width: 4),
+                          Text(
+                            '审核中 · 仅自己可见',
+                            style: TextStyle(
+                              color: Color(0xFFC2410C),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                ],
-                Text(
-                  post.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    height: 1.42,
-                    color: AppTheme.textPrimary,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.15,
-                  ),
-                ),
-                if (post.body.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  LinkText(
-                    post.body,
-                    maxLines: post.images.isEmpty ? 5 : 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      height: 1.58,
-                      color: Color(0xFF334B60),
-                    ),
-                  ),
-                ],
-                if (post.images.isNotEmpty) ...[
-                  PostMediaPreview(
-                    images: post.images,
-                    onTap: onOpen,
-                    onImageTap: (_) => onOpen(),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _ActionStat(
-                      icon: Icons.chat_bubble_outline_rounded,
-                      text: '${post.comments}',
-                      onTap: openComments,
-                    ),
-                    const SizedBox(width: 14),
-                    _ActionStat(
-                      icon: Icons.favorite_border_rounded,
-                      activeIcon: Icons.favorite_rounded,
-                      text: '${post.likeCount}',
-                      onTap: onLike,
-                      active: post.isLiked,
-                    ),
-                    const SizedBox(width: 14),
-                    _Stat(icon: Icons.visibility_outlined, text: post.views),
-                    const Spacer(),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onBookmark,
-                      icon: MotionTapIcon(
-                        active: post.isBookmarked,
-                        activeIcon: Icons.bookmark_rounded,
-                        inactiveIcon: Icons.bookmark_border_rounded,
-                        activeColor: AppTheme.primary,
-                        inactiveColor: AppTheme.textSecondary,
-                      ),
-                      tooltip: '收藏帖子',
                     ),
                   ],
-                ),
-              ],
+                  if (showsRecommendationPin ||
+                      post.isPinned ||
+                      post.isFeatured ||
+                      post.hotSuppressed ||
+                      post.extraTag == '精华') ...[
+                    Row(
+                      children: [
+                        if (showsRecommendationPin ||
+                            post.isPinned ||
+                            post.isFeatured ||
+                            post.extraTag == '精华') ...[
+                          _Tag(
+                            text: showsRecommendationPin || post.isPinned
+                                ? '置顶'
+                                : '精华',
+                            color: showsRecommendationPin || post.isPinned
+                                ? AppTheme.pink
+                                : AppTheme.orange,
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        if (post.hotSuppressed)
+                          const _Tag(text: '已人工移出热门', color: Colors.blueGrey),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  if (contextMeta != null) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.background,
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        contextMeta!,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 11,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                  Text(
+                    post.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      height: 1.42,
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.15,
+                    ),
+                  ),
+                  if (post.body.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    LinkText(
+                      post.body,
+                      maxLines: post.images.isEmpty ? 5 : 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.58,
+                        color: Color(0xFF334B60),
+                      ),
+                    ),
+                  ],
+                  if (post.images.isNotEmpty) ...[
+                    PostMediaPreview(
+                      images: post.images,
+                      onTap: onOpen,
+                      onImageTap: (_) => onOpen(),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _ActionStat(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        text: '${post.comments}',
+                        onTap: openComments,
+                      ),
+                      const SizedBox(width: 14),
+                      _ActionStat(
+                        icon: Icons.favorite_border_rounded,
+                        activeIcon: Icons.favorite_rounded,
+                        text: '${post.likeCount}',
+                        onTap: onLike,
+                        active: post.isLiked,
+                      ),
+                      const SizedBox(width: 14),
+                      _Stat(icon: Icons.visibility_outlined, text: post.views),
+                      const Spacer(),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onBookmark,
+                        icon: MotionTapIcon(
+                          active: post.isBookmarked,
+                          activeIcon: Icons.bookmark_rounded,
+                          inactiveIcon: Icons.bookmark_border_rounded,
+                          activeColor: AppTheme.primary,
+                          inactiveColor: AppTheme.textSecondary,
+                        ),
+                        tooltip: '收藏帖子',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 }
 
 class _Tag extends StatelessWidget {
@@ -332,4 +341,3 @@ class _ActionStat extends StatelessWidget {
     ),
   );
 }
-

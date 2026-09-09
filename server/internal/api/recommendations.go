@@ -13,6 +13,7 @@ import (
 type homeRecommendationItem struct {
 	PostID        string        `json:"post_id"`
 	Position      int           `json:"position"`
+	IsPinned      bool          `json:"is_pinned"`
 	RecommendedBy string        `json:"recommended_by"`
 	RecommendedAt time.Time     `json:"recommended_at"`
 	ExpiresAt     *time.Time    `json:"expires_at,omitempty"`
@@ -47,7 +48,7 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 	}
 
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT hr.post_id, hr.position, hr.recommended_by, hr.recommended_at, hr.expires_at,
+		SELECT hr.post_id, hr.position, hr.is_pinned, hr.recommended_by, hr.recommended_at, hr.expires_at,
 		       p.id, p.author_id, u.username, COALESCE(up.nickname, u.username), p.community_id, c.slug, c.name,
 		       p.type, p.title, p.content, p.comment_count, p.like_count, p.bookmark_count, p.share_count, p.view_count,
 		       p.created_at, p.updated_at, p.published_at, p.publication_status, p.moderation_status
@@ -57,7 +58,7 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		JOIN communities c ON c.id = p.community_id
 		WHERE p.deleted_at IS NULL
-		ORDER BY hr.position ASC, hr.recommended_at DESC, p.id DESC`)
+		ORDER BY hr.is_pinned DESC, hr.position ASC, hr.recommended_at DESC, p.id DESC`)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -69,7 +70,7 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 		var item homeRecommendationItem
 		var post postResponse
 		err := rows.Scan(
-			&item.PostID, &item.Position, &item.RecommendedBy, &item.RecommendedAt, &item.ExpiresAt,
+			&item.PostID, &item.Position, &item.IsPinned, &item.RecommendedBy, &item.RecommendedAt, &item.ExpiresAt,
 			&post.ID, &post.Author.ID, &post.Author.Username, &post.Author.Nickname,
 			&post.Community.ID, &post.Community.Slug, &post.Community.Name,
 			&post.Type, &post.Title, &post.ContentPreview, &post.CommentCount, &post.LikeCount,
@@ -83,6 +84,7 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 		post.ContentPreview = preview(post.ContentPreview)
 		post.IsRecommended = true
 		post.RecommendationPosition = &item.Position
+		post.RecommendationPinned = item.IsPinned
 		item.Post = &post
 		items = append(items, item)
 	}
@@ -92,6 +94,73 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+type setRecommendationPinInput struct {
+	Pinned bool `json:"pinned"`
+}
+
+func (s *Server) setHomeRecommendationPin(w http.ResponseWriter, r *http.Request, postID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+	user, ok := s.authenticatedUser(w, r)
+	if !ok {
+		return
+	}
+	if !s.canModerate(r, user) {
+		writeAuthError(w, r, ErrPermissionDenied)
+		return
+	}
+
+	var input setRecommendationPinInput
+	if err := decodeJSON(r, &input); err != nil {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_BODY", Message: "请求体格式错误"})
+		return
+	}
+
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(r.Context(), `
+		UPDATE home_recommendations
+		SET is_pinned = $1
+		WHERE post_id = $2 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`, input.Pinned, postID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if rowsAffected == 0 {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusConflict,
+			Code:    "POST_NOT_RECOMMENDED",
+			Message: "帖子当前不在首页推荐中",
+		})
+		return
+	}
+
+	_ = appendAdminLogTx(r.Context(), tx, user.ID, "home_recommendation.pin", "post", postID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
+		"pinned": input.Pinned,
+	}, time.Now().UTC())
+	if err := tx.Commit(); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"post_id": postID,
+		"pinned":  input.Pinned,
+	})
 }
 
 func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, postID string) {

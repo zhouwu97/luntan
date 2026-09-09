@@ -539,6 +539,10 @@ class _HomeScreenState extends State<HomeScreen> {
         final activeStatus = feedState.status;
         final activeHasMore = feedState.hasMore;
         final activeError = feedState.error;
+        final showRecommendationSections =
+            selectedSort == FeedSort.recommended &&
+            posts.any((post) => post.isRecommendationPinned) &&
+            posts.any((post) => !post.isRecommendationPinned);
         final showInitialSkeleton =
             activeStatus == FeedStatus.initial ||
             (activeStatus == FeedStatus.loading && posts.isEmpty);
@@ -620,27 +624,68 @@ class _HomeScreenState extends State<HomeScreen> {
                                 itemCount: posts.length,
                                 itemBuilder: (context, index) {
                                   final post = posts[index];
+                                  final isRecommendationFeed =
+                                      selectedSort == FeedSort.recommended;
+                                  String? recommendationSection;
+                                  if (showRecommendationSections) {
+                                    final previousPinned = index > 0
+                                        ? posts[index - 1]
+                                              .isRecommendationPinned
+                                        : null;
+                                    if (post.isRecommendationPinned &&
+                                        previousPinned != true) {
+                                      recommendationSection = '置顶推荐';
+                                    } else if (!post.isRecommendationPinned &&
+                                        previousPinned != false) {
+                                      recommendationSection = '更多推荐';
+                                    }
+                                  }
                                   final showActivity =
                                       selectedSort == FeedSort.latest &&
                                       latestOrder == LatestOrder.comment &&
                                       (post.lastCommentAt != null ||
                                           post.activityAt != null);
-                                  return ForumPostCard(
-                                    post: post,
-                                    onOpen: () => widget.onOpenPost(post),
-                                    onOpenComments: () =>
-                                        widget.onOpenComments(post),
-                                    onLike: () => widget.onToggleLike(post),
-                                    onBookmark: () =>
-                                        widget.onToggleBookmark(post),
-                                    onMenu: () => _showPostMenu(post),
-                                    onAuthorTap: widget.onOpenUserId,
-                                    contextMeta: showActivity
-                                        ? '💬 最近回复 ${relativeTimeLabel(post.activityAt ?? post.lastCommentAt!)}'
-                                        : null,
-                                    interactionListenable: widget
-                                        .interactionController
-                                        .interactionsFor(post.id),
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (recommendationSection != null)
+                                        Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            2,
+                                            8,
+                                            2,
+                                            4,
+                                          ),
+                                          child: Text(
+                                            recommendationSection,
+                                            style: const TextStyle(
+                                              color: AppTheme.textSecondary,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      ForumPostCard(
+                                        post: post,
+                                        onOpen: () => widget.onOpenPost(post),
+                                        onOpenComments: () =>
+                                            widget.onOpenComments(post),
+                                        onLike: () => widget.onToggleLike(post),
+                                        onBookmark: () =>
+                                            widget.onToggleBookmark(post),
+                                        onMenu: () => _showPostMenu(post),
+                                        onAuthorTap: widget.onOpenUserId,
+                                        contextMeta: showActivity
+                                            ? '💬 最近回复 ${relativeTimeLabel(post.activityAt ?? post.lastCommentAt!)}'
+                                            : null,
+                                        interactionListenable: widget
+                                            .interactionController
+                                            .interactionsFor(post.id),
+                                        showRecommendationPin:
+                                            isRecommendationFeed,
+                                      ),
+                                    ],
                                   );
                                 },
                               ),
@@ -700,38 +745,88 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             if (widget.platform != null && widget.canModerate) ...[
-              ListTile(
-                leading: Icon(
-                  post.isRecommended
-                      ? Icons.remove_circle_outline
-                      : Icons.push_pin_outlined,
-                  color: AppTheme.primary,
-                ),
-                title: Text(post.isRecommended ? '移出首页推荐' : '加入首页推荐'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  try {
-                    if (post.isRecommended) {
-                      await widget.platform!.removeHomeRecommendation(post.id);
-                    } else {
+              if (!post.isRecommended)
+                ListTile(
+                  leading: const Icon(
+                    Icons.add_circle_outline,
+                    color: AppTheme.primary,
+                  ),
+                  title: const Text('加入推荐'),
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    try {
                       await widget.platform!.setHomeRecommendation(
                         postId: post.id,
                       );
+                      if (!mounted) return;
+                      widget.onFeedback('已加入推荐');
+                      await widget.feedController.refresh();
+                    } catch (error) {
+                      if (mounted) {
+                        widget.onFeedback(
+                          userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
+                        );
+                      }
                     }
-                    if (!mounted) return;
-                    widget.onFeedback(
-                      post.isRecommended ? '已移出首页推荐' : '已加入首页推荐',
-                    );
-                    await widget.feedController.refresh();
-                  } catch (error) {
-                    if (mounted) {
-                      widget.onFeedback(
-                        userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
+                  },
+                )
+              else ...[
+                ListTile(
+                  leading: Icon(
+                    post.isRecommendationPinned
+                        ? Icons.push_pin
+                        : Icons.push_pin_outlined,
+                    color: AppTheme.primary,
+                  ),
+                  title: Text(
+                    post.isRecommendationPinned ? '取消推荐置顶' : '在推荐中置顶',
+                  ),
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    try {
+                      final pinned = !post.isRecommendationPinned;
+                      await widget.platform!.setHomeRecommendationPinned(
+                        postId: post.id,
+                        pinned: pinned,
                       );
+                      if (!mounted) return;
+                      widget.onFeedback(pinned ? '已在推荐中置顶' : '已取消推荐置顶');
+                      await widget.feedController.refresh();
+                    } catch (error) {
+                      if (mounted) {
+                        widget.onFeedback(
+                          userFacingApiMessage(
+                            error,
+                            fallback: '推荐置顶操作失败，请稍后重试',
+                          ),
+                        );
+                      }
                     }
-                  }
-                },
-              ),
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.remove_circle_outline,
+                    color: AppTheme.primary,
+                  ),
+                  title: const Text('移出推荐'),
+                  onTap: () async {
+                    Navigator.pop(sheetContext);
+                    try {
+                      await widget.platform!.removeHomeRecommendation(post.id);
+                      if (!mounted) return;
+                      widget.onFeedback('已移出推荐');
+                      await widget.feedController.refresh();
+                    } catch (error) {
+                      if (mounted) {
+                        widget.onFeedback(
+                          userFacingApiMessage(error, fallback: '推荐操作失败，请稍后重试'),
+                        );
+                      }
+                    }
+                  },
+                ),
+              ],
               ListTile(
                 leading: Icon(
                   post.hotSuppressed
@@ -1037,10 +1132,7 @@ class _SectionTabs extends StatelessWidget {
             ? const Center(
                 child: Text(
                   '暂无可用板块',
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 13,
-                  ),
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                 ),
               )
             : Row(

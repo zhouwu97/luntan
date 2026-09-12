@@ -14,7 +14,8 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_TEST_BASE_URL
     ? undefined
     : {
-        command: "npm run start",
+        // 显式绑定回环地址，避免 Windows 下 Next 默认监听 0.0.0.0 被权限策略拦截。
+        command: "npm run start -- --hostname 127.0.0.1",
         url: "http://127.0.0.1:3000",
         env: {
           ...process.env,

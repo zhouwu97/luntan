@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SiteHeader } from "../../components/site-header";
 import { Icon } from "../../components/icons";
@@ -43,7 +42,8 @@ export default function ActivitiesPage() {
               <h1>一起玩点新的</h1>
               <p>查看社区正在进行和即将开始的活动。</p>
             </div>
-            <Link href="/" className="outline-button feature-back">回到首页</Link>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/" className="outline-button feature-back">回到首页</a>
           </div>
           {error && <div className="data-note" role="status">{error}</div>}
           {loading ? (
@@ -51,7 +51,11 @@ export default function ActivitiesPage() {
           ) : items.length ? (
             <div className="activity-list">{items.map((item) => <ActivityCard key={item.id} item={item} />)}</div>
           ) : (
-            <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="calendar" size={24} /></span><h2>暂时没有公开活动</h2><p>有新的活动时，我们会第一时间放在这里。</p><Link href="/" className="primary-link">去逛帖子</Link></div>
+            <div className="empty-state feature-empty">
+              <span className="empty-icon"><Icon name="calendar" size={24} /></span><h2>暂时没有公开活动</h2><p>有新的活动时，我们会第一时间放在这里。</p>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a href="/" className="primary-link">去逛帖子</a>
+            </div>
           )}
         </section>
       </main>

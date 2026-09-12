@@ -373,7 +373,11 @@ export async function getActivities(): Promise<ActivityItem[]> {
           id: asString(item.id),
           title: asString(item.title, "未命名活动"),
           description: asString(item.description),
-          coverUrl: resolveMediaUrl(asString(item.cover_url), "detail"),
+          // 兼容历史活动接口的 image_url/banner_url 字段，避免有图活动退化成日历占位图。
+          coverUrl: resolveMediaUrl(
+            asString(item.cover_url) || asString(item.image_url) || asString(item.banner_url) || asString(item.cover),
+            "detail",
+          ),
           startAt: asString(item.start_at) || undefined,
           endAt: asString(item.end_at) || undefined,
           location: asString(item.location),

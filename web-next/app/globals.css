@@ -151,6 +151,14 @@ img { display: block; max-width: 100%; }
 .profile-menu-meta { margin: 4px 0 12px; color: var(--text-faint); font-size: 12px; }
 .profile-menu button { width: 100%; padding: 9px 8px; text-align: left; color: var(--text-soft); background: transparent; border-radius: 8px; font-size: 13px; }
 .profile-menu button:hover { color: var(--primary-deep); background: var(--surface-blue); }
+.settings-list { display: grid; gap: 10px; margin-top: 18px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 17px 20px; color: var(--text); text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); cursor: pointer; }
+.settings-row:hover { border-color: #b8d6f7; background: #f8fbff; }
+.settings-row strong, .settings-row small { display: block; }
+.settings-row strong { font-size: 14px; }
+.settings-row small { margin-top: 4px; color: var(--text-soft); font-size: 12px; }
+.settings-row > span:last-child { color: var(--text-faint); font-size: 22px; }
+.settings-row.danger strong { color: #c2410c; }
 
 .page-frame { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 24px 0 64px; }
 .home-page-frame { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 24px 0 64px; }

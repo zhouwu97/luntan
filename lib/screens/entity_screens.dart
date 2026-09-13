@@ -108,6 +108,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String? _nextCommentsCursor;
   bool _hasMoreComments = true;
   bool _loadingMoreComments = false;
+  bool _commentsInitialLoading = false;
+  bool _commentsInitialFailed = false;
   double _profileHeaderOffset = 0;
 
   @override
@@ -117,6 +119,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     _selfSummary = widget.profileSummary;
     _future = _load();
     _postsFuture = _loadInitialPosts();
+    _commentsInitialLoading = true;
     _commentsFuture = _loadInitialComments();
     _loadPoints();
     _postsScrollController.addListener(_loadMorePostsWhenNeeded);
@@ -192,7 +195,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       });
       return page;
     } catch (_) {
+      _commentsInitialFailed = true;
       return null;
+    } finally {
+      _commentsInitialLoading = false;
     }
   }
 
@@ -1129,8 +1135,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   '评论 ${commentCount > 0 ? commentCount : _comments.length}',
                               active: _currentTab == 1,
                               onTap: () {
-                                if (_comments.isEmpty) {
-                                  _commentsFuture = _loadInitialComments();
+                                if (_comments.isEmpty &&
+                                    _commentsInitialFailed &&
+                                    !_commentsInitialLoading) {
+                                  setState(() {
+                                    _commentsInitialFailed = false;
+                                    _commentsInitialLoading = true;
+                                    _commentsFuture = _loadInitialComments();
+                                  });
                                 }
                                 _switchTab(1);
                               },

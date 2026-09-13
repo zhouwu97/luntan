@@ -21,7 +21,8 @@ export const getPublicActivity = cache(async (activityID: string): Promise<Publi
   try {
     const response = await fetch(`${apiOrigin()}/api/v1/activities/${encodeURIComponent(activityID)}`, {
       headers: { Accept: "application/json" },
-      next: { revalidate: 60 },
+      // 活动下线/删除必须立即生效，不能让 SSR 数据缓存继续暴露旧内容。
+      cache: "no-store",
     });
     if (response.status === 404 || response.status === 410) return { status: "not_found" };
     if (!response.ok) return { status: "unavailable" };

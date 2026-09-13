@@ -36,6 +36,36 @@ type reorderRecommendationsInput struct {
 	Items []reorderRecommendationItem `json:"items"`
 }
 
+func validateRecommendationOrder(items []reorderRecommendationItem, currentIDs map[string]struct{}) (string, bool) {
+	if len(items) != len(currentIDs) {
+		return "推荐排序已发生变化，请刷新后重试", false
+	}
+	seenIDs := make(map[string]struct{}, len(items))
+	seenPositions := make(map[int]struct{}, len(items))
+	for _, item := range items {
+		if item.PostID == "" || item.Position < 1 {
+			return "推荐排序参数无效", false
+		}
+		if _, exists := seenIDs[item.PostID]; exists {
+			return "推荐排序中不能重复出现同一帖子", false
+		}
+		if _, exists := currentIDs[item.PostID]; !exists {
+			return "推荐排序已发生变化，请刷新后重试", false
+		}
+		if _, exists := seenPositions[item.Position]; exists {
+			return "推荐排序位置不能重复", false
+		}
+		seenIDs[item.PostID] = struct{}{}
+		seenPositions[item.Position] = struct{}{}
+	}
+	for position := 1; position <= len(items); position++ {
+		if _, exists := seenPositions[position]; !exists {
+			return "推荐排序位置必须从 1 开始连续排列", false
+		}
+	}
+	return "", true
+}
+
 const homeRecommendationOrderLock = `SELECT pg_advisory_xact_lock(hashtext('luntan:home-recommendation-order'))`
 
 func lockHomeRecommendationOrder(ctx context.Context, tx *sql.Tx) error {
@@ -384,6 +414,51 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 	defer tx.Rollback()
 	if err := lockHomeRecommendationOrder(r.Context(), tx); err != nil {
 		writeInternalError(w, r, err)
+		return
+	}
+
+	rows, err := tx.QueryContext(r.Context(), `
+		SELECT post_id
+		FROM home_recommendations
+		WHERE is_pinned = true
+		  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)`)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	currentIDs := make(map[string]struct{})
+	for rows.Next() {
+		var postID string
+		if err := rows.Scan(&postID); err != nil {
+			rows.Close()
+			writeInternalError(w, r, err)
+			return
+		}
+		currentIDs[postID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		writeInternalError(w, r, err)
+		return
+	}
+	rows.Close()
+	if message, valid := validateRecommendationOrder(input.Items, currentIDs); !valid {
+		status := http.StatusBadRequest
+		code := "INVALID_RECOMMENDATION_ORDER"
+		stale := len(input.Items) != len(currentIDs)
+		if !stale {
+			for _, item := range input.Items {
+				if _, exists := currentIDs[item.PostID]; !exists {
+					stale = true
+					break
+				}
+			}
+		}
+		if stale {
+			status = http.StatusConflict
+			code = "RECOMMENDATION_ORDER_STALE"
+		}
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: status, Code: code, Message: message})
 		return
 	}
 

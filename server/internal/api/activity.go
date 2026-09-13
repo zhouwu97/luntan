@@ -150,9 +150,28 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON u.id = a.created_by
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN media_assets ma ON ma.id = a.cover_media_id AND ma.deleted_at IS NULL
-		WHERE a.deleted_at IS NULL
-		ORDER BY a.created_at DESC
-		LIMIT 200`
+		WHERE a.deleted_at IS NULL`
+	// 动态阶段在 SQL 中先筛选再 LIMIT，避免活动数量增长后某个状态被截断。
+	switch statusFilter {
+	case "draft":
+		query += ` AND a.publication_status = 'draft'`
+	case "offline":
+		query += ` AND a.publication_status = 'offline'`
+	case "upcoming":
+		query += ` AND a.publication_status = 'published' AND a.start_at > CURRENT_TIMESTAMP`
+	case "active":
+		query += ` AND a.publication_status = 'published'
+			AND (a.start_at IS NULL OR a.start_at <= CURRENT_TIMESTAMP)
+			AND (a.end_at IS NULL OR a.end_at > CURRENT_TIMESTAMP)`
+	case "ended":
+		query += ` AND a.publication_status = 'published' AND a.end_at IS NOT NULL AND a.end_at <= CURRENT_TIMESTAMP`
+	case "", "all":
+		// 不限状态。
+	default:
+		// 保持旧接口对未知筛选值返回空列表的行为。
+		query += ` AND 1 = 0`
+	}
+	query += ` ORDER BY a.created_at DESC LIMIT 200`
 
 	rows, err := s.db.QueryContext(r.Context(), query)
 	if err != nil {
@@ -191,9 +210,6 @@ func (s *Server) listAdminActivities(w http.ResponseWriter, r *http.Request) {
 			item.PublishedAt = &publishedAt.Time
 		}
 		hydrateActivityStatus(&item, now)
-		if statusFilter != "" && statusFilter != "all" && item.Status != statusFilter {
-			continue
-		}
 		items = append(items, item)
 	}
 

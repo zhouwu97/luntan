@@ -50,7 +50,8 @@ export const getPublicPost = cache(async (postId: string): Promise<PublicPostRes
 });
 
 export const getPublicRecentPosts = cache(async (): Promise<Post[]> => {
-  const payload = await fetchPublicJson("/feed/latest?limit=100&sort=latest&latest_by=comment&include_details=1");
+  // SEO 首屏只需要近期帖子摘要；避免一次请求 100 条并携带评论/投票详情，压缩上游响应体。
+  const payload = await fetchPublicJson("/feed/latest?limit=20&sort=latest&latest_by=comment");
   if (!payload || typeof payload !== "object") return [];
   const items = (payload as { items?: unknown[] }).items;
   return Array.isArray(items) ? items.map(parsePost).filter((post) => post.id) : [];

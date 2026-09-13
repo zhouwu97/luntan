@@ -14,18 +14,28 @@ export default function ActivitiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  async function loadActivities() {
+    setLoading(true);
+    setError("");
+    try {
+      const nextItems = await getActivities();
+      setItems(nextItems);
+    } catch (requestError: unknown) {
+      setError(formatError(requestError, "活动暂时无法加载，请稍后再试"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     let active = true;
-    void getActivities()
-      .then((nextItems) => {
-        if (active) setItems(nextItems);
-      })
-      .catch((requestError: unknown) => {
-        if (active) setError(formatError(requestError, "活动暂时无法加载，请稍后再试"));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    void getActivities().then((nextItems) => {
+      if (active) setItems(nextItems);
+    }).catch((requestError: unknown) => {
+      if (active) setError(formatError(requestError, "活动暂时无法加载，请稍后再试"));
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
     return () => {
       active = false;
     };
@@ -45,7 +55,7 @@ export default function ActivitiesPage() {
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a href="/" className="outline-button feature-back">回到首页</a>
           </div>
-          {error && <div className="data-note" role="status">{error}</div>}
+          {error && <div className="data-note" role="status">{error}<button type="button" className="outline-button" onClick={() => void loadActivities()}>重新加载</button></div>}
           {loading ? (
             <div className="activity-list" aria-label="活动加载中"><div className="activity-skeleton" /><div className="activity-skeleton" /></div>
           ) : items.length ? (

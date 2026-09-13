@@ -148,6 +148,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     setState(() => _profileHeaderOffset = next);
   }
 
+  void _switchTab(int tab) {
+    if (_currentTab == tab) return;
+    setState(() => _currentTab = tab);
+    // 每个 Tab 使用独立滚动容器，切换后要立即把头部同步到新容器的位置。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncProfileHeader();
+    });
+  }
+
   Future<void> _loadPoints() async {
     // /me/points 是当前登录用户的余额，不能挂到他人主页的经验信息旁边。
     if (widget.storeRepository == null || !widget.isSelf) return;
@@ -1111,7 +1120,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               label:
                                   '帖子 ${postCount > 0 ? postCount : _posts.length}',
                               active: _currentTab == 0,
-                              onTap: () => setState(() => _currentTab = 0),
+                              onTap: () => _switchTab(0),
                             ),
                           ),
                           Expanded(
@@ -1123,7 +1132,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 if (_comments.isEmpty) {
                                   _commentsFuture = _loadInitialComments();
                                 }
-                                setState(() => _currentTab = 1);
+                                _switchTab(1);
                               },
                             ),
                           ),

@@ -363,7 +363,7 @@ export async function getFeed(options: {
   return sharedRequest;
 }
 
-function parseActivity(raw: unknown): ActivityItem {
+export function parseActivity(raw: unknown): ActivityItem {
   const item = asRecord(raw);
   const status = asString(item.status, asString(item.phase, "upcoming"));
   return {

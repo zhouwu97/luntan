@@ -70,7 +70,7 @@ export default function ActivitiesPage() {
           )}
         </section>
       </main>
-      <BottomNav activeNav="home" />
+      <BottomNav activeNav={null} />
     </>
   );
 }

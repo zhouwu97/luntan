@@ -121,6 +121,10 @@ export default function AdminRecommendationsPage() {
   async function handleAddRecommendation(e: FormEvent) {
     e.preventDefault();
     if (!targetPost) return;
+    if (dirty) {
+      setNotice("排序尚未保存，请先保存或放弃修改后再变更推荐内容。");
+      return;
+    }
     setAdding(true);
     try {
       const expiresAtIso = targetExpiresAt ? new Date(targetExpiresAt).toISOString() : undefined;
@@ -141,6 +145,10 @@ export default function AdminRecommendationsPage() {
   }
 
   async function handleRemove(postId: string) {
+    if (dirty) {
+      setNotice("排序尚未保存，请先保存或放弃修改后再移除推荐。");
+      return;
+    }
     if (!window.confirm("确定要将此帖子从首页推荐中移除吗？")) return;
     try {
       await removeHomeRecommendation(postId);
@@ -153,6 +161,7 @@ export default function AdminRecommendationsPage() {
   }
 
   function moveItem(from: number, to: number) {
+    if (saving) return;
     if (to < 0 || to >= items.length) return;
     if (!items[from]?.isPinned || !items[to]?.isPinned) return;
     const next = [...items];
@@ -187,6 +196,10 @@ export default function AdminRecommendationsPage() {
 
   async function handleTogglePin(item: HomeRecommendationItem) {
     if (saving) return;
+    if (dirty) {
+      setNotice("排序尚未保存，请先保存或放弃修改后再调整置顶状态。");
+      return;
+    }
     setSaving(true);
     try {
       await setHomeRecommendationPinned(item.postId, !item.isPinned);
@@ -197,6 +210,13 @@ export default function AdminRecommendationsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleDiscardOrder() {
+    if (!dirty || saving) return;
+    if (!window.confirm("放弃当前未保存的排序修改吗？")) return;
+    await loadRecommendations();
+    setNotice("");
   }
 
   if (!ready) {
@@ -344,7 +364,7 @@ export default function AdminRecommendationsPage() {
                   <button
                     type="submit"
                     className="primary-button"
-                    disabled={adding}
+                    disabled={adding || dirty}
                     style={{ height: 36, padding: "0 18px", marginLeft: "auto" }}
                   >
                     {adding ? "正在提交…" : "确认加入首页推荐"}
@@ -368,6 +388,7 @@ export default function AdminRecommendationsPage() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
+              {dirty && <button type="button" className="outline-button" disabled={saving} onClick={() => void handleDiscardOrder()} style={{ height: 38, padding: "0 14px" }}>放弃修改</button>}
               <button
                 type="button"
                 className="primary-button"
@@ -409,12 +430,12 @@ export default function AdminRecommendationsPage() {
                       </div>
                     )}
                   <div
-                    draggable={item.isPinned}
+                    draggable={item.isPinned && !saving}
                     onDragStart={() => {
-                      if (item.isPinned) dragIndex.current = index;
+                      if (item.isPinned && !saving) dragIndex.current = index;
                     }}
                     onDragOver={(e) => {
-                      if (item.isPinned) e.preventDefault();
+                      if (item.isPinned && !saving) e.preventDefault();
                     }}
                     onDrop={() => {
                       if (dragIndex.current !== null && dragIndex.current !== index) {
@@ -481,11 +502,12 @@ export default function AdminRecommendationsPage() {
                     {/* 操作 */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
                       {item.isPinned && <>
-                        <button type="button" disabled={isFirst} onClick={() => moveItem(index, index - 1)} title="上移">↑</button>
-                        <button type="button" disabled={isLast} onClick={() => moveItem(index, index + 1)} title="下移">↓</button>
+                        <button type="button" disabled={saving || isFirst} onClick={() => moveItem(index, index - 1)} title="上移">↑</button>
+                        <button type="button" disabled={saving || isLast} onClick={() => moveItem(index, index + 1)} title="下移">↓</button>
                       </>}
                       <button
                         type="button"
+                        disabled={dirty || saving}
                         onClick={() => void handleTogglePin(item)}
                         title={item.isPinned ? "取消推荐置顶" : "在推荐中置顶"}
                       >
@@ -493,7 +515,8 @@ export default function AdminRecommendationsPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleRemove(item.postId)}
+                        disabled={dirty || saving}
+                        onClick={() => void handleRemove(item.postId)}
                         style={{
                           padding: "4px 8px",
                           borderRadius: 6,

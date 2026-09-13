@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { SiteHeader } from "../../components/site-header";
+import { BottomNav } from "../../components/bottom-nav";
 import { Icon } from "../../components/icons";
 import { getActivities } from "../../lib/api/forum";
 import { formatError } from "../../lib/format";
@@ -69,6 +70,7 @@ export default function ActivitiesPage() {
           )}
         </section>
       </main>
+      <BottomNav activeNav="home" />
     </>
   );
 }
@@ -81,7 +83,7 @@ function ActivityCard({ item }: { item: ActivityItem }) {
     : "时间待定";
   const status = statusLabels[item.status] || item.status;
   return (
-    <article className="activity-card">
+    <a className="activity-card activity-card-link" href={`/activities/${encodeURIComponent(item.id)}`}>
       {item.coverUrl ? <img className="activity-cover" src={item.coverUrl} alt="" loading="lazy" /> : <div className="activity-cover activity-cover-empty"><Icon name="calendar" size={32} /></div>}
       <div className="activity-copy">
         <div className="activity-card-top"><span className={`activity-status activity-status-${item.status}`}>{status}</span><span className="activity-author">{item.authorName}</span></div>
@@ -89,7 +91,7 @@ function ActivityCard({ item }: { item: ActivityItem }) {
         {item.description && <p>{item.description}</p>}
         <div className="activity-meta"><span><Icon name="calendar" size={15} /> <time dateTime={item.startAt}>{timeLabel}</time></span>{item.location && <span><Icon name="arrow-up-right" size={15} /> {item.location}</span>}</div>
       </div>
-    </article>
+    </a>
   );
 }
 

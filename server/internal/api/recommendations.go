@@ -69,6 +69,7 @@ func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request)
 		JOIN communities c ON c.id = p.community_id
 		LEFT JOIN recommendation_comment_stats rcs ON rcs.post_id = p.id
 		WHERE p.deleted_at IS NULL
+		  AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)
 		`+recommendationOrderBy(scoreExpr))
 	if err != nil {
 		writeInternalError(w, r, err)

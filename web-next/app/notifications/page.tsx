@@ -162,7 +162,7 @@ function notificationHref(item: ForumNotification): string | undefined {
     case "toy":
       return `/ranking/${encodeURIComponent(item.targetId)}`;
     case "activity":
-      return "/activities";
+      return `/activities/${encodeURIComponent(item.targetId)}`;
     case "store_order":
       return `/points?tab=orders&order=${encodeURIComponent(item.targetId)}`;
     default:

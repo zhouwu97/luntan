@@ -8,7 +8,7 @@ import { useSession } from "../../components/session-provider";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, ready, signOut } = useSession();
+  const { user, ready, isRegistered, signOut } = useSession();
 
   if (!ready) {
     return (
@@ -25,15 +25,16 @@ export default function SettingsPage() {
     );
   }
 
-  if (!user) {
+  if (!user || !isRegistered) {
     return (
       <>
         <SiteHeader />
         <main className="page-frame">
           <section className="feature-page">
-            <div className="feature-hero compact-hero"><div><span className="feature-kicker">账号设置</span><h1>请先登录</h1><p>登录后可以管理账号与通知偏好。</p></div><Link href="/login" className="primary-link">登录</Link></div>
+            <div className="feature-hero compact-hero"><div><span className="feature-kicker">账号设置</span><h1>游客模式</h1><p>登录或注册正式账号后，可以管理账号与通知偏好。</p></div><Link href="/login" className="primary-link">登录 / 注册</Link></div>
           </section>
         </main>
+        <BottomNav activeNav="profile" />
       </>
     );
   }

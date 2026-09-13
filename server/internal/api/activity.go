@@ -588,6 +588,57 @@ func (s *Server) listPublicActivities(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// getPublicActivity 返回单个公开活动，供通知和活动列表详情链接使用。
+func (s *Server) getPublicActivity(w http.ResponseWriter, r *http.Request, activityID string) {
+	if !s.requireDatabase(w, r) {
+		return
+	}
+
+	var item activityResponse
+	var coverMediaID, coverKey string
+	var startAt, endAt, publishedAt sql.NullTime
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT a.id, a.title, a.description, COALESCE(a.cover_media_id, ''),
+		       COALESCE(ma.object_key, a.cover_url, ''),
+		       a.start_at, a.end_at, a.location, a.publication_status, a.created_by,
+		       COALESCE(up.nickname, u.username, ''), a.published_at, a.created_at, a.updated_at
+		FROM activities a
+		JOIN users u ON u.id = a.created_by
+		LEFT JOIN user_profiles up ON up.user_id = u.id
+		LEFT JOIN media_assets ma ON ma.id = a.cover_media_id AND ma.deleted_at IS NULL
+		WHERE a.id = $1 AND a.deleted_at IS NULL AND a.publication_status = 'published'`, activityID).
+		Scan(
+			&item.ID, &item.Title, &item.Description, &coverMediaID,
+			&coverKey, &startAt, &endAt, &item.Location, &item.PublicationStatus,
+			&item.CreatedBy, &item.AuthorName, &publishedAt, &item.CreatedAt, &item.UpdatedAt,
+		)
+	if errors.Is(err, sql.ErrNoRows) {
+		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "ACTIVITY_NOT_FOUND", Message: "活动不存在或已下线"})
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if coverMediaID != "" {
+		item.CoverMediaID = coverMediaID
+	}
+	if coverKey != "" {
+		item.CoverURL = mediaVariantURL(coverMediaID, coverKey, "detail")
+	}
+	if startAt.Valid {
+		item.StartAt = &startAt.Time
+	}
+	if endAt.Valid {
+		item.EndAt = &endAt.Time
+	}
+	if publishedAt.Valid {
+		item.PublishedAt = &publishedAt.Time
+	}
+	hydrateActivityStatus(&item, time.Now().UTC())
+	httpserver.WriteJSON(w, http.StatusOK, item)
+}
+
 // 首次发布在活动行上领取广播资格，避免重复点击、编辑和重新上架反复打扰用户。
 func enqueueActivityNotificationTx(ctx context.Context, tx *sql.Tx, activityID, actorID string, now time.Time) error {
 	var title, description string

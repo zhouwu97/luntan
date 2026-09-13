@@ -795,7 +795,12 @@ function PostArticle({
 
   async function handleCopyLink() {
     setMenuOpen(false);
-    showToast(await copyText(window.location.href) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    const copied = await copyText(window.location.href);
+    showToast(copied ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    if (copied && user && user.accountType !== "guest") {
+      // 详情菜单与顶部分享入口统一记录正式账号的首次有效分享。
+      void recordPostShare(post.id).catch(() => undefined);
+    }
   }
 
   async function handleToggleRecommendation() {

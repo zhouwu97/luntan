@@ -386,6 +386,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/activities":
 		s.listPublicActivities(w, r)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/activities/"):
+		activityID := strings.TrimPrefix(path, "/api/v1/activities/")
+		s.getPublicActivity(w, r, activityID)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/ranking/submissions":
 		s.createRankingToySubmission(w, r)
 		return

@@ -363,30 +363,34 @@ export async function getFeed(options: {
   return sharedRequest;
 }
 
+function parseActivity(raw: unknown): ActivityItem {
+  const item = asRecord(raw);
+  const status = asString(item.status, asString(item.phase, "upcoming"));
+  return {
+    id: asString(item.id),
+    title: asString(item.title, "未命名活动"),
+    description: asString(item.description),
+    // 兼容历史活动接口的 image_url/banner_url 字段，避免有图活动退化成日历占位图。
+    coverUrl: resolveMediaUrl(
+      asString(item.cover_url) || asString(item.image_url) || asString(item.banner_url) || asString(item.cover),
+      "detail",
+    ),
+    startAt: asString(item.start_at) || undefined,
+    endAt: asString(item.end_at) || undefined,
+    location: asString(item.location),
+    status,
+    phase: asString(item.phase) || undefined,
+    authorName: asString(item.author_name, "社区官方"),
+  } satisfies ActivityItem;
+}
+
 export async function getActivities(): Promise<ActivityItem[]> {
   const payload = await apiJson<{ items?: unknown[] }>("/activities");
-  return Array.isArray(payload.items)
-    ? payload.items.map((raw) => {
-        const item = asRecord(raw);
-        const status = asString(item.status, asString(item.phase, "upcoming"));
-        return {
-          id: asString(item.id),
-          title: asString(item.title, "未命名活动"),
-          description: asString(item.description),
-          // 兼容历史活动接口的 image_url/banner_url 字段，避免有图活动退化成日历占位图。
-          coverUrl: resolveMediaUrl(
-            asString(item.cover_url) || asString(item.image_url) || asString(item.banner_url) || asString(item.cover),
-            "detail",
-          ),
-          startAt: asString(item.start_at) || undefined,
-          endAt: asString(item.end_at) || undefined,
-          location: asString(item.location),
-          status,
-          phase: asString(item.phase) || undefined,
-          authorName: asString(item.author_name, "社区官方"),
-        } satisfies ActivityItem;
-      })
-    : [];
+  return Array.isArray(payload.items) ? payload.items.map(parseActivity) : [];
+}
+
+export async function getActivity(id: string): Promise<ActivityItem> {
+  return parseActivity(await apiJson<JsonRecord>(`/activities/${encodeURIComponent(id)}`));
 }
 
 export async function getRankingToys(tab = "", category = ""): Promise<RankingToy[]> {

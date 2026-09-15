@@ -36,7 +36,7 @@ import type {
   PublicBootstrap,
   UserSummary,
 } from "../../types/forum";
-import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
+import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, getSessionVersion, setAccessToken } from "./client";
 
 type JsonRecord = Record<string, unknown>;
 const feedRequests = new Map<string, Promise<FeedPage>>();
@@ -1008,7 +1008,6 @@ export async function getPublicBootstrap(): Promise<PublicBootstrap> {
 function parseSession(payload: JsonRecord): AuthSession {
   const token = asString(payload.access_token);
   if (!token) throw new Error("登录响应格式错误");
-  setAccessToken(token);
   return {
     accessToken: token,
     expiresIn: asNumber(payload.expires_in) || undefined,
@@ -1016,12 +1015,31 @@ function parseSession(payload: JsonRecord): AuthSession {
   };
 }
 
+class StaleSessionResponseError extends Error {
+  constructor() {
+    super("登录响应已过期");
+    this.name = "StaleSessionResponseError";
+  }
+}
+
+function commitSession(session: AuthSession, expectedVersion?: number): AuthSession {
+  if (expectedVersion !== undefined && getSessionVersion() !== expectedVersion) {
+    throw new StaleSessionResponseError();
+  }
+  setAccessToken(session.accessToken);
+  return session;
+}
+
+function parseAndCommitSession(payload: JsonRecord): AuthSession {
+  return commitSession(parseSession(payload));
+}
+
 export async function loginWithEmailCode(email: string, code: string): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
+  return parseAndCommitSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
+  return parseAndCommitSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
 }
 
 export async function registerWithEmail(
@@ -1030,7 +1048,7 @@ export async function registerWithEmail(
   code?: string,
   nickname = "",
 ): Promise<AuthSession> {
-  return parseSession(
+  return parseAndCommitSession(
     await apiPost<JsonRecord>("/auth/register", {
       email,
       ...(code && code.trim() ? { code: code.trim() } : {}),
@@ -1040,8 +1058,9 @@ export async function registerWithEmail(
   );
 }
 
-export async function loginAsGuest(): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/guest"));
+export async function loginAsGuest(expectedVersion?: number): Promise<AuthSession> {
+  const session = parseSession(await apiPost<JsonRecord>("/auth/guest"));
+  return commitSession(session, expectedVersion);
 }
 
 export async function getMe(): Promise<SessionUser> {

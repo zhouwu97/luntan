@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CommunityRail } from "./community-rail";
 import { DiscoveryRail } from "./discovery-rail";
@@ -78,6 +78,7 @@ export function HomeShell() {
   const [communityError, setCommunityError] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const queryVersion = useRef(0);
 
   useEffect(() => {
     const rawSort = searchParams.get("sort");
@@ -118,6 +119,8 @@ export function HomeShell() {
 
   useEffect(() => {
     let mounted = true;
+    const requestVersion = ++queryVersion.current;
+    setLoadingMore(false);
     const snapshot = readFeedCacheSnapshot(currentCacheOptions);
     const cached = snapshot?.page || null;
     setPosts(cached?.items || []);
@@ -140,14 +143,14 @@ export function HomeShell() {
       accountScope: user?.id,
     })
       .then((page) => {
-        if (!mounted) return;
+        if (!mounted || requestVersion !== queryVersion.current) return;
         setPosts(page.items);
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
         writeFeedCache(currentCacheOptions, page);
       })
       .catch(() => {
-        if (!mounted) return;
+        if (!mounted || requestVersion !== queryVersion.current) return;
         setPosts(cached?.items || []);
         setNextCursor(cached?.nextCursor);
         setHasMore(cached?.hasMore === true);
@@ -162,7 +165,7 @@ export function HomeShell() {
         );
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mounted && requestVersion === queryVersion.current) setLoading(false);
       });
     return () => {
       mounted = false;
@@ -171,6 +174,8 @@ export function HomeShell() {
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
+    const requestVersion = queryVersion.current;
+    const cursor = nextCursor;
     setLoadingMore(true);
     setLoadMoreError(false);
     try {
@@ -180,9 +185,10 @@ export function HomeShell() {
         hasMedia,
         latestOrder,
         topic: topic || undefined,
-        cursor: nextCursor,
+        cursor,
         accountScope: user?.id,
       });
+      if (requestVersion !== queryVersion.current) return;
       setPosts((current) => {
         const knownIds = new Set(current.map((post) => post.id));
         const items = [...current, ...page.items.filter((post) => !knownIds.has(post.id))];
@@ -192,6 +198,7 @@ export function HomeShell() {
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
     } catch (cause) {
+      if (requestVersion !== queryVersion.current) return;
       if (cause instanceof ApiError && cause.code === "INVALID_CURSOR") {
         // 服务端游标版本升级后，清掉旧分页快照并有界地重建首屏。
         clearFeedCache(user?.id);
@@ -203,7 +210,7 @@ export function HomeShell() {
       }
       setLoadMoreError(true);
     } finally {
-      setLoadingMore(false);
+      if (requestVersion === queryVersion.current) setLoadingMore(false);
     }
   }, [activeCommunityId, currentCacheOptions, hasMedia, latestOrder, loadingMore, nextCursor, sort, topic, user?.id]);
 

@@ -68,7 +68,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (!restored) {
           const guestStartVersion = getSessionVersion();
           try {
-            const guestSession = await loginAsGuest();
+            const guestSession = await loginAsGuest(guestStartVersion);
             // 登录过程中若已有新的身份写入，旧的启动恢复不能覆盖它。
             if (active && getSessionVersion() === guestStartVersion + 1) {
               setUser(guestSession.user);

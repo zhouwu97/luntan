@@ -155,7 +155,11 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
             () => items.removeWhere((value) => value.postId == item.postId),
           );
           await _load(force: true);
-          widget.onFeedback('该推荐已被其他管理员移除，列表已同步');
+          widget.onFeedback(
+            _lastLoadSucceeded
+                ? '该推荐已被其他管理员移除，列表已同步'
+                : '该推荐已被移除，本地条目已清理，但列表更新失败',
+          );
           return;
         }
         widget.onFeedback(userFacingApiMessage(cause, fallback: '移出推荐失败'));
@@ -176,10 +180,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         pinned: pinned,
       );
       if (!mounted) return;
-      setState(() {
-        final index = items.indexWhere((value) => value.postId == item.postId);
-        if (index >= 0) items[index] = _withPinned(items[index], pinned);
-      });
+      setState(() => _applyPinnedLocally(item.postId, pinned));
       await widget.onRecommendationChanged?.call();
       if (!mounted) return;
       await _load(force: true);
@@ -230,6 +231,16 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         communityName: item.communityName,
         isPinned: pinned,
       );
+
+  void _applyPinnedLocally(String postId, bool pinned) {
+    final index = items.indexWhere((value) => value.postId == postId);
+    if (index < 0) return;
+    final updated = _withPinned(items[index], pinned);
+    items.removeAt(index);
+    final pinnedCount = items.where((value) => value.isPinned).length;
+    items.insert(pinnedCount, updated);
+    _syncPinnedPositions();
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(

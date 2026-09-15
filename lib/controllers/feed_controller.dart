@@ -200,6 +200,22 @@ class FeedController extends ChangeNotifier {
       if (error is ApiException && error.code == 'INVALID_CURSOR') {
         // 游标格式/版本升级后，丢弃旧游标并有界地重建首屏，避免重复提交
         // 同一个失效值。首屏重建仍受 generation 保护，不会拼回旧分页结果。
+        _state = _state.copyWith(
+          status: _state.items.isEmpty
+              ? FeedStatus.initial
+              : FeedStatus.success,
+          clearCursor: true,
+          hasMore: false,
+          clearError: true,
+        );
+        unawaited(
+          _cache.invalidate(
+            accountScope: _accountScope,
+            communityId: communityId,
+            sort: sort,
+            latestOrder: latestOrder,
+          ),
+        );
         await _startFirstPage();
         return;
       }

@@ -34,20 +34,40 @@ class _FakeRecommendationRepository extends PlatformRepository {
     required bool pinned,
   }) async {
     this.pinned = pinned;
+    final index = items.indexWhere((item) => item.postId == postId);
+    if (index >= 0) {
+      final item = items[index];
+      items[index] = HomeRecommendation(
+        postId: item.postId,
+        position: item.position,
+        recommendedBy: item.recommendedBy,
+        recommendedAt: item.recommendedAt,
+        title: item.title,
+        contentPreview: item.contentPreview,
+        authorName: item.authorName,
+        communityName: item.communityName,
+        isPinned: pinned,
+        expiresAt: item.expiresAt,
+      );
+    }
   }
 }
 
-HomeRecommendation _recommendation(String id, int position) =>
-    HomeRecommendation(
-      postId: id,
-      position: position,
-      recommendedBy: 'admin',
-      recommendedAt: DateTime.utc(2026, 8, 26),
-      title: '推荐帖子 $id',
-      contentPreview: '正文',
-      authorName: '管理员',
-      communityName: '大型拆箱',
-    );
+HomeRecommendation _recommendation(
+  String id,
+  int position, {
+  bool isPinned = false,
+}) => HomeRecommendation(
+  postId: id,
+  position: position,
+  recommendedBy: 'admin',
+  recommendedAt: DateTime.utc(2026, 8, 26),
+  title: '推荐帖子 $id',
+  contentPreview: '正文',
+  authorName: '管理员',
+  communityName: '大型拆箱',
+  isPinned: isPinned,
+);
 
 void main() {
   testWidgets('首页推荐管理页支持置顶和取消置顶', (tester) async {
@@ -76,8 +96,8 @@ void main() {
 
   testWidgets('首页推荐页支持查看、移除和拖拽排序', (tester) async {
     final repository = _FakeRecommendationRepository([
-      _recommendation('p1', 0),
-      _recommendation('p2', 1),
+      _recommendation('p1', 0, isPinned: true),
+      _recommendation('p2', 1, isPinned: true),
     ]);
     final openedPostIds = <String>[];
     final feedback = <String>[];
@@ -113,7 +133,10 @@ void main() {
     // 重新挂载两项，验证拖拽回调会提交新的顺序。
     repository.items
       ..clear()
-      ..addAll([_recommendation('p1', 0), _recommendation('p2', 1)]);
+      ..addAll([
+        _recommendation('p1', 0, isPinned: true),
+        _recommendation('p2', 1, isPinned: true),
+      ]);
     await tester.pumpWidget(
       MaterialApp(
         home: HomeRecommendationsScreen(

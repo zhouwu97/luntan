@@ -81,6 +81,20 @@ class FeedCacheService {
     }
   }
 
+  Future<void> invalidate({
+    required String accountScope,
+    required String? communityId,
+    required String sort,
+    required LatestOrder latestOrder,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_key(accountScope, communityId, sort, latestOrder));
+    } catch (_) {
+      // 缓存失效失败不影响首屏重建。
+    }
+  }
+
   Future<void> _trim(SharedPreferences prefs) async {
     final records = <_FeedCacheRecord>[];
     for (final key in prefs.getKeys().where(
@@ -257,8 +271,7 @@ Post _postFromJson(Map<String, dynamic> value) {
       : null;
   final media = <MediaAsset>[
     if (value['media'] case final List<dynamic> rawMedia)
-      for (final item in rawMedia.whereType<Map>())
-        _mediaFromJson(_map(item)),
+      for (final item in rawMedia.whereType<Map>()) _mediaFromJson(_map(item)),
   ];
   return Post(
     id: value['id'] as String? ?? '',

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CommunityRail } from "./community-rail";
 import { DiscoveryRail } from "./discovery-rail";
@@ -15,7 +15,8 @@ import { PostCard } from "./post-card";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { getCommunities, getFeed } from "../lib/api/forum";
-import { readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
+import { ApiError } from "../lib/api/client";
+import { clearFeedCache, readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
 import { selectHomeCommunities, HOME_COMMUNITY_FALLBACKS } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
 import { useInfiniteScroll } from "../lib/use-infinite-scroll";
@@ -77,6 +78,7 @@ export function HomeShell() {
   const [communityError, setCommunityError] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const queryVersion = useRef(0);
 
   useEffect(() => {
     const rawSort = searchParams.get("sort");
@@ -117,6 +119,9 @@ export function HomeShell() {
 
   useEffect(() => {
     let mounted = true;
+    const requestVersion = ++queryVersion.current;
+    setLoadingMore(false);
+    setRefreshing(false);
     const snapshot = readFeedCacheSnapshot(currentCacheOptions);
     const cached = snapshot?.page || null;
     setPosts(cached?.items || []);
@@ -139,14 +144,14 @@ export function HomeShell() {
       accountScope: user?.id,
     })
       .then((page) => {
-        if (!mounted) return;
+        if (!mounted || requestVersion !== queryVersion.current) return;
         setPosts(page.items);
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
         writeFeedCache(currentCacheOptions, page);
       })
       .catch(() => {
-        if (!mounted) return;
+        if (!mounted || requestVersion !== queryVersion.current) return;
         setPosts(cached?.items || []);
         setNextCursor(cached?.nextCursor);
         setHasMore(cached?.hasMore === true);
@@ -161,7 +166,7 @@ export function HomeShell() {
         );
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mounted && requestVersion === queryVersion.current) setLoading(false);
       });
     return () => {
       mounted = false;
@@ -170,6 +175,8 @@ export function HomeShell() {
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
+    const requestVersion = queryVersion.current;
+    const cursor = nextCursor;
     setLoadingMore(true);
     setLoadMoreError(false);
     try {
@@ -179,9 +186,10 @@ export function HomeShell() {
         hasMedia,
         latestOrder,
         topic: topic || undefined,
-        cursor: nextCursor,
+        cursor,
         accountScope: user?.id,
       });
+      if (requestVersion !== queryVersion.current) return;
       setPosts((current) => {
         const knownIds = new Set(current.map((post) => post.id));
         const items = [...current, ...page.items.filter((post) => !knownIds.has(post.id))];
@@ -190,10 +198,20 @@ export function HomeShell() {
       });
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
-    } catch {
+    } catch (cause) {
+      if (requestVersion !== queryVersion.current) return;
+      if (cause instanceof ApiError && cause.code === "INVALID_CURSOR") {
+        // 服务端游标版本升级后，清掉旧分页快照并有界地重建首屏。
+        clearFeedCache(user?.id);
+        setNextCursor(undefined);
+        setHasMore(false);
+        setLoadMoreError(false);
+        setRefreshVersion((version) => version + 1);
+        return;
+      }
       setLoadMoreError(true);
     } finally {
-      setLoadingMore(false);
+      if (requestVersion === queryVersion.current) setLoadingMore(false);
     }
   }, [activeCommunityId, currentCacheOptions, hasMedia, latestOrder, loadingMore, nextCursor, sort, topic, user?.id]);
 
@@ -257,7 +275,10 @@ export function HomeShell() {
 
   async function handleFloatingRefresh() {
     if (refreshing) return;
+    const requestVersion = ++queryVersion.current;
     setRefreshing(true);
+    // 刷新首屏会废弃当前分页请求，避免旧页结果在刷新后追加或回写游标。
+    setLoadingMore(false);
     if (typeof window !== "undefined" && window.scrollY > 120) {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -270,15 +291,18 @@ export function HomeShell() {
         topic: topic || undefined,
         accountScope: user?.id,
       });
+      if (requestVersion !== queryVersion.current) return;
       setPosts(page.items);
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
       writeFeedCache(currentCacheOptions, page);
       showToast("已刷新到最新内容");
     } catch {
-      showToast("刷新失败，请稍后重试");
+      if (requestVersion === queryVersion.current) {
+        showToast("刷新失败，请稍后重试");
+      }
     } finally {
-      setRefreshing(false);
+      if (requestVersion === queryVersion.current) setRefreshing(false);
     }
   }
 

@@ -28,6 +28,7 @@ import {
   getPostPoll,
   cleanupUploadedMedia,
   recordHistory,
+  recordPostShare,
   recordPostView,
   removeHomeRecommendation,
   setCommentDislike,
@@ -475,7 +476,20 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
   }
 
   async function handleShareLink() {
-    showToast(await copyText(window.location.href) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    const copied = await copyText(window.location.href);
+    showToast(copied ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    if (copied && post && user && user.accountType !== "guest") {
+      void recordPostShare(post.id)
+        .then(({ shareCount }) => {
+          setPost((current) => {
+            if (!current) return current;
+            const next = { ...current, shareCount };
+            setPostSnapshot(next, user.id);
+            return next;
+          });
+        })
+        .catch(() => undefined);
+    }
   }
 
   if (postLoading && !post) {
@@ -781,7 +795,12 @@ function PostArticle({
 
   async function handleCopyLink() {
     setMenuOpen(false);
-    showToast(await copyText(window.location.href) ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    const copied = await copyText(window.location.href);
+    showToast(copied ? "已复制帖子链接" : "复制失败，请手动复制浏览器地址");
+    if (copied && user && user.accountType !== "guest") {
+      // 详情菜单与顶部分享入口统一记录正式账号的首次有效分享。
+      void recordPostShare(post.id).catch(() => undefined);
+    }
   }
 
   async function handleToggleRecommendation() {
@@ -1011,7 +1030,6 @@ function PostPoll({
   postId: string;
   user: SessionUser | null;
 }) {
-  const router = useRouter();
   const { showToast } = useToast();
   const [poll, setPoll] = useState<Poll | null>(null);
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
@@ -1054,10 +1072,11 @@ function PostPoll({
   const totalVotes = activePoll.options.reduce((sum, option) => sum + option.voteCount, 0);
   const hasEnded = Boolean(activePoll.endsAt && new Date(activePoll.endsAt).getTime() <= Date.now());
   const showResults = activePoll.viewerState.hasVoted || hasEnded;
+  // 会话与投票请求并发时 user 可能暂时为空；先保留注册引导，避免 Safari 时序下按钮被错误禁用。
   const needsRegistration = !activePoll.viewerState.canVote && (
-    activePoll.viewerState.authenticationRequired || user?.accountType === "guest" || user?.capabilities?.can_vote === false
+    activePoll.viewerState.authenticationRequired || !user || user.accountType === "guest" || user.capabilities?.can_vote === false
   );
-  const cannotVote = !activePoll.viewerState.canVote && !needsRegistration;
+  const cannotVote = Boolean(user) && !activePoll.viewerState.canVote && !needsRegistration;
 
   function toggleOption(optionId: string) {
     if (activePoll.viewerState.hasVoted || hasEnded || busy) return;
@@ -1076,7 +1095,10 @@ function PostPoll({
     }
     if (!activePoll.viewerState.canVote) {
       if (needsRegistration) {
-        router.push(`/login?mode=register&next=${encodeURIComponent(`/post/${postId}`)}`);
+        const loginUrl = `/login?mode=register&next=${encodeURIComponent(`/post/${postId}`)}`;
+        // 投票卡片可能在会话恢复前完成渲染，使用原生跳转确保 WebKit 不丢失这次导航。
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.assign(loginUrl);
       } else {
         showToast(hasEnded ? "投票已结束" : "当前账号暂时不能参与投票");
       }

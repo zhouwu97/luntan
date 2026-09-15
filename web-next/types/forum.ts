@@ -369,6 +369,7 @@ export interface RankingAdminView {
 export interface HomeRecommendationItem {
   postId: string;
   position: number;
+  isPinned: boolean;
   recommendedBy: string;
   recommendedAt: string;
   expiresAt?: string;

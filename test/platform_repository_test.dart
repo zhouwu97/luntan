@@ -201,8 +201,8 @@ void main() {
       );
       expect(jsonDecode(calls[4].substring(calls[4].indexOf('{'))) as Map, {
         'items': [
-          {'post_id': 'p2', 'position': 0},
-          {'post_id': 'p1', 'position': 1},
+          {'post_id': 'p2', 'position': 1},
+          {'post_id': 'p1', 'position': 2},
         ],
       });
       client.close();

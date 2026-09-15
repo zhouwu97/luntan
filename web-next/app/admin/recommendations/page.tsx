@@ -13,6 +13,7 @@ import {
   reorderHomeRecommendations,
   searchForum,
   setHomeRecommendation,
+  setHomeRecommendationPinned,
 } from "../../../lib/api/forum";
 import { formatError, relativeTime } from "../../../lib/format";
 import type { HomeRecommendationItem, Post } from "../../../types/forum";
@@ -54,7 +55,6 @@ export default function AdminRecommendationsPage() {
   const [searching, setSearching] = useState(false);
   const [searchCandidates, setSearchCandidates] = useState<Post[]>([]);
   const [targetPost, setTargetPost] = useState<Post | null>(null);
-  const [targetPosition, setTargetPosition] = useState(1);
   const [targetExpiresAt, setTargetExpiresAt] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -67,7 +67,6 @@ export default function AdminRecommendationsPage() {
       const list = await getHomeRecommendations();
       setItems(list);
       setDirty(false);
-      setTargetPosition(list.length + 1);
     } catch (requestError) {
       setError(formatError(requestError, "推荐列表暂时无法加载"));
     } finally {
@@ -122,11 +121,14 @@ export default function AdminRecommendationsPage() {
   async function handleAddRecommendation(e: FormEvent) {
     e.preventDefault();
     if (!targetPost) return;
+    if (dirty) {
+      setNotice("排序尚未保存，请先保存或放弃修改后再变更推荐内容。");
+      return;
+    }
     setAdding(true);
     try {
       const expiresAtIso = targetExpiresAt ? new Date(targetExpiresAt).toISOString() : undefined;
       await setHomeRecommendation(targetPost.id, {
-        position: targetPosition,
         expiresAt: expiresAtIso,
       });
       showToast("已成功加入首页推荐！");
@@ -143,6 +145,10 @@ export default function AdminRecommendationsPage() {
   }
 
   async function handleRemove(postId: string) {
+    if (dirty) {
+      setNotice("排序尚未保存，请先保存或放弃修改后再移除推荐。");
+      return;
+    }
     if (!window.confirm("确定要将此帖子从首页推荐中移除吗？")) return;
     try {
       await removeHomeRecommendation(postId);
@@ -155,7 +161,9 @@ export default function AdminRecommendationsPage() {
   }
 
   function moveItem(from: number, to: number) {
+    if (saving) return;
     if (to < 0 || to >= items.length) return;
+    if (!items[from]?.isPinned || !items[to]?.isPinned) return;
     const next = [...items];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
@@ -165,12 +173,13 @@ export default function AdminRecommendationsPage() {
   }
 
   async function handleSaveOrder() {
-    if (saving || items.length === 0) return;
+    const pinnedItems = items.filter((item) => item.isPinned);
+    if (saving || pinnedItems.length === 0) return;
     setSaving(true);
     setError("");
     setNotice("");
     try {
-      const orderPayload = items.map((it, idx) => ({
+      const orderPayload = pinnedItems.map((it, idx) => ({
         postId: it.postId,
         position: idx + 1,
       }));
@@ -183,6 +192,31 @@ export default function AdminRecommendationsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleTogglePin(item: HomeRecommendationItem) {
+    if (saving) return;
+    if (dirty) {
+      setNotice("排序尚未保存，请先保存或放弃修改后再调整置顶状态。");
+      return;
+    }
+    setSaving(true);
+    try {
+      await setHomeRecommendationPinned(item.postId, !item.isPinned);
+      showToast(item.isPinned ? "已取消推荐置顶" : "已追加到置顶推荐末尾");
+      await loadRecommendations();
+    } catch (pinError) {
+      showToast(formatError(pinError, "推荐置顶操作失败"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDiscardOrder() {
+    if (!dirty || saving) return;
+    if (!window.confirm("放弃当前未保存的排序修改吗？")) return;
+    await loadRecommendations();
+    setNotice("");
   }
 
   if (!ready) {
@@ -318,17 +352,6 @@ export default function AdminRecommendationsPage() {
                   }}
                 >
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                    <span>推荐位次：</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={targetPosition}
-                      onChange={(e) => setTargetPosition(Math.max(1, Number(e.target.value) || 1))}
-                      style={{ width: 70, height: 34, border: "1px solid #cbd5e1", borderRadius: 8, padding: "0 8px" }}
-                    />
-                  </label>
-
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
                     <span>过期时间 (可选)：</span>
                     <input
                       type="datetime-local"
@@ -341,7 +364,7 @@ export default function AdminRecommendationsPage() {
                   <button
                     type="submit"
                     className="primary-button"
-                    disabled={adding}
+                    disabled={adding || dirty}
                     style={{ height: 36, padding: "0 18px", marginLeft: "auto" }}
                   >
                     {adding ? "正在提交…" : "确认加入首页推荐"}
@@ -360,11 +383,12 @@ export default function AdminRecommendationsPage() {
                 <Icon name="flame" size={18} /> 当前推荐列表 ({items.length} 篇)
               </h2>
               <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>
-                按位次正序（position ASC）在首页推荐展示。支持上下移动与拖拽调整。
+                置顶推荐支持人工排序；更多推荐根据互动质量与发布时间动态排序。
               </p>
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
+              {dirty && <button type="button" className="outline-button" disabled={saving} onClick={() => void handleDiscardOrder()} style={{ height: 38, padding: "0 14px" }}>放弃修改</button>}
               <button
                 type="button"
                 className="primary-button"
@@ -391,17 +415,28 @@ export default function AdminRecommendationsPage() {
             <div className="admin-rec-table" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {items.map((item, index) => {
                 const post = item.post;
-                const isFirst = index === 0;
-                const isLast = index === items.length - 1;
+                const pinnedCount = items.filter((value) => value.isPinned).length;
+                const isFirst = item.isPinned && index === 0;
+                const isLast = item.isPinned && index === pinnedCount - 1;
+                const startsSection = index === 0 || items[index - 1]?.isPinned !== item.isPinned;
 
                 return (
                   <div
                     key={item.postId}
-                    draggable
+                  >
+                    {startsSection && (
+                      <div style={{ margin: index === 0 ? "2px 0 8px" : "14px 0 8px", fontWeight: 800, color: "#475569" }}>
+                        {item.isPinned ? "置顶推荐" : "更多推荐 · 按推荐算法排序"}
+                      </div>
+                    )}
+                  <div
+                    draggable={item.isPinned && !saving}
                     onDragStart={() => {
-                      dragIndex.current = index;
+                      if (item.isPinned && !saving) dragIndex.current = index;
                     }}
-                    onDragOver={(e) => e.preventDefault()}
+                    onDragOver={(e) => {
+                      if (item.isPinned && !saving) e.preventDefault();
+                    }}
                     onDrop={() => {
                       if (dragIndex.current !== null && dragIndex.current !== index) {
                         moveItem(dragIndex.current, index);
@@ -410,7 +445,7 @@ export default function AdminRecommendationsPage() {
                     }}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "36px 40px minmax(0, 1fr) 140px 140px 80px",
+                      gridTemplateColumns: "36px 40px minmax(0, 1fr) 140px 140px 150px",
                       alignItems: "center",
                       gap: 12,
                       padding: "12px 14px",
@@ -422,10 +457,10 @@ export default function AdminRecommendationsPage() {
                   >
                     {/* 拖拽手柄 */}
                     <div
-                      style={{ cursor: "grab", color: "#94a3b8", display: "grid", placeItems: "center", fontSize: 18 }}
-                      title="拖拽排序"
+                      style={{ cursor: item.isPinned ? "grab" : "default", color: "#94a3b8", display: "grid", placeItems: "center", fontSize: 18 }}
+                      title={item.isPinned ? "拖拽排序" : "由推荐算法动态排序"}
                     >
-                      ☰
+                      {item.isPinned ? "☰" : "◇"}
                     </div>
 
                     {/* 序号 */}
@@ -466,43 +501,22 @@ export default function AdminRecommendationsPage() {
 
                     {/* 操作 */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+                      {item.isPinned && <>
+                        <button type="button" disabled={saving || isFirst} onClick={() => moveItem(index, index - 1)} title="上移">↑</button>
+                        <button type="button" disabled={saving || isLast} onClick={() => moveItem(index, index + 1)} title="下移">↓</button>
+                      </>}
                       <button
                         type="button"
-                        disabled={isFirst}
-                        onClick={() => moveItem(index, index - 1)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: "1px solid #cbd5e1",
-                          background: "#fff",
-                          cursor: isFirst ? "not-allowed" : "pointer",
-                          opacity: isFirst ? 0.4 : 1,
-                        }}
-                        title="上移"
+                        disabled={dirty || saving}
+                        onClick={() => void handleTogglePin(item)}
+                        title={item.isPinned ? "取消推荐置顶" : "在推荐中置顶"}
                       >
-                        ↑
+                        {item.isPinned ? "取消置顶" : "置顶"}
                       </button>
                       <button
                         type="button"
-                        disabled={isLast}
-                        onClick={() => moveItem(index, index + 1)}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: 6,
-                          border: "1px solid #cbd5e1",
-                          background: "#fff",
-                          cursor: isLast ? "not-allowed" : "pointer",
-                          opacity: isLast ? 0.4 : 1,
-                        }}
-                        title="下移"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(item.postId)}
+                        disabled={dirty || saving}
+                        onClick={() => void handleRemove(item.postId)}
                         style={{
                           padding: "4px 8px",
                           borderRadius: 6,
@@ -516,6 +530,7 @@ export default function AdminRecommendationsPage() {
                         移除
                       </button>
                     </div>
+                  </div>
                   </div>
                 );
               })}

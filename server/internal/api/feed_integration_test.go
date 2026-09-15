@@ -831,7 +831,7 @@ func TestReplyToHiddenCommentRejected(t *testing.T) {
 
 // 推荐严格限定管理员人工源：
 // 普通公开帖 A、管理员置顶推荐 B (pos=2)、管理员普通推荐 C (pos=1)。
-// 推荐置顶优先于普通推荐内部 position，请求结果必须为 [B, C]；
+// 推荐置顶优先于算法排序，请求结果必须为 [B, C]；
 // 移除 C 后，再次请求只剩 [B]，未推荐的 A 始终不能出现。
 func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
 	s := feedIntegrationServer(t)
@@ -873,6 +873,59 @@ func TestFeedRecommendedStrictAdminOnly(t *testing.T) {
 	if slices.Contains(gotAfterDelete, postC) {
 		t.Fatalf("已被移除推荐的帖子 C (%s) 仍出现在推荐流中: %v", postC, gotAfterDelete)
 	}
+}
+
+func TestRecommendedScoreExcludesAuthorGuestAndViews(t *testing.T) {
+	s := feedIntegrationServer(t)
+	communityID, ids := insertFeedFixtures(t, s)
+	postA := ids["p1"]
+	postB := ids["p2"]
+
+	var authorID string
+	if err := s.db.QueryRow(`SELECT author_id FROM posts WHERE id = $1`, postA).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`UPDATE posts SET published_at = $1, like_count = 0, bookmark_count = 0, share_count = 0, view_count = 0 WHERE id IN ($2, $3)`, now.Add(-time.Hour), postA, postB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO home_recommendations (post_id, recommended_by, position, recommended_at)
+		VALUES ($1, $3, 1, $4), ($2, $3, 2, $4)`, postA, postB, authorID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	registered, err := auth.NewService(s.db).Register(context.Background(), auth.RegisterInput{
+		Username: "rec_comment_" + fmt.Sprint(now.UnixNano()%100000000), Password: "安全密码12345", Nickname: "正式评论者",
+	}, auth.SessionMetadata{UserAgent: "recommend-score-test", IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guest, err := auth.NewService(s.db).CreateGuest(context.Background(), auth.SessionMetadata{UserAgent: "recommend-score-test", IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertComment := func(id, postID, userID string) {
+		t.Helper()
+		if _, err := s.db.Exec(`
+			INSERT INTO comments (id, post_id, author_id, content, publication_status, moderation_status, created_at, updated_at, published_at)
+			VALUES ($1, $2, $3, '评论', 'published', 'normal', $4, $4, $4)`, id, postID, userID, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertComment("itest-rec-comment-registered-"+fmt.Sprint(now.UnixNano()), postA, registered.User.ID)
+	insertComment("itest-rec-comment-author-"+fmt.Sprint(now.UnixNano()), postB, authorID)
+	insertComment("itest-rec-comment-guest-"+fmt.Sprint(now.UnixNano()), postB, guest.User.ID)
+
+	requireFeedOrder(t, fetchFeedIDs(t, s, "recommended", communityID), []string{postA, postB}, "recommended: registered external comment")
+	if _, err := s.db.Exec(`UPDATE posts SET view_count = 1000000 WHERE id = $1`, postB); err != nil {
+		t.Fatal(err)
+	}
+	requireFeedOrder(t, fetchFeedIDs(t, s, "recommended", communityID), []string{postA, postB}, "recommended: views ignored")
+	if _, err := s.db.Exec(`UPDATE posts SET share_count = 100 WHERE id = $1`, postB); err != nil {
+		t.Fatal(err)
+	}
+	requireFeedOrder(t, fetchFeedIDs(t, s, "recommended", communityID), []string{postB, postA}, "recommended: shares included")
 }
 
 func TestRecommendedFeedPaginationCrossesPinBoundaryWithoutDuplicates(t *testing.T) {
@@ -960,12 +1013,19 @@ func TestRecommendedFeedPaginationCrossesPinBoundaryWithoutDuplicates(t *testing
 	for _, item := range append(firstPage.Items, secondPage.Items...) {
 		got = append(got, item.ID)
 	}
-	requireFeedOrder(t, got, postIDs, "recommended: pin boundary pagination")
 	seen := make(map[string]struct{}, len(got))
 	for _, postID := range got {
 		if _, duplicated := seen[postID]; duplicated {
 			t.Fatalf("推荐分页出现重复帖子 %s：%v", postID, got)
 		}
 		seen[postID] = struct{}{}
+	}
+	if len(seen) != len(postIDs) {
+		t.Fatalf("推荐分页结果数量错误：got=%d want=%d", len(seen), len(postIDs))
+	}
+	for _, postID := range postIDs {
+		if _, ok := seen[postID]; !ok {
+			t.Fatalf("推荐分页遗漏帖子 %s：%v", postID, got)
+		}
 	}
 }

@@ -7,7 +7,7 @@ import { useSession } from "./session-provider";
 export function BottomNav({
   activeNav = "home",
 }: {
-  activeNav?: "home" | "profile";
+  activeNav?: "home" | "profile" | null;
 }) {
   const router = useRouter();
   const { user, isRegistered } = useSession();

@@ -36,7 +36,7 @@ import type {
   PublicBootstrap,
   UserSummary,
 } from "../../types/forum";
-import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
+import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, getSessionVersion, setAccessToken } from "./client";
 
 type JsonRecord = Record<string, unknown>;
 const feedRequests = new Map<string, Promise<FeedPage>>();
@@ -363,26 +363,34 @@ export async function getFeed(options: {
   return sharedRequest;
 }
 
+export function parseActivity(raw: unknown): ActivityItem {
+  const item = asRecord(raw);
+  const status = asString(item.status, asString(item.phase, "upcoming"));
+  return {
+    id: asString(item.id),
+    title: asString(item.title, "未命名活动"),
+    description: asString(item.description),
+    // 兼容历史活动接口的 image_url/banner_url 字段，避免有图活动退化成日历占位图。
+    coverUrl: resolveMediaUrl(
+      asString(item.cover_url) || asString(item.image_url) || asString(item.banner_url) || asString(item.cover),
+      "detail",
+    ),
+    startAt: asString(item.start_at) || undefined,
+    endAt: asString(item.end_at) || undefined,
+    location: asString(item.location),
+    status,
+    phase: asString(item.phase) || undefined,
+    authorName: asString(item.author_name, "社区官方"),
+  } satisfies ActivityItem;
+}
+
 export async function getActivities(): Promise<ActivityItem[]> {
   const payload = await apiJson<{ items?: unknown[] }>("/activities");
-  return Array.isArray(payload.items)
-    ? payload.items.map((raw) => {
-        const item = asRecord(raw);
-        const status = asString(item.status, asString(item.phase, "upcoming"));
-        return {
-          id: asString(item.id),
-          title: asString(item.title, "未命名活动"),
-          description: asString(item.description),
-          coverUrl: resolveMediaUrl(asString(item.cover_url), "detail"),
-          startAt: asString(item.start_at) || undefined,
-          endAt: asString(item.end_at) || undefined,
-          location: asString(item.location),
-          status,
-          phase: asString(item.phase) || undefined,
-          authorName: asString(item.author_name, "社区官方"),
-        } satisfies ActivityItem;
-      })
-    : [];
+  return Array.isArray(payload.items) ? payload.items.map(parseActivity) : [];
+}
+
+export async function getActivity(id: string): Promise<ActivityItem> {
+  return parseActivity(await apiJson<JsonRecord>(`/activities/${encodeURIComponent(id)}`));
 }
 
 export async function getRankingToys(tab = "", category = ""): Promise<RankingToy[]> {
@@ -576,6 +584,14 @@ export async function recordPostView(postId: string): Promise<{ recorded: boolea
   return {
     recorded: payload.recorded === true,
     viewCount: typeof payload.view_count === "number" ? payload.view_count : undefined,
+  };
+}
+
+export async function recordPostShare(postId: string): Promise<{ recorded: boolean; shareCount: number }> {
+  const payload = await apiPost<JsonRecord>(`/posts/${encodeURIComponent(postId)}/share`);
+  return {
+    recorded: payload.recorded === true,
+    shareCount: asNumber(payload.share_count),
   };
 }
 
@@ -992,7 +1008,6 @@ export async function getPublicBootstrap(): Promise<PublicBootstrap> {
 function parseSession(payload: JsonRecord): AuthSession {
   const token = asString(payload.access_token);
   if (!token) throw new Error("登录响应格式错误");
-  setAccessToken(token);
   return {
     accessToken: token,
     expiresIn: asNumber(payload.expires_in) || undefined,
@@ -1000,12 +1015,31 @@ function parseSession(payload: JsonRecord): AuthSession {
   };
 }
 
+class StaleSessionResponseError extends Error {
+  constructor() {
+    super("登录响应已过期");
+    this.name = "StaleSessionResponseError";
+  }
+}
+
+function commitSession(session: AuthSession, expectedVersion?: number): AuthSession {
+  if (expectedVersion !== undefined && getSessionVersion() !== expectedVersion) {
+    throw new StaleSessionResponseError();
+  }
+  setAccessToken(session.accessToken);
+  return session;
+}
+
+function parseAndCommitSession(payload: JsonRecord): AuthSession {
+  return commitSession(parseSession(payload));
+}
+
 export async function loginWithEmailCode(email: string, code: string): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
+  return parseAndCommitSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
+  return parseAndCommitSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
 }
 
 export async function registerWithEmail(
@@ -1014,7 +1048,7 @@ export async function registerWithEmail(
   code?: string,
   nickname = "",
 ): Promise<AuthSession> {
-  return parseSession(
+  return parseAndCommitSession(
     await apiPost<JsonRecord>("/auth/register", {
       email,
       ...(code && code.trim() ? { code: code.trim() } : {}),
@@ -1024,8 +1058,9 @@ export async function registerWithEmail(
   );
 }
 
-export async function loginAsGuest(): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/guest"));
+export async function loginAsGuest(expectedVersion = getSessionVersion()): Promise<AuthSession> {
+  const session = parseSession(await apiPost<JsonRecord>("/auth/guest"));
+  return commitSession(session, expectedVersion);
 }
 
 export async function getMe(): Promise<SessionUser> {
@@ -1420,6 +1455,7 @@ function parseHomeRecommendationItem(raw: unknown): HomeRecommendationItem {
   return {
     postId: asString(item.post_id),
     position: asNumber(item.position),
+    isPinned: item.is_pinned === true,
     recommendedBy: asString(item.recommended_by),
     recommendedAt: asString(item.recommended_at),
     expiresAt: asString(item.expires_at) || undefined,
@@ -1453,6 +1489,14 @@ export async function setHomeRecommendation(
 export async function removeHomeRecommendation(postId: string): Promise<void> {
   await apiFetch(`/admin/recommendations/${encodeURIComponent(postId)}`, {
     method: "DELETE",
+  });
+}
+
+export async function setHomeRecommendationPinned(postId: string, pinned: boolean): Promise<void> {
+  await apiJson(`/admin/recommendations/${encodeURIComponent(postId)}/pin`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
   });
 }
 

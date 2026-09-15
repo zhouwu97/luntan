@@ -13,7 +13,8 @@ export class ApiError extends Error {
 }
 
 let accessToken: string | null = null;
-let refreshInFlight: Promise<boolean> | null = null;
+let sessionVersion = 0;
+let refreshInFlight: { version: number; promise: Promise<boolean> } | null = null;
 
 function requestUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) return path;
@@ -65,11 +66,11 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}
   }
 }
 
-async function send(path: string, init: RequestInit = {}): Promise<Response> {
+async function send(path: string, init: RequestInit = {}, token = accessToken): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   return fetchWithTimeout(requestUrl(path), {
     ...init,
     headers,
@@ -78,7 +79,7 @@ async function send(path: string, init: RequestInit = {}): Promise<Response> {
   });
 }
 
-async function refreshSessionInternal(): Promise<boolean> {
+async function refreshSessionInternal(version: number): Promise<boolean> {
   const response = await fetchWithTimeout(requestUrl("/auth/refresh"), {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -87,41 +88,58 @@ async function refreshSessionInternal(): Promise<boolean> {
     cache: "no-store",
   });
   if (!response.ok) {
-    accessToken = null;
+    if (sessionVersion === version) accessToken = null;
     return false;
   }
   const payload = await readPayload(response);
   const nextToken = typeof payload.access_token === "string" ? payload.access_token : "";
   if (!nextToken) {
-    accessToken = null;
+    if (sessionVersion === version) accessToken = null;
     return false;
   }
+  if (sessionVersion !== version) return false;
   accessToken = nextToken;
   return true;
 }
 
 export async function refreshSession(): Promise<boolean> {
-  if (!refreshInFlight) {
-    refreshInFlight = refreshSessionInternal().finally(() => {
-      refreshInFlight = null;
-    });
-  }
-  return refreshInFlight;
+  const version = sessionVersion;
+  if (refreshInFlight?.version === version) return refreshInFlight.promise;
+  const promise = refreshSessionInternal(version).finally(() => {
+    if (refreshInFlight?.promise === promise) refreshInFlight = null;
+  });
+  refreshInFlight = { version, promise };
+  return promise;
 }
 
 export function setAccessToken(token: string | null): void {
+  sessionVersion += 1;
   accessToken = token;
 }
 
 export function clearAccessToken(): void {
+  sessionVersion += 1;
   accessToken = null;
 }
 
+export function getSessionVersion(): number {
+  return sessionVersion;
+}
+
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  let response = await send(path, init);
+  const requestVersion = sessionVersion;
+  const requestToken = accessToken;
+  let response = await send(path, init, requestToken);
   const isAuthRoute = path.startsWith("/auth/");
-  if (response.status === 401 && !isAuthRoute && (await refreshSession())) {
-    response = await send(path, init);
+  if (
+    response.status === 401 &&
+    !isAuthRoute &&
+    sessionVersion === requestVersion &&
+    (await refreshSession()) &&
+    sessionVersion === requestVersion
+  ) {
+    // 会话切换或退出后，旧请求不得带着当前账号令牌重放。
+    response = await send(path, init, accessToken);
   }
   if (!response.ok) {
     const payload = await readPayload(response);

@@ -670,6 +670,9 @@ class HomeRecommendation {
   final String authorName;
   final String communityName;
   final bool isPinned;
+
+  bool get isExpired =>
+      expiresAt != null && !expiresAt!.isAfter(DateTime.now().toUtc());
 }
 
 class RankingToySubmission {
@@ -1187,7 +1190,7 @@ class PlatformRepository {
       body: {
         'items': [
           for (var index = 0; index < postIds.length; index++)
-            {'post_id': postIds[index], 'position': index},
+            {'post_id': postIds[index], 'position': index + 1},
         ],
       },
     );

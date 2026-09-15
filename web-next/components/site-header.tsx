@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "./icons";
@@ -55,13 +54,15 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
     <header className={`site-header${home ? " home-site-header" : ""}${className ? ` ${className}` : ""}`}>
       <div className="header-inner">
         <div className="brand-wrap" style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Link href="/" className="brand" aria-label="圣杯酱首页">
+          {/* 使用原生链接保证部署环境下导航不被 RSC 预取失败阻塞。 */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/" className="brand" aria-label="圣杯酱首页">
             <span className="brand-mark">
               <img src="/brand-mark.webp" alt="圣杯酱" className="brand-icon-img" />
             </span>
             <span className="brand-word">圣杯酱</span>
             <span className="brand-dot" aria-hidden="true" />
-          </Link>
+          </a>
           <span className="tagline desktop-only">分享热爱，遇见同好！</span>
         </div>
 
@@ -73,9 +74,9 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
                 ? pathname === "/" && searchParams.get("sort") === "hot"
                 : pathname === item.href;
             return (
-              <Link key={item.label} href={item.href} className={`nav-link${isActive ? " active" : ""}`} aria-current={isActive ? "page" : undefined}>
+              <a key={item.label} href={item.href} className={`nav-link${isActive ? " active" : ""}`} aria-current={isActive ? "page" : undefined}>
                 {item.label}
-              </Link>
+              </a>
             );
           })}
         </nav>
@@ -129,11 +130,13 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
                       </button>
                       <button type="button" onClick={() => { setMenuOpen(false); router.push("/me"); }}>我的工作台</button>
                       <button type="button" onClick={() => { setMenuOpen(false); router.push("/points"); }}>积分中心</button>
+                      <button type="button" onClick={() => { setMenuOpen(false); router.push("/settings"); }}>设置</button>
                     </>
                   ) : (
                     <>
                       <button type="button" onClick={() => { setMenuOpen(false); router.push("/me"); }}>我的工作台</button>
                       <button type="button" onClick={() => { setMenuOpen(false); router.push("/points"); }}>积分中心</button>
+                      <button type="button" onClick={() => { setMenuOpen(false); router.push("/settings"); }}>设置</button>
                       <button type="button" onClick={() => { setMenuOpen(false); router.push(`/user/${user.id}`); }}>公开个人主页</button>
                       {(user.capabilities?.can_manage_admins || user.capabilities?.can_moderate) && (
                         <>

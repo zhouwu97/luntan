@@ -195,7 +195,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if isRecommended {
-			if decoded.RecommendationPinned == nil || decoded.AsOf == nil ||
+			if decoded.Version != feedCursorVersion || decoded.RecommendationPinned == nil || decoded.AsOf == nil ||
 				(*decoded.RecommendationPinned && (decoded.Position == nil || decoded.RecommendedAt == nil)) ||
 				(!*decoded.RecommendationPinned && (decoded.Score == nil || decoded.PublishedAt.IsZero())) {
 				httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
@@ -451,6 +451,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 	if hasMore && len(rowsData) > 0 {
 		last := rowsData[len(rowsData)-1]
 		var next feedCursor
+		next.Version = feedCursorVersion
 		next.Sort = cursorSort
 		next.ID = last.post.ID
 		if isRecommended {

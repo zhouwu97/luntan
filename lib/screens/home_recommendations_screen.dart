@@ -28,6 +28,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   Object? error;
   bool loading = true;
   bool saving = false;
+  int _operationVersion = 0;
 
   @override
   void initState() {
@@ -35,14 +36,16 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
+    if (saving && !force) return;
+    final version = ++_operationVersion;
     setState(() {
       loading = true;
       error = null;
     });
     try {
       final loaded = await widget.repository.listHomeRecommendations();
-      if (!mounted) return;
+      if (!mounted || version != _operationVersion) return;
       setState(() {
         items
           ..clear()
@@ -50,7 +53,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         loading = false;
       });
     } catch (cause) {
-      if (!mounted) return;
+      if (!mounted || version != _operationVersion) return;
       setState(() {
         loading = false;
         error = cause;
@@ -59,7 +62,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   }
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
-    if (saving) return;
+    if (saving || loading) return;
     if (newIndex > oldIndex) newIndex -= 1;
     final pinnedCount = items.where((item) => item.isPinned).length;
     if (oldIndex == newIndex ||
@@ -72,6 +75,8 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     final previous = List<HomeRecommendation>.of(items);
     final moved = items.removeAt(oldIndex);
     items.insert(newIndex, moved);
+    _syncPinnedPositions();
+    ++_operationVersion;
     setState(() => saving = true);
     try {
       await widget.repository.reorderHomeRecommendations(
@@ -81,6 +86,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
             .toList(),
       );
       await widget.onRecommendationChanged?.call();
+      await _load(force: true);
       if (mounted) widget.onFeedback('首页推荐顺序已保存');
     } catch (cause) {
       if (mounted) {
@@ -97,7 +103,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   }
 
   Future<void> _remove(HomeRecommendation item) async {
-    if (saving) return;
+    if (saving || loading) return;
     final confirmed =
         await showDialog<bool>(
           context: context,
@@ -126,6 +132,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         false;
     if (!confirmed || !mounted) return;
 
+    ++_operationVersion;
     setState(() => saving = true);
     try {
       await widget.repository.removeHomeRecommendation(item.postId);
@@ -143,8 +150,9 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   }
 
   Future<void> _setPinned(HomeRecommendation item) async {
-    if (saving) return;
+    if (saving || item.isExpired) return;
     final pinned = !item.isPinned;
+    ++_operationVersion;
     setState(() => saving = true);
     try {
       await widget.repository.setHomeRecommendationPinned(
@@ -153,7 +161,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       );
       await widget.onRecommendationChanged?.call();
       if (!mounted) return;
-      await _load();
+      await _load(force: true);
       widget.onFeedback(pinned ? '已在推荐中置顶' : '已取消推荐置顶');
     } catch (cause) {
       if (mounted) {
@@ -161,6 +169,26 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       }
     } finally {
       if (mounted) setState(() => saving = false);
+    }
+  }
+
+  void _syncPinnedPositions() {
+    var position = 1;
+    for (var index = 0; index < items.length; index++) {
+      final item = items[index];
+      if (!item.isPinned) continue;
+      items[index] = HomeRecommendation(
+        postId: item.postId,
+        position: position++,
+        recommendedBy: item.recommendedBy,
+        recommendedAt: item.recommendedAt,
+        expiresAt: item.expiresAt,
+        title: item.title,
+        contentPreview: item.contentPreview,
+        authorName: item.authorName,
+        communityName: item.communityName,
+        isPinned: item.isPinned,
+      );
     }
   }
 
@@ -411,7 +439,9 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                           ),
                           IconButton(
                             tooltip: item.isPinned ? '取消推荐置顶' : '在推荐中置顶',
-                            onPressed: saving ? null : () => _setPinned(item),
+                            onPressed: saving || loading || item.isExpired
+                                ? null
+                                : () => _setPinned(item),
                             icon: Icon(
                               item.isPinned
                                   ? Icons.push_pin_rounded
@@ -424,7 +454,9 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
                           ),
                           IconButton(
                             tooltip: '移出推荐',
-                            onPressed: saving ? null : () => _remove(item),
+                            onPressed: saving || loading
+                                ? null
+                                : () => _remove(item),
                             icon: const Icon(
                               Icons.remove_circle_outline_rounded,
                               color: Color(0xFF8FA3B8),

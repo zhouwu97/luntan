@@ -670,6 +670,9 @@ class HomeRecommendation {
   final String authorName;
   final String communityName;
   final bool isPinned;
+
+  bool get isExpired =>
+      expiresAt != null && !expiresAt!.isAfter(DateTime.now().toUtc());
 }
 
 class RankingToySubmission {

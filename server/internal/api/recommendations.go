@@ -371,6 +371,14 @@ func (s *Server) removeHomeRecommendation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		httpserver.WriteAppError(w, r, httpserver.AppError{
+			Status:  http.StatusConflict,
+			Code:    "POST_NOT_RECOMMENDED",
+			Message: "帖子当前不在首页推荐中",
+		})
+		return
+	}
 
 	_ = appendAdminLogTx(r.Context(), tx, user.ID, "home_recommendation.remove", "post", postID, "", requestIDFromRequest(r), httpserver.ClientIP(r), map[string]any{
 		"removed": rowsAffected > 0,

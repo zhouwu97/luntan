@@ -8,6 +8,8 @@ import (
 )
 
 type feedCursor struct {
+	// Version 用于在排序键变化时让旧页面的游标有界失效，由客户端重建首屏。
+	Version int `json:"version,omitempty"`
 	// Sort 绑定生成游标时的排序模式，禁止把不同评分体系的游标交叉复用。
 	Sort                 string     `json:"sort"`
 	PublishedAt          time.Time  `json:"published_at,omitempty"`
@@ -21,6 +23,8 @@ type feedCursor struct {
 	// AsOf 固定评分所使用的时间，避免跨页请求之间 now() 漂移导致上一页最后一条再次出现。
 	AsOf *time.Time `json:"as_of,omitempty"`
 }
+
+const feedCursorVersion = 2
 
 func encodeFeedCursor(cursor feedCursor) (string, error) {
 	data, err := json.Marshal(cursor)

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../data/api/api_client.dart';
 import '../data/cache/feed_cache.dart';
 import '../domain/models.dart';
 import '../domain/repositories.dart';
@@ -55,6 +56,7 @@ class FeedController extends ChangeNotifier {
   String _accountScope;
   FeedState _state = const FeedState();
   int _generation = 0;
+  int? _networkCompletedGeneration;
   int? _loadingMoreGeneration;
   final Set<String> _knownIds = <String>{};
   String? _communityId;
@@ -194,6 +196,12 @@ class FeedController extends ChangeNotifier {
       );
     } catch (error) {
       if (generation != _generation) return;
+      if (error is ApiException && error.code == 'INVALID_CURSOR') {
+        // 游标格式/版本升级后，丢弃旧游标并有界地重建首屏，避免重复提交
+        // 同一个失效值。首屏重建仍受 generation 保护，不会拼回旧分页结果。
+        await _startFirstPage();
+        return;
+      }
       _state = _state.copyWith(
         status: _state.items.isEmpty ? FeedStatus.error : FeedStatus.success,
         error: error,
@@ -208,6 +216,7 @@ class FeedController extends ChangeNotifier {
 
   Future<void> _startFirstPage({bool restoreCache = false}) {
     final generation = ++_generation;
+    _networkCompletedGeneration = null;
     _loadingMoreGeneration = null;
     if (restoreCache) unawaited(_restoreCache(generation));
     return _loadFirstPage(
@@ -224,8 +233,8 @@ class FeedController extends ChangeNotifier {
     required String sort,
     required LatestOrder latestOrder,
   }) async {
-    final previousItems = _state.items;
-    _state = FeedState(status: FeedStatus.loading, items: previousItems);
+    final previousState = _state;
+    _state = FeedState(status: FeedStatus.loading, items: previousState.items);
     notifyListeners();
     try {
       final page = await _fetch(
@@ -234,6 +243,8 @@ class FeedController extends ChangeNotifier {
         latestOrder: latestOrder,
       );
       if (generation != _generation) return;
+      // 网络结果是当前代次的权威快照，即使为空也必须阻止迟到缓存回写。
+      _networkCompletedGeneration = generation;
       _knownIds
         ..clear()
         ..addAll(page.items.map((item) => item.id));
@@ -254,9 +265,11 @@ class FeedController extends ChangeNotifier {
       );
     } catch (error) {
       if (generation != _generation) return;
-      _state = FeedState(
-        status: previousItems.isEmpty ? FeedStatus.error : FeedStatus.success,
-        items: previousItems,
+      // 缓存可能已经在请求期间预展示；刷新失败时保留当前有效列表和
+      // 完整分页状态，而不是退回请求开始时的空快照。
+      final fallback = _state.items.isNotEmpty ? _state : previousState;
+      _state = fallback.copyWith(
+        status: fallback.items.isEmpty ? FeedStatus.error : FeedStatus.success,
         error: error,
       );
     }
@@ -272,7 +285,8 @@ class FeedController extends ChangeNotifier {
     );
     if (cached == null ||
         expectedGeneration != _generation ||
-        _state.items.isNotEmpty) {
+        _state.items.isNotEmpty ||
+        _networkCompletedGeneration == expectedGeneration) {
       return;
     }
     _knownIds
@@ -283,6 +297,7 @@ class FeedController extends ChangeNotifier {
       items: cached.items,
       nextCursor: cached.nextCursor,
       hasMore: cached.hasMore,
+      error: _state.error,
     );
     notifyListeners();
   }

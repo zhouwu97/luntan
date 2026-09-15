@@ -122,6 +122,10 @@ export function clearAccessToken(): void {
   accessToken = null;
 }
 
+export function getSessionVersion(): number {
+  return sessionVersion;
+}
+
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const requestVersion = sessionVersion;
   const requestToken = accessToken;

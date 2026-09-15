@@ -127,6 +127,47 @@ class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
       PostViewResult(postId: postId, recorded: true);
 }
 
+class _FailingRefreshFeed implements FeedRepository, QueryableFeedRepository {
+  final List<String?> cursors = <String?>[];
+  int firstPageCalls = 0;
+
+  @override
+  Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
+      getFeed(cursor: cursor, limit: limit);
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
+    String? postType,
+    bool? hasMedia,
+    String? topic,
+  }) {
+    cursors.add(cursor);
+    if (cursor != null) {
+      return Future.value(FeedPage(items: [_post('second', 'campus')]));
+    }
+    firstPageCalls += 1;
+    if (firstPageCalls == 1) {
+      return Future.value(
+        FeedPage(
+          items: [_post('first', 'campus')],
+          hasMore: true,
+          nextCursor: 'page-2',
+        ),
+      );
+    }
+    return Future.error(StateError('模拟刷新网络失败'));
+  }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
+}
+
 Post _post(String id, String communityId) => Post(
   id: id,
   authorId: 'author-1',
@@ -393,5 +434,21 @@ void main() {
 
     await controller.loadMore();
     expect(feed.cursors, [null, 'page-2', 'page-2']);
+  });
+
+  test('首屏刷新失败保留旧列表和分页游标', () async {
+    final feed = _FailingRefreshFeed();
+    final controller = FeedController(repository: feed);
+
+    await controller.initialLoad();
+    await controller.refresh();
+
+    expect(controller.state.items.map((post) => post.id), ['first']);
+    expect(controller.state.nextCursor, 'page-2');
+    expect(controller.state.hasMore, isTrue);
+
+    await controller.loadMore();
+    expect(feed.cursors, [null, null, 'page-2']);
+    expect(controller.state.items.map((post) => post.id), ['first', 'second']);
   });
 }

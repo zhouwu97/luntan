@@ -149,7 +149,8 @@ class FeedController extends ChangeNotifier {
 
   Future<void> loadMore() async {
     final generation = _generation;
-    if (_loadingMoreGeneration == generation ||
+    if (_state.status == FeedStatus.loading ||
+        _loadingMoreGeneration == generation ||
         !_state.hasMore ||
         _state.nextCursor == null) {
       return;
@@ -234,7 +235,11 @@ class FeedController extends ChangeNotifier {
     required LatestOrder latestOrder,
   }) async {
     final previousState = _state;
-    _state = FeedState(status: FeedStatus.loading, items: previousState.items);
+    // 加载态保留旧分页元数据，但 loadMore 会在 loading 状态下主动阻止并发请求。
+    _state = previousState.copyWith(
+      status: FeedStatus.loading,
+      clearError: true,
+    );
     notifyListeners();
     try {
       final page = await _fetch(

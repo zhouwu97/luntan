@@ -15,7 +15,8 @@ import { PostCard } from "./post-card";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import { getCommunities, getFeed } from "../lib/api/forum";
-import { readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
+import { ApiError } from "../lib/api/client";
+import { clearFeedCache, readFeedCacheSnapshot, writeFeedCache, type FeedCacheOptions } from "../lib/feed-cache";
 import { selectHomeCommunities, HOME_COMMUNITY_FALLBACKS } from "../lib/home-communities";
 import { relativeTime } from "../lib/format";
 import { useInfiniteScroll } from "../lib/use-infinite-scroll";
@@ -190,7 +191,16 @@ export function HomeShell() {
       });
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
-    } catch {
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "INVALID_CURSOR") {
+        // 服务端游标版本升级后，清掉旧分页快照并有界地重建首屏。
+        clearFeedCache(user?.id);
+        setNextCursor(undefined);
+        setHasMore(false);
+        setLoadMoreError(false);
+        setRefreshVersion((version) => version + 1);
+        return;
+      }
       setLoadMoreError(true);
     } finally {
       setLoadingMore(false);

@@ -29,6 +29,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   bool loading = true;
   bool saving = false;
   int _operationVersion = 0;
+  bool _lastLoadSucceeded = false;
 
   @override
   void initState() {
@@ -39,6 +40,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   Future<void> _load({bool force = false}) async {
     if (saving && !force) return;
     final version = ++_operationVersion;
+    _lastLoadSucceeded = false;
     setState(() {
       loading = true;
       error = null;
@@ -52,6 +54,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
           ..addAll(loaded);
         loading = false;
       });
+      _lastLoadSucceeded = true;
     } catch (cause) {
       if (!mounted || version != _operationVersion) return;
       setState(() {
@@ -87,7 +90,11 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       );
       await widget.onRecommendationChanged?.call();
       await _load(force: true);
-      if (mounted) widget.onFeedback('首页推荐顺序已保存');
+      if (mounted) {
+        widget.onFeedback(
+          _lastLoadSucceeded ? '首页推荐顺序已保存' : '首页推荐顺序已保存，但列表更新失败',
+        );
+      }
     } catch (cause) {
       if (mounted) {
         setState(() {
@@ -142,6 +149,15 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       widget.onFeedback('已移出首页推荐');
     } catch (cause) {
       if (mounted) {
+        if (cause is ApiException && cause.code == 'POST_NOT_RECOMMENDED') {
+          // 目标状态已经由其他管理员完成，先移除本地旧条目，再尽力同步其余列表。
+          setState(
+            () => items.removeWhere((value) => value.postId == item.postId),
+          );
+          await _load(force: true);
+          widget.onFeedback('该推荐已被其他管理员移除，列表已同步');
+          return;
+        }
         widget.onFeedback(userFacingApiMessage(cause, fallback: '移出推荐失败'));
       }
     } finally {
@@ -159,10 +175,19 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         postId: item.postId,
         pinned: pinned,
       );
+      if (!mounted) return;
+      setState(() {
+        final index = items.indexWhere((value) => value.postId == item.postId);
+        if (index >= 0) items[index] = _withPinned(items[index], pinned);
+      });
       await widget.onRecommendationChanged?.call();
       if (!mounted) return;
       await _load(force: true);
-      widget.onFeedback(pinned ? '已在推荐中置顶' : '已取消推荐置顶');
+      widget.onFeedback(
+        _lastLoadSucceeded
+            ? (pinned ? '已在推荐中置顶' : '已取消推荐置顶')
+            : (pinned ? '已在推荐中置顶，但列表更新失败' : '已取消推荐置顶，但列表更新失败'),
+      );
     } catch (cause) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(cause, fallback: '推荐置顶操作失败'));
@@ -191,6 +216,20 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       );
     }
   }
+
+  HomeRecommendation _withPinned(HomeRecommendation item, bool pinned) =>
+      HomeRecommendation(
+        postId: item.postId,
+        position: item.position,
+        recommendedBy: item.recommendedBy,
+        recommendedAt: item.recommendedAt,
+        expiresAt: item.expiresAt,
+        title: item.title,
+        contentPreview: item.contentPreview,
+        authorName: item.authorName,
+        communityName: item.communityName,
+        isPinned: pinned,
+      );
 
   @override
   Widget build(BuildContext context) => Scaffold(

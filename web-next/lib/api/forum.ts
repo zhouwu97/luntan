@@ -1058,7 +1058,7 @@ export async function registerWithEmail(
   );
 }
 
-export async function loginAsGuest(expectedVersion?: number): Promise<AuthSession> {
+export async function loginAsGuest(expectedVersion = getSessionVersion()): Promise<AuthSession> {
   const session = parseSession(await apiPost<JsonRecord>("/auth/guest"));
   return commitSession(session, expectedVersion);
 }

@@ -121,6 +121,7 @@ export function HomeShell() {
     let mounted = true;
     const requestVersion = ++queryVersion.current;
     setLoadingMore(false);
+    setRefreshing(false);
     const snapshot = readFeedCacheSnapshot(currentCacheOptions);
     const cached = snapshot?.page || null;
     setPosts(cached?.items || []);
@@ -274,7 +275,10 @@ export function HomeShell() {
 
   async function handleFloatingRefresh() {
     if (refreshing) return;
+    const requestVersion = ++queryVersion.current;
     setRefreshing(true);
+    // 刷新首屏会废弃当前分页请求，避免旧页结果在刷新后追加或回写游标。
+    setLoadingMore(false);
     if (typeof window !== "undefined" && window.scrollY > 120) {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -287,15 +291,18 @@ export function HomeShell() {
         topic: topic || undefined,
         accountScope: user?.id,
       });
+      if (requestVersion !== queryVersion.current) return;
       setPosts(page.items);
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
       writeFeedCache(currentCacheOptions, page);
       showToast("已刷新到最新内容");
     } catch {
-      showToast("刷新失败，请稍后重试");
+      if (requestVersion === queryVersion.current) {
+        showToast("刷新失败，请稍后重试");
+      }
     } finally {
-      setRefreshing(false);
+      if (requestVersion === queryVersion.current) setRefreshing(false);
     }
   }
 

@@ -81,6 +81,12 @@ func feedSortColumns(sort string) (scoreExpr, orderBy string) {
 	return feedSortColumnsAt(sort, "CURRENT_TIMESTAMP")
 }
 
+const feedRankingEpochDuration = 30 * time.Second
+
+func feedRankingEpoch(t time.Time) int64 {
+	return t.UTC().Unix() / int64(feedRankingEpochDuration/time.Second)
+}
+
 func feedSortColumnsAt(sort, asOfPlaceholder string) (scoreExpr, orderBy string) {
 	ageHours := "GREATEST(EXTRACT(EPOCH FROM (" + asOfPlaceholder + " - p.published_at)) / 3600.0, 0.0)"
 	switch sort {
@@ -194,6 +200,19 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusBadRequest, Code: "INVALID_CURSOR", Message: "cursor 与当前排序不匹配"})
 			return
 		}
+		if (sortMode == "hot" || isRecommended) && decoded.AsOf != nil {
+			// 30 秒 coarse epoch：翻页会话在 30 秒窗口内平滑进行；
+			// 若游标跨度超过 30 秒，互动与时间衰减已产生较大漂移，触发 INVALID_CURSOR 让端侧自愈刷新。
+			if time.Since(*decoded.AsOf) > feedRankingEpochDuration || time.Since(*decoded.AsOf) < -5*time.Second {
+				httpserver.WriteAppError(w, r, httpserver.AppError{
+					Status:  http.StatusBadRequest,
+					Code:    "INVALID_CURSOR",
+					Message: "Feed 排序已更新，请重新刷新",
+				})
+				return
+			}
+		}
+
 		if isRecommended {
 			if decoded.Version != feedCursorVersion || decoded.RecommendationPinned == nil || decoded.AsOf == nil ||
 				(*decoded.RecommendationPinned && (decoded.Position == nil || decoded.RecommendedAt == nil)) ||
@@ -258,7 +277,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			p.publication_status = 'published' AND p.moderation_status = 'normal'
 			AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
 			AND candidate_communities.status = 'active' AND candidate_communities.deleted_at IS NULL
-			AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)`) + " " + columns + `
+			AND (hr.expires_at IS NULL OR hr.expires_at > `+asOfPlaceholder+`)`) + " " + columns + `
 		FROM home_recommendations hr
 		JOIN posts p ON p.id = hr.post_id
 		JOIN users u ON u.id = p.author_id
@@ -268,14 +287,14 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
 		  AND c.status = 'active' AND c.deleted_at IS NULL
-		  AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)`
+		  AND (hr.expires_at IS NULL OR hr.expires_at > `+asOfPlaceholder+`)`
 	} else {
 		query = columns + `
 		FROM posts p
 		JOIN users u ON u.id = p.author_id
 		LEFT JOIN user_profiles up ON up.user_id = u.id
 		LEFT JOIN home_recommendations hr ON hr.post_id = p.id
-		  AND (hr.expires_at IS NULL OR hr.expires_at > CURRENT_TIMESTAMP)
+		  AND (hr.expires_at IS NULL OR hr.expires_at > `+asOfPlaceholder+`)
 		JOIN communities c ON c.id = p.community_id
 		WHERE p.publication_status = 'published' AND p.moderation_status = 'normal'
 		  AND p.deleted_at IS NULL AND p.published_at IS NOT NULL AND p.type <> 'market'
@@ -284,6 +303,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			query += " AND p.hot_suppressed = false"
 		}
 	}
+
 
 	args := make([]any, 0, 8)
 	if usesAsOf {
@@ -458,6 +478,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			next.RecommendationPinned = last.recPinned
 			asOf := feedAsOf
 			next.AsOf = &asOf
+			next.Revision = feedRankingEpoch(feedAsOf)
 			if last.recPinned != nil && *last.recPinned {
 				next.Position = last.recPosition
 				next.RecommendedAt = last.recAt
@@ -472,6 +493,9 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			if usesAsOf {
 				next.AsOf = &asOf
 			}
+			if sortMode == "hot" {
+				next.Revision = feedRankingEpoch(feedAsOf)
+			}
 		} else if isLatestComment {
 			next.ActivityAt = last.activityAt
 			asOf := feedAsOf
@@ -479,6 +503,7 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 		} else {
 			next.PublishedAt = last.publishedAt
 		}
+
 
 		nextCursor, err = encodeFeedCursor(next)
 		if err != nil {

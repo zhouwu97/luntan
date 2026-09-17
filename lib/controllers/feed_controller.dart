@@ -208,13 +208,11 @@ class FeedController extends ChangeNotifier {
           hasMore: false,
           clearError: true,
         );
-        unawaited(
-          _cache.invalidate(
-            accountScope: _accountScope,
-            communityId: communityId,
-            sort: sort,
-            latestOrder: latestOrder,
-          ),
+        await _cache.invalidate(
+          accountScope: _accountScope,
+          communityId: communityId,
+          sort: sort,
+          latestOrder: latestOrder,
         );
         await _startFirstPage();
         return;

@@ -81,11 +81,10 @@ func feedSortColumns(sort string) (scoreExpr, orderBy string) {
 	return feedSortColumnsAt(sort, "CURRENT_TIMESTAMP")
 }
 
-const feedRankingEpochDuration = 30 * time.Second
-
-func feedRankingEpoch(t time.Time) int64 {
-	return t.UTC().Unix() / int64(feedRankingEpochDuration/time.Second)
-}
+// feedCursorTTL 定义 hot 与 recommended 游标会话的有效期（5 分钟）。
+// 游标基于 AsOf 冻结时间衰减与推荐窗口；在会话期内允许平滑翻页，
+// 超过会话期或发生反向时钟跳跃则返回 INVALID_CURSOR 提示端侧重建首屏。
+const feedCursorTTL = 5 * time.Minute
 
 func feedSortColumnsAt(sort, asOfPlaceholder string) (scoreExpr, orderBy string) {
 	ageHours := "GREATEST(EXTRACT(EPOCH FROM (" + asOfPlaceholder + " - p.published_at)) / 3600.0, 0.0)"
@@ -201,9 +200,9 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if (sortMode == "hot" || isRecommended) && decoded.AsOf != nil {
-			// 30 秒 coarse epoch：翻页会话在 30 秒窗口内平滑进行；
-			// 若游标跨度超过 30 秒，互动与时间衰减已产生较大漂移，触发 INVALID_CURSOR 让端侧自愈刷新。
-			if time.Since(*decoded.AsOf) > feedRankingEpochDuration || time.Since(*decoded.AsOf) < -5*time.Second {
+			// 5 分钟游标会话窗口：翻页会话在 5 分钟内平滑进行；
+			// 若游标跨度超过 5 分钟，互动与时间衰减已产生较大漂移，触发 INVALID_CURSOR 让端侧自愈刷新。
+			if time.Since(*decoded.AsOf) > feedCursorTTL || time.Since(*decoded.AsOf) < -5*time.Second {
 				httpserver.WriteAppError(w, r, httpserver.AppError{
 					Status:  http.StatusBadRequest,
 					Code:    "INVALID_CURSOR",
@@ -478,7 +477,6 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			next.RecommendationPinned = last.recPinned
 			asOf := feedAsOf
 			next.AsOf = &asOf
-			next.Revision = feedRankingEpoch(feedAsOf)
 			if last.recPinned != nil && *last.recPinned {
 				next.Position = last.recPosition
 				next.RecommendedAt = last.recAt
@@ -492,9 +490,6 @@ func (s *Server) latestFeed(w http.ResponseWriter, r *http.Request) {
 			asOf := feedAsOf
 			if usesAsOf {
 				next.AsOf = &asOf
-			}
-			if sortMode == "hot" {
-				next.Revision = feedRankingEpoch(feedAsOf)
 			}
 		} else if isLatestComment {
 			next.ActivityAt = last.activityAt

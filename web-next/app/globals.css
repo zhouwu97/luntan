@@ -2494,6 +2494,20 @@ img { display: block; max-width: 100%; }
   line-height: 1.55;
   color: #2e4760;
   margin: 6px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.content-link {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.content-link:hover {
+  color: var(--primary-deep, #1d4ed8);
+  text-decoration: underline;
 }
 .nested {
   background: #f7fafc;
@@ -2504,7 +2518,6 @@ img { display: block; max-width: 100%; }
   line-height: 1.5;
   color: #4b647c;
   margin: 7px 0;
-  cursor: pointer;
 }
 .nested-name {
   font-weight: 750;
@@ -2521,6 +2534,10 @@ img { display: block; max-width: 100%; }
 .nested-reply-content {
   min-width: 0;
   flex: 1;
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .nested-reply-author {
   display: flex;
@@ -2544,6 +2561,12 @@ img { display: block; max-width: 100%; }
   font-weight: 650;
   margin-top: 4px;
   font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+}
+.more-nested:hover {
+  text-decoration: underline;
 }
 .comm-actions {
   display: flex;

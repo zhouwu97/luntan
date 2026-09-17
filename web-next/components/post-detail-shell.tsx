@@ -10,6 +10,7 @@ import { AppDownloadBanner } from "./app-download-banner";
 import { Icon } from "./icons";
 import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
+import { LinkText } from "./link-text";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
 import type { GalleryImage } from "./image-gallery-modal";
@@ -955,7 +956,7 @@ function PostArticle({
 
       <div className="detail-body">
         {post.content.split("\n\n").map((paragraph, index) => (
-          <p key={index}>{paragraph}</p>
+          <p key={index}><LinkText text={paragraph} /></p>
         ))}
       </div>
 
@@ -1727,7 +1728,7 @@ function CommentRow({
           <span className="comm-floor">#{comment.floor || "1"}</span>
         </div>
         <div className="comm-time">{relativeTime(comment.createdAt)}</div>
-        <p className={`comm-text${isDeleted ? " deleted" : ""}`}>{isDeleted ? "该评论已删除" : comment.content}</p>
+        <p className={`comm-text${isDeleted ? " deleted" : ""}`}>{isDeleted ? "该评论已删除" : <LinkText text={comment.content} />}</p>
 
         {!isDeleted && comment.media && comment.media.length > 0 && (
           <div
@@ -1759,6 +1760,19 @@ function CommentRow({
           <div
             className="nested"
             onClick={(event) => {
+              if (typeof window !== "undefined") {
+                const selection = window.getSelection();
+                if (selection && selection.toString().trim().length > 0) {
+                  return;
+                }
+              }
+              const target = event.target as HTMLElement | null;
+              if (target?.closest("a, button, input, textarea, select, .comment-media-thumb, img")) {
+                return;
+              }
+              if (target?.closest(".nested-reply-content") && !target?.closest(".more-nested")) {
+                return;
+              }
               event.stopPropagation();
               onReply();
             }}
@@ -1788,7 +1802,7 @@ function CommentRow({
                       <span className="nested-reply-level">Lv.{reply.author.level || 1}</span>
                     </div>
                     <div className={isReplyDeleted ? "deleted" : undefined}>
-                      {isReplyDeleted ? "该回复已删除" : reply.content}
+                      {isReplyDeleted ? "该回复已删除" : <LinkText text={reply.content} />}
                     </div>
                     {!isReplyDeleted && reply.media && reply.media.length > 0 && (
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
@@ -1810,9 +1824,18 @@ function CommentRow({
                 </div>
               );
             })}
-            {hiddenReplyCount > 0 && (
-              <div className="more-nested">展开其余 {hiddenReplyCount} 条回复 ›</div>
-            )}
+            <div
+              className="more-nested"
+              role="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onReply();
+              }}
+            >
+              {hiddenReplyCount > 0
+                ? `展开其余 ${hiddenReplyCount} 条回复 ›`
+                : `查看全部 ${comment.replyCount || previewReplies.length} 条回复 ›`}
+            </div>
           </div>
         )}
 
@@ -2063,7 +2086,7 @@ function CommentReplyModal({
               <Link href={`/user/${encodeURIComponent(root.author.id)}`}>
                 <strong>{root.author.nickname}</strong>
               </Link>
-              <p className={isRootDeleted ? "comm-text deleted" : undefined}>{isRootDeleted ? "该评论已删除" : root.content}</p>
+              <p className={isRootDeleted ? "comm-text deleted" : undefined}>{isRootDeleted ? "该评论已删除" : <LinkText text={root.content} />}</p>
               {!isRootDeleted && root.media && root.media.length > 0 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                   {root.media.map((asset, idx) => (
@@ -2128,7 +2151,7 @@ function CommentReplyModal({
                         </button>
                       )}
                     </div>
-                    <p className={isReplyDeleted ? "comm-text deleted" : undefined}>{isReplyDeleted ? "该回复已删除" : reply.content}</p>
+                    <p className={isReplyDeleted ? "comm-text deleted" : undefined}>{isReplyDeleted ? "该回复已删除" : <LinkText text={reply.content} />}</p>
                     {!isReplyDeleted && reply.media && reply.media.length > 0 && (
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                         {reply.media.map((asset, idx) => (

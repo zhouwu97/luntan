@@ -22,8 +22,6 @@ type feedCursor struct {
 	Score *float64 `json:"score,omitempty"`
 	// AsOf 固定评分所使用的时间，避免跨页请求之间 now() 漂移导致上一页最后一条再次出现。
 	AsOf *time.Time `json:"as_of,omitempty"`
-	// Revision 用于动态排序（hot/recommended）检测全局排序版本；当互动导致排序重排时促使旧游标失效并重建首屏。
-	Revision int64 `json:"revision,omitempty"`
 }
 
 const feedCursorVersion = 2

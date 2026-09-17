@@ -146,8 +146,13 @@ export function writeFeedCache(options: FeedCacheOptions, page: FeedPage): void 
 }
 
 export function clearFeedCache(accountScope?: string): void {
+  const scope = accountScope || "anon";
+  clearFeedCacheForScope(scope);
+}
+
+export function clearFeedCacheForScope(accountScope: string): void {
   const store = storage();
-  const prefix = accountScope ? `${CACHE_PREFIX}${encodeURIComponent(accountScope)}:` : CACHE_PREFIX;
+  const prefix = `${CACHE_PREFIX}${encodeURIComponent(accountScope)}:`;
   if (store) {
     for (let index = store.length - 1; index >= 0; index -= 1) {
       const key = store.key(index);
@@ -161,3 +166,21 @@ export function clearFeedCache(accountScope?: string): void {
     if (key.startsWith(prefix)) memoryCache.delete(key);
   }
 }
+
+export function clearAllFeedCaches(): void {
+  const store = storage();
+  const prefix = CACHE_PREFIX;
+  if (store) {
+    for (let index = store.length - 1; index >= 0; index -= 1) {
+      const key = store.key(index);
+      if (key?.startsWith(prefix)) {
+        store.removeItem(key);
+        memoryCache.delete(key);
+      }
+    }
+  }
+  for (const key of memoryCache.keys()) {
+    if (key.startsWith(prefix)) memoryCache.delete(key);
+  }
+}
+

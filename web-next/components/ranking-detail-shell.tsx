@@ -6,6 +6,7 @@ import { SiteHeader } from "./site-header";
 import { Icon } from "./icons";
 import { MediaImage } from "./media-image";
 import { UserAvatar } from "./user-avatar";
+import { LinkText } from "./link-text";
 import { RankingCommentThreadSheet } from "./ranking-comment-thread-sheet";
 import { useSession } from "./session-provider";
 import { compactCount, formatError, relativeTime } from "../lib/format";
@@ -334,5 +335,5 @@ function RatingHearts({ rating, size }: { rating?: number; size: number }) {
 }
 
 function RankingReview({ item, likeBusy, onLike, onReply }: { item: RankingToyComment; likeBusy: boolean; onLike: () => void; onReply: () => void }) {
-  return <article className="ranking-review"><UserAvatar userId={item.author.id} name={item.author.nickname} url={item.author.avatarUrl} size="small" /><div className="ranking-review-copy"><div className="ranking-review-author"><strong>{item.author.nickname}</strong><span>Lv.{item.author.level || 1}</span><time>{relativeTime(item.createdAt)}</time></div>{item.rating != null && <div className="ranking-review-rating"><RatingHearts rating={item.rating} size={12} /><strong>{item.rating}分</strong></div>}<p>{item.content}</p>{item.media.length > 0 && <div className="ranking-review-media">{item.media.map((media) => <MediaImage key={media.id} asset={media} alt="评价配图" />)}</div>}<div className="ranking-review-actions"><button type="button" className={item.viewerState.hasLiked ? "liked" : ""} disabled={likeBusy} onClick={onLike}><Icon name="heart" size={15} fill={item.viewerState.hasLiked ? "currentColor" : "none"} />{item.likeCount}</button><button type="button" onClick={onReply}>回复{item.replyCount > 0 ? ` ${item.replyCount}` : ""}</button></div></div></article>;
+  return <article className="ranking-review"><UserAvatar userId={item.author.id} name={item.author.nickname} url={item.author.avatarUrl} size="small" /><div className="ranking-review-copy"><div className="ranking-review-author"><strong>{item.author.nickname}</strong><span>Lv.{item.author.level || 1}</span><time>{relativeTime(item.createdAt)}</time></div>{item.rating != null && <div className="ranking-review-rating"><RatingHearts rating={item.rating} size={12} /><strong>{item.rating}分</strong></div>}<p><LinkText text={item.content} /></p>{item.media.length > 0 && <div className="ranking-review-media">{item.media.map((media) => <MediaImage key={media.id} asset={media} alt="评价配图" />)}</div>}<div className="ranking-review-actions"><button type="button" className={item.viewerState.hasLiked ? "liked" : ""} disabled={likeBusy} onClick={onLike}><Icon name="heart" size={15} fill={item.viewerState.hasLiked ? "currentColor" : "none"} />{item.likeCount}</button><button type="button" onClick={onReply}>回复{item.replyCount > 0 ? ` ${item.replyCount}` : ""}</button></div></div></article>;
 }

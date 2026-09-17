@@ -147,15 +147,25 @@ export function broadcastSessionChanged(): void {
 export function onSessionChanged(callback: () => void): () => void {
   if (typeof window === "undefined") return () => undefined;
 
+  let lastTriggerTime = 0;
+  const trigger = () => {
+    const now = Date.now();
+    // 300ms 窗口内去重防抖：BroadcastChannel 与 storage 事件由 broadcastSessionChanged
+    // 成对发出，去重避免短时间内触发两次并发会话恢复，导致单次令牌轮换失败。
+    if (now - lastTriggerTime < 300) return;
+    lastTriggerTime = now;
+    callback();
+  };
+
   const handleMessage = (event: MessageEvent) => {
     if (event.data && typeof event.data === "object" && (event.data as SessionChangedMessage).type === "session-changed") {
-      callback();
+      trigger();
     }
   };
 
   const handleStorage = (event: StorageEvent) => {
     if (event.key === SESSION_EPOCH_STORAGE_KEY && event.newValue) {
-      callback();
+      trigger();
     }
   };
 

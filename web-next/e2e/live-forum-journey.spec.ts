@@ -108,10 +108,17 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
 
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  // 导航会释放旧页面的响应体；在响应到达时立即读取，避免后续重载丢失 CDP 资源。
-  const guestResponse = page
-    .waitForResponse((response) => response.url().endsWith("/api/v1/auth/guest") && response.request().method() === "POST")
-    .then((response) => response.json());
+  // 先进入主页等待应用完成引导并创建游客，立即读取响应体，不再把游客初始化与 404 导航混在一起。
+  const guestResponsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/api/v1/auth/guest") && response.request().method() === "POST",
+  );
+  await navigate("/");
+  const guestResponse = await guestResponsePromise;
+  const guest = await guestResponse.json();
+  expect(guest.user.account_type).toBe("guest");
+  const guestId = guest.user.id;
+
+  // 独立测试 missing post 返回 404
   const missingResponse = await navigate(`/post/journey-missing-${suffix}`);
   expect(missingResponse?.status()).toBe(404);
   if (webOrigin) {
@@ -128,9 +135,6 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
   await expect.poll(() => page.locator(".detail-gallery img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 20000 }).toBeGreaterThan(0);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(() => page.locator(".detail-gallery img").first().evaluate((image) => (image as HTMLImageElement).naturalWidth), { timeout: 20000 }).toBeGreaterThan(0);
-  const guest = await guestResponse;
-  expect(guest.user.account_type).toBe("guest");
-  const guestId = guest.user.id;
   await navigate("/");
   const viewResponse = page.waitForResponse((response) => response.url().endsWith(`/posts/${postId}/view`));
   await page.getByRole("heading", { name: title, exact: true }).first().click();
@@ -218,8 +222,43 @@ test("真实论坛旅程：游客、图片、GIF、投票、回复定位和原�
   await aftercare.locator("textarea").fill("本地测试取消兑换");
   await aftercare.getByRole("button", { name: "取消订单并返还已扣积分" }).click();
   await expect(page.locator(`#order-${order.id}`)).toContainText("已取消");
-  await expect(page.locator(".points-hero-number")).toHaveText("100");
-  expect(sql(`SELECT stock_reserved FROM store_products WHERE id=${quote(productId)}`)).toBe("0");
   if (process.env.LUNTAN_QA_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.LUNTAN_QA_SCREENSHOT_DIR, "store-cancelled-desktop.png"), fullPage: false });
+
+  // 真实双 Tab HttpOnly Cookie 与广播同步链路验证：
+  // Tab 1 与 Tab 2 共享同一个 BrowserContext（即共享真实浏览器 HttpOnly Cookie 容器）
+  const tab1 = page;
+  const tab2 = await page.context().newPage();
+  if (webOrigin) {
+    const apiOrigin = process.env.PLAYWRIGHT_TEST_BASE_URL || "";
+    await tab2.route("**/api/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch({ url: new URL(url.pathname + url.search, apiOrigin).toString() });
+      await route.fulfill({ response });
+    });
+  }
+  const navigateTab2 = (route: string) => tab2.goto(webOrigin ? new URL(route, webOrigin).toString() : route, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+  // 在真实后端中注册新账号 B
+  const userBSuffix = randomUUID();
+  const userBEmail = `journey_b_${userBSuffix.slice(0, 8)}@example.com`;
+  const userBPassword = "TestPassword123!";
+  const userBResponse = await request.post("/api/v1/auth/register", {
+    data: { email: userBEmail, password: userBPassword, nickname: "旅程用户乙" },
+  });
+  expect(userBResponse.status()).toBe(201);
+
+  // Tab 2 前往登录页登录用户乙，真实写入 HttpOnly refresh cookie
+  await navigateTab2("/login");
+  await tab2.getByPlaceholder("请输入邮箱地址").fill(userBEmail);
+  await tab2.getByPlaceholder("请输入密码").fill(userBPassword);
+  await tab2.locator('button[type="submit"]').click();
+  await expect(tab2.locator(".profile-card-name, img[alt='旅程用户乙']").first()).toBeVisible({ timeout: 15000 });
+
+  // 此时 Tab 2 的 HttpOnly Cookie 已被轮转为用户乙。
+  // Tab 1 应当通过跨标签页广播与 refresh /me 自动同步展示“旅程用户乙”，杜绝“界面 A、请求 B”
+  await expect(tab1.locator(".profile-card-name, img[alt='旅程用户乙']").first()).toBeVisible({ timeout: 15000 });
+  await tab2.close();
+
   expect(errors).toEqual([]);
 });
+

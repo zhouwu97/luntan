@@ -11,7 +11,14 @@ import {
   logout,
   registerWithEmail,
 } from "../lib/api/forum";
-import { ApiError, getSessionVersion, refreshSession } from "../lib/api/client";
+import {
+  ApiError,
+  beginSessionTransition,
+  clearAccessToken,
+  getSessionVersion,
+  onSessionChanged,
+  refreshSession,
+} from "../lib/api/client";
 import { clearFeedCache } from "../lib/feed-cache";
 import { clearPostSnapshots } from "../lib/post-memory-cache";
 
@@ -70,7 +77,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           try {
             const guestSession = await loginAsGuest(guestStartVersion);
             // 登录过程中若已有新的身份写入，旧的启动恢复不能覆盖它。
-            if (active && getSessionVersion() === guestStartVersion + 1) {
+            if (active && getSessionVersion() === guestStartVersion) {
               setUser(guestSession.user);
             }
           } catch {
@@ -81,7 +88,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const currentUser = await restoreCurrentUser();
         if (!active || getSessionVersion() !== restoreVersion) return;
         setUser(currentUser);
-
       })
       .catch(() => undefined)
       .finally(() => {
@@ -89,6 +95,46 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSessionChanged(() => {
+      // 跨 Tab 收到会话变动广播：清除当前账号前端缓存与旧 token，重新从共享 Cookie 恢复会话
+      const currentScope = unreadAccount.current;
+      clearAccessToken();
+      clearFeedCache(currentScope);
+      clearPostSnapshots(currentScope);
+      setUnreadCount(0);
+      const syncVersion = getSessionVersion();
+      void refreshSession()
+        .then(async (restored) => {
+          if (getSessionVersion() !== syncVersion) return;
+          if (!restored) {
+            try {
+              const guestSession = await loginAsGuest(syncVersion);
+              if (getSessionVersion() === syncVersion) {
+                setUser(guestSession.user);
+              }
+            } catch {
+              if (getSessionVersion() === syncVersion) {
+                setUser(null);
+              }
+            }
+            return;
+          }
+          const currentUser = await restoreCurrentUser();
+          if (getSessionVersion() !== syncVersion) return;
+          setUser(currentUser);
+        })
+        .catch(() => {
+          if (getSessionVersion() === syncVersion) {
+            setUser(null);
+          }
+        });
+    });
+    return () => {
+      unsubscribe();
     };
   }, []);
 
@@ -158,17 +204,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       },
       signOut: async () => {
         const accountScope = user?.id;
-        await logout();
+        const opVersion = beginSessionTransition();
+        try {
+          await logout(opVersion);
+        } catch {
+          // 登出网络异常时仍保持本地会话隔离过渡
+        }
         clearFeedCache(accountScope);
         clearPostSnapshots(accountScope);
+        if (getSessionVersion() !== opVersion) return;
         setUnreadCount(0);
+        setUser(null);
         try {
-          const guestSession = await loginAsGuest();
-          setUser(guestSession.user);
+          const guestSession = await loginAsGuest(opVersion);
+          if (getSessionVersion() === opVersion) {
+            setUser(guestSession.user);
+          }
         } catch {
-          setUser(null);
+          if (getSessionVersion() === opVersion) {
+            setUser(null);
+          }
         }
       },
+
     }),
     [authState, isGuest, isRegistered, ready, unreadCount, user],
   );

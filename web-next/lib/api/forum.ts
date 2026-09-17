@@ -36,7 +36,20 @@ import type {
   PublicBootstrap,
   UserSummary,
 } from "../../types/forum";
-import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, getSessionVersion, setAccessToken } from "./client";
+import {
+  ApiError,
+  StaleSessionResponseError,
+  apiFetch,
+  apiJson,
+  apiPost,
+  beginSessionTransition,
+  broadcastSessionChanged,
+  clearAccessToken,
+  getSessionVersion,
+  setAccessToken,
+} from "./client";
+
+export { StaleSessionResponseError };
 
 type JsonRecord = Record<string, unknown>;
 const feedRequests = new Map<string, Promise<FeedPage>>();
@@ -1015,31 +1028,28 @@ function parseSession(payload: JsonRecord): AuthSession {
   };
 }
 
-class StaleSessionResponseError extends Error {
-  constructor() {
-    super("登录响应已过期");
-    this.name = "StaleSessionResponseError";
-  }
-}
-
 function commitSession(session: AuthSession, expectedVersion?: number): AuthSession {
   if (expectedVersion !== undefined && getSessionVersion() !== expectedVersion) {
     throw new StaleSessionResponseError();
   }
-  setAccessToken(session.accessToken);
+  setAccessToken(session.accessToken, expectedVersion);
   return session;
 }
 
-function parseAndCommitSession(payload: JsonRecord): AuthSession {
-  return commitSession(parseSession(payload));
-}
-
 export async function loginWithEmailCode(email: string, code: string): Promise<AuthSession> {
-  return parseAndCommitSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
+  const version = beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/email/verify", { email, code });
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthSession> {
-  return parseAndCommitSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
+  const version = beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/login/password", { email, password });
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
 export async function registerWithEmail(
@@ -1048,19 +1058,24 @@ export async function registerWithEmail(
   code?: string,
   nickname = "",
 ): Promise<AuthSession> {
-  return parseAndCommitSession(
-    await apiPost<JsonRecord>("/auth/register", {
-      email,
-      ...(code && code.trim() ? { code: code.trim() } : {}),
-      password,
-      nickname,
-    }),
-  );
+  const version = beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/register", {
+    email,
+    ...(code && code.trim() ? { code: code.trim() } : {}),
+    password,
+    nickname,
+  });
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
-export async function loginAsGuest(expectedVersion = getSessionVersion()): Promise<AuthSession> {
-  const session = parseSession(await apiPost<JsonRecord>("/auth/guest"));
-  return commitSession(session, expectedVersion);
+export async function loginAsGuest(expectedVersion?: number): Promise<AuthSession> {
+  const version = expectedVersion ?? beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/guest");
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
 export async function getMe(): Promise<SessionUser> {
@@ -1378,11 +1393,13 @@ export async function markNotificationRead(id: string): Promise<void> {
   await apiFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH" });
 }
 
-export async function logout(): Promise<void> {
+export async function logout(expectedVersion?: number): Promise<void> {
+  const version = expectedVersion ?? beginSessionTransition();
   try {
     await apiPost("/auth/logout", {});
   } finally {
-    clearAccessToken();
+    clearAccessToken(version);
+    broadcastSessionChanged();
   }
 }
 

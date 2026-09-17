@@ -9,8 +9,9 @@ import { PostCard } from "./post-card";
 import { SiteHeader } from "./site-header";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
+import { ApiError } from "../lib/api/client";
 import { getCommunity, getFeed } from "../lib/api/forum";
-import { readFeedCacheSnapshot, writeFeedCache } from "../lib/feed-cache";
+import { clearFeedCache, readFeedCacheSnapshot, writeFeedCache } from "../lib/feed-cache";
 import { relativeTime } from "../lib/format";
 import { copyText } from "../lib/clipboard";
 import type { Community, Post } from "../types/forum";
@@ -120,7 +121,14 @@ export function CommunityShell({ communityId }: { communityId: string }) {
       });
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
-    } catch {
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "INVALID_CURSOR") {
+        clearFeedCache(user?.id);
+        setNextCursor(undefined);
+        setHasMore(false);
+        setRefreshVersion((v) => v + 1);
+        return;
+      }
       setError("更多内容暂时无法加载");
     } finally {
       setLoadingMore(false);

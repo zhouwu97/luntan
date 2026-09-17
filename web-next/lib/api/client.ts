@@ -102,6 +102,76 @@ async function refreshSessionInternal(version: number): Promise<boolean> {
   return true;
 }
 
+export class StaleSessionResponseError extends Error {
+  constructor() {
+    super("登录响应已过期");
+    this.name = "StaleSessionResponseError";
+  }
+}
+
+const AUTH_CHANNEL_NAME = "luntan-auth";
+const SESSION_EPOCH_STORAGE_KEY = "luntan:session-epoch";
+
+type SessionChangedMessage = {
+  type: "session-changed";
+  timestamp: number;
+};
+
+let authChannel: BroadcastChannel | null = null;
+if (typeof window !== "undefined" && typeof BroadcastChannel !== "undefined") {
+  try {
+    authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
+  } catch {
+    authChannel = null;
+  }
+}
+
+export function broadcastSessionChanged(): void {
+  const timestamp = Date.now();
+  if (authChannel) {
+    try {
+      authChannel.postMessage({ type: "session-changed", timestamp } satisfies SessionChangedMessage);
+    } catch {
+      // 忽略跨 Tab 广播发送失败
+    }
+  }
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.setItem(SESSION_EPOCH_STORAGE_KEY, timestamp.toString());
+    } catch {
+      // 忽略 localStorage 写入异常（如隐私模式）
+    }
+  }
+}
+
+export function onSessionChanged(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+
+  const handleMessage = (event: MessageEvent) => {
+    if (event.data && typeof event.data === "object" && (event.data as SessionChangedMessage).type === "session-changed") {
+      callback();
+    }
+  };
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === SESSION_EPOCH_STORAGE_KEY && event.newValue) {
+      callback();
+    }
+  };
+
+  if (authChannel) {
+    authChannel.addEventListener("message", handleMessage);
+  }
+  window.addEventListener("storage", handleStorage);
+
+  return () => {
+    if (authChannel) {
+      authChannel.removeEventListener("message", handleMessage);
+    }
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
 export async function refreshSession(): Promise<boolean> {
   const version = sessionVersion;
   if (refreshInFlight?.version === version) return refreshInFlight.promise;
@@ -112,15 +182,40 @@ export async function refreshSession(): Promise<boolean> {
   return promise;
 }
 
-export function setAccessToken(token: string | null): void {
+export function beginSessionTransition(): number {
   sessionVersion += 1;
+  return sessionVersion;
+}
+
+export function commitAccessToken(token: string | null, expectedVersion?: number): void {
+  if (expectedVersion !== undefined && sessionVersion !== expectedVersion) {
+    throw new StaleSessionResponseError();
+  }
   accessToken = token;
 }
 
-export function clearAccessToken(): void {
-  sessionVersion += 1;
+export function setAccessToken(token: string | null, expectedVersion?: number): void {
+  if (expectedVersion !== undefined) {
+    if (sessionVersion !== expectedVersion) {
+      throw new StaleSessionResponseError();
+    }
+  } else {
+    sessionVersion += 1;
+  }
+  accessToken = token;
+}
+
+export function clearAccessToken(expectedVersion?: number): void {
+  if (expectedVersion !== undefined) {
+    if (sessionVersion !== expectedVersion) {
+      return;
+    }
+  } else {
+    sessionVersion += 1;
+  }
   accessToken = null;
 }
+
 
 export function getSessionVersion(): number {
   return sessionVersion;

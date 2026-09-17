@@ -15,6 +15,7 @@ import {
   setHomeRecommendation,
   setHomeRecommendationPinned,
 } from "../../../lib/api/forum";
+import { ApiError } from "../../../lib/api/client";
 import { formatError, relativeTime } from "../../../lib/format";
 import type { HomeRecommendationItem, Post } from "../../../types/forum";
 
@@ -156,6 +157,13 @@ export default function AdminRecommendationsPage() {
       setItems((curr) => curr.filter((it) => it.postId !== postId));
       setDirty(false);
     } catch (removeErr) {
+      if (removeErr instanceof ApiError && removeErr.code === "POST_NOT_RECOMMENDED") {
+        setItems((curr) => curr.filter((it) => it.postId !== postId));
+        setDirty(false);
+        await loadRecommendations();
+        showToast("该推荐已被其他管理员移除，列表已同步");
+        return;
+      }
       showToast(formatError(removeErr, "移除失败，请重试"));
     }
   }
@@ -188,6 +196,12 @@ export default function AdminRecommendationsPage() {
       setDirty(false);
       await loadRecommendations();
     } catch (saveErr) {
+      if (saveErr instanceof ApiError && saveErr.code === "RECOMMENDATION_ORDER_STALE") {
+        setDirty(false);
+        await loadRecommendations();
+        showToast("推荐列表已变化，请重新排序");
+        return;
+      }
       setError(formatError(saveErr, "保存推荐排序失败"));
     } finally {
       setSaving(false);
@@ -206,6 +220,19 @@ export default function AdminRecommendationsPage() {
       showToast(item.isPinned ? "已取消推荐置顶" : "已追加到置顶推荐末尾");
       await loadRecommendations();
     } catch (pinError) {
+      if (pinError instanceof ApiError) {
+        if (pinError.code === "POST_NOT_RECOMMENDED") {
+          setItems((curr) => curr.filter((it) => it.postId !== item.postId));
+          await loadRecommendations();
+          showToast("该推荐已被其他管理员移除，列表已同步");
+          return;
+        }
+        if (pinError.code === "POST_NOT_RECOMMENDABLE") {
+          await loadRecommendations();
+          showToast("该推荐已失效，请移除或恢复帖子状态");
+          return;
+        }
+      }
       showToast(formatError(pinError, "推荐置顶操作失败"));
     } finally {
       setSaving(false);

@@ -73,6 +73,37 @@ func lockHomeRecommendationOrder(ctx context.Context, tx *sql.Tx) error {
 	return tx.QueryRowContext(ctx, homeRecommendationOrderLock).Scan(&lock)
 }
 
+type postRecommendableInfo struct {
+	AuthorID string
+}
+
+func checkPostRecommendable(ctx context.Context, tx *sql.Tx, postID string) (*postRecommendableInfo, *httpserver.AppError) {
+	var status, moderation, postType, authorID, communityStatus string
+	var publishedAt, communityDeletedAt sql.NullTime
+	err := tx.QueryRowContext(ctx, `
+		SELECT p.publication_status, p.moderation_status, p.type, p.published_at, p.author_id,
+		       c.status, c.deleted_at
+		FROM posts p
+		JOIN communities c ON c.id = p.community_id
+		WHERE p.id = $1 AND p.deleted_at IS NULL`, postID).
+		Scan(&status, &moderation, &postType, &publishedAt, &authorID, &communityStatus, &communityDeletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, &httpserver.AppError{Status: http.StatusNotFound, Code: "POST_NOT_FOUND", Message: "帖子不存在或已删除"}
+	}
+	if err != nil {
+		return nil, &httpserver.AppError{Status: http.StatusInternalServerError, Code: "INTERNAL_ERROR", Message: err.Error()}
+	}
+	if status != "published" || moderation != "normal" || postType == "market" || !publishedAt.Valid ||
+		communityStatus != "active" || communityDeletedAt.Valid {
+		return nil, &httpserver.AppError{
+			Status:  http.StatusBadRequest,
+			Code:    "POST_NOT_RECOMMENDABLE",
+			Message: "帖子未公开发布或处于审核/隐藏状态，不可加入或置顶首页推荐",
+		}
+	}
+	return &postRecommendableInfo{AuthorID: authorID}, nil
+}
+
 func (s *Server) listHomeRecommendations(w http.ResponseWriter, r *http.Request) {
 	if !s.requireDatabase(w, r) {
 		return
@@ -193,6 +224,13 @@ func (s *Server) setHomeRecommendationPin(w http.ResponseWriter, r *http.Request
 
 	if input.Pinned != currentlyPinned {
 		if input.Pinned {
+			if _, appErr := checkPostRecommendable(r.Context(), tx, postID); appErr != nil {
+				if appErr.Code == "POST_NOT_RECOMMENDABLE" {
+					appErr.Status = http.StatusConflict
+				}
+				httpserver.WriteAppError(w, r, *appErr)
+				return
+			}
 			var nextPosition int
 			if err := tx.QueryRowContext(r.Context(), `
 				SELECT COALESCE(MAX(position), 0) + 1
@@ -221,6 +259,7 @@ func (s *Server) setHomeRecommendationPin(w http.ResponseWriter, r *http.Request
 	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+
 		"success": true,
 		"post_id": postID,
 		"pinned":  input.Pinned,
@@ -269,32 +308,12 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 	}
 
 	// 设置入口与推荐 Feed 使用相同的帖子、社区公开可见性条件。
-	var status, moderation, postType, authorID, communityStatus string
-	var publishedAt, communityDeletedAt sql.NullTime
-	err = tx.QueryRowContext(r.Context(), `
-		SELECT p.publication_status, p.moderation_status, p.type, p.published_at, p.author_id,
-		       c.status, c.deleted_at
-		FROM posts p
-		JOIN communities c ON c.id = p.community_id
-		WHERE p.id = $1 AND p.deleted_at IS NULL`, postID).
-		Scan(&status, &moderation, &postType, &publishedAt, &authorID, &communityStatus, &communityDeletedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		httpserver.WriteAppError(w, r, httpserver.AppError{Status: http.StatusNotFound, Code: "POST_NOT_FOUND", Message: "帖子不存在或已删除"})
+	info, appErr := checkPostRecommendable(r.Context(), tx, postID)
+	if appErr != nil {
+		httpserver.WriteAppError(w, r, *appErr)
 		return
 	}
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if status != "published" || moderation != "normal" || postType == "market" || !publishedAt.Valid ||
-		communityStatus != "active" || communityDeletedAt.Valid {
-		httpserver.WriteAppError(w, r, httpserver.AppError{
-			Status:  http.StatusBadRequest,
-			Code:    "POST_NOT_RECOMMENDABLE",
-			Message: "帖子未公开发布或处于审核/隐藏状态，不可加入首页推荐",
-		})
-		return
-	}
+	authorID := info.AuthorID
 
 	var position int
 	err = tx.QueryRowContext(r.Context(), `
@@ -339,6 +358,7 @@ func (s *Server) setHomeRecommendation(w http.ResponseWriter, r *http.Request, p
 	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+
 		"success":  true,
 		"post_id":  postID,
 		"position": position,
@@ -365,6 +385,11 @@ func (s *Server) removeHomeRecommendation(w http.ResponseWriter, r *http.Request
 	}
 	defer tx.Rollback()
 
+	if err := lockHomeRecommendationOrder(r.Context(), tx); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+
 	res, err := tx.ExecContext(r.Context(), `DELETE FROM home_recommendations WHERE post_id = $1`, postID)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -390,6 +415,7 @@ func (s *Server) removeHomeRecommendation(w http.ResponseWriter, r *http.Request
 	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+
 		"success": true,
 		"post_id": postID,
 	})
@@ -489,6 +515,14 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 			writeInternalError(w, r, err)
 			return
 		}
+		if affected != 1 {
+			httpserver.WriteAppError(w, r, httpserver.AppError{
+				Status:  http.StatusConflict,
+				Code:    "RECOMMENDATION_ORDER_STALE",
+				Message: "推荐排序已发生变化，请刷新后重试",
+			})
+			return
+		}
 		updated += affected
 	}
 
@@ -502,6 +536,7 @@ func (s *Server) reorderHomeRecommendations(w http.ResponseWriter, r *http.Reque
 	}
 
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
+
 		"success": true,
 		"updated": updated,
 	})

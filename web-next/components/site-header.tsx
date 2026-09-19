@@ -58,7 +58,7 @@ export function SiteHeader({ home = false, className = "" }: { home?: boolean; c
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a href="/" className="brand" aria-label="圣杯酱首页">
             <span className="brand-mark">
-              <img src="/brand-mark.webp" alt="圣杯酱" className="brand-icon-img" />
+              <img src="/brand-mark.webp" alt="" className="brand-icon-img" />
             </span>
             <span className="brand-word">圣杯酱</span>
             <span className="brand-dot" aria-hidden="true" />

@@ -184,6 +184,14 @@ export function PostCard({
 
   const isAuthor = Boolean(user && user.id === post.author.id);
 
+  function recordScrollBeforeNav() {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("last_feed_scroll_url", window.location.href);
+      sessionStorage.setItem("last_feed_scroll_y", window.scrollY.toString());
+      sessionStorage.setItem("last_feed_post_id", post.id);
+    }
+  }
+
   function handleCardClick(event: MouseEvent<HTMLElement>) {
     if (typeof window !== "undefined") {
       const selection = window.getSelection();
@@ -199,6 +207,7 @@ export function PostCard({
       return;
     }
 
+    recordScrollBeforeNav();
     setPostSnapshot(post, user?.id);
     router.push(`/post/${encodeURIComponent(post.id)}`);
   }
@@ -234,6 +243,7 @@ export function PostCard({
         onKeyDown={(event) => {
           if (event.key === "Enter" && event.target === event.currentTarget) {
             event.preventDefault();
+            recordScrollBeforeNav();
             setPostSnapshot(post, user?.id);
             router.push(`/post/${encodeURIComponent(post.id)}`);
           }
@@ -349,7 +359,7 @@ export function PostCard({
         )}
 
         <div className="post-card-body">
-          <Link href={`/post/${encodeURIComponent(post.id)}`} className="post-card-content-link" onClick={() => setPostSnapshot(post, user?.id)}>
+          <Link href={`/post/${encodeURIComponent(post.id)}`} className="post-card-content-link" onClick={() => { recordScrollBeforeNav(); setPostSnapshot(post, user?.id); }}>
             <h2 className="post-title">{post.title}</h2>
             <p className="post-text">{post.content}</p>
           </Link>
@@ -392,6 +402,7 @@ export function PostCard({
               href={`/post/${encodeURIComponent(post.id)}#comments`}
               className="stat"
               aria-label={`回复 ${post.commentCount}`}
+              onClick={() => recordScrollBeforeNav()}
             >
               <Icon name="message" size={16} />
               <span>{compactCount(post.commentCount)}</span>

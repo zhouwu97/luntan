@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "../../components/site-header";
+import { BottomNav } from "../../components/bottom-nav";
 import { Icon, type IconName } from "../../components/icons";
+import { MobilePageHeader } from "../../components/mobile-page-header";
 import { useSession } from "../../components/session-provider";
 import { getNotifications, markAllNotificationsRead, markNotificationRead } from "../../lib/api/forum";
 import { formatError, relativeTime } from "../../lib/format";
@@ -31,6 +33,13 @@ export default function NotificationsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const emptyDescription = category === "interaction" ? "回复、点赞、收藏和关注会出现在这里。" : category === "community" ? "社区公告和活动消息会出现在这里。" : category === "moderation" ? "举报处理、申诉和兑换进度会出现在这里。" : "新消息会出现在这里。";
+  const unreadCount = items.reduce((count, item) => count + (item.isRead ? 0 : 1), 0);
+  const activeTabLabel = tabs.find((tab) => tab.value === category)?.label || "全部";
+
+  useEffect(() => {
+    const requestedCategory = new URLSearchParams(window.location.search).get("category");
+    if (requestedCategory && tabs.some((tab) => tab.value === requestedCategory)) setCategory(requestedCategory);
+  }, []);
 
   useEffect(() => {
     if (!ready || !user) return;
@@ -117,25 +126,28 @@ export default function NotificationsPage() {
   }
 
   if (!ready || !user) {
-    return <><SiteHeader /><main className="page-frame"><div className="detail-skeleton"><div /><div /></div></main></>;
+    return <><SiteHeader /><MobilePageHeader title="通知" /><main className="page-frame"><div className="detail-skeleton"><div /><div /></div></main><BottomNav activeNav={null} /></>;
   }
 
   return (
     <>
       <SiteHeader />
+      <MobilePageHeader title="通知" action={<button type="button" className="mobile-notification-read-all" disabled={busy || unreadCount === 0} onClick={() => void readAll()}>全部已读</button>} />
       <main className="page-frame">
         <section className="feature-page notifications-page">
-          <div className="feature-hero compact-hero">
+          <div className="feature-hero compact-hero notification-hero">
             <div><span className="feature-kicker"><Icon name="bell" size={16} /> 消息中心</span><h1>通知</h1><p>评论、点赞和社区动态都会在这里提醒你。</p></div>
-            <button type="button" className="outline-button feature-back" disabled={busy} onClick={readAll}>{busy ? "处理中…" : "全部已读"}</button>
+            <div className="notification-hero-actions"><div className="notification-unread-summary"><strong>{unreadCount}</strong><span>条未读</span></div><button type="button" className="outline-button feature-back" disabled={busy || unreadCount === 0} onClick={readAll}>{busy ? "处理中…" : "全部已读"}</button></div>
           </div>
+          <div className="notification-overview"><div><span>当前分类</span><strong>{activeTabLabel}</strong></div><div><span>消息状态</span><strong>{unreadCount > 0 ? `${unreadCount} 条待处理` : "全部已读"}</strong></div><span className="notification-overview-hint">点击消息可直接回到对应内容</span></div>
           <div className="notification-tabs" role="tablist" aria-label="通知分类">
             {tabs.map((tab) => <button key={tab.value} type="button" role="tab" aria-selected={category === tab.value} className={category === tab.value ? "active" : ""} onClick={() => setCategory(tab.value)}>{tab.label}</button>)}
           </div>
           {error && <div className="data-note" role="status">{error}</div>}
-          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{groupNotifications(items).map((group) => <section className="notification-group" key={group.label}><h2>{group.label}</h2>{group.items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</section>)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>{emptyDescription}</p></div>}
+          {loading ? <div className="notification-list"><div className="notification-skeleton" /><div className="notification-skeleton" /><div className="notification-skeleton" /></div> : items.length ? <><div className="notification-list">{groupNotifications(items).map((group) => <section className="notification-group" key={group.label}><h2>{group.label}</h2>{group.items.map((item) => <NotificationRow key={item.id} item={item} onRead={readOne} />)}</section>)}</div>{hasMore && <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}><button type="button" className="outline-button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "加载中…" : "加载更多"}</button></div>}</> : <div className="empty-state feature-empty notification-empty"><span className="empty-icon"><Icon name="bell" size={24} /></span><h2>暂时没有通知</h2><p>{emptyDescription}</p><Link href="/" className="notification-empty-action">去社区逛逛 <Icon name="arrow-up-right" size={14} /></Link></div>}
         </section>
       </main>
+      <BottomNav activeNav={null} />
     </>
   );
 }

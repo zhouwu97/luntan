@@ -80,6 +80,33 @@ export function HomeShell() {
   const [refreshing, setRefreshing] = useState(false);
   const queryVersion = useRef(0);
 
+  const restoredScrollRef = useRef(false);
+  useEffect(() => {
+    if (restoredScrollRef.current || !posts.length || typeof window === "undefined") return;
+    const savedY = sessionStorage.getItem("last_feed_scroll_y");
+    const savedUrl = sessionStorage.getItem("last_feed_scroll_url");
+    const savedPostId = sessionStorage.getItem("last_feed_post_id");
+
+    if (savedY !== null && savedUrl === window.location.href) {
+      restoredScrollRef.current = true;
+      const targetY = parseFloat(savedY);
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: targetY, behavior: "instant" as ScrollBehavior });
+        setTimeout(() => {
+          if (savedPostId) {
+            const el = document.querySelector(`[data-post-id="${savedPostId}"]`);
+            if (el) {
+              const rect = el.getBoundingClientRect();
+              if (rect.top < -80 || rect.bottom > window.innerHeight + 100) {
+                el.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+              }
+            }
+          }
+        }, 80);
+      });
+    }
+  }, [posts.length]);
+
   useEffect(() => {
     const rawSort = searchParams.get("sort");
     setLoadMoreError(false);
@@ -350,6 +377,21 @@ export function HomeShell() {
           </div>
 
           <section className="feed-column" aria-label={`${activeCommunity?.name || "首页"}帖子流`}>
+            <div className="home-feed-header desktop-only">
+              <div>
+                <span className="home-feed-kicker">正在浏览</span>
+                <h1>{activeCommunity?.name || "社区首页"}</h1>
+                <p>{activeCommunity?.description || "浏览全站动态精选，发现更多同好分享。"}</p>
+              </div>
+              <div className="home-feed-header-actions">
+                <span>{visiblePosts.length > 0 ? `${visiblePosts.length} 条动态` : "暂无动态"}</span>
+                <button type="button" aria-label="刷新信息流" onClick={handleFloatingRefresh} disabled={refreshing}>
+                  <Icon name="refresh" size={16} />
+                  <span>{refreshing ? "刷新中" : "刷新"}</span>
+                </button>
+              </div>
+            </div>
+            <h1 className="mobile-feed-title">{activeCommunity?.name || "社区首页"}</h1>
             <FeedToolbar
               sort={sort}
               latestOrder={latestOrder}

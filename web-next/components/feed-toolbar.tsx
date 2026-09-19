@@ -34,8 +34,8 @@ export function FeedToolbar({
 }) {
   return (
     <div className="feedbar feed-toolbar">
-      <div className="feed-tabs" role="tablist" aria-label="帖子流排序">
-        <div className="tab-row">
+      <div className="feed-tabs">
+        <div className="tab-row" role="tablist" aria-label="帖子流排序">
           {tabs.map((tab) => (
             <button
               key={tab.value}

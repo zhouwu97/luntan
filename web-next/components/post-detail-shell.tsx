@@ -87,6 +87,13 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
   const searchParams = useSearchParams();
   const notificationCommentId = searchParams.get("reply") || searchParams.get("comment");
   const router = useRouter();
+  const handleGoBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/");
+    }
+  }, [router]);
   const { user, ready: sessionReady, isRegistered } = useSession();
   const canUploadMedia = isRegistered && user?.capabilities?.can_upload_media !== false;
   const { showToast } = useToast();
@@ -500,19 +507,18 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
         <main className="page-frame post-detail-page-frame">
           <div className="detail-grid">
             <section className="detail-main">
-              <div className="back-link detail-back desktop-only" style={{ opacity: 0.6 }}>
-                <Icon name="chevron-left" size={17} />
-                <span>正在进入讨论…</span>
+              <div className="detail-top-nav desktop-only" style={{ opacity: 0.6 }}>
+                <div className="detail-back-btn" style={{ pointerEvents: "none" }}>
+                  <Icon name="chevron-left" size={16} />
+                  <span>正在进入讨论…</span>
+                </div>
               </div>
               <article className="detail-article" style={{ pointerEvents: "none" }}>
-                <header className="detail-author">
-                  <div className="avatar avatar-large" style={{ background: "linear-gradient(110deg, #f1f5f9 8%, #e2e8f0 18%, #f1f5f9 33%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
-                  <div className="post-author" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ width: 120, height: 16, background: "#e2e8f0", borderRadius: 4, animation: "shimmer 1.5s infinite" }} />
-                    <div style={{ width: 90, height: 12, background: "#f1f5f9", borderRadius: 4 }} />
-                  </div>
-                </header>
-                <div style={{ width: "75%", height: 28, background: "#e2e8f0", borderRadius: 6, margin: "18px 0 14px", animation: "shimmer 1.5s infinite" }} />
+                <div style={{ width: "75%", height: 28, background: "#e2e8f0", borderRadius: 6, margin: "4px 0 14px", animation: "shimmer 1.5s infinite" }} />
+                <div className="detail-meta-bar" style={{ opacity: 0.6 }}>
+                  <div style={{ width: 70, height: 22, background: "#eff6ff", borderRadius: 9999 }} />
+                  <div style={{ width: 60, height: 16, background: "#f1f5f9", borderRadius: 4 }} />
+                </div>
                 <div className="detail-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ width: "100%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
                   <div style={{ width: "96%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
@@ -557,8 +563,8 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
         <button
           type="button"
           className="icon-btn"
-          aria-label="返回首页"
-          onClick={() => router.push("/")}
+          aria-label="返回"
+          onClick={handleGoBack}
         >
           <Icon name="chevron-left" size={22} />
         </button>
@@ -576,10 +582,24 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       <main ref={mobileContentRef} className="page-frame post-detail-page-frame post-detail-mobile-content">
         <div className="detail-grid">
           <section className="detail-main">
-            <Link href="/" className="back-link detail-back desktop-only">
-              <Icon name="chevron-left" size={17} />
-              返回首页
-            </Link>
+            <div className="detail-top-nav desktop-only">
+              <button
+                type="button"
+                className="detail-back-btn"
+                onClick={handleGoBack}
+                aria-label="返回上一页"
+              >
+                <Icon name="chevron-left" size={16} />
+                <span>返回上一页</span>
+              </button>
+              <nav className="detail-breadcrumbs" aria-label="面包屑导航">
+                <Link href="/">首页</Link>
+                <span className="sep">/</span>
+                <Link href={`/community/${encodeURIComponent(post.community.id)}`}>{post.community.name}</Link>
+                <span className="sep">/</span>
+                <span className="current">帖子详情</span>
+              </nav>
+            </div>
 
             {postError && <div className="data-note">{postError}</div>}
 
@@ -629,7 +649,7 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
       </main>
 
       {/* 移动端与 App 保持一致：评论栏始终固定在页面底部。 */}
-      <div ref={mobileComposerContainerRef} className="composer mobile-only mobile-comment-composer">
+      <aside ref={mobileComposerContainerRef} className="composer mobile-only mobile-comment-composer" aria-label="评论输入">
         <form className="mobile-reply-form" onSubmit={handleMobileSubmitComment}>
           <div className="mobile-reply-extras">
               {mobilePreviews.items.length > 0 && (
@@ -739,7 +759,7 @@ export function PostDetailShell({ id, initialPost = null }: { id: string; initia
                 </button>
           </div>
         </form>
-      </div>
+      </aside>
 
       {/* 图片全屏画廊查看器 */}
       {galleryImages && (
@@ -856,103 +876,112 @@ function PostArticle({
 
   return (
     <article className="detail-article">
-      <header className="detail-author">
-        <Link href={`/user/${encodeURIComponent(post.author.id)}`}>
-          <UserAvatar
-            userId={post.author.id}
-            name={post.author.nickname}
-            url={post.author.avatarUrl}
-            className="post-avatar"
-          />
-        </Link>
-        <div className="post-author">
-          <Link href={`/user/${encodeURIComponent(post.author.id)}`} className="author-line">
-            <span className="author-name">{post.author.nickname}</span>
-            <span className="lv">Lv.{post.author.level || 1}</span>
+      <h1 className="detail-title">{post.title}</h1>
+
+      <div className="detail-meta-bar">
+        <div className="detail-meta-left">
+          <Link href={`/community/${encodeURIComponent(post.community.id)}`} className="detail-community-badge">
+            <span className="badge-icon" aria-hidden="true">🏷️</span>
+            <span>{post.community.name}</span>
           </Link>
-          <div className="meta">
-            {post.community.name} · {relativeTime(post.createdAt)}
+          {post.isFeatured && <span className="detail-tag-featured">精选</span>}
+          <span className="detail-author-desktop desktop-only">
+            <UserAvatar
+              userId={post.author.id}
+              name={post.author.nickname}
+              url={post.author.avatarUrl}
+              size="small"
+            />
+            <Link href={`/user/${encodeURIComponent(post.author.id)}`}>{post.author.nickname}</Link>
+            <span className="detail-author-level">Lv.{post.author.level || 1}</span>
+          </span>
+          <span className="detail-author-mobile mobile-only">
+            · <Link href={`/user/${encodeURIComponent(post.author.id)}`}>{post.author.nickname}</Link>
+          </span>
+        </div>
+
+        <div className="detail-meta-right">
+          <span className="detail-pub-time" title={post.createdAt ? new Date(post.createdAt).toLocaleString("zh-CN") : ""}>
+            {relativeTime(post.createdAt)}
+          </span>
+
+          <div className="post-card-more-wrapper" style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="more"
+              aria-label="更多操作"
+              onClick={() => setMenuOpen((val) => !val)}
+            >
+              <Icon name="more" size={18} />
+            </button>
+            {menuOpen && (
+              <div className="post-card-menu-popover" onClick={(e) => e.stopPropagation()}>
+                <button type="button" className="post-card-menu-item" onClick={handleCopyLink}>
+                  <Icon name="copy" size={14} />
+                  <span>复制链接</span>
+                </button>
+                <button
+                  type="button"
+                  className="post-card-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onToggleBookmark();
+                  }}
+                >
+                  <Icon name="bookmark" size={14} />
+                  <span>{post.viewerState.hasBookmarked ? "取消收藏" : "收藏帖子"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="post-card-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    if (!user) return onRequireAuth();
+                    onOpenReport();
+                  }}
+                >
+                  <Icon name="info" size={14} />
+                  <span>举报帖子</span>
+                </button>
+                {isModerator && (
+                  <>
+                    <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
+                    <button
+                      type="button"
+                      className="post-card-menu-item"
+                      onClick={handleToggleRecommendation}
+                    >
+                      <Icon name="sparkle" size={14} />
+                      <span>{isRecommended ? "取消首页推荐" : "加入首页推荐"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="post-card-menu-item"
+                      onClick={handleToggleHotSuppression}
+                    >
+                      <Icon name="flame" size={14} />
+                      <span>{isHotSuppressed ? "取消隐藏热门" : "隐藏热门"}</span>
+                    </button>
+                  </>
+                )}
+                {(isAuthor || isModerator) && (
+                  <>
+                    <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
+                    <button
+                      type="button"
+                      className="post-card-menu-item danger"
+                      onClick={handleDeletePost}
+                    >
+                      <Icon name="close" size={14} />
+                      <span>删除帖子</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
-
-        <div className="post-card-more-wrapper" style={{ marginLeft: "auto", position: "relative" }}>
-          <button
-            type="button"
-            className="more"
-            aria-label="更多操作"
-            onClick={() => setMenuOpen((val) => !val)}
-          >
-            <Icon name="more" size={18} />
-          </button>
-          {menuOpen && (
-            <div className="post-card-menu-popover" onClick={(e) => e.stopPropagation()}>
-              <button type="button" className="post-card-menu-item" onClick={handleCopyLink}>
-                <Icon name="copy" size={14} />
-                <span>复制链接</span>
-              </button>
-              <button
-                type="button"
-                className="post-card-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onToggleBookmark();
-                }}
-              >
-                <Icon name="bookmark" size={14} />
-                <span>{post.viewerState.hasBookmarked ? "取消收藏" : "收藏帖子"}</span>
-              </button>
-              <button
-                type="button"
-                className="post-card-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  if (!user) return onRequireAuth();
-                  onOpenReport();
-                }}
-              >
-                <Icon name="info" size={14} />
-                <span>举报帖子</span>
-              </button>
-              {isModerator && (
-                <>
-                  <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
-                  <button
-                    type="button"
-                    className="post-card-menu-item"
-                    onClick={handleToggleRecommendation}
-                  >
-                    <Icon name="sparkle" size={14} />
-                    <span>{isRecommended ? "取消首页推荐" : "加入首页推荐"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="post-card-menu-item"
-                    onClick={handleToggleHotSuppression}
-                  >
-                    <Icon name="flame" size={14} />
-                    <span>{isHotSuppressed ? "取消隐藏热门" : "隐藏热门"}</span>
-                  </button>
-                </>
-              )}
-              {(isAuthor || isModerator) && (
-                <>
-                  <div style={{ height: 1, background: "#e2e8f0", margin: "4px 0" }} />
-                  <button
-                    type="button"
-                    className="post-card-menu-item danger"
-                    onClick={handleDeletePost}
-                  >
-                    <Icon name="close" size={14} />
-                    <span>删除帖子</span>
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </header>
-
-      <h1 className="detail-title">{post.title}</h1>
+      </div>
 
       <div className="detail-body">
         {post.content.split("\n\n").map((paragraph, index) => (
@@ -961,14 +990,22 @@ function PostArticle({
       </div>
 
       {post.media.length > 0 && (
-        <div className="detail-gallery">
+        <div
+          className={`detail-gallery ${post.media.length === 1 ? "detail-gallery-single" : `detail-gallery-multi media-count-${Math.min(4, post.media.length)}`}`}
+        >
           {post.media.map((asset, index) => (
             <div
               key={index}
+              className="detail-media-frame"
               style={{ cursor: "pointer" }}
               onClick={() => onOpenGallery(articleImages, index)}
             >
-              <MediaImage asset={asset} preferred="detail" alt={`${post.title} 图片 ${index + 1}`} />
+              <MediaImage
+                asset={asset}
+                preferred={post.media.length === 1 ? "detail" : "feed"}
+                alt={`${post.title} 图片 ${index + 1}`}
+                className="detail-gallery-image"
+              />
             </div>
           ))}
         </div>
@@ -979,46 +1016,51 @@ function PostArticle({
       )}
 
       <div className="detail-stats">
-        <a href="#comments" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "inherit", textDecoration: "none" }}>
-          <Icon name="message" size={15} />
-          {compactCount(post.commentCount)} 评论
-        </a>
-        <button
-          type="button"
-          className={`stat${post.viewerState.hasLiked ? " selected" : ""}`}
-          onClick={onToggleLike}
-          disabled={likePending}
-          style={{ background: "none", border: "none", cursor: likePending ? "not-allowed" : "pointer" }}
-        >
-          <Icon name="heart" size={15} />
-          {compactCount(post.likeCount)} 点赞
-        </button>
-        <button
-          type="button"
-          className={`stat${post.viewerState.hasBookmarked ? " selected" : ""}`}
-          onClick={onToggleBookmark}
-          disabled={bookmarkPending}
-          style={{ background: "none", border: "none", cursor: bookmarkPending ? "not-allowed" : "pointer" }}
-        >
-          <Icon name="bookmark" size={15} />
-          {compactCount(post.bookmarkCount)} 收藏
-        </button>
-        <span>
-          <Icon name="eye" size={15} />
-          {compactCount(post.viewCount)} 浏览
-        </span>
-        <button
-          type="button"
-          className="stat"
-          onClick={() => {
-            if (!user) return onRequireAuth();
-            onOpenReport();
-          }}
-          style={{ background: "none", border: "none", cursor: "pointer" }}
-        >
-          <Icon name="info" size={15} />
-          举报
-        </button>
+        <div className="detail-actions-group">
+          <button
+            type="button"
+            className={`detail-action-btn like-btn${post.viewerState.hasLiked ? " active" : ""}`}
+            onClick={onToggleLike}
+            disabled={likePending}
+            aria-label={post.viewerState.hasLiked ? "取消点赞" : "点赞"}
+          >
+            <Icon name="heart" size={16} />
+            <span>{post.likeCount > 0 ? `${compactCount(post.likeCount)} 点赞` : "点赞"}</span>
+          </button>
+          <button
+            type="button"
+            className={`detail-action-btn bookmark-btn${post.viewerState.hasBookmarked ? " active" : ""}`}
+            onClick={onToggleBookmark}
+            disabled={bookmarkPending}
+            aria-label="收藏"
+          >
+            <Icon name="bookmark" size={16} />
+            <span>{post.bookmarkCount > 0 ? `${compactCount(post.bookmarkCount)} 收藏` : "收藏"}</span>
+          </button>
+          <a href="#comments" className="detail-action-btn comment-btn" aria-label="查看评论">
+            <Icon name="message" size={16} />
+            <span>{post.commentCount > 0 ? `${compactCount(post.commentCount)} 评论` : "评论"}</span>
+          </a>
+        </div>
+
+        <div className="detail-stats-meta">
+          <span className="view-count" title={`浏览量 ${post.viewCount}`}>
+            <Icon name="eye" size={15} />
+            <span>{compactCount(post.viewCount)} 浏览</span>
+          </span>
+          <button
+            type="button"
+            className="report-btn"
+            onClick={() => {
+              if (!user) return onRequireAuth();
+              onOpenReport();
+            }}
+            aria-label="举报帖子"
+          >
+            <Icon name="info" size={14} />
+            <span>举报</span>
+          </button>
+        </div>
       </div>
     </article>
   );
@@ -1576,7 +1618,7 @@ function CommentMediaThumbnail({
   const isPreview = variant === "preview";
   const mediaSize = isPreview
     ? { width: "min(240px, 100%)", height: 240, objectFit: "contain" as const }
-    : { width: 80, height: 80, objectFit: "cover" as const };
+    : { width: 140, height: 140, objectFit: "cover" as const };
 
   useEffect(() => { setCandidateIdx(0); setMediaRetry(0); }, [mediaKey]);
   useEffect(() => {

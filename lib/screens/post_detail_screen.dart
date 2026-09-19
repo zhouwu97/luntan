@@ -525,7 +525,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ForumAuthorRow(
                               post: post,
                               onAuthorTap: widget.onOpenUserId,
-                              avatarRadius: 19.0,
+                              avatarRadius: 22.0,
                             ),
                             const SizedBox(height: 12),
                             if (post.isPinned ||
@@ -543,21 +543,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               post.title,
                               selectable: true,
                               style: const TextStyle(
-                                fontSize: 20,
+                                fontSize: 22,
                                 height: 1.38,
                                 color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.25,
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
                             LinkText(
                               post.body,
                               selectable: true,
                               style: const TextStyle(
-                                color: Color(0xFF243647),
-                                fontSize: 15,
-                                height: 1.72,
+                                color: Color(0xFF1E293B),
+                                fontSize: 16.5,
+                                height: 1.76,
                                 letterSpacing: 0.1,
                               ),
                             ),

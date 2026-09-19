@@ -95,7 +95,6 @@ export default function DownloadPage() {
               ) : (
                 <div className="download-unavailable">安装包暂未开放下载，请稍后再来。</div>
               )}
-              {release.sha256 && <p className="download-sha">SHA-256 · {release.sha256}</p>}
             </section>
             <section className="download-notes" aria-label="安装提示">
               <div className="download-note"><strong>与软件内更新一致</strong><p>这里和 App 内“检查更新”读取同一个发布源，版本不会出现不一致。</p></div>

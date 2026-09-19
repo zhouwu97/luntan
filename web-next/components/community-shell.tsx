@@ -41,6 +41,33 @@ export function CommunityShell({ communityId }: { communityId: string }) {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const queryVersion = useRef(0);
 
+  const restoredScrollRef = useRef(false);
+  useEffect(() => {
+    if (restoredScrollRef.current || !posts.length || typeof window === "undefined") return;
+    const savedY = sessionStorage.getItem("last_feed_scroll_y");
+    const savedUrl = sessionStorage.getItem("last_feed_scroll_url");
+    const savedPostId = sessionStorage.getItem("last_feed_post_id");
+
+    if (savedY !== null && savedUrl === window.location.href) {
+      restoredScrollRef.current = true;
+      const targetY = parseFloat(savedY);
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: targetY, behavior: "instant" as ScrollBehavior });
+        setTimeout(() => {
+          if (savedPostId) {
+            const el = document.querySelector(`[data-post-id="${savedPostId}"]`);
+            if (el) {
+              const rect = el.getBoundingClientRect();
+              if (rect.top < -80 || rect.bottom > window.innerHeight + 100) {
+                el.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+              }
+            }
+          }
+        }, 80);
+      });
+    }
+  }, [posts.length]);
+
   useEffect(() => {
     const rawSort = searchParams.get("sort");
     setSort(normalizeSort(rawSort));

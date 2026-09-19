@@ -995,7 +995,7 @@ export async function votePostPoll(pollId: string, optionIds: string[]): Promise
   });
 }
 
-export async function requestEmailCode(email: string, scene: "login" | "register" = "login"): Promise<EmailCodeChallenge> {
+export async function requestEmailCode(email: string, scene: "login" | "register" | "password_reset" = "login"): Promise<EmailCodeChallenge> {
   const payload = await apiPost<JsonRecord>("/auth/email/request", { email, scene });
   return {
     expiresIn: asNumber(payload.expires_in, 600),
@@ -1321,6 +1321,188 @@ export async function createReport(input: ReportInput): Promise<ReportResult> {
     moderationCaseId: asString(payload.moderation_case_id),
     status: asString(payload.status),
   };
+}
+
+export interface AccountPunishment {
+  id: string;
+  type: string;
+  action: string;
+  reason: string;
+  startsAt: string;
+  endsAt?: string;
+  createdAt: string;
+  appealable: boolean;
+}
+
+export interface AccountStatusData {
+  userId: string;
+  username: string;
+  status: string;
+  accountType: string;
+  email: string;
+  emailVerified: boolean;
+  createdAt: string;
+  punishments: AccountPunishment[];
+}
+
+function parseAccountPunishment(raw: unknown): AccountPunishment {
+  const item = asRecord(raw);
+  return {
+    id: asString(item.id),
+    type: asString(item.type),
+    action: asString(item.action),
+    reason: asString(item.reason),
+    startsAt: asString(item.starts_at ?? item.startsAt),
+    endsAt: asString(item.ends_at ?? item.endsAt) || undefined,
+    createdAt: asString(item.created_at ?? item.createdAt),
+    appealable: asBoolean(item.appealable),
+  };
+}
+
+export async function getAccountStatus(): Promise<AccountStatusData> {
+  const payload = await apiJson<JsonRecord>("/me/account-status");
+  return {
+    userId: asString(payload.user_id ?? payload.userId),
+    username: asString(payload.username),
+    status: asString(payload.status, "active"),
+    accountType: asString(payload.account_type ?? payload.accountType, "standard"),
+    email: asString(payload.email),
+    emailVerified: asBoolean(payload.email_verified ?? payload.emailVerified),
+    createdAt: asString(payload.created_at ?? payload.createdAt),
+    punishments: Array.isArray(payload.punishments) ? payload.punishments.map(parseAccountPunishment) : [],
+  };
+}
+
+export interface ModerationAction {
+  id: string;
+  action: string;
+  reason: string;
+  appealable: boolean;
+  targetType: string;
+  targetId: string;
+  targetTitle?: string;
+  targetContent?: string;
+  mediaIds: string[];
+  createdAt: string;
+}
+
+export interface ModerationAppeal {
+  id: string;
+  moderationActionId: string;
+  targetType: string;
+  targetId: string;
+  reason: string;
+  description: string;
+  status: string;
+  reviewerNote?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  updatedAt?: string;
+  action?: string;
+  actionReason?: string;
+  targetTitle?: string;
+  targetContent?: string;
+  mediaIds: string[];
+}
+
+function parseModerationAction(raw: unknown): ModerationAction {
+  const item = asRecord(raw);
+  const mediaIds = Array.isArray(item.media_ids) ? item.media_ids : Array.isArray(item.mediaIds) ? item.mediaIds : [];
+  return {
+    id: asString(item.id),
+    action: asString(item.action),
+    reason: asString(item.reason),
+    appealable: asBoolean(item.appealable),
+    targetType: asString(item.target_type ?? item.targetType),
+    targetId: asString(item.target_id ?? item.targetId),
+    targetTitle: asString(item.target_title ?? item.targetTitle) || undefined,
+    targetContent: asString(item.target_content ?? item.targetContent) || undefined,
+    mediaIds: mediaIds.map(String),
+    createdAt: asString(item.created_at ?? item.createdAt),
+  };
+}
+
+function parseModerationAppeal(raw: unknown): ModerationAppeal {
+  const item = asRecord(raw);
+  const mediaIds = Array.isArray(item.media_ids) ? item.media_ids : Array.isArray(item.mediaIds) ? item.mediaIds : [];
+  return {
+    id: asString(item.id),
+    moderationActionId: asString(item.moderation_action_id ?? item.moderationActionId),
+    targetType: asString(item.target_type ?? item.targetType),
+    targetId: asString(item.target_id ?? item.targetId),
+    reason: asString(item.reason),
+    description: asString(item.description),
+    status: asString(item.status, "pending"),
+    reviewerNote: asString(item.reviewer_note ?? item.reviewerNote) || undefined,
+    createdAt: asString(item.created_at ?? item.createdAt),
+    reviewedAt: asString(item.reviewed_at ?? item.reviewedAt) || undefined,
+    updatedAt: asString(item.updated_at ?? item.updatedAt) || undefined,
+    action: asString(item.action) || undefined,
+    actionReason: asString(item.action_reason ?? item.actionReason) || undefined,
+    targetTitle: asString(item.target_title ?? item.targetTitle) || undefined,
+    targetContent: asString(item.target_content ?? item.targetContent) || undefined,
+    mediaIds: mediaIds.map(String),
+  };
+}
+
+export async function getModerationAction(id: string): Promise<ModerationAction> {
+  return parseModerationAction(await apiJson<JsonRecord>(`/moderation-actions/${encodeURIComponent(id)}`));
+}
+
+export async function createAppeal(actionId: string, input: { reason: string; description: string }): Promise<ModerationAppeal> {
+  return parseModerationAppeal(await apiPost<JsonRecord>(`/moderation-actions/${encodeURIComponent(actionId)}/appeals`, {
+    reason: input.reason.trim(),
+    description: input.description.trim(),
+  }));
+}
+
+export async function getMyAppeals(options: { status?: string; cursor?: string; limit?: number } = {}): Promise<{ items: ModerationAppeal[]; nextCursor?: string; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.status) params.set("status", options.status);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<JsonRecord>(`/appeals?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseModerationAppeal) : [],
+    nextCursor: asString(payload.next_cursor ?? payload.nextCursor) || undefined,
+    hasMore: asBoolean(payload.has_more ?? payload.hasMore),
+  };
+}
+
+export async function getAppeal(id: string): Promise<ModerationAppeal> {
+  return parseModerationAppeal(await apiJson<JsonRecord>(`/appeals/${encodeURIComponent(id)}`));
+}
+
+export async function getModerationAppeals(options: { status?: string; cursor?: string; limit?: number } = {}) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.status) params.set("status", options.status);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<JsonRecord>(`/moderation/appeals?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseModerationAppeal) : [],
+    nextCursor: asString(payload.next_cursor ?? payload.nextCursor) || undefined,
+    hasMore: asBoolean(payload.has_more ?? payload.hasMore),
+  };
+}
+
+export async function getModerationCases(options: { status?: string; source?: string; cursor?: string; limit?: number } = {}) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.status) params.set("status", options.status);
+  if (options.source) params.set("source", options.source);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<JsonRecord>(`/moderation/cases?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map((raw) => asRecord(raw)) : [],
+    nextCursor: asString(payload.next_cursor ?? payload.nextCursor) || undefined,
+    hasMore: asBoolean(payload.has_more ?? payload.hasMore),
+  };
+}
+
+export async function setPassword(input: { password: string; currentPassword?: string; emailCode?: string }): Promise<void> {
+  await apiPost("/me/password", {
+    password: input.password,
+    ...(input.currentPassword?.trim() ? { current_password: input.currentPassword.trim() } : {}),
+    ...(input.emailCode?.trim() ? { email_code: input.emailCode.trim() } : {}),
+  });
 }
 
 export async function setUserFollow(id: string, active: boolean): Promise<void> {

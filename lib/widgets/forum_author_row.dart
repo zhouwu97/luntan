@@ -81,11 +81,11 @@ class ForumAuthorRow extends StatelessWidget {
                       child: Text(
                         displayName,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: 13.5,
+                          fontSize: avatarRadius > 20 ? 15.0 : 13.5,
                           fontWeight: FontWeight.w800,
-                          height: 1.22,
+                          height: 1.25,
                         ),
                       ),
                     ),
@@ -93,15 +93,15 @@ class ForumAuthorRow extends StatelessWidget {
                     _LevelBadge(level: post.level, color: levelColor),
                   ],
                 ),
-                const SizedBox(height: 2.5),
+                const SizedBox(height: 3),
                 Text(
                   metaText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textSecondary,
-                    fontSize: 10.5,
-                    height: 1.2,
+                    fontSize: avatarRadius > 20 ? 12.0 : 10.5,
+                    height: 1.25,
                   ),
                 ),
               ],

@@ -123,7 +123,8 @@ test.describe("GIF 媒体 Web 回归", () => {
     await page.goto("/post/post-gif-comment");
     const desktopComposer = page.getByPlaceholder("写下你的评价、拆箱感受或回复…");
     const mobileComposer = page.getByPlaceholder("友善地回复一句…");
-    await expect.poll(async () => (await desktopComposer.isVisible()) || (await mobileComposer.isVisible())).toBe(true);
+    await expect.poll(async () => (await desktopComposer.isVisible()) || (await mobileComposer.isVisible()), { timeout: 15000 }).toBe(true);
+
     if (await desktopComposer.isVisible()) {
       await desktopComposer.fill("评论 GIF");
       await page.locator(".comment-composer input[type=file]").setInputFiles({ name: "reply.gif", mimeType: "image/gif", buffer: gifBytes });

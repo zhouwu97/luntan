@@ -36,6 +36,7 @@ class PostDetailScreen extends StatefulWidget {
     required this.commentsController,
     required this.interactionController,
     this.currentUserId,
+    this.canRecordShare = false,
     this.isAuthenticated = true,
     this.canLike,
     this.canComment,
@@ -67,6 +68,7 @@ class PostDetailScreen extends StatefulWidget {
   final CommentsController commentsController;
   final InteractionController interactionController;
   final String? currentUserId;
+  final bool canRecordShare;
   final bool isAuthenticated;
 
   /// 能力字段由 /me 下发；可空是为了兼容直接使用该页面的旧调用方。
@@ -523,7 +525,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ForumAuthorRow(
                               post: post,
                               onAuthorTap: widget.onOpenUserId,
-                              avatarRadius: 19.0,
+                              avatarRadius: 22.0,
                             ),
                             const SizedBox(height: 12),
                             if (post.isPinned ||
@@ -541,21 +543,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               post.title,
                               selectable: true,
                               style: const TextStyle(
-                                fontSize: 20,
+                                fontSize: 22,
                                 height: 1.38,
                                 color: AppTheme.textPrimary,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.25,
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
                             LinkText(
                               post.body,
                               selectable: true,
                               style: const TextStyle(
-                                color: Color(0xFF243647),
-                                fontSize: 15,
-                                height: 1.72,
+                                color: Color(0xFF1E293B),
+                                fontSize: 16.5,
+                                height: 1.76,
                                 letterSpacing: 0.1,
                               ),
                             ),
@@ -1064,10 +1066,28 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       Navigator.pop(sheetContext);
                       final shareUrl = AppLinks.post(post.id);
                       try {
-                        await Share.share(shareUrl, subject: '分享帖子');
+                        final result = await Share.share(
+                          shareUrl,
+                          subject: '分享帖子',
+                        );
+                        if (result.status != ShareResultStatus.dismissed &&
+                            widget.canRecordShare) {
+                          try {
+                            await widget.interactionController.recordPostShare(
+                              post,
+                            );
+                          } catch (_) {}
+                        }
                       } catch (_) {
                         await Clipboard.setData(ClipboardData(text: shareUrl));
                         widget.onFeedback('系统分享不可用，帖子链接已复制');
+                        if (widget.canRecordShare) {
+                          try {
+                            await widget.interactionController.recordPostShare(
+                              post,
+                            );
+                          } catch (_) {}
+                        }
                       }
                     },
                   ),

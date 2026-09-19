@@ -4,9 +4,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_theme.dart';
 
-/// 正文中的 URL 正则：http(s):// 或 www. 开头，遇到空白、中文标点等截断。
+/// 正文中的 URL 正则：http(s):// 或 www. 开头，遇到空白、中文标点或汉字等截断。
 final RegExp _postContentUrlPattern = RegExp(
-  r'(?:(?:https?://)|(?:www\.))[^\s<>"\u0000-\u001F，。！？；：、（）【】]+',
+  r'(?:(?:https?://)|(?:www\.))[a-zA-Z0-9\-._~:/?#[\]@!$&*+,;%=]+',
   caseSensitive: false,
 );
 

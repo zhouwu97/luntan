@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -170,6 +171,74 @@ func TestRecommendationExpiryAndVisibilityValidation(t *testing.T) {
 	}
 }
 
+func TestSetRecommendationResetsExpiredPinAndRejectsUnavailableCommunity(t *testing.T) {
+	s := feedIntegrationServer(t)
+	communityID, postIDs := insertFeedFixtures(t, s)
+	handler := NewHandler(s.db)
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("itest-rec-expired-pin-%d@example.com", suffix)
+	token := registerAndLogin(t, handler, email, fmt.Sprintf("itest_rec_expired_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, email)
+	token = loginUser(t, handler, email, "password123")
+
+	var adminID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, email).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	postID := postIDs["p1"]
+	if _, err := s.db.Exec(`
+		INSERT INTO home_recommendations
+			(post_id, recommended_by, position, is_pinned, recommended_at, expires_at)
+		VALUES ($1, $2, 7, true, now() - interval '2 days', now() - interval '1 day')`, postID, adminID); err != nil {
+		t.Fatal(err)
+	}
+
+	code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("重新加入过期推荐应返回 200，实际 %d：%s", code, body)
+	}
+	var position int
+	var pinned bool
+	if err := s.db.QueryRow(`SELECT position, is_pinned FROM home_recommendations WHERE post_id = $1`, postID).Scan(&position, &pinned); err != nil {
+		t.Fatal(err)
+	}
+	if pinned || position != 0 {
+		t.Fatalf("过期置顶重新加入后应成为普通推荐：pinned=%v position=%d", pinned, position)
+	}
+
+	activeExpiry := time.Now().UTC().Add(24 * time.Hour)
+	if _, err := s.db.Exec(`UPDATE home_recommendations SET is_pinned = true, position = 8, expires_at = $2 WHERE post_id = $1`, postID, activeExpiry); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"expires_at": activeExpiry.Add(24 * time.Hour), "position": 108})
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, payload, nil)
+	if code != http.StatusOK {
+		t.Fatalf("更新有效置顶推荐应返回 200，实际 %d：%s", code, body)
+	}
+	if err := s.db.QueryRow(`SELECT position, is_pinned FROM home_recommendations WHERE post_id = $1`, postID).Scan(&position, &pinned); err != nil {
+		t.Fatal(err)
+	}
+	if !pinned || position != 8 {
+		t.Fatalf("有效置顶更新有效期后应保留顺序：pinned=%v position=%d", pinned, position)
+	}
+
+	if _, err := s.db.Exec(`UPDATE communities SET status = 'inactive' WHERE id = $1`, communityID); err != nil {
+		t.Fatal(err)
+	}
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, nil, nil)
+	if code != http.StatusBadRequest || !bytes.Contains(body, []byte(`"code":"POST_NOT_RECOMMENDABLE"`)) {
+		t.Fatalf("停用社区中的帖子不可加入推荐，实际 %d：%s", code, body)
+	}
+	if _, err := s.db.Exec(`UPDATE communities SET status = 'active', deleted_at = now() WHERE id = $1`, communityID); err != nil {
+		t.Fatal(err)
+	}
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, nil, nil)
+	if code != http.StatusBadRequest || !bytes.Contains(body, []byte(`"code":"POST_NOT_RECOMMENDABLE"`)) {
+		t.Fatalf("已删除社区中的帖子不可加入推荐，实际 %d：%s", code, body)
+	}
+}
+
 func TestRecommendationPinRequiresActiveRecommendationAndAppearsInPostDetail(t *testing.T) {
 	s := feedIntegrationServer(t)
 	handler := NewHandler(s.db)
@@ -227,6 +296,25 @@ func TestRecommendationPinRequiresActiveRecommendationAndAppearsInPostDetail(t *
 	if !recommendedAtAfter.Equal(recommendedAtBefore) {
 		t.Fatalf("pin → unpin → pin 不应改变 recommended_at：before=%s after=%s", recommendedAtBefore, recommendedAtAfter)
 	}
+	var pinnedPositionBefore int
+	if err := s.db.QueryRow(`SELECT position FROM home_recommendations WHERE post_id = $1`, postID).Scan(&pinnedPositionBefore); err != nil {
+		t.Fatal(err)
+	}
+	legacyPayload, _ := json.Marshal(map[string]any{
+		"position":   pinnedPositionBefore + 100,
+		"expires_at": now.Add(24 * time.Hour),
+	})
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, token, legacyPayload, nil)
+	if code != http.StatusOK {
+		t.Fatalf("旧 set-recommendation 请求应保持兼容，实际 %d：%s", code, body)
+	}
+	var pinnedPositionAfter int
+	if err := s.db.QueryRow(`SELECT position FROM home_recommendations WHERE post_id = $1`, postID).Scan(&pinnedPositionAfter); err != nil {
+		t.Fatal(err)
+	}
+	if pinnedPositionAfter != pinnedPositionBefore {
+		t.Fatalf("旧 set-recommendation 不得改写置顶位置：before=%d after=%d", pinnedPositionBefore, pinnedPositionAfter)
+	}
 
 	code, body = callBusinessAPI(handler, http.MethodGet, "/api/v1/posts/"+postID, token, nil, nil)
 	if code != http.StatusOK {
@@ -238,6 +326,76 @@ func TestRecommendationPinRequiresActiveRecommendationAndAppearsInPostDetail(t *
 	}
 	if !post.IsRecommended || !post.RecommendationPinned {
 		t.Fatalf("帖子详情未返回真实推荐置顶状态：%s", body)
+	}
+}
+
+func TestConcurrentRecommendationPinsAppendDistinctPositions(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("itest-rec-pin-race-%d@example.com", suffix)
+	token := registerAndLogin(t, handler, email, fmt.Sprintf("rec_pin_race_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, email)
+	token = loginUser(t, handler, email, "password123")
+
+	var authorID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, email).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+	postIDs := []string{fmt.Sprintf("post-rec-pin-race-a-%d", suffix), fmt.Sprintf("post-rec-pin-race-b-%d", suffix)}
+	for _, postID := range postIDs {
+		if _, err := s.db.Exec(`
+			INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+			VALUES ($1, $2, 'community-campus', 'normal', 'published', 'normal', '并发置顶', '正文', now(), now(), now())`, postID, authorID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'normal', post_status = 'published' WHERE id = $1`, postID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO home_recommendations (post_id, recommended_by, position) VALUES ($1, $2, 0)`, postID, authorID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	payload, _ := json.Marshal(map[string]bool{"pinned": true})
+	type pinRes struct {
+		id   string
+		code int
+		body []byte
+	}
+	results := make(chan pinRes, len(postIDs))
+	var wg sync.WaitGroup
+	for _, postID := range postIDs {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+id+"/pin", token, payload, nil)
+			results <- pinRes{id: id, code: code, body: body}
+		}(postID)
+	}
+	wg.Wait()
+	close(results)
+	for res := range results {
+		if res.code != http.StatusOK {
+			t.Fatalf("并发置顶 %s 返回 %d：%s", res.id, res.code, res.body)
+		}
+	}
+
+	positions := make([]int, 0, 2)
+	for _, postID := range postIDs {
+		var position int
+		var pinned bool
+		if err := s.db.QueryRow(`SELECT position, is_pinned FROM home_recommendations WHERE post_id = $1`, postID).Scan(&position, &pinned); err != nil {
+			t.Fatal(err)
+		}
+		if !pinned {
+			t.Fatalf("帖子 %s 未置顶", postID)
+		}
+		positions = append(positions, position)
+	}
+	difference := positions[0] - positions[1]
+	if difference != 1 && difference != -1 {
+		t.Fatalf("并发置顶位置应连续且不同：%v", positions)
 	}
 }
 
@@ -423,3 +581,138 @@ func TestRecommendationAwardsAuthorPointsOnce(t *testing.T) {
 		t.Fatalf("重复推荐后推荐流水=%d, want 1", got)
 	}
 }
+
+// 回归：被隐藏或停用社区的推荐在尝试置顶时应被拒绝，返回 409 POST_NOT_RECOMMENDABLE。
+func TestRecommendationPinRejectsNonPublicOrHiddenPost(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+
+	suffix := time.Now().UnixNano()
+	adminEmail := fmt.Sprintf("itest-rec-pin-admin-%d@example.com", suffix)
+	authorEmail := fmt.Sprintf("itest-rec-pin-author-%d@example.com", suffix)
+
+	adminToken := registerAndLogin(t, handler, adminEmail, fmt.Sprintf("itest_rec_pin_admin_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, adminEmail)
+	adminToken = loginUser(t, handler, adminEmail, "password123")
+
+	_ = registerAndLogin(t, handler, authorEmail, fmt.Sprintf("itest_rec_pin_author_%d", suffix%100000000), "password123")
+	var authorID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, authorEmail).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	postID := fmt.Sprintf("post-rec-pin-%d", suffix%100000)
+	if _, err := s.db.Exec(`
+		INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+		VALUES ($1, $2, 'community-campus', 'normal', 'published', 'normal', '置顶推荐测试帖', '测试正文', $3, $3, $3)`,
+		postID, authorID, now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 正常上推荐
+	code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID, adminToken, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("上推荐应返回 200，实际 %d：%s", code, body)
+	}
+
+	// 2. 将帖子置为隐藏/审核异常
+	if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'hidden' WHERE id = $1`, postID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 此时尝试置顶，必须返回 409 POST_NOT_RECOMMENDABLE
+	pinBody, _ := json.Marshal(map[string]bool{"pinned": true})
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", adminToken, pinBody, nil)
+	if code != http.StatusConflict {
+		t.Fatalf("隐藏帖子置顶推荐应返回 409，实际 %d：%s", code, body)
+	}
+	if !bytes.Contains(body, []byte("POST_NOT_RECOMMENDABLE")) {
+		t.Fatalf("错误码应为 POST_NOT_RECOMMENDABLE，实际响应：%s", body)
+	}
+
+	// 4. 先恢复帖子置顶成功，再隐藏帖子，验证取消置顶（unpin）不受阻碍，允许正常执行
+	if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'normal' WHERE id = $1`, postID); err != nil {
+		t.Fatal(err)
+	}
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", adminToken, pinBody, nil)
+	if code != http.StatusOK {
+		t.Fatalf("正常帖子置顶推荐应返回 200，实际 %d：%s", code, body)
+	}
+	// 再次隐藏帖子
+	if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'hidden' WHERE id = $1`, postID); err != nil {
+		t.Fatal(err)
+	}
+	// 取消置顶（unpin）必须允许，不能被 POST_NOT_RECOMMENDABLE 误伤拦截
+	unpinBody, _ := json.Marshal(map[string]bool{"pinned": false})
+	code, body = callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+postID+"/pin", adminToken, unpinBody, nil)
+	if code != http.StatusOK {
+		t.Fatalf("隐藏帖子取消置顶应返回 200，实际 %d：%s", code, body)
+	}
+}
+
+
+// 回归：排序更新时若有条目已被并发删除，逐项检查 RowsAffected 必须拦截并返回 409 RECOMMENDATION_ORDER_STALE。
+func TestRecommendationReorderReturnsStaleOnDeletedItem(t *testing.T) {
+	s := feedIntegrationServer(t)
+	handler := NewHandler(s.db)
+
+	suffix := time.Now().UnixNano()
+	adminEmail := fmt.Sprintf("itest-rec-order-admin-%d@example.com", suffix)
+	authorEmail := fmt.Sprintf("itest-rec-order-author-%d@example.com", suffix)
+
+	adminToken := registerAndLogin(t, handler, adminEmail, fmt.Sprintf("itest_rec_ord_admin_%d", suffix%100000000), "password123")
+	promoteSuperAdmin(t, s, adminEmail)
+	adminToken = loginUser(t, handler, adminEmail, "password123")
+
+	_ = registerAndLogin(t, handler, authorEmail, fmt.Sprintf("itest_rec_ord_author_%d", suffix%100000000), "password123")
+	var authorID string
+	if err := s.db.QueryRow(`SELECT id FROM users WHERE lower(email) = $1`, authorEmail).Scan(&authorID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	postID1 := fmt.Sprintf("post-rec-ord-1-%d", suffix%100000)
+	postID2 := fmt.Sprintf("post-rec-ord-2-%d", suffix%100000)
+	for _, pid := range []string{postID1, postID2} {
+		if _, err := s.db.Exec(`
+			INSERT INTO posts (id, author_id, community_id, type, publication_status, moderation_status, title, content, published_at, created_at, updated_at)
+			VALUES ($1, $2, 'community-campus', 'normal', 'published', 'normal', '排序测试帖', '测试正文', $3, $3, $3)`,
+			pid, authorID, now,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE posts SET moderation_status = 'normal', post_status = 'published' WHERE id = $1`, pid); err != nil {
+			t.Fatal(err)
+		}
+		if code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+pid, adminToken, nil, nil); code != http.StatusOK {
+			t.Fatalf("加入推荐失败：%d %s", code, body)
+		}
+		pinBody, _ := json.Marshal(map[string]bool{"pinned": true})
+		if code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/"+pid+"/pin", adminToken, pinBody, nil); code != http.StatusOK {
+			t.Fatalf("置顶失败：%d %s", code, body)
+		}
+	}
+
+	// 模拟并发：另一个管理员删除了 postID2
+	if code, body := callBusinessAPI(handler, http.MethodDelete, "/api/v1/admin/recommendations/"+postID2, adminToken, nil, nil); code != http.StatusOK {
+		t.Fatalf("删除推荐失败：%d %s", code, body)
+	}
+
+	// 当前管理员尝试提交旧排序 [postID2: 1, postID1: 2]
+	reorderBody, _ := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"post_id": postID2, "position": 1},
+			{"post_id": postID1, "position": 2},
+		},
+	})
+	code, body := callBusinessAPI(handler, http.MethodPut, "/api/v1/admin/recommendations/reorder", adminToken, reorderBody, nil)
+	if code != http.StatusConflict {
+		t.Fatalf("对已删除条目排序应返回 409，实际 %d：%s", code, body)
+	}
+	if !bytes.Contains(body, []byte("RECOMMENDATION_ORDER_STALE")) {
+		t.Fatalf("错误码应为 RECOMMENDATION_ORDER_STALE，实际响应：%s", body)
+	}
+}
+

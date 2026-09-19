@@ -108,6 +108,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String? _nextCommentsCursor;
   bool _hasMoreComments = true;
   bool _loadingMoreComments = false;
+  bool _commentsInitialLoading = false;
+  bool _commentsInitialFailed = false;
+  double _profileHeaderOffset = 0;
 
   @override
   void initState() {
@@ -116,21 +119,45 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     _selfSummary = widget.profileSummary;
     _future = _load();
     _postsFuture = _loadInitialPosts();
+    _commentsInitialLoading = true;
     _commentsFuture = _loadInitialComments();
     _loadPoints();
     _postsScrollController.addListener(_loadMorePostsWhenNeeded);
     _commentsScrollController.addListener(_loadMoreCommentsWhenNeeded);
+    _postsScrollController.addListener(_syncProfileHeader);
+    _commentsScrollController.addListener(_syncProfileHeader);
   }
 
   @override
   void dispose() {
     _postsScrollController
       ..removeListener(_loadMorePostsWhenNeeded)
+      ..removeListener(_syncProfileHeader)
       ..dispose();
     _commentsScrollController
       ..removeListener(_loadMoreCommentsWhenNeeded)
+      ..removeListener(_syncProfileHeader)
       ..dispose();
     super.dispose();
+  }
+
+  void _syncProfileHeader() {
+    final controller = _currentTab == 0
+        ? _postsScrollController
+        : _commentsScrollController;
+    if (!controller.hasClients) return;
+    final next = controller.offset.clamp(0.0, 343.0).toDouble();
+    if ((next - _profileHeaderOffset).abs() < 1) return;
+    setState(() => _profileHeaderOffset = next);
+  }
+
+  void _switchTab(int tab) {
+    if (_currentTab == tab) return;
+    setState(() => _currentTab = tab);
+    // 每个 Tab 使用独立滚动容器，切换后要立即把头部同步到新容器的位置。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncProfileHeader();
+    });
   }
 
   Future<void> _loadPoints() async {
@@ -168,7 +195,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       });
       return page;
     } catch (_) {
+      _commentsInitialFailed = true;
       return null;
+    } finally {
+      _commentsInitialLoading = false;
     }
   }
 
@@ -177,17 +207,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     // 自己看自己：使用 /api/v1/me/comments
     if (widget.isSelf && selfRepository != null) {
-      return selfRepository.list(
-        'comments',
-        cursor: cursor,
-      );
+      return selfRepository.list('comments', cursor: cursor);
     }
 
     // 看别人：使用公开用户评论接口
-    return widget.repository.listComments(
-      widget.userId,
-      cursor: cursor,
-    );
+    return widget.repository.listComments(widget.userId, cursor: cursor);
   }
 
   void _loadMorePostsWhenNeeded() {
@@ -410,9 +434,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         showDragHandle: true,
         useSafeArea: true,
         builder: (sheetContext) => Padding(
-          padding: EdgeInsets.only(
-            bottom: bottomInset + 8,
-          ),
+          padding: EdgeInsets.only(bottom: bottomInset + 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1066,8 +1088,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               ),
             ),
             // 2. 底部悬浮圆角面板与 Feed 流
-            Positioned(
-              top: 407,
+            AnimatedPositioned(
+              duration: Duration.zero,
+              top: 407 - _profileHeaderOffset,
               left: 0,
               right: 0,
               bottom: 0,
@@ -1103,7 +1126,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               label:
                                   '帖子 ${postCount > 0 ? postCount : _posts.length}',
                               active: _currentTab == 0,
-                              onTap: () => setState(() => _currentTab = 0),
+                              onTap: () => _switchTab(0),
                             ),
                           ),
                           Expanded(
@@ -1112,10 +1135,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   '评论 ${commentCount > 0 ? commentCount : _comments.length}',
                               active: _currentTab == 1,
                               onTap: () {
-                                if (_comments.isEmpty) {
-                                  _commentsFuture = _loadInitialComments();
+                                if (_comments.isEmpty &&
+                                    _commentsInitialFailed &&
+                                    !_commentsInitialLoading) {
+                                  setState(() {
+                                    _commentsInitialFailed = false;
+                                    _commentsInitialLoading = true;
+                                    _commentsFuture = _loadInitialComments();
+                                  });
                                 }
-                                setState(() => _currentTab = 1);
+                                _switchTab(1);
                               },
                             ),
                           ),
@@ -1290,10 +1319,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 final commentId = comment.commentId;
 
                 if (openById != null && commentId != null) {
-                  openById(
-                    comment.id,
-                    focusCommentId: commentId,
-                  );
+                  openById(comment.id, focusCommentId: commentId);
                   return;
                 }
 
@@ -1424,126 +1450,126 @@ class _UserPostCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          // 作者信息栏只展示已有的账号等级，不凭空推算信任指标。
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 19,
-                backgroundColor: AppTheme.surfaceBlue,
-                child: Text(
-                  authorNickname.isEmpty
-                      ? '杯'
-                      : authorNickname.characters.first,
-                  style: const TextStyle(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14,
+            // 作者信息栏只展示已有的账号等级，不凭空推算信任指标。
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 19,
+                  backgroundColor: AppTheme.surfaceBlue,
+                  child: Text(
+                    authorNickname.isEmpty
+                        ? '杯'
+                        : authorNickname.characters.first,
+                    style: const TextStyle(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            authorNickname,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.textPrimary,
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              authorNickname,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.textPrimary,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 5),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 5,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8F3F7),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            'Lv.$authorLevel',
-                            style: const TextStyle(
-                              color: Color(0xFF5F8DA7),
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
+                          const SizedBox(width: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE8F3F7),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'Lv.$authorLevel',
+                              style: const TextStyle(
+                                color: Color(0xFF5F8DA7),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      relativeTimeLabel(post.createdAt),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: Color(0xFF9AA5AE),
+                        ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        relativeTimeLabel(post.createdAt),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF9AA5AE),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // 帖子标题
-          Text(
-            post.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.textPrimary,
-              height: 1.35,
+              ],
             ),
-          ),
-          if (post.contentPreview.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 12),
+            // 帖子标题
             Text(
-              post.contentPreview,
+              post.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFF45505A),
-                height: 1.55,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.textPrimary,
+                height: 1.35,
               ),
             ),
-          ],
-          const SizedBox(height: 10),
-          // 统计值来自用户帖子接口，禁止用其他字段推算或填充演示值。
-          Row(
-            children: [
-              _MetricItem(
-                icon: Icons.visibility_outlined,
-                label: '${post.viewCount}',
-              ),
-              const SizedBox(width: 17),
-              _MetricItem(
-                icon: Icons.favorite_border_rounded,
-                label: '${post.likeCount}',
-              ),
-              const SizedBox(width: 17),
-              _MetricItem(
-                icon: Icons.chat_bubble_outline_rounded,
-                label: '${post.commentCount}',
+            if (post.contentPreview.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                post.contentPreview,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF45505A),
+                  height: 1.55,
+                ),
               ),
             ],
-          ),
-        ],
+            const SizedBox(height: 10),
+            // 统计值来自用户帖子接口，禁止用其他字段推算或填充演示值。
+            Row(
+              children: [
+                _MetricItem(
+                  icon: Icons.visibility_outlined,
+                  label: '${post.viewCount}',
+                ),
+                const SizedBox(width: 17),
+                _MetricItem(
+                  icon: Icons.favorite_border_rounded,
+                  label: '${post.likeCount}',
+                ),
+                const SizedBox(width: 17),
+                _MetricItem(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: '${post.commentCount}',
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     ),
-  ),
-);
+  );
 }
 
 class _UserCommentCard extends StatelessWidget {
@@ -1572,105 +1598,102 @@ class _UserCommentCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 19,
-                backgroundColor: AppTheme.surfaceBlue,
-                child: Text(
-                  authorNickname.isEmpty
-                      ? '杯'
-                      : authorNickname.characters.first,
-                  style: const TextStyle(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 9),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        authorNickname,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F3F7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          'Lv.$authorLevel',
-                          style: const TextStyle(
-                            color: Color(0xFF5F8DA7),
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    relativeTimeLabel(item.activityAt ?? item.publishedAt),
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 19,
+                  backgroundColor: AppTheme.surfaceBlue,
+                  child: Text(
+                    authorNickname.isEmpty
+                        ? '杯'
+                        : authorNickname.characters.first,
                     style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF9AA5AE),
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14,
                     ),
                   ),
-                ],
+                ),
+                const SizedBox(width: 9),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          authorNickname,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F3F7),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Lv.$authorLevel',
+                            style: const TextStyle(
+                              color: Color(0xFF5F8DA7),
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      relativeTimeLabel(item.activityAt ?? item.publishedAt),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Color(0xFF9AA5AE),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              item.contentPreview.isNotEmpty ? item.contentPreview : '发表了评论',
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF394856),
+                height: 1.55,
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            item.contentPreview.isNotEmpty ? item.contentPreview : '发表了评论',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF394856),
-              height: 1.55,
             ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F8FB),
-              borderRadius: BorderRadius.circular(10),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F8FB),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '回复帖子：${item.title}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF708294)),
+              ),
             ),
-            child: Text(
-              '回复帖子：${item.title}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF708294)),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
-  ),
-);
+  );
 }
 
 class _CommentedPostCard extends StatelessWidget {
-  const _CommentedPostCard({
-    required this.item,
-    required this.onTap,
-  });
+  const _CommentedPostCard({required this.item, required this.onTap});
 
   final ProfilePostItem item;
   final VoidCallback onTap;
@@ -1686,10 +1709,7 @@ class _CommentedPostCard extends StatelessWidget {
         children: [
           Text(
             '💬 评论于 ${item.communityName} · ${relativeTimeLabel(item.activityAt ?? item.publishedAt)}',
-            style: const TextStyle(
-              fontSize: 11,
-              color: AppTheme.textSecondary,
-            ),
+            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 8),
           Text(

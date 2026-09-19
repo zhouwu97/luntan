@@ -28,6 +28,8 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   Object? error;
   bool loading = true;
   bool saving = false;
+  int _operationVersion = 0;
+  bool _lastLoadSucceeded = false;
 
   @override
   void initState() {
@@ -35,22 +37,26 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
+    if (saving && !force) return;
+    final version = ++_operationVersion;
+    _lastLoadSucceeded = false;
     setState(() {
       loading = true;
       error = null;
     });
     try {
       final loaded = await widget.repository.listHomeRecommendations();
-      if (!mounted) return;
+      if (!mounted || version != _operationVersion) return;
       setState(() {
         items
           ..clear()
           ..addAll(loaded);
         loading = false;
       });
+      _lastLoadSucceeded = true;
     } catch (cause) {
-      if (!mounted) return;
+      if (!mounted || version != _operationVersion) return;
       setState(() {
         loading = false;
         error = cause;
@@ -59,25 +65,36 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   }
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
-    if (saving) return;
+    if (saving || loading) return;
     if (newIndex > oldIndex) newIndex -= 1;
+    final pinnedCount = items.where((item) => item.isPinned).length;
     if (oldIndex == newIndex ||
         oldIndex < 0 ||
-        oldIndex >= items.length ||
+        oldIndex >= pinnedCount ||
         newIndex < 0 ||
-        newIndex >= items.length) {
+        newIndex >= pinnedCount) {
       return;
     }
     final previous = List<HomeRecommendation>.of(items);
     final moved = items.removeAt(oldIndex);
     items.insert(newIndex, moved);
+    _syncPinnedPositions();
+    ++_operationVersion;
     setState(() => saving = true);
     try {
       await widget.repository.reorderHomeRecommendations(
-        items.map((item) => item.postId).toList(),
+        items
+            .where((item) => item.isPinned)
+            .map((item) => item.postId)
+            .toList(),
       );
       await widget.onRecommendationChanged?.call();
-      if (mounted) widget.onFeedback('首页推荐顺序已保存');
+      await _load(force: true);
+      if (mounted) {
+        widget.onFeedback(
+          _lastLoadSucceeded ? '首页推荐顺序已保存' : '首页推荐顺序已保存，但列表更新失败',
+        );
+      }
     } catch (cause) {
       if (mounted) {
         setState(() {
@@ -93,7 +110,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   }
 
   Future<void> _remove(HomeRecommendation item) async {
-    if (saving) return;
+    if (saving || loading) return;
     final confirmed =
         await showDialog<bool>(
           context: context,
@@ -122,6 +139,7 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
         false;
     if (!confirmed || !mounted) return;
 
+    ++_operationVersion;
     setState(() => saving = true);
     try {
       await widget.repository.removeHomeRecommendation(item.postId);
@@ -131,6 +149,19 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       widget.onFeedback('已移出首页推荐');
     } catch (cause) {
       if (mounted) {
+        if (cause is ApiException && cause.code == 'POST_NOT_RECOMMENDED') {
+          // 目标状态已经由其他管理员完成，先移除本地旧条目，再尽力同步其余列表。
+          setState(
+            () => items.removeWhere((value) => value.postId == item.postId),
+          );
+          await _load(force: true);
+          widget.onFeedback(
+            _lastLoadSucceeded
+                ? '该推荐已被其他管理员移除，列表已同步'
+                : '该推荐已被移除，本地条目已清理，但列表更新失败',
+          );
+          return;
+        }
         widget.onFeedback(userFacingApiMessage(cause, fallback: '移出推荐失败'));
       }
     } finally {
@@ -139,28 +170,25 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   }
 
   Future<void> _setPinned(HomeRecommendation item) async {
-    if (saving) return;
+    if (saving || item.isExpired) return;
     final pinned = !item.isPinned;
+    ++_operationVersion;
     setState(() => saving = true);
     try {
       await widget.repository.setHomeRecommendationPinned(
         postId: item.postId,
         pinned: pinned,
       );
+      if (!mounted) return;
+      setState(() => _applyPinnedLocally(item.postId, pinned));
       await widget.onRecommendationChanged?.call();
       if (!mounted) return;
-      setState(() {
-        final index = items.indexWhere((value) => value.postId == item.postId);
-        if (index >= 0) {
-          items[index] = _copyRecommendation(item, isPinned: pinned);
-          // 管理列表与首页使用同一分区顺序，操作后立即反映真实位置。
-          items.sort((a, b) {
-            if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
-            return a.position.compareTo(b.position);
-          });
-        }
-      });
-      widget.onFeedback(pinned ? '已在推荐中置顶' : '已取消推荐置顶');
+      await _load(force: true);
+      widget.onFeedback(
+        _lastLoadSucceeded
+            ? (pinned ? '已在推荐中置顶' : '已取消推荐置顶')
+            : (pinned ? '已在推荐中置顶，但列表更新失败' : '已取消推荐置顶，但列表更新失败'),
+      );
     } catch (cause) {
       if (mounted) {
         widget.onFeedback(userFacingApiMessage(cause, fallback: '推荐置顶操作失败'));
@@ -168,6 +196,50 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
     } finally {
       if (mounted) setState(() => saving = false);
     }
+  }
+
+  void _syncPinnedPositions() {
+    var position = 1;
+    for (var index = 0; index < items.length; index++) {
+      final item = items[index];
+      if (!item.isPinned) continue;
+      items[index] = HomeRecommendation(
+        postId: item.postId,
+        position: position++,
+        recommendedBy: item.recommendedBy,
+        recommendedAt: item.recommendedAt,
+        expiresAt: item.expiresAt,
+        title: item.title,
+        contentPreview: item.contentPreview,
+        authorName: item.authorName,
+        communityName: item.communityName,
+        isPinned: item.isPinned,
+      );
+    }
+  }
+
+  HomeRecommendation _withPinned(HomeRecommendation item, bool pinned) =>
+      HomeRecommendation(
+        postId: item.postId,
+        position: item.position,
+        recommendedBy: item.recommendedBy,
+        recommendedAt: item.recommendedAt,
+        expiresAt: item.expiresAt,
+        title: item.title,
+        contentPreview: item.contentPreview,
+        authorName: item.authorName,
+        communityName: item.communityName,
+        isPinned: pinned,
+      );
+
+  void _applyPinnedLocally(String postId, bool pinned) {
+    final index = items.indexWhere((value) => value.postId == postId);
+    if (index < 0) return;
+    final updated = _withPinned(items[index], pinned);
+    items.removeAt(index);
+    final pinnedCount = items.where((value) => value.isPinned).length;
+    items.insert(pinnedCount, updated);
+    _syncPinnedPositions();
   }
 
   @override
@@ -287,122 +359,167 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
       child: ReorderableListView.builder(
         padding: const EdgeInsets.fromLTRB(14, 4, 14, 32),
         itemCount: items.length,
+        buildDefaultDragHandles: false,
         // 3.41.8 无 onReorderItem，待 SDK 统一后迁移
         // ignore: deprecated_member_use
         onReorder: _reorder,
         itemBuilder: (context, index) {
           final item = items[index];
-          return Container(
+          final startsSection =
+              index == 0 || items[index - 1].isPinned != item.isPinned;
+          return Column(
             key: ValueKey(item.postId),
-            margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.border),
-              boxShadow: const [AppTheme.cardShadow],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: widget.onOpenPostId == null
-                    ? null
-                    : () => widget.onOpenPostId!(item.postId),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      ReorderableDragStartListener(
-                        index: index,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: AppTheme.softViolet,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.drag_indicator_rounded,
-                            color: AppTheme.purple,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${index + 1}. ${item.title}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13.5,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                            if (item.isPinned) ...[
-                              const SizedBox(height: 4),
-                              const Text(
-                                '置顶推荐',
-                                style: TextStyle(
-                                  color: AppTheme.pink,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (startsSection)
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: 4,
+                    top: index == 0 ? 0 : 10,
+                    bottom: 8,
+                  ),
+                  child: Text(
+                    item.isPinned ? '置顶推荐' : '更多推荐 · 按推荐算法排序',
+                    style: const TextStyle(
+                      color: Color(0xFF526A82),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.border),
+                  boxShadow: const [AppTheme.cardShadow],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: widget.onOpenPostId == null
+                        ? null
+                        : () => widget.onOpenPostId!(item.postId),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          if (item.isPinned)
+                            ReorderableDragStartListener(
+                              index: index,
+                              child: Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: AppTheme.softViolet,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                alignment: Alignment.center,
+                                child: const Icon(
+                                  Icons.drag_indicator_rounded,
+                                  color: AppTheme.purple,
+                                  size: 18,
                                 ),
                               ),
-                            ],
-                            const SizedBox(height: 3),
-                            Text(
-                              [
-                                if (item.communityName.isNotEmpty)
-                                  item.communityName,
-                                if (item.authorName.isNotEmpty) item.authorName,
-                                _dateLabel(item.recommendedAt),
-                                if (item.expiresAt != null)
-                                  '至 ${_dateLabel(item.expiresAt!)}',
-                              ].join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 11,
+                            )
+                          else
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: AppTheme.softViolet,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: const Icon(
+                                Icons.auto_awesome_rounded,
+                                color: Color(0xFF8FA3B8),
+                                size: 18,
                               ),
                             ),
-                          ],
-                        ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${index + 1}. ${item.title}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                    color: AppTheme.textPrimary,
+                                  ),
+                                ),
+                                if (item.isPinned) ...[
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    '置顶推荐',
+                                    style: TextStyle(
+                                      color: AppTheme.pink,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 3),
+                                Text(
+                                  [
+                                    if (item.communityName.isNotEmpty)
+                                      item.communityName,
+                                    if (item.authorName.isNotEmpty)
+                                      item.authorName,
+                                    _dateLabel(item.recommendedAt),
+                                    if (item.expiresAt != null)
+                                      '至 ${_dateLabel(item.expiresAt!)}',
+                                  ].join(' · '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: item.isPinned ? '取消推荐置顶' : '在推荐中置顶',
+                            onPressed: saving || loading || item.isExpired
+                                ? null
+                                : () => _setPinned(item),
+                            icon: Icon(
+                              item.isPinned
+                                  ? Icons.push_pin_rounded
+                                  : Icons.push_pin_outlined,
+                              color: item.isPinned
+                                  ? AppTheme.pink
+                                  : const Color(0xFF8FA3B8),
+                              size: 20,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '移出推荐',
+                            onPressed: saving || loading
+                                ? null
+                                : () => _remove(item),
+                            icon: const Icon(
+                              Icons.remove_circle_outline_rounded,
+                              color: Color(0xFF8FA3B8),
+                              size: 20,
+                            ),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        tooltip: item.isPinned ? '取消推荐置顶' : '在推荐中置顶',
-                        onPressed: saving ? null : () => _setPinned(item),
-                        icon: Icon(
-                          item.isPinned
-                              ? Icons.push_pin_rounded
-                              : Icons.push_pin_outlined,
-                          color: item.isPinned
-                              ? AppTheme.pink
-                              : const Color(0xFF8FA3B8),
-                          size: 20,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: '移出推荐',
-                        onPressed: saving ? null : () => _remove(item),
-                        icon: const Icon(
-                          Icons.remove_circle_outline_rounded,
-                          color: Color(0xFF8FA3B8),
-                          size: 20,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
           );
         },
       ),
@@ -412,19 +529,3 @@ class _HomeRecommendationsScreenState extends State<HomeRecommendationsScreen> {
   String _dateLabel(DateTime value) =>
       '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 }
-
-HomeRecommendation _copyRecommendation(
-  HomeRecommendation item, {
-  required bool isPinned,
-}) => HomeRecommendation(
-  postId: item.postId,
-  position: item.position,
-  recommendedBy: item.recommendedBy,
-  recommendedAt: item.recommendedAt,
-  title: item.title,
-  contentPreview: item.contentPreview,
-  authorName: item.authorName,
-  communityName: item.communityName,
-  isPinned: isPinned,
-  expiresAt: item.expiresAt,
-);

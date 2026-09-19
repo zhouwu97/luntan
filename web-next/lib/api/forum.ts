@@ -36,7 +36,20 @@ import type {
   PublicBootstrap,
   UserSummary,
 } from "../../types/forum";
-import { ApiError, apiFetch, apiJson, apiPost, clearAccessToken, setAccessToken } from "./client";
+import {
+  ApiError,
+  StaleSessionResponseError,
+  apiFetch,
+  apiJson,
+  apiPost,
+  beginSessionTransition,
+  broadcastSessionChanged,
+  clearAccessToken,
+  getSessionVersion,
+  setAccessToken,
+} from "./client";
+
+export { StaleSessionResponseError };
 
 type JsonRecord = Record<string, unknown>;
 const feedRequests = new Map<string, Promise<FeedPage>>();
@@ -363,26 +376,34 @@ export async function getFeed(options: {
   return sharedRequest;
 }
 
+export function parseActivity(raw: unknown): ActivityItem {
+  const item = asRecord(raw);
+  const status = asString(item.status, asString(item.phase, "upcoming"));
+  return {
+    id: asString(item.id),
+    title: asString(item.title, "未命名活动"),
+    description: asString(item.description),
+    // 兼容历史活动接口的 image_url/banner_url 字段，避免有图活动退化成日历占位图。
+    coverUrl: resolveMediaUrl(
+      asString(item.cover_url) || asString(item.image_url) || asString(item.banner_url) || asString(item.cover),
+      "detail",
+    ),
+    startAt: asString(item.start_at) || undefined,
+    endAt: asString(item.end_at) || undefined,
+    location: asString(item.location),
+    status,
+    phase: asString(item.phase) || undefined,
+    authorName: asString(item.author_name, "社区官方"),
+  } satisfies ActivityItem;
+}
+
 export async function getActivities(): Promise<ActivityItem[]> {
   const payload = await apiJson<{ items?: unknown[] }>("/activities");
-  return Array.isArray(payload.items)
-    ? payload.items.map((raw) => {
-        const item = asRecord(raw);
-        const status = asString(item.status, asString(item.phase, "upcoming"));
-        return {
-          id: asString(item.id),
-          title: asString(item.title, "未命名活动"),
-          description: asString(item.description),
-          coverUrl: resolveMediaUrl(asString(item.cover_url), "detail"),
-          startAt: asString(item.start_at) || undefined,
-          endAt: asString(item.end_at) || undefined,
-          location: asString(item.location),
-          status,
-          phase: asString(item.phase) || undefined,
-          authorName: asString(item.author_name, "社区官方"),
-        } satisfies ActivityItem;
-      })
-    : [];
+  return Array.isArray(payload.items) ? payload.items.map(parseActivity) : [];
+}
+
+export async function getActivity(id: string): Promise<ActivityItem> {
+  return parseActivity(await apiJson<JsonRecord>(`/activities/${encodeURIComponent(id)}`));
 }
 
 export async function getRankingToys(tab = "", category = ""): Promise<RankingToy[]> {
@@ -576,6 +597,14 @@ export async function recordPostView(postId: string): Promise<{ recorded: boolea
   return {
     recorded: payload.recorded === true,
     viewCount: typeof payload.view_count === "number" ? payload.view_count : undefined,
+  };
+}
+
+export async function recordPostShare(postId: string): Promise<{ recorded: boolean; shareCount: number }> {
+  const payload = await apiPost<JsonRecord>(`/posts/${encodeURIComponent(postId)}/share`);
+  return {
+    recorded: payload.recorded === true,
+    shareCount: asNumber(payload.share_count),
   };
 }
 
@@ -966,7 +995,7 @@ export async function votePostPoll(pollId: string, optionIds: string[]): Promise
   });
 }
 
-export async function requestEmailCode(email: string, scene: "login" | "register" = "login"): Promise<EmailCodeChallenge> {
+export async function requestEmailCode(email: string, scene: "login" | "register" | "password_reset" = "login"): Promise<EmailCodeChallenge> {
   const payload = await apiPost<JsonRecord>("/auth/email/request", { email, scene });
   return {
     expiresIn: asNumber(payload.expires_in, 600),
@@ -992,7 +1021,6 @@ export async function getPublicBootstrap(): Promise<PublicBootstrap> {
 function parseSession(payload: JsonRecord): AuthSession {
   const token = asString(payload.access_token);
   if (!token) throw new Error("登录响应格式错误");
-  setAccessToken(token);
   return {
     accessToken: token,
     expiresIn: asNumber(payload.expires_in) || undefined,
@@ -1000,12 +1028,28 @@ function parseSession(payload: JsonRecord): AuthSession {
   };
 }
 
+function commitSession(session: AuthSession, expectedVersion?: number): AuthSession {
+  if (expectedVersion !== undefined && getSessionVersion() !== expectedVersion) {
+    throw new StaleSessionResponseError();
+  }
+  setAccessToken(session.accessToken, expectedVersion);
+  return session;
+}
+
 export async function loginWithEmailCode(email: string, code: string): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/email/verify", { email, code }));
+  const version = beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/email/verify", { email, code });
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
 export async function loginWithPassword(email: string, password: string): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/login/password", { email, password }));
+  const version = beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/login/password", { email, password });
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
 export async function registerWithEmail(
@@ -1014,18 +1058,24 @@ export async function registerWithEmail(
   code?: string,
   nickname = "",
 ): Promise<AuthSession> {
-  return parseSession(
-    await apiPost<JsonRecord>("/auth/register", {
-      email,
-      ...(code && code.trim() ? { code: code.trim() } : {}),
-      password,
-      nickname,
-    }),
-  );
+  const version = beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/register", {
+    email,
+    ...(code && code.trim() ? { code: code.trim() } : {}),
+    password,
+    nickname,
+  });
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
-export async function loginAsGuest(): Promise<AuthSession> {
-  return parseSession(await apiPost<JsonRecord>("/auth/guest"));
+export async function loginAsGuest(expectedVersion?: number): Promise<AuthSession> {
+  const version = expectedVersion ?? beginSessionTransition();
+  const payload = await apiPost<JsonRecord>("/auth/guest");
+  const session = commitSession(parseSession(payload), version);
+  broadcastSessionChanged();
+  return session;
 }
 
 export async function getMe(): Promise<SessionUser> {
@@ -1273,6 +1323,188 @@ export async function createReport(input: ReportInput): Promise<ReportResult> {
   };
 }
 
+export interface AccountPunishment {
+  id: string;
+  type: string;
+  action: string;
+  reason: string;
+  startsAt: string;
+  endsAt?: string;
+  createdAt: string;
+  appealable: boolean;
+}
+
+export interface AccountStatusData {
+  userId: string;
+  username: string;
+  status: string;
+  accountType: string;
+  email: string;
+  emailVerified: boolean;
+  createdAt: string;
+  punishments: AccountPunishment[];
+}
+
+function parseAccountPunishment(raw: unknown): AccountPunishment {
+  const item = asRecord(raw);
+  return {
+    id: asString(item.id),
+    type: asString(item.type),
+    action: asString(item.action),
+    reason: asString(item.reason),
+    startsAt: asString(item.starts_at ?? item.startsAt),
+    endsAt: asString(item.ends_at ?? item.endsAt) || undefined,
+    createdAt: asString(item.created_at ?? item.createdAt),
+    appealable: asBoolean(item.appealable),
+  };
+}
+
+export async function getAccountStatus(): Promise<AccountStatusData> {
+  const payload = await apiJson<JsonRecord>("/me/account-status");
+  return {
+    userId: asString(payload.user_id ?? payload.userId),
+    username: asString(payload.username),
+    status: asString(payload.status, "active"),
+    accountType: asString(payload.account_type ?? payload.accountType, "standard"),
+    email: asString(payload.email),
+    emailVerified: asBoolean(payload.email_verified ?? payload.emailVerified),
+    createdAt: asString(payload.created_at ?? payload.createdAt),
+    punishments: Array.isArray(payload.punishments) ? payload.punishments.map(parseAccountPunishment) : [],
+  };
+}
+
+export interface ModerationAction {
+  id: string;
+  action: string;
+  reason: string;
+  appealable: boolean;
+  targetType: string;
+  targetId: string;
+  targetTitle?: string;
+  targetContent?: string;
+  mediaIds: string[];
+  createdAt: string;
+}
+
+export interface ModerationAppeal {
+  id: string;
+  moderationActionId: string;
+  targetType: string;
+  targetId: string;
+  reason: string;
+  description: string;
+  status: string;
+  reviewerNote?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  updatedAt?: string;
+  action?: string;
+  actionReason?: string;
+  targetTitle?: string;
+  targetContent?: string;
+  mediaIds: string[];
+}
+
+function parseModerationAction(raw: unknown): ModerationAction {
+  const item = asRecord(raw);
+  const mediaIds = Array.isArray(item.media_ids) ? item.media_ids : Array.isArray(item.mediaIds) ? item.mediaIds : [];
+  return {
+    id: asString(item.id),
+    action: asString(item.action),
+    reason: asString(item.reason),
+    appealable: asBoolean(item.appealable),
+    targetType: asString(item.target_type ?? item.targetType),
+    targetId: asString(item.target_id ?? item.targetId),
+    targetTitle: asString(item.target_title ?? item.targetTitle) || undefined,
+    targetContent: asString(item.target_content ?? item.targetContent) || undefined,
+    mediaIds: mediaIds.map(String),
+    createdAt: asString(item.created_at ?? item.createdAt),
+  };
+}
+
+function parseModerationAppeal(raw: unknown): ModerationAppeal {
+  const item = asRecord(raw);
+  const mediaIds = Array.isArray(item.media_ids) ? item.media_ids : Array.isArray(item.mediaIds) ? item.mediaIds : [];
+  return {
+    id: asString(item.id),
+    moderationActionId: asString(item.moderation_action_id ?? item.moderationActionId),
+    targetType: asString(item.target_type ?? item.targetType),
+    targetId: asString(item.target_id ?? item.targetId),
+    reason: asString(item.reason),
+    description: asString(item.description),
+    status: asString(item.status, "pending"),
+    reviewerNote: asString(item.reviewer_note ?? item.reviewerNote) || undefined,
+    createdAt: asString(item.created_at ?? item.createdAt),
+    reviewedAt: asString(item.reviewed_at ?? item.reviewedAt) || undefined,
+    updatedAt: asString(item.updated_at ?? item.updatedAt) || undefined,
+    action: asString(item.action) || undefined,
+    actionReason: asString(item.action_reason ?? item.actionReason) || undefined,
+    targetTitle: asString(item.target_title ?? item.targetTitle) || undefined,
+    targetContent: asString(item.target_content ?? item.targetContent) || undefined,
+    mediaIds: mediaIds.map(String),
+  };
+}
+
+export async function getModerationAction(id: string): Promise<ModerationAction> {
+  return parseModerationAction(await apiJson<JsonRecord>(`/moderation-actions/${encodeURIComponent(id)}`));
+}
+
+export async function createAppeal(actionId: string, input: { reason: string; description: string }): Promise<ModerationAppeal> {
+  return parseModerationAppeal(await apiPost<JsonRecord>(`/moderation-actions/${encodeURIComponent(actionId)}/appeals`, {
+    reason: input.reason.trim(),
+    description: input.description.trim(),
+  }));
+}
+
+export async function getMyAppeals(options: { status?: string; cursor?: string; limit?: number } = {}): Promise<{ items: ModerationAppeal[]; nextCursor?: string; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.status) params.set("status", options.status);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<JsonRecord>(`/appeals?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseModerationAppeal) : [],
+    nextCursor: asString(payload.next_cursor ?? payload.nextCursor) || undefined,
+    hasMore: asBoolean(payload.has_more ?? payload.hasMore),
+  };
+}
+
+export async function getAppeal(id: string): Promise<ModerationAppeal> {
+  return parseModerationAppeal(await apiJson<JsonRecord>(`/appeals/${encodeURIComponent(id)}`));
+}
+
+export async function getModerationAppeals(options: { status?: string; cursor?: string; limit?: number } = {}) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.status) params.set("status", options.status);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<JsonRecord>(`/moderation/appeals?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map(parseModerationAppeal) : [],
+    nextCursor: asString(payload.next_cursor ?? payload.nextCursor) || undefined,
+    hasMore: asBoolean(payload.has_more ?? payload.hasMore),
+  };
+}
+
+export async function getModerationCases(options: { status?: string; source?: string; cursor?: string; limit?: number } = {}) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.status) params.set("status", options.status);
+  if (options.source) params.set("source", options.source);
+  if (options.cursor) params.set("cursor", options.cursor);
+  const payload = await apiJson<JsonRecord>(`/moderation/cases?${params.toString()}`);
+  return {
+    items: Array.isArray(payload.items) ? payload.items.map((raw) => asRecord(raw)) : [],
+    nextCursor: asString(payload.next_cursor ?? payload.nextCursor) || undefined,
+    hasMore: asBoolean(payload.has_more ?? payload.hasMore),
+  };
+}
+
+export async function setPassword(input: { password: string; currentPassword?: string; emailCode?: string }): Promise<void> {
+  await apiPost("/me/password", {
+    password: input.password,
+    ...(input.currentPassword?.trim() ? { current_password: input.currentPassword.trim() } : {}),
+    ...(input.emailCode?.trim() ? { email_code: input.emailCode.trim() } : {}),
+  });
+}
+
 export async function setUserFollow(id: string, active: boolean): Promise<void> {
   await apiFetch(`/users/${encodeURIComponent(id)}/follow`, { method: active ? "PUT" : "DELETE" });
 }
@@ -1343,11 +1575,13 @@ export async function markNotificationRead(id: string): Promise<void> {
   await apiFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: "PATCH" });
 }
 
-export async function logout(): Promise<void> {
+export async function logout(expectedVersion?: number): Promise<void> {
+  const version = expectedVersion ?? beginSessionTransition();
   try {
     await apiPost("/auth/logout", {});
   } finally {
-    clearAccessToken();
+    clearAccessToken(version);
+    broadcastSessionChanged();
   }
 }
 
@@ -1420,6 +1654,7 @@ function parseHomeRecommendationItem(raw: unknown): HomeRecommendationItem {
   return {
     postId: asString(item.post_id),
     position: asNumber(item.position),
+    isPinned: item.is_pinned === true,
     recommendedBy: asString(item.recommended_by),
     recommendedAt: asString(item.recommended_at),
     expiresAt: asString(item.expires_at) || undefined,
@@ -1453,6 +1688,14 @@ export async function setHomeRecommendation(
 export async function removeHomeRecommendation(postId: string): Promise<void> {
   await apiFetch(`/admin/recommendations/${encodeURIComponent(postId)}`, {
     method: "DELETE",
+  });
+}
+
+export async function setHomeRecommendationPinned(postId: string, pinned: boolean): Promise<void> {
+  await apiJson(`/admin/recommendations/${encodeURIComponent(postId)}/pin`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
   });
 }
 

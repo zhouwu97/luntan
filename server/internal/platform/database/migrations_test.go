@@ -68,6 +68,21 @@ func TestUpMigrationsRemainApplicationRollbackCompatible(t *testing.T) {
 	}
 }
 
+func TestPostShareDownMigrationDoesNotRewriteAggregate(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "migrations", "000076_post_share_events.down.sql")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToUpper(string(contents))
+	if !strings.Contains(downSQL, "DROP TABLE") {
+		t.Fatal("分享事件 down migration 未删除事件表")
+	}
+	if strings.Contains(downSQL, "UPDATE POSTS") || strings.Contains(downSQL, "SHARE_COUNT =") {
+		t.Fatal("分享事件 down migration 不得逆向改写 posts.share_count")
+	}
+}
+
 func TestMigrationsAgainstPostgres(t *testing.T) {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -102,7 +117,7 @@ func TestMigrationsAgainstPostgres(t *testing.T) {
 	if dirtyCount != 0 {
 		t.Fatalf("schema_migrations 存在 dirty 记录: %d", dirtyCount)
 	}
-	for _, table := range []string{"users", "user_profiles", "community_categories", "communities", "posts", "user_auth_methods", "sessions", "refresh_tokens", "post_revisions", "post_idempotency_keys", "media_assets", "media_variants", "media_moderation_versions", "post_media", "comments", "comment_idempotency_keys", "post_reactions", "comment_reactions", "bookmarks", "bookmark_folders", "bookmark_folder_items", "user_follows", "community_follows", "community_members", "notifications", "reports", "moderation_cases", "moderation_actions", "roles", "permissions", "role_permissions", "user_roles", "audit_logs", "blocks", "outbox_events", "point_transactions", "experience_transactions", "polls", "poll_options", "poll_votes", "market_items", "user_post_histories", "post_view_events", "store_products", "store_orders", "store_order_shipping", "store_point_invalidations", "moderation_appeals", "moderation_appeal_media", "ranking_toys", "ranking_toy_user_states", "ranking_toy_rating_distribution", "ranking_toy_comments", "ranking_toy_comment_likes", "email_codes", "guest_sessions", "bans", "restrictions", "admin_invites", "login_devices", "risk_events", "admin_log_chain", "admin_logs", "ip_restrictions", "home_recommendations", "ranking_toy_submissions"} {
+	for _, table := range []string{"users", "user_profiles", "community_categories", "communities", "posts", "user_auth_methods", "sessions", "refresh_tokens", "post_revisions", "post_idempotency_keys", "media_assets", "media_variants", "media_moderation_versions", "post_media", "comments", "comment_idempotency_keys", "post_reactions", "comment_reactions", "bookmarks", "bookmark_folders", "bookmark_folder_items", "user_follows", "community_follows", "community_members", "notifications", "reports", "moderation_cases", "moderation_actions", "roles", "permissions", "role_permissions", "user_roles", "audit_logs", "blocks", "outbox_events", "point_transactions", "experience_transactions", "polls", "poll_options", "poll_votes", "market_items", "user_post_histories", "post_view_events", "post_share_events", "store_products", "store_orders", "store_order_shipping", "store_point_invalidations", "moderation_appeals", "moderation_appeal_media", "ranking_toys", "ranking_toy_user_states", "ranking_toy_rating_distribution", "ranking_toy_comments", "ranking_toy_comment_likes", "email_codes", "guest_sessions", "bans", "restrictions", "admin_invites", "login_devices", "risk_events", "admin_log_chain", "admin_logs", "ip_restrictions", "home_recommendations", "ranking_toy_submissions"} {
 		var exists bool
 		if err := db.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+table).Scan(&exists); err != nil {
 			t.Fatal(err)

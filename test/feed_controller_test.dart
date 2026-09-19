@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:luntan/controllers/feed_controller.dart';
+import 'package:luntan/data/api/api_client.dart';
 import 'package:luntan/domain/models.dart';
 import 'package:luntan/domain/repositories.dart';
 
@@ -120,6 +121,47 @@ class _FailingLoadMoreFeed implements FeedRepository, QueryableFeedRepository {
       );
     }
     return Future.error(StateError('模拟下一页网络失败'));
+  }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
+}
+
+class _FailingRefreshFeed implements FeedRepository, QueryableFeedRepository {
+  final List<String?> cursors = <String?>[];
+  int firstPageCalls = 0;
+
+  @override
+  Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
+      getFeed(cursor: cursor, limit: limit);
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
+    String? postType,
+    bool? hasMedia,
+    String? topic,
+  }) {
+    cursors.add(cursor);
+    if (cursor != null) {
+      return Future.value(FeedPage(items: [_post('second', 'campus')]));
+    }
+    firstPageCalls += 1;
+    if (firstPageCalls == 1) {
+      return Future.value(
+        FeedPage(
+          items: [_post('first', 'campus')],
+          hasMore: true,
+          nextCursor: 'page-2',
+        ),
+      );
+    }
+    return Future.error(StateError('模拟刷新网络失败'));
   }
 
   @override
@@ -394,4 +436,98 @@ void main() {
     await controller.loadMore();
     expect(feed.cursors, [null, 'page-2', 'page-2']);
   });
+
+  test('首屏刷新失败保留旧列表和分页游标', () async {
+    final feed = _FailingRefreshFeed();
+    final controller = FeedController(repository: feed);
+
+    await controller.initialLoad();
+    await controller.refresh();
+
+    expect(controller.state.items.map((post) => post.id), ['first']);
+    expect(controller.state.nextCursor, 'page-2');
+    expect(controller.state.hasMore, isTrue);
+
+    await controller.loadMore();
+    expect(feed.cursors, [null, null, 'page-2']);
+    expect(controller.state.items.map((post) => post.id), ['first', 'second']);
+  });
+
+  test('遇到 INVALID_CURSOR 时清除旧游标并自愈重建首屏', () async {
+    final feed = _InvalidCursorFeed();
+    final controller = FeedController(repository: feed);
+
+    await controller.initialLoad();
+    expect(controller.state.items.map((post) => post.id), ['p1']);
+    expect(controller.state.nextCursor, 'cursor-page-2');
+
+    // 翻页触发 INVALID_CURSOR
+    await controller.loadMore();
+
+    // 验证：controller 收到 INVALID_CURSOR 后，清除了旧游标并重新拉取了 cursor: null 的首屏
+    expect(feed.cursors, [null, 'cursor-page-2', null]);
+    expect(controller.state.status, FeedStatus.success);
+    expect(controller.state.items.map((post) => post.id), ['p-recovered']);
+    expect(controller.state.nextCursor, isNull);
+    expect(controller.state.error, isNull);
+  });
+}
+
+class _InvalidCursorFeed implements FeedRepository, QueryableFeedRepository {
+  final List<String?> cursors = <String?>[];
+  bool failedOnce = false;
+
+  @override
+  Future<FeedPage> getLatestFeed({String? cursor, int limit = 20}) =>
+      getFeed(cursor: cursor, limit: limit);
+
+  @override
+  Future<FeedPage> getFeed({
+    String? cursor,
+    int limit = 20,
+    String? communityId,
+    String sort = 'recommended',
+    LatestOrder latestOrder = LatestOrder.comment,
+    String? postType,
+    bool? hasMedia,
+    String? topic,
+  }) {
+    cursors.add(cursor);
+    if (cursor == null) {
+      if (!failedOnce) {
+        return Future.value(
+          FeedPage(
+            items: [_post('p1', 'campus')],
+            hasMore: true,
+            nextCursor: 'cursor-page-2',
+          ),
+        );
+      } else {
+        return Future.value(
+          FeedPage(
+            items: [_post('p-recovered', 'campus')],
+            hasMore: false,
+            nextCursor: null,
+          ),
+        );
+      }
+    }
+    if (cursor == 'cursor-page-2' && !failedOnce) {
+      failedOnce = true;
+      return Future.error(
+        const ApiException(
+          type: ApiErrorType.unknown,
+          code: 'INVALID_CURSOR',
+          message: 'Feed 排序已更新，请重新刷新',
+        ),
+      );
+    }
+    return Future.value(
+      FeedPage(items: [_post('p-other', 'campus')]),
+    );
+  }
+
+  @override
+  Future<PostViewResult> recordPostView(String postId) async =>
+      PostViewResult(postId: postId, recorded: true);
 }

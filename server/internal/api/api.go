@@ -386,6 +386,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && path == "/api/v1/activities":
 		s.listPublicActivities(w, r)
 		return
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/api/v1/activities/"):
+		activityID := strings.TrimPrefix(path, "/api/v1/activities/")
+		s.getPublicActivity(w, r, activityID)
+		return
 	case r.Method == http.MethodPost && path == "/api/v1/ranking/submissions":
 		s.createRankingToySubmission(w, r)
 		return
@@ -500,6 +504,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/bookmark"):
 		s.toggleBookmark(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/bookmark"), false)
+		return
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/v1/posts/") && strings.HasSuffix(path, "/share"):
+		s.recordPostShare(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/posts/"), "/share"))
 		return
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/v1/posts/"):
 		s.deletePost(w, r, strings.TrimPrefix(path, "/api/v1/posts/"))

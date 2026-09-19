@@ -8,6 +8,7 @@ import { AppDownloadBanner } from "../../components/app-download-banner";
 import { BottomNav } from "../../components/bottom-nav";
 import { Icon } from "../../components/icons";
 import { useSession } from "../../components/session-provider";
+import { UserAvatar } from "../../components/user-avatar";
 import { useInfiniteScroll } from "../../lib/use-infinite-scroll";
 import { getMyPoints, getMyProfileList, getUserProfile } from "../../lib/api/forum";
 import { compactCount, formatError, relativeTime } from "../../lib/format";
@@ -25,7 +26,7 @@ const TABS: Array<{ kind: TabKind; label: string; icon: "message" | "heart" | "b
 
 export default function MyWorkbenchPage() {
   const router = useRouter();
-  const { user, ready, isGuest, isRegistered } = useSession();
+  const { user, ready, isGuest, isRegistered, unreadCount } = useSession();
   const [profile, setProfile] = useState<ProfileSummary | null>(null);
   const [points, setPoints] = useState<number | null>(null);
   const [pointsError, setPointsError] = useState(false);
@@ -142,7 +143,71 @@ export default function MyWorkbenchPage() {
     <>
       <SiteHeader />
 
-      <main className="page-frame workbench-page" style={{ maxWidth: 960, margin: "0 auto", padding: "24px 16px 80px" }}>
+      {/* 移动端按 App 的“我的”信息架构展示，桌面端继续保留工作台布局。 */}
+      <section className="mobile-profile-page">
+        <header className="mobile-profile-header">
+          <h1>我的</h1>
+          <div className="mobile-profile-header-actions">
+            <button type="button" aria-label="通知" onClick={() => router.push("/notifications")}>
+              <Icon name="bell" size={22} />
+              {unreadCount > 0 && <span className="mobile-profile-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+            </button>
+            <button type="button" aria-label="设置" onClick={() => router.push("/settings")}>
+              <Icon name="settings" size={23} />
+            </button>
+          </div>
+        </header>
+
+        <section className="mobile-profile-card">
+          <button type="button" className="mobile-profile-card-head" onClick={() => router.push(`/user/${encodeURIComponent(user.id)}`)}>
+            <UserAvatar userId={user.id} name={user.nickname} url={user.avatarUrl} size="profile" className="mobile-profile-avatar" />
+            <span className="mobile-profile-copy">
+              <strong>{user.nickname || "用户"}</strong>
+              <small>{user.email || `@${user.username}`} · Lv.{profile?.level || user.level || 1}</small>
+              <em>{profile?.bio || "还没有个性签名，点进主页完善资料"}</em>
+            </span>
+            <span className="mobile-profile-public">个人主页 <Icon name="chevron-right" size={16} /></span>
+          </button>
+          <div className="mobile-profile-stats">
+            {[
+              [profile?.postCount ?? 0, "我的发布", "posts" as TabKind],
+              [profile?.commentCount ?? 0, "我的评论", "comments" as TabKind],
+              [profile?.followerCount ?? 0, "粉丝", null],
+              [profile?.followingCount ?? 0, "关注", null],
+            ].map(([count, label, tab]) => (
+              <button key={label as string} type="button" onClick={() => tab && void handleTabChange(tab as TabKind)}>
+                <strong>{count as number}</strong>
+                <span>{label as string}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <button type="button" className="mobile-points-card" onClick={() => router.push("/points")}>
+          <span className="mobile-points-mark"><Icon name="star" size={18} /></span>
+          <span className="mobile-points-copy"><small>社区积分</small><strong>{points === null ? (pointsError ? "暂不可用" : "加载中…") : `${compactCount(points)} 积分`}</strong><em>当前可用积分 {points ?? 0}</em></span>
+          <span className="mobile-points-actions"><span>明细</span><span onClick={(event) => { event.stopPropagation(); router.push("/points?tab=store"); }}>兑换</span><em>查看积分明细 <Icon name="chevron-right" size={14} /></em></span>
+        </button>
+
+        <section className="mobile-profile-section">
+          <h2>常用功能</h2>
+          <div className="mobile-tools-grid">
+            <button type="button" onClick={() => void handleTabChange("bookmarks")}><span className="tool-icon tool-icon-orange"><Icon name="star" size={21} /></span><span>我的收藏</span></button>
+            <button type="button" onClick={() => void handleTabChange("likes")}><span className="tool-icon tool-icon-pink"><Icon name="heart" size={21} /></span><span>我的点赞</span></button>
+            <button type="button" onClick={() => void handleTabChange("history")}><span className="tool-icon tool-icon-blue"><Icon name="history" size={21} /></span><span>浏览历史</span></button>
+            <button type="button" onClick={() => router.push("/appeals")}><span className="tool-icon tool-icon-mint"><Icon name="bell" size={21} /></span><span>我的申诉</span></button>
+          </div>
+        </section>
+
+        <section className="mobile-profile-section mobile-profile-recent" id="mobile-profile-recent">
+          <div className="mobile-profile-section-heading"><h2>最近发布</h2><button type="button" onClick={() => void handleTabChange("posts")}>查看全部 <Icon name="chevron-right" size={15} /></button></div>
+          {loading ? <div className="mobile-recent-card mobile-recent-loading"><span className="feed-spinner" /></div> : items.length ? <div className="mobile-recent-card">{items.slice(0, 2).map((item) => <Link key={item.id} href={`/post/${encodeURIComponent(item.id)}`} className="mobile-recent-item"><span className="mobile-recent-icon"><Icon name="message" size={20} /></span><span><strong>{item.title}</strong><small>{item.communityName} · {relativeTime(item.activityAt || item.createdAt)} · {item.commentCount} 回复</small></span><Icon name="chevron-right" size={17} /></Link>)}</div> : <div className="mobile-recent-card mobile-recent-empty"><span className="mobile-recent-icon"><Icon name="message" size={21} /></span><div><strong>还没有发布过帖子</strong><small>分享你的第一篇内容吧。</small></div><button type="button" onClick={() => router.push("/publish")}>去发布</button></div>}
+        </section>
+
+        <p className="mobile-profile-slogan">圣杯酱 · 把真实的玩具体验留在这里</p>
+      </section>
+
+      <main className="page-frame workbench-page desktop-workbench" style={{ maxWidth: 960, margin: "0 auto", padding: "24px 16px 80px" }}>
         {/* 顶部工作台标题栏 */}
         <section className="workbench-header-card">
           <div className="workbench-header-main">
@@ -340,7 +405,7 @@ export default function MyWorkbenchPage() {
         </section>
       </main>
 
-      <footer className="profile-version-footer" style={{ textAlign: "center", padding: "16px 0 24px" }}>
+      <footer className="profile-version-footer desktop-workbench" style={{ textAlign: "center", padding: "16px 0 24px" }}>
         <a
           href="/api/version"
           target="_blank"

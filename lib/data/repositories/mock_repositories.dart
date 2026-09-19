@@ -353,10 +353,7 @@ class MockFeedRepository implements FeedRepository, QueryableFeedRepository {
         viewCount: post.viewCount,
       );
     }
-    return PostViewResult(
-      postId: postId,
-      recorded: false,
-    );
+    return PostViewResult(postId: postId, recorded: false);
   }
 }
 
@@ -682,7 +679,9 @@ class MockCommentRepository
         break;
     }
     final safeOffset = offset.clamp(0, floors.length).toInt();
-    final end = (safeOffset + limit.clamp(1, 50)).clamp(0, floors.length).toInt();
+    final end = (safeOffset + limit.clamp(1, 50))
+        .clamp(0, floors.length)
+        .toInt();
     return CommentPage(
       items: floors.sublist(safeOffset, end),
       hasMore: end < floors.length,
@@ -841,6 +840,10 @@ class MockCommentRepository
 }
 
 class MockInteractionRepository implements InteractionRepository {
+  @override
+  Future<ShareRecordResult> recordPostShare({required String postId}) async =>
+      const ShareRecordResult(recorded: false, shareCount: 0);
+
   @override
   Future<void> setPostLike({
     required String postId,

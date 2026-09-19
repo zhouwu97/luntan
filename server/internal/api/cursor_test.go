@@ -1,12 +1,17 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestFeedCursorRoundTrip(t *testing.T) {
-	original := feedCursor{PublishedAt: time.Date(2026, 8, 22, 12, 0, 0, 123, time.UTC), ID: "post-2"}
+	original := feedCursor{Sort: "latest:post", PublishedAt: time.Date(2026, 8, 22, 12, 0, 0, 123, time.UTC), ID: "post-2"}
 	encoded, err := encodeFeedCursor(original)
 	if err != nil {
 		t.Fatal(err)
@@ -23,6 +28,7 @@ func TestFeedCursorRoundTrip(t *testing.T) {
 func TestFeedCursorRoundTripWithScore(t *testing.T) {
 	score := 42.5
 	original := feedCursor{
+		Sort:        "hot",
 		PublishedAt: time.Date(2026, 8, 22, 12, 0, 0, 123, time.UTC),
 		ID:          "post-2",
 		Score:       &score,
@@ -44,6 +50,7 @@ func TestFeedCursorRoundTripWithAsOf(t *testing.T) {
 	asOf := time.Date(2026, 8, 26, 12, 0, 0, 123, time.UTC)
 	activity := time.Date(2026, 8, 26, 11, 59, 0, 0, time.UTC)
 	original := feedCursor{
+		Sort:       "latest:comment",
 		ActivityAt: &activity,
 		AsOf:       &asOf,
 		ID:         "post-2",
@@ -65,10 +72,13 @@ func TestRecommendedFeedCursorRoundTripWithPinState(t *testing.T) {
 	pinned := true
 	position := 3
 	recommendedAt := time.Date(2026, 9, 8, 8, 0, 0, 0, time.UTC)
+	asOf := time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC)
 	original := feedCursor{
+		Sort:                 "recommended",
 		RecommendationPinned: &pinned,
 		Position:             &position,
 		RecommendedAt:        &recommendedAt,
+		AsOf:                 &asOf,
 		ID:                   "post-pinned",
 	}
 
@@ -91,6 +101,49 @@ func TestFeedCursorRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestFeedCursorRejectsCrossSortReuse(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	score := 12.5
+	asOf := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	publishedAt := asOf.Add(-time.Hour)
+	tests := []struct {
+		cursorSort   string
+		requestQuery string
+	}{
+		{cursorSort: "recommended", requestQuery: "sort=hot"},
+		{cursorSort: "hot", requestQuery: "sort=featured"},
+		{cursorSort: "featured", requestQuery: "sort=recommended"},
+		{cursorSort: "latest:comment", requestQuery: "sort=latest&latest_by=post"},
+		{cursorSort: "latest:post", requestQuery: "sort=latest&latest_by=comment"},
+	}
+	for _, tt := range tests {
+		cursor, err := encodeFeedCursor(feedCursor{
+			Sort:        tt.cursorSort,
+			PublishedAt: publishedAt,
+			Score:       &score,
+			AsOf:        &asOf,
+			ID:          "post-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?"+tt.requestQuery+"&cursor="+url.QueryEscape(cursor), nil)
+		rec := httptest.NewRecorder()
+		(&Server{db: db}).latestFeed(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s cursor 用于 %s 应返回 400，实际 %d：%s", tt.cursorSort, tt.requestQuery, rec.Code, rec.Body.String())
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseLimit(t *testing.T) {
 	if limit, err := parseLimit(""); err != nil || limit != 20 {
 		t.Fatalf("default limit = %d, err = %v", limit, err)
@@ -102,3 +155,71 @@ func TestParseLimit(t *testing.T) {
 		t.Fatal("limit over 50 was accepted")
 	}
 }
+
+func TestFeedCursorRoundTripWithAsOfAndScore(t *testing.T) {
+	asOf := time.Now().UTC().Truncate(time.Millisecond)
+	score := 50.0
+	pinned := false
+	original := feedCursor{
+		Sort:                 "recommended",
+		Score:                &score,
+		RecommendationPinned: &pinned,
+		PublishedAt:          asOf,
+		AsOf:                 &asOf,
+		ID:                   "post-roundtrip",
+	}
+	encoded, err := encodeFeedCursor(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeFeedCursor(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Sort != original.Sort || decoded.ID != original.ID {
+		t.Fatalf("cursor identity mismatch: got %+v, want %+v", decoded, original)
+	}
+	if decoded.Score == nil || *decoded.Score != score {
+		t.Fatalf("score mismatch: got %v, want %f", decoded.Score, score)
+	}
+	if decoded.AsOf == nil || !decoded.AsOf.Equal(asOf) {
+		t.Fatalf("as_of mismatch: got %v, want %v", decoded.AsOf, asOf)
+	}
+}
+
+func TestFeedCursorRejectsExpiredAsOf(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// 构造 6 分钟前的游标（超出 5 分钟 feedCursorTTL 窗口）
+	expiredAsOf := time.Now().UTC().Add(-6 * time.Minute)
+	score := 33.0
+	pinned := false
+	expiredCursor, err := encodeFeedCursor(feedCursor{
+		Sort:                 "recommended",
+		Score:                &score,
+		RecommendationPinned: &pinned,
+		PublishedAt:          expiredAsOf,
+		AsOf:                 &expiredAsOf,
+		ID:                   "post-expired",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/latest?sort=recommended&cursor="+url.QueryEscape(expiredCursor), nil)
+	rec := httptest.NewRecorder()
+	(&Server{db: db}).latestFeed(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("过期游标应返回 400，实际 %d：%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+

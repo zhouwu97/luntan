@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FeedToolbar, type FeedSort, type LatestOrder } from "./feed-toolbar";
 import { Icon } from "./icons";
@@ -9,8 +9,9 @@ import { PostCard } from "./post-card";
 import { SiteHeader } from "./site-header";
 import { useSession } from "./session-provider";
 import { useToast } from "./toast-context";
+import { ApiError } from "../lib/api/client";
 import { getCommunity, getFeed } from "../lib/api/forum";
-import { readFeedCacheSnapshot, writeFeedCache } from "../lib/feed-cache";
+import { clearFeedCache, readFeedCacheSnapshot, writeFeedCache } from "../lib/feed-cache";
 import { relativeTime } from "../lib/format";
 import { copyText } from "../lib/clipboard";
 import type { Community, Post } from "../types/forum";
@@ -38,6 +39,34 @@ export function CommunityShell({ communityId }: { communityId: string }) {
   const [communityError, setCommunityError] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const queryVersion = useRef(0);
+
+  const restoredScrollRef = useRef(false);
+  useEffect(() => {
+    if (restoredScrollRef.current || !posts.length || typeof window === "undefined") return;
+    const savedY = sessionStorage.getItem("last_feed_scroll_y");
+    const savedUrl = sessionStorage.getItem("last_feed_scroll_url");
+    const savedPostId = sessionStorage.getItem("last_feed_post_id");
+
+    if (savedY !== null && savedUrl === window.location.href) {
+      restoredScrollRef.current = true;
+      const targetY = parseFloat(savedY);
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: targetY, behavior: "instant" as ScrollBehavior });
+        setTimeout(() => {
+          if (savedPostId) {
+            const el = document.querySelector(`[data-post-id="${savedPostId}"]`);
+            if (el) {
+              const rect = el.getBoundingClientRect();
+              if (rect.top < -80 || rect.bottom > window.innerHeight + 100) {
+                el.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+              }
+            }
+          }
+        }, 80);
+      });
+    }
+  }, [posts.length]);
 
   useEffect(() => {
     const rawSort = searchParams.get("sort");
@@ -63,7 +92,9 @@ export function CommunityShell({ communityId }: { communityId: string }) {
   const cacheOptions = useMemo(() => ({ communityId, sort, latestOrder, hasMedia, accountScope: user?.id }), [communityId, hasMedia, latestOrder, sort, user?.id]);
 
   useEffect(() => {
-    let active = true;
+    let mounted = true;
+    const requestVersion = ++queryVersion.current;
+    setLoadingMore(false);
     const snapshot = readFeedCacheSnapshot(cacheOptions);
     const cached = snapshot?.page || null;
     setPosts(cached?.items || []);
@@ -72,24 +103,26 @@ export function CommunityShell({ communityId }: { communityId: string }) {
     setLoading(!snapshot);
     setError("");
 
-    if (snapshot?.isFresh) return () => { active = false; };
+    if (snapshot?.isFresh) return () => { mounted = false; };
 
     void getFeed({ communityId, sort, latestOrder, hasMedia, accountScope: user?.id })
       .then((page) => {
-        if (!active) return;
+        if (!mounted || requestVersion !== queryVersion.current) return;
         setPosts(page.items);
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
         writeFeedCache(cacheOptions, page);
       })
       .catch(() => {
-        if (!active) return;
+        if (!mounted || requestVersion !== queryVersion.current) return;
         setError(cached ? "网络异常，显示上次加载的内容" : sort === "recommended" ? "推荐内容暂时无法加载" : "社区内容暂时无法加载");
       })
-      .finally(() => { if (active) setLoading(false); });
+      .finally(() => {
+        if (mounted && requestVersion === queryVersion.current) setLoading(false);
+      });
 
-    return () => { active = false; };
-  }, [cacheOptions, communityId, hasMedia, latestOrder, refreshVersion, sort]);
+    return () => { mounted = false; };
+  }, [cacheOptions, communityId, hasMedia, latestOrder, refreshVersion, sort, user?.id]);
 
   const visiblePosts = useMemo(() => {
     if (!query) return posts;
@@ -107,11 +140,21 @@ export function CommunityShell({ communityId }: { communityId: string }) {
     router.replace(`/community/${encodeURIComponent(communityId)}${queryString ? `?${queryString}` : ""}`, { scroll: false });
   }
 
-  async function loadMore() {
+  const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
+    const requestVersion = queryVersion.current;
+    const cursor = nextCursor;
     setLoadingMore(true);
     try {
-      const page = await getFeed({ communityId, sort, latestOrder, hasMedia, cursor: nextCursor, accountScope: user?.id });
+      const page = await getFeed({
+        communityId,
+        sort,
+        latestOrder,
+        hasMedia,
+        cursor,
+        accountScope: user?.id,
+      });
+      if (requestVersion !== queryVersion.current) return;
       setPosts((current) => {
         const known = new Set(current.map((post) => post.id));
         const merged = [...current, ...page.items.filter((post) => !known.has(post.id))];
@@ -120,12 +163,20 @@ export function CommunityShell({ communityId }: { communityId: string }) {
       });
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
-    } catch {
+    } catch (cause) {
+      if (requestVersion !== queryVersion.current) return;
+      if (cause instanceof ApiError && cause.code === "INVALID_CURSOR") {
+        clearFeedCache(user?.id);
+        setNextCursor(undefined);
+        setHasMore(false);
+        setRefreshVersion((v) => v + 1);
+        return;
+      }
       setError("更多内容暂时无法加载");
     } finally {
-      setLoadingMore(false);
+      if (requestVersion === queryVersion.current) setLoadingMore(false);
     }
-  }
+  }, [cacheOptions, communityId, hasMedia, latestOrder, loadingMore, nextCursor, sort, user?.id]);
 
   const title = community?.name || "社区";
   const emptyTitle = error ? "内容暂时无法展示" : sort === "recommended" ? "暂无推荐内容" : "这里还没有帖子";

@@ -1115,7 +1115,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
     await expect(page.getByRole("heading", { name: "最新帖子第一篇" })).toBeVisible();
   });
 
-  test("15. 首页人工推荐管理：权限隔离、搜索帖子、添加位次与重新排序保存", async ({ page }) => {
+  test("15. 首页人工推荐管理：权限隔离、添加普通推荐与置顶排序保存", async ({ page }) => {
     // 1. 模拟非管理员用户访问，应被守卫拦截呈现“访问受限”
     await page.route("**/api/v1/auth/refresh", async (route) => {
       await route.fulfill({
@@ -1151,6 +1151,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       {
         post_id: "p-rec-1",
         position: 1,
+        is_pinned: true,
         recommended_at: new Date().toISOString(),
         post: {
           id: "p-rec-1",
@@ -1163,6 +1164,7 @@ test.describe("Web-Next 核心业务链路验收套件", () => {
       {
         post_id: "p-rec-2",
         position: 2,
+        is_pinned: true,
         recommended_at: new Date().toISOString(),
         post: {
           id: "p-rec-2",

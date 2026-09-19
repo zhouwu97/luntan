@@ -12,6 +12,7 @@ export type IconName =
   | "tag"
   | "copy"
   | "bell"
+  | "settings"
   | "plus"
   | "chevron-right"
   | "chevron-left"
@@ -63,6 +64,7 @@ const paths: Record<IconName, React.ReactNode> = {
   tag: <><path d="M4 5.5V11l8 8 7-7-8-8H5.5A1.5 1.5 0 0 0 4 5.5Z" /><circle cx="8" cy="8" r="1" /></>,
   copy: <><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
   bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" /></>,
+  settings: <><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.3a2 2 0 1 1-4 0v-.2A2 2 0 0 0 5.8 18l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A2 2 0 0 0 1.6 12a2 2 0 1 1 0-4h.2A2 2 0 0 0 3 4.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A2 2 0 0 0 9.2.4V.2a2 2 0 1 1 4 0v.2A2 2 0 0 0 16.6 2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A2 2 0 0 0 20.8 8h.2a2 2 0 1 1 0 4h-.2a2 2 0 0 0-1.4 3Z" /></>,
   plus: <><path d="M12 5v14M5 12h14" /></>,
   "chevron-right": <path d="m9 5 7 7-7 7" />,
   "chevron-left": <path d="m15 5-7 7 7 7" />,

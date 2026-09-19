@@ -20,21 +20,19 @@ export default function PostLoading() {
       <main className="page-frame post-detail-page-frame">
         <div className="detail-grid">
           <section className="detail-main">
-            <div className="back-link detail-back desktop-only" style={{ opacity: 0.6 }}>
-              <Icon name="chevron-left" size={17} />
-              <span>正在进入讨论…</span>
+            <div className="detail-top-nav desktop-only" style={{ opacity: 0.6 }}>
+              <div className="detail-back-btn" style={{ pointerEvents: "none" }}>
+                <Icon name="chevron-left" size={16} />
+                <span>正在进入讨论…</span>
+              </div>
             </div>
 
             <article className="detail-article" style={{ pointerEvents: "none" }}>
-              <header className="detail-author">
-                <div className="avatar avatar-large" style={{ background: "linear-gradient(110deg, #f1f5f9 8%, #e2e8f0 18%, #f1f5f9 33%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
-                <div className="post-author" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ width: 120, height: 16, background: "#e2e8f0", borderRadius: 4, animation: "shimmer 1.5s infinite" }} />
-                  <div style={{ width: 90, height: 12, background: "#f1f5f9", borderRadius: 4 }} />
-                </div>
-              </header>
-
-              <div style={{ width: "75%", height: 28, background: "#e2e8f0", borderRadius: 6, margin: "18px 0 14px", animation: "shimmer 1.5s infinite" }} />
+              <div style={{ width: "75%", height: 28, background: "#e2e8f0", borderRadius: 6, margin: "4px 0 14px", animation: "shimmer 1.5s infinite" }} />
+              <div className="detail-meta-bar" style={{ opacity: 0.6 }}>
+                <div style={{ width: 70, height: 22, background: "#eff6ff", borderRadius: 9999 }} />
+                <div style={{ width: 60, height: 16, background: "#f1f5f9", borderRadius: 4 }} />
+              </div>
 
               <div className="detail-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ width: "100%", height: 16, background: "#f1f5f9", borderRadius: 4 }} />
@@ -51,7 +49,7 @@ export default function PostLoading() {
             </article>
 
             {/* 评论区占位骨架 */}
-            <section className="detail-comments" style={{ marginTop: 20 }}>
+            <section className="comments-wrap" style={{ marginTop: 0 }}>
               <div style={{ width: 100, height: 20, background: "#e2e8f0", borderRadius: 4, marginBottom: 16 }} />
               <div className="detail-skeleton" style={{ gap: 12 }}>
                 <div style={{ height: 100, borderRadius: 12 }} />

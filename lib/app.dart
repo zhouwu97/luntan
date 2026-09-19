@@ -527,6 +527,7 @@ class _LuntanAppState extends State<LuntanApp> with WidgetsBindingObserver {
               commentRestrictedUntil: commentRestrictedUntil,
               onRequireAuth: _openLogin,
               currentUserId: currentUser?.id,
+              canRecordShare: (currentUser?.accountType ?? 'guest') != 'guest',
               focusComments:
                   focusComments ||
                   (normalizedCommentId != null &&
